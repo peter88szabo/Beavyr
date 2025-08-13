@@ -10,19 +10,99 @@ pub struct XyzBuffer {
     pub text: String,
 }
 
-/// Same behavior as before, but:
-/// - XYZ loader is collapsible
-/// - Appearance split into 3 collapsibles: Geometry, Color & Materials, Lighting
-/// - Emissive controls removed from UI
+/// Same behavior as before, plus:
+/// - "Center molecule" button in Structure block (also auto after load)
+/// - Right-click pick near an atom in the 3D view -> popup to set rotation center
 pub fn ui_panel(
     mut contexts: EguiContexts,
     mut settings: ResMut<MolSettings>,
     mut mol: ResMut<Molecule>,
     mut xyz_buf: ResMut<XyzBuffer>,
+    // control orbit target
+    mut cam: ResMut<crate::camera::OrbitCamera>,
+    // need camera/projection to project atoms to screen for picking
+    q_cam: Query<(&Camera, &GlobalTransform), (With<Camera3d>, With<crate::scene::MainCamera>)>,
+    windows: Query<&Window>,
 ) {
     // bevy_egui 0.36: ctx_mut() returns Result; if it fails, skip this frame
     let Ok(ctx) = contexts.ctx_mut() else { return; };
 
+    // -------------------------
+    // Right-click picking: detect click in empty space (not over egui)
+    // -------------------------
+    let (latest_pos_opt, right_clicked) =
+        ctx.input(|i| (i.pointer.latest_pos(), i.pointer.secondary_clicked()));
+    let mouse_over_ui = ctx.is_pointer_over_area();
+    if let (Some(pos_points), true) = (latest_pos_opt, right_clicked) {
+        if !mouse_over_ui {
+            if let (Ok((cam_comp, cam_xform)), Ok(win)) = (q_cam.single(), windows.single()) {
+                // Egui uses logical points; world_to_viewport returns PHYSICAL px. Convert:
+                let scale = win.scale_factor() as f32;
+                let mouse_px = pos_points * scale;
+
+                if let Some((hit_idx, hit_px_pos)) =
+                    find_nearest_atom_screen_space(cam_comp, cam_xform, &mol.pos, mouse_px, 18.0)
+                {
+                    // Store the picked atom + popup location in egui memory (persist across frames)
+                    let pick_id = egui::Id::new("picked_atom_idx");
+                    let popup_id = egui::Id::new("rc_popup_open");
+                    let popup_pos_id = egui::Id::new("rc_popup_pos_px");
+
+                    ctx.data_mut(|d| {
+                        d.insert_persisted(pick_id, hit_idx as i32);
+                        d.insert_persisted(popup_id, true);
+                        d.insert_persisted(popup_pos_id, hit_px_pos / scale); // store as logical points
+                    });
+                }
+            }
+        }
+    }
+
+    // If popup is open, draw a tiny context menu at stored mouse position
+    {
+        let popup_id = egui::Id::new("rc_popup_open");
+        let popup_pos_id = egui::Id::new("rc_popup_pos_px");
+        let pick_id = egui::Id::new("picked_atom_idx");
+
+        let (mut open, pos_pts, picked) = ctx.data_mut(|d| {
+            (
+                d.get_persisted::<bool>(popup_id).unwrap_or(false),
+                d.get_persisted::<egui::Pos2>(popup_pos_id)
+                    .unwrap_or(egui::pos2(20.0, 20.0)),
+                d.get_persisted::<i32>(pick_id).unwrap_or(-1),
+            )
+        });
+
+        if open && picked >= 0 {
+            egui::Area::new(egui::Id::new("rc_atom_popup"))
+                .fixed_pos(pos_pts)
+                .order(egui::Order::Foreground)
+                .show(&ctx, |ui| {
+                    egui::Frame::popup(&ctx.style()).show(ui, |ui| {
+                        ui.vertical(|ui| {
+                            ui.label(format!("Atom #{} (right-click)", picked));
+                            if ui.button("Use as rotation center").clicked() {
+                                let idx = picked as usize;
+                                if idx < mol.pos.len() {
+                                    cam.target = mol.pos[idx];
+                                }
+                                open = false; // close popup
+                            }
+                            if ui.button("Cancel").clicked() {
+                                open = false;
+                            }
+                        });
+                    });
+                });
+
+            // write back popup state
+            ctx.data_mut(|d| d.insert_persisted(popup_id, open));
+        }
+    }
+
+    // -------------------------
+    // Side panel
+    // -------------------------
     egui::SidePanel::right("controls")
         .default_width(380.0)
         .resizable(true)
@@ -35,21 +115,35 @@ pub fn ui_panel(
 
                 ui.add(
                     egui::TextEdit::multiline(&mut xyz_buf.text)
-                        .desired_rows(25)
+                        .desired_rows(10)
                         .code_editor()
                         .lock_focus(true),
                 );
 
-                if ui.button("Load XYZ (Å)").clicked() {
-                    let (_n, atoms, qxyz) = parse_xyz_angstrom(&xyz_buf.text);
-                    mol.atoms = atoms;
-                    mol.pos = qxyz
-                        .into_iter()
-                        .map(|v| Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32))
-                        .collect();
-                    mol.recompute_bonds(settings.bond_thresh_scale);
-                    settings.dirty = true;
-                }
+                ui.horizontal(|ui| {
+                    if ui.button("Load XYZ (Å)").clicked() {
+                        let (_n, atoms, qxyz) = parse_xyz_angstrom(&xyz_buf.text);
+                        mol.atoms = atoms;
+                        mol.pos = qxyz
+                            .into_iter()
+                            .map(|v| Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32))
+                            .collect();
+                        mol.recompute_bonds(settings.bond_thresh_scale);
+                        // auto-center after loading
+                        if let Some(c) = compute_centroid(&mol.pos) {
+                            cam.target = c;
+                        }
+                        settings.dirty = true;
+                    }
+
+                    if ui.button("Center molecule").clicked() {
+                        if let Some(c) = compute_centroid(&mol.pos) {
+                            cam.target = c;
+                        }
+                    }
+                });
+
+                ui.small("Tip: right-click near an atom in the 3D view to set it as the rotation center.");
             });
 
             ui.add_space(8.0);
@@ -61,7 +155,7 @@ pub fn ui_panel(
             ui.collapsing("Geometry Scaling", |ui| {
                 let mut changed = false;
                 changed |= ui
-                    .add(egui::Slider::new(&mut settings.atom_scale, 0.1..=2.0).text("Atom scale"))
+                    .add(egui::Slider::new(&mut settings.atom_scale, 0.3..=3.0).text("Atom scale"))
                     .changed();
                 changed |= ui
                     .add(
@@ -77,7 +171,6 @@ pub fn ui_panel(
                     .changed();
 
                 if changed {
-                    // recompute bonds for threshold; radius is handled at spawn
                     mol.recompute_bonds(settings.bond_thresh_scale);
                     settings.dirty = true;
                 }
@@ -128,7 +221,7 @@ pub fn ui_panel(
                 ui.label("Colors:");
                 ui.horizontal(|ui| {
                     ui.label("Scheme:");
-                    egui::ComboBox::from_id_source("scheme_combo")
+                    egui::ComboBox::from_id_salt("scheme_combo")
                         .selected_text(format!("{:?}", settings.scheme))
                         .show_ui(ui, |ui| {
                             for &sc in &[
@@ -200,7 +293,7 @@ pub fn ui_panel(
                 // Lighting rig
                 ui.horizontal(|ui| {
                     ui.label("Rig:");
-                    egui::ComboBox::from_id_source("lighting_mode_combo")
+                    egui::ComboBox::from_id_salt("lighting_mode_combo")
                         .selected_text(match settings.lighting_mode {
                             LightingMode::SinglePoint => "Single point",
                             LightingMode::ThreePoint  => "Three-point",
@@ -248,6 +341,48 @@ pub fn ui_panel(
                 if changed { settings.dirty = true; }
             });
         });
+}
+
+// ---- helpers ----
+
+fn compute_centroid(points: &[Vec3]) -> Option<Vec3> {
+    if points.is_empty() { return None; }
+    let mut acc = Vec3::ZERO;
+    for &p in points {
+        acc += p;
+    }
+    Some(acc / (points.len() as f32))
+}
+
+/// Return (index, mouse_px_pos) of nearest atom within `radius_px` of `mouse_px`.
+fn find_nearest_atom_screen_space(
+    cam: &Camera,
+    cam_xform: &GlobalTransform,
+    atoms: &[Vec3],
+    mouse_px: egui::Pos2,
+    radius_px: f32,
+) -> Option<(usize, egui::Pos2)> {
+    // Convert mouse to Vec2 for distance math
+    let mouse_v = Vec2::new(mouse_px.x, mouse_px.y);
+    let mut best: Option<(usize, f32, Vec2)> = None;
+
+    for (i, &p_world) in atoms.iter().enumerate() {
+        // Bevy 0.16: world_to_viewport -> Result<Vec2, ViewportConversionError>
+        if let Ok(screen_px) = cam.world_to_viewport(cam_xform, p_world) {
+            let d = screen_px.distance(mouse_v);
+            if d <= radius_px {
+                if let Some((_, best_d, _)) = best {
+                    if d < best_d {
+                        best = Some((i, d, screen_px));
+                    }
+                } else {
+                    best = Some((i, d, screen_px));
+                }
+            }
+        }
+    }
+
+    best.map(|(i, _d, s)| (i, egui::pos2(s.x, s.y)))
 }
 
 // --- color helpers (identical behavior) ---
