@@ -125,7 +125,6 @@ pub fn setup(
     let to_x = Quat::from_rotation_arc(Vec3::Y, Vec3::X);
     let to_z = Quat::from_rotation_arc(Vec3::Y, Vec3::Z);
 
-    // +X
     let x_shaft = commands
         .spawn((
             Mesh3d(shaft.clone()),
@@ -145,7 +144,6 @@ pub fn setup(
         .id();
     commands.entity(x_head).insert(ChildOf(axes_root));
 
-    // +Y
     let y_shaft = commands
         .spawn((
             Mesh3d(shaft.clone()),
@@ -165,7 +163,6 @@ pub fn setup(
         .id();
     commands.entity(y_head).insert(ChildOf(axes_root));
 
-    // +Z
     let z_shaft = commands
         .spawn((
             Mesh3d(shaft),
@@ -184,35 +181,6 @@ pub fn setup(
         ))
         .id();
     commands.entity(z_head).insert(ChildOf(axes_root));
-
-    // ---- Axis labels (X, Y, Z) ----
-    let label_offset = 0.10;
-    let x_pos = Vec3::X * (axis_len + head_len + label_offset);
-    let y_pos = Vec3::Y * (axis_len + head_len + label_offset);
-    let z_pos = Vec3::Z * (axis_len + head_len + label_offset);
-
-    let mut spawn_label = |ch: &str, color: Color, pos: Vec3| {
-        let e = commands
-            .spawn((
-                Text2dBundle {
-                    text: Text::new(ch),
-                    transform: Transform::from_translation(pos),
-                    ..Default::default()
-                },
-                TextFont {
-                    font_size: 16.0,
-                    ..Default::default()
-                },
-                TextColor(color),
-                RenderLayers::layer(LAYER_AXES),
-            ))
-            .id();
-        commands.entity(e).insert(ChildOf(axes_root));
-    };
-
-    spawn_label("X", Color::srgb(1.0, 0.1, 0.1), x_pos);
-    spawn_label("Y", Color::srgb(0.1, 1.0, 0.1), y_pos);
-    spawn_label("Z", Color::srgb(0.1, 0.4, 1.0), z_pos);
 
     // Axis camera (overlay)
     commands.spawn((
@@ -249,15 +217,15 @@ pub fn rebuild_if_dirty(
     amb.brightness = if settings.use_ambient { settings.ambient_brightness } else { 0.0 };
 
     // Update lights to current settings
-    if let Ok((mut l, mut tf)) = q_key.single_mut() {
+    if let Ok((mut l, mut tf)) = q_key.get_single_mut() {
         l.intensity = settings.light_intensity;
         tf.translation = Vec3::new(settings.light_distance, settings.light_distance, settings.light_distance);
     }
-    if let Ok((mut l, mut tf)) = q_fill.single_mut() {
+    if let Ok((mut l, mut tf)) = q_fill.get_single_mut() {
         l.intensity = if matches!(settings.lighting_mode, LightingMode::ThreePoint) { settings.fill_intensity } else { 0.0 };
         tf.translation = Vec3::new(-settings.fill_distance, settings.fill_distance * 0.5, settings.fill_distance);
     }
-    if let Ok((mut l, mut tf)) = q_rim.single_mut() {
+    if let Ok((mut l, mut tf)) = q_rim.get_single_mut() {
         l.intensity = if matches!(settings.lighting_mode, LightingMode::ThreePoint) { settings.rim_intensity } else { 0.0 };
         tf.translation = Vec3::new(settings.rim_distance, settings.rim_distance * 0.5, -settings.rim_distance);
     }
@@ -292,6 +260,7 @@ pub fn rebuild_if_dirty(
         let sym = &mol.atoms[i];
         let r_cov = covalent_radius_angstrom(sym) * settings.atom_scale;
 
+        // If you prefer the palette function, use it; otherwise the overrides map:
         let color = settings
             .element_colors
             .get(sym)
