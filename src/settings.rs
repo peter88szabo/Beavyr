@@ -73,9 +73,9 @@ impl Default for MolSettings {
     fn default() -> Self {
         MolSettings {
             // requested defaults
-            atom_scale: 1.0,
-            bond_thresh_scale: 2.0,
-            bond_radius_pct: 0.50, // 50% of smaller covalent radius
+            atom_scale: 0.6,
+            bond_thresh_scale: 1.2,
+            bond_radius_pct: 0.35, // 50% of smaller covalent radius
 
             scheme: ColorScheme::Molden0,
             element_colors: color_scheme_map(ColorScheme::Molden0),

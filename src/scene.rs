@@ -9,9 +9,9 @@ use crate::settings::{LightingMode, MolSettings};
 
 // default molecule (Å)
 pub const DEFAULT_WATER: &str = r#"
-O 0.00000   0.00000   0.22700
-H 0.00000   1.35300  -0.90800
-H 0.00000  -1.35300  -0.90800
+O 0.00000    0.00000    0.12008
+H 0.00000    0.71604   -0.48061
+H 0.00000   -0.71604   -0.48061
 "#;
 
 #[derive(Component)] pub struct AtomMarker;

@@ -35,7 +35,7 @@ pub fn ui_panel(
 
                 ui.add(
                     egui::TextEdit::multiline(&mut xyz_buf.text)
-                        .desired_rows(10)
+                        .desired_rows(25)
                         .code_editor()
                         .lock_focus(true),
                 );
@@ -61,7 +61,7 @@ pub fn ui_panel(
             ui.collapsing("Geometry Scaling", |ui| {
                 let mut changed = false;
                 changed |= ui
-                    .add(egui::Slider::new(&mut settings.atom_scale, 0.3..=3.0).text("Atom scale"))
+                    .add(egui::Slider::new(&mut settings.atom_scale, 0.1..=2.0).text("Atom scale"))
                     .changed();
                 changed |= ui
                     .add(

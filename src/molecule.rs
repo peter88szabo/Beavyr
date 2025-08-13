@@ -70,10 +70,10 @@ pub fn parse_xyz_angstrom(xyz: &str) -> (usize, Vec<String>, Vec<Vec<f64>>) {
 /// Covalent radii in Å (no Bohr conversion anymore)
 pub fn covalent_radius_angstrom(sym: &str) -> f32 {
     match sym {
-        "H"  => 0.31,
-        "C"  => 0.76,
-        "N"  => 0.71,
-        "O"  => 0.66,
+        "H"  => 0.45,
+        "C"  => 0.75,
+        "N"  => 0.70,
+        "O"  => 0.70,
         "F"  => 0.57,
         "S"  => 1.05,
         "Cl" => 1.02,
