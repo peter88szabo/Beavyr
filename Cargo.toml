@@ -1,0 +1,10 @@
+[package]
+name = "Beavyr"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bevy = { version = "0.16", features = ["dynamic_linking"] } # dynamic_linking optional
+bevy_egui = "0.36"   # <- compatible with Bevy 0.16
+
+
