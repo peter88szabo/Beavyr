@@ -5,7 +5,7 @@ use bevy::render::view::RenderLayers;
 
 use crate::color_schemes::color_for;
 use crate::molecule::{covalent_radius_angstrom, Molecule};
-use crate::settings::{LightingMode, MolSettings};
+use crate::settings::{BondColorMode, LightingMode, MolSettings};
 
 // default molecule (Å)
 pub const DEFAULT_WATER: &str = r#"
@@ -260,7 +260,6 @@ pub fn rebuild_if_dirty(
         let sym = &mol.atoms[i];
         let r_cov = covalent_radius_angstrom(sym) * settings.atom_scale;
 
-        // If you prefer the palette function, use it; otherwise the overrides map:
         let color = settings
             .element_colors
             .get(sym)
@@ -293,44 +292,127 @@ pub fn rebuild_if_dirty(
 
     // Bonds
     let bonds = mol.bonds.clone();
-    for (i, j, d) in bonds {
+    for (i, j, len_cc) in bonds {
         let p0 = mol.pos[i];
         let p1 = mol.pos[j];
+        if len_cc <= 0.0001 { continue; }
+
         let dir = p1 - p0;
-        let len = d;
-        if len <= 0.0001 { continue; }
+        let dir_n = dir.normalize();
 
-        let center = (p0 + p1) * 0.5;
-        let rot = Quat::from_rotation_arc(Vec3::Y, dir.normalize());
+        // Visual sphere radii (atom spheres)
+        let ri_sphere = covalent_radius_angstrom(&mol.atoms[i]) * settings.atom_scale;
+        let rj_sphere = covalent_radius_angstrom(&mol.atoms[j]) * settings.atom_scale;
 
-        // radius based on smaller atom radius
-        let ri = covalent_radius_angstrom(&mol.atoms[i]) * settings.atom_scale;
-        let rj = covalent_radius_angstrom(&mol.atoms[j]) * settings.atom_scale;
-        let base = ri.min(rj);
+        // Bond cylinder/capsule radius based on smaller atom radius
+        let base = ri_sphere.min(rj_sphere);
         let radius = (base * settings.bond_radius_pct).clamp(0.01, base);
 
-        let half_length = (len * 0.5 - radius).max(0.0);
-        let cap = Mesh::from(Capsule3d { radius, half_length });
+        // Common rotation (align local +Y with bond direction)
+        let rot = Quat::from_rotation_arc(Vec3::Y, dir_n);
 
-        let mat = materials.add(StandardMaterial {
-            base_color: Color::srgb(0.85, 0.85, 0.88),
-            metallic,
-            perceptual_roughness: rough,
-            reflectance: refl,
-            emissive,
-            ..default()
-        });
+        match settings.bond_color_mode {
+            // === ORIGINAL LOOK (capsule across centers) ===
+            BondColorMode::Uniform => {
+                // Single capsule centered between atom centers, like the original
+                let center = (p0 + p1) * 0.5;
+                // This is the original half-length formula you had:
+                // half_length = (center-to-center distance)/2 - radius
+                let half_length = (len_cc * 0.5 - radius).max(0.0);
+                let cap = Mesh::from(Capsule3d { radius, half_length });
 
-        let ent = commands
-            .spawn((
-                Mesh3d(meshes.add(cap)),
-                MeshMaterial3d(mat),
-                Transform { translation: center, rotation: rot, ..default() },
-                BondMarker,
-                RenderLayers::layer(LAYER_MAIN),
-            ))
-            .id();
-        mol.bond_entities.push(ent);
+                let mat = materials.add(StandardMaterial {
+                    base_color: settings.uniform_bond_color,
+                    metallic,
+                    perceptual_roughness: rough,
+                    reflectance: refl,
+                    emissive,
+                    ..default()
+                });
+
+                let ent = commands
+                    .spawn((
+                        Mesh3d(meshes.add(cap)),
+                        MeshMaterial3d(mat),
+                        Transform { translation: center, rotation: rot, ..default() },
+                        BondMarker,
+                        RenderLayers::layer(LAYER_MAIN),
+                    ))
+                    .id();
+                mol.bond_entities.push(ent);
+            }
+
+            // === SPLIT COLOR, NO GAPS (flat cylinders, slight overlap into spheres) ===
+            BondColorMode::AtomSplit => {
+                // Push the visible segment slightly inside each atom sphere to guarantee no seam.
+                // Using a generous overlap fraction looks best on bright backgrounds.
+                let overlap = radius * 0.25; // 25% of bond radius
+                let start = p0 + dir_n * (ri_sphere - overlap);
+                let end   = p1 - dir_n * (rj_sphere - overlap);
+
+                let visible_len = (end - start).length();
+                if visible_len <= 0.0 { continue; }
+
+                let half_len = visible_len * 0.5;
+
+                // Centers for each half (flat ends meet at the exact midpoint)
+                let mid = (start + end) * 0.5;
+                let c0 = mid - dir_n * (half_len * 0.5);
+                let c1 = mid + dir_n * (half_len * 0.5);
+
+                let cyl_half = Mesh::from(Cylinder::new(radius, half_len));
+
+                let col_i = settings
+                    .element_colors
+                    .get(&mol.atoms[i])
+                    .copied()
+                    .unwrap_or_else(|| color_for(&mol.atoms[i], settings.scheme));
+                let col_j = settings
+                    .element_colors
+                    .get(&mol.atoms[j])
+                    .copied()
+                    .unwrap_or_else(|| color_for(&mol.atoms[j], settings.scheme));
+
+                let mat_i = materials.add(StandardMaterial {
+                    base_color: col_i,
+                    metallic,
+                    perceptual_roughness: rough,
+                    reflectance: refl,
+                    emissive,
+                    ..default()
+                });
+                let mat_j = materials.add(StandardMaterial {
+                    base_color: col_j,
+                    metallic,
+                    perceptual_roughness: rough,
+                    reflectance: refl,
+                    emissive,
+                    ..default()
+                });
+
+                let e0 = commands
+                    .spawn((
+                        Mesh3d(meshes.add(cyl_half.clone())),
+                        MeshMaterial3d(mat_i),
+                        Transform { translation: c0, rotation: rot, ..default() },
+                        BondMarker,
+                        RenderLayers::layer(LAYER_MAIN),
+                    ))
+                    .id();
+                mol.bond_entities.push(e0);
+
+                let e1 = commands
+                    .spawn((
+                        Mesh3d(meshes.add(cyl_half)),
+                        MeshMaterial3d(mat_j),
+                        Transform { translation: c1, rotation: rot, ..default() },
+                        BondMarker,
+                        RenderLayers::layer(LAYER_MAIN),
+                    ))
+                    .id();
+                mol.bond_entities.push(e1);
+            }
+        }
     }
 }
 

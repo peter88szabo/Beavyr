@@ -3,7 +3,7 @@ use bevy_egui::{egui, EguiContexts};
 
 use crate::color_schemes::color_scheme_map;
 use crate::molecule::{parse_xyz_angstrom, Molecule};
-use crate::settings::{ColorScheme, LightingMode, MolSettings};
+use crate::settings::{BondColorMode, ColorScheme, LightingMode, MolSettings};
 
 #[derive(Resource, Clone)]
 pub struct XyzBuffer {
@@ -309,6 +309,47 @@ pub fn ui_panel(
                         }
                     }
                 });
+
+                ui.add_space(8.0);
+                ui.separator();
+
+                // ---------------------------
+                // NEW: Bond appearance block
+                // ---------------------------
+                ui.label("Bond appearance:");
+                ui.horizontal(|ui| {
+                    let sel = ui.visuals().selection.bg_fill;
+                    let dim = ui.visuals().widgets.inactive.bg_fill;
+
+                    let is_uniform = matches!(settings.bond_color_mode, BondColorMode::Uniform);
+                    let is_split   = matches!(settings.bond_color_mode, BondColorMode::AtomSplit);
+
+                    if ui
+                        .add(egui::Button::new("Uniform bonds").fill(if is_uniform { sel } else { dim }))
+                        .clicked()
+                    {
+                        settings.bond_color_mode = BondColorMode::Uniform;
+                        settings.dirty = true;
+                    }
+
+                    if ui
+                        .add(egui::Button::new("Atom-split bonds").fill(if is_split { sel } else { dim }))
+                        .clicked()
+                    {
+                        settings.bond_color_mode = BondColorMode::AtomSplit;
+                        settings.dirty = true;
+                    }
+                });
+
+                // Uniform bond color picker (enabled for both modes; useful to preselect)
+                ui.horizontal(|ui| {
+                    ui.label("Uniform bond color:");
+                    let mut bc = color_to_egui(settings.uniform_bond_color);
+                    if ui.color_edit_button_srgba(&mut bc).changed() {
+                        settings.uniform_bond_color = egui_to_color(bc);
+                        settings.dirty = true;
+                    }
+                });
             });
 
             ui.add_space(8.0);
@@ -435,19 +476,7 @@ pub fn ui_panel(
                                     egui::Color32::WHITE,
                                 )
                             });
-                            let text_size = galley.size();
-
-                            // Draw a small translucent background rectangle behind text
-                            let bg_rect = egui::Rect::from_min_size(
-                                pos + egui::vec2(-3.0, -14.0),
-                                egui::vec2(text_size.x + 6.0, text_size.y + 2.0),
-                            );
-
                             // Draw the text galley
-                            // Draw shadow then text (no background box)
-                            //let shadow = egui::Color32::from_rgba_unmultiplied(0, 0, 0, 140);
-                            //let offset = egui::vec2(1.0, 1.0);
-                            //painter.galley(pos + offset, galley.clone(), shadow);
                             painter.galley(pos, galley, egui::Color32::WHITE);
                         }
                     }
