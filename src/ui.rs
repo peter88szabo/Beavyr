@@ -200,7 +200,7 @@ pub fn ui_panel(
             ui.collapsing("Geometry Scaling", |ui| {
                 let mut changed = false;
                 changed |= ui
-                    .add(egui::Slider::new(&mut settings.atom_scale, 0.3..=3.0).text("Atom scale"))
+                    .add(egui::Slider::new(&mut settings.atom_scale, 0.1..=3.0).text("Atom scale"))
                     .changed();
                 changed |= ui
                     .add(

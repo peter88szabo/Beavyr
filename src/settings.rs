@@ -86,7 +86,7 @@ impl Default for MolSettings {
             // requested defaults
             atom_scale: 0.6,
             bond_thresh_scale: 1.2,
-            bond_radius_pct: 0.35, // 50% of smaller covalent radius
+            bond_radius_pct: 0.40, // 50% of smaller covalent radius
 
             scheme: ColorScheme::Molden0,
             element_colors: color_scheme_map(ColorScheme::Molden0),
@@ -116,7 +116,7 @@ impl Default for MolSettings {
             rim_distance: 10.0,
 
             // --- new defaults ---
-            bond_color_mode: BondColorMode::Uniform,
+            bond_color_mode: BondColorMode::AtomSplit,
             uniform_bond_color: Color::srgb(0.85, 0.85, 0.88),
 
             dirty: true,
