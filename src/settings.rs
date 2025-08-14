@@ -81,7 +81,7 @@ impl Default for MolSettings {
             element_colors: color_scheme_map(ColorScheme::Molden0),
             bg_color: Color::srgb(0.0, 0.0, 0.0),
 
-            metallic: 0.5,
+            metallic: 0.4,
             roughness: 0.3,
             reflectance: 0.3,
             use_emissive: false,

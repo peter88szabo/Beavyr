@@ -10,11 +10,9 @@ pub struct XyzBuffer {
     pub text: String,
 }
 
-/// Same behavior as before +
-/// - Two toggles in Structure block: show atom Type, show atom Index
-/// - Labels drawn in the 3D view (overlay) using egui painter
-/// - "Center molecule" button (and auto-center after load)
-/// - Right-click near atom -> popup to use as rotation center
+/// Same behavior as before, plus:
+/// - "Center molecule" button in Structure block (also auto after load)
+/// - Right-click pick near an atom in the 3D view -> popup to set rotation center
 pub fn ui_panel(
     mut contexts: EguiContexts,
     mut settings: ResMut<MolSettings>,
@@ -22,7 +20,7 @@ pub fn ui_panel(
     mut xyz_buf: ResMut<XyzBuffer>,
     // control orbit target
     mut cam: ResMut<crate::camera::OrbitCamera>,
-    // need camera/projection to project atoms to screen for picking + labels
+    // need camera/projection to project atoms to screen for picking
     q_cam: Query<(&Camera, &GlobalTransform), (With<Camera3d>, With<crate::scene::MainCamera>)>,
     windows: Query<&Window>,
 ) {
@@ -114,49 +112,6 @@ pub fn ui_panel(
             // ===========================
             ui.collapsing("Structure (XYZ)", |ui| {
                 ui.label("Paste or edit XYZ. Input is assumed in Å (Angstrom).");
-
-                // Two toggles: show type / show index
-                let show_type_id = egui::Id::new("show_atom_type");
-                let show_index_id = egui::Id::new("show_atom_index");
-
-                // read current state
-                let (mut show_type, mut show_index) = ctx.data_mut(|d| {
-                    (
-                        d.get_persisted::<bool>(show_type_id).unwrap_or(false),
-                        d.get_persisted::<bool>(show_index_id).unwrap_or(false),
-                    )
-                });
-
-                ui.horizontal(|ui| {
-                    let sel = ui.visuals().selection.bg_fill;
-                    let dim = ui.visuals().widgets.inactive.bg_fill;
-
-                    // Toggle: show element symbol
-                    if ui
-                        .add(
-                            egui::Button::new("Show Atom Type")
-                                .fill(if show_type { sel } else { dim }),
-                        )
-                        .clicked()
-                    {
-                        show_type = !show_type;
-                        ctx.data_mut(|d| d.insert_persisted(show_type_id, show_type));
-                    }
-
-                    // Toggle: show 1-based index
-                    if ui
-                        .add(
-                            egui::Button::new("Show Atom Index")
-                                .fill(if show_index { sel } else { dim }),
-                        )
-                        .clicked()
-                    {
-                        show_index = !show_index;
-                        ctx.data_mut(|d| d.insert_persisted(show_index_id, show_index));
-                    }
-                });
-
-                ui.add_space(8.0);
 
                 ui.add(
                     egui::TextEdit::multiline(&mut xyz_buf.text)
@@ -386,74 +341,6 @@ pub fn ui_panel(
                 if changed { settings.dirty = true; }
             });
         });
-
-    // -------------------------
-    // Overlay: draw labels next to atoms (types / indices) if toggled
-    // -------------------------
-    let show_type = ctx.data_mut(|d| d.get_persisted::<bool>(egui::Id::new("show_atom_type")).unwrap_or(false));
-    let show_index = ctx.data_mut(|d| d.get_persisted::<bool>(egui::Id::new("show_atom_index")).unwrap_or(false));
-
-    if (show_type || show_index) && mol.pos.len() == mol.atoms.len() {
-        if let (Ok((cam_comp, cam_xform)), Ok(win)) = (q_cam.single(), windows.single()) {
-            // paint on a full-screen, non-interactive egui area
-            egui::Area::new(egui::Id::new("atom_labels_overlay"))
-                .movable(false)
-                .interactable(false)
-                .order(egui::Order::Tooltip) // on top but below popups
-                .show(&ctx, |ui| {
-                    let painter = ui.painter();
-                    let scale = win.scale_factor() as f32;
-
-                    for (i, (&p_world, sym)) in mol.pos.iter().zip(mol.atoms.iter()).enumerate() {
-                        if let Ok(screen_px) = cam_comp.world_to_viewport(cam_xform, p_world) {
-                            // Convert to egui logical points for painting
-                            let pos = egui::pos2(screen_px.x / scale, screen_px.y / scale);
-
-                            // Compose label text
-                            let mut text = String::new();
-                            if show_type {
-                                text.push_str(sym);
-                            }
-                            if show_index {
-                                if !text.is_empty() {
-                                    text.push('(');
-                                    text.push_str(&(i + 1).to_string());
-                                    text.push(')');
-                                } else {
-                                    text.push_str(&(i + 1).to_string());
-                                }
-                            }
-                            if text.is_empty() {
-                                continue;
-                            }
-
-                            // Layout text (measure size) with egui fonts
-                            let galley = ctx.fonts(|f| {
-                                f.layout_no_wrap(
-                                    text.clone(),
-                                    egui::FontId::proportional(13.0),
-                                    egui::Color32::WHITE,
-                                )
-                            });
-                            let text_size = galley.size();
-
-                            // Draw a small translucent background rectangle behind text
-                            let bg_rect = egui::Rect::from_min_size(
-                                pos + egui::vec2(-3.0, -14.0),
-                                egui::vec2(text_size.x + 6.0, text_size.y + 2.0),
-                            );
-
-                            // Draw the text galley
-                            // Draw shadow then text (no background box)
-                            //let shadow = egui::Color32::from_rgba_unmultiplied(0, 0, 0, 140);
-                            //let offset = egui::vec2(1.0, 1.0);
-                            //painter.galley(pos + offset, galley.clone(), shadow);
-                            painter.galley(pos, galley, egui::Color32::WHITE);
-                        }
-                    }
-                });
-        }
-    }
 }
 
 // ---- helpers ----

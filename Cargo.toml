@@ -8,3 +8,4 @@ bevy = { version = "0.16", features = ["dynamic_linking"] } # dynamic_linking op
 bevy_egui = "0.36"   # <- compatible with Bevy 0.16
 
 
+
