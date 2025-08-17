@@ -5,6 +5,10 @@ use crate::color_schemes::color_scheme_map;
 use crate::molecule::{parse_xyz_angstrom, Molecule};
 use crate::settings::{BondColorMode, ColorScheme, LightingMode, MolSettings};
 
+// NEW: import inline export section + resources
+use crate::export_ui;
+use crate::export::{ExportRequestQueue, ExportUiState};
+
 #[derive(Resource, Clone)]
 pub struct XyzBuffer {
     pub text: String,
@@ -25,6 +29,10 @@ pub fn ui_panel(
     // need camera/projection to project atoms to screen for picking + labels
     q_cam: Query<(&Camera, &GlobalTransform), (With<Camera3d>, With<crate::scene::MainCamera>)>,
     windows: Query<&Window>,
+
+    // NEW: export resources for the inline export section
+    mut export_ui_state: ResMut<ExportUiState>,
+    mut export_queue: ResMut<ExportRequestQueue>,
 ) {
     // bevy_egui 0.36: ctx_mut() returns Result; if it fails, skip this frame
     let Ok(ctx) = contexts.ctx_mut() else { return; };
@@ -432,6 +440,15 @@ pub fn ui_panel(
                 }
 
                 if changed { settings.dirty = true; }
+            });
+
+            // ===========================
+            // 5) Export Image — collapsible (NEW)
+            // ===========================
+            ui.add_space(8.0);
+            ui.separator();
+            ui.collapsing("Export Image", |ui| {
+                export_ui::export_section(ui, &mut export_ui_state, &mut export_queue);
             });
         });
 
