@@ -39,9 +39,10 @@ pub enum BondColorMode {
 #[derive(Resource, Clone)]
 pub struct MolSettings {
     // geometry
-    pub atom_scale: f32,         // multiplier on covalent radius for spheres
-    pub bond_thresh_scale: f32,  // neighbor cutoff factor
-    pub bond_radius_pct: f32,    // fraction (0.05..1.0) of the smaller covalent radius
+    pub atom_scale: f32,        // multiplier on covalent radius for spheres
+    pub bond_thresh_scale: f32, // neighbor cutoff factor
+    pub hbond_cutoff: f32,      // neighbor cutoff factor
+    pub bond_radius_pct: f32,   // fraction (0.05..1.0) of the smaller covalent radius
 
     // appearance
     pub scheme: ColorScheme,
@@ -50,8 +51,8 @@ pub struct MolSettings {
 
     // material (shared by atoms and bonds)
     pub metallic: f32,
-    pub roughness: f32,       // perceptual_roughness in Bevy
-    pub reflectance: f32,     // specular reflectance
+    pub roughness: f32,   // perceptual_roughness in Bevy
+    pub reflectance: f32, // specular reflectance
     pub use_emissive: bool,
     pub emissive_color: Color,
     pub emissive_strength: f32,
@@ -86,15 +87,16 @@ impl Default for MolSettings {
             // requested defaults
             atom_scale: 0.6,
             bond_thresh_scale: 1.2,
+            hbond_cutoff: 3.0,
             bond_radius_pct: 0.40, // 50% of smaller covalent radius
 
-            scheme: ColorScheme::Molden0,
-            element_colors: color_scheme_map(ColorScheme::Molden0),
+            scheme: ColorScheme::Jmol,
+            element_colors: color_scheme_map(ColorScheme::Jmol),
             bg_color: Color::srgb(0.0, 0.0, 0.0),
 
-            metallic: 0.4,
-            roughness: 0.3,
-            reflectance: 0.3,
+            metallic: 0.1,
+            roughness: 0.2,
+            reflectance: 0.2,
             use_emissive: false,
             emissive_color: Color::srgb(1.0, 1.0, 1.0),
             emissive_strength: 0.0,
@@ -123,4 +125,3 @@ impl Default for MolSettings {
         }
     }
 }
-

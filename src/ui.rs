@@ -173,7 +173,7 @@ pub fn ui_panel(
                             .into_iter()
                             .map(|v| Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32))
                             .collect();
-                        mol.recompute_bonds(settings.bond_thresh_scale);
+                        mol.recompute_bonds(settings.bond_thresh_scale, settings.hbond_cutoff);
                         // auto-center after loading
                         if let Some(c) = compute_centroid(&mol.pos) {
                             cam.target = c;
@@ -204,19 +204,26 @@ pub fn ui_panel(
                     .changed();
                 changed |= ui
                     .add(
+                        egui::Slider::new(&mut settings.bond_radius_pct, 0.05..=1.0)
+                            .text("Bond radius (% of smaller atom)"),
+                    )
+                    .changed();
+
+                changed |= ui
+                    .add(
                         egui::Slider::new(&mut settings.bond_thresh_scale, 0.8..=3.0)
                             .text("Bond cutoff × covalent radii"),
                     )
                     .changed();
                 changed |= ui
                     .add(
-                        egui::Slider::new(&mut settings.bond_radius_pct, 0.05..=1.0)
-                            .text("Bond radius (% of smaller atom)"),
+                        egui::Slider::new(&mut settings.hbond_cutoff, 1.2..=5.0)
+                            .text("Hydrogen bond cutoff in Å"),
                     )
                     .changed();
 
                 if changed {
-                    mol.recompute_bonds(settings.bond_thresh_scale);
+                    mol.recompute_bonds(settings.bond_thresh_scale, settings.hbond_cutoff);
                     settings.dirty = true;
                 }
             });

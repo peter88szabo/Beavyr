@@ -4,8 +4,9 @@ use bevy::prelude::*;
 #[derive(Resource, Clone)]
 pub struct Molecule {
     pub atoms: Vec<String>,
-    pub pos: Vec<Vec3>,                  // positions in Å
-    pub bonds: Vec<(usize, usize, f32)>, // (i, j, distance in Å)
+    pub pos: Vec<Vec3>,                           // positions in Å
+    pub bonds: Vec<(usize, usize, f32)>,          // (i, j, distance in Å)
+    pub hydrogen_bonds: Vec<(usize, usize, f32)>, // (i, j, distance in Å)
     pub atom_entities: Vec<Entity>,
     pub bond_entities: Vec<Entity>,
 }
@@ -22,24 +23,31 @@ impl Molecule {
             atoms,
             pos,
             bonds: vec![],
+            hydrogen_bonds: vec![],
             atom_entities: vec![],
             bond_entities: vec![],
         };
-        mol.recompute_bonds(2.0);
+        mol.recompute_bonds(2.0, 3.0);
         mol
     }
 
-    pub fn recompute_bonds(&mut self, thresh_scale: f32) {
+    pub fn recompute_bonds(&mut self, thresh_scale: f32, hbond_cutoff: f32) {
+        //pub fn recompute_bonds(&mut self, thresh_scale: f32) {
         self.bonds.clear();
         let n = self.atoms.len();
         for i in 0..n {
             for j in (i + 1)..n {
                 let ri = covalent_radius_angstrom(&self.atoms[i]);
                 let rj = covalent_radius_angstrom(&self.atoms[j]);
+
+                //Threshold for cutoff:
                 let cutoff = (ri + rj) * thresh_scale;
                 let d = self.pos[i].distance(self.pos[j]);
-                if d > 0.0001 && d <= cutoff {
+
+                if d > 0.01 && d <= cutoff {
                     self.bonds.push((i, j, d));
+                } else if (self.atoms[i] == "H" || self.atoms[j] == "H") && d > 0.01 && d <= hbond_cutoff {
+                    self.hydrogen_bonds.push((i, j, d));
                 }
             }
         }
@@ -70,16 +78,15 @@ pub fn parse_xyz_angstrom(xyz: &str) -> (usize, Vec<String>, Vec<Vec<f64>>) {
 /// Covalent radii in Å (no Bohr conversion anymore)
 pub fn covalent_radius_angstrom(sym: &str) -> f32 {
     match sym {
-        "H"  => 0.45,
-        "C"  => 0.75,
-        "N"  => 0.70,
-        "O"  => 0.70,
-        "F"  => 0.57,
-        "S"  => 1.05,
+        "H" => 0.45,
+        "C" => 0.75,
+        "N" => 0.70,
+        "O" => 0.70,
+        "F" => 0.57,
+        "S" => 1.05,
         "Cl" => 1.02,
         "Br" => 1.20,
-        "I"  => 1.39,
-        _    => 0.77,
+        "I" => 1.39,
+        _ => 0.77,
     }
 }
-

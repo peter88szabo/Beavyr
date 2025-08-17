@@ -8,11 +8,34 @@ use crate::molecule::{covalent_radius_angstrom, Molecule};
 use crate::settings::{BondColorMode, LightingMode, MolSettings};
 
 // default molecule (Å)
+//pub const DEFAULT_WATER: &str = r#"
+//O 0.00000    0.00000    0.12008
+//H 0.00000    0.71604   -0.48061
+//H 0.00000   -0.71604   -0.48061
+//"#;
+
 pub const DEFAULT_WATER: &str = r#"
-O 0.00000    0.00000    0.12008
-H 0.00000    0.71604   -0.48061
-H 0.00000   -0.71604   -0.48061
+ C     3.404683    -0.287515    -0.903005
+ C     2.325076    -0.599377     0.094261
+ C     0.977015    -0.785767    -0.398914
+ O     0.043460    -1.302769     0.197011
+ C     2.642901    -0.820134     1.403961
+ O     1.659102    -0.781623     2.335360
+ O     2.118423    -1.345193     3.550266
+ C     2.999429    -3.126629     1.307477
+ O     2.924540    -3.499829     2.595704
+ O     4.015804    -2.938419     3.317124
+ H     3.643381    -0.674886     1.795782
+ H     0.817695    -0.438845    -1.434686
+ H     3.177756     0.628759    -1.450770
+ H     4.365213    -0.147108    -0.410621
+ H     3.515307    -1.086632    -1.639109
+ H     3.981819    -3.110222     0.851582
+ H     2.153132    -3.502728     0.748574
+ H     3.526510    -2.593820     4.103130
+ H     0.376130    -1.957501     0.799636
 "#;
+
 
 #[derive(Component)] pub struct AtomMarker;
 #[derive(Component)] pub struct BondMarker;
@@ -236,7 +259,7 @@ pub fn rebuild_if_dirty(
     mol.atom_entities.clear();
     mol.bond_entities.clear();
 
-    mol.recompute_bonds(settings.bond_thresh_scale);
+    mol.recompute_bonds(settings.bond_thresh_scale, settings.hbond_cutoff);
 
     // material parameters from settings
     let metallic = settings.metallic.clamp(0.0, 1.0);
@@ -312,11 +335,10 @@ pub fn rebuild_if_dirty(
         let rot = Quat::from_rotation_arc(Vec3::Y, dir_n);
 
         match settings.bond_color_mode {
-            // === ORIGINAL LOOK (capsule across centers) ===
             BondColorMode::Uniform => {
                 // Single capsule centered between atom centers, like the original
                 let center = (p0 + p1) * 0.5;
-                // This is the original half-length formula you had:
+                // This is the original half-length formula
                 // half_length = (center-to-center distance)/2 - radius
                 let half_length = (len_cc * 0.5 - radius).max(0.0);
                 let cap = Mesh::from(Capsule3d { radius, half_length });
@@ -342,7 +364,7 @@ pub fn rebuild_if_dirty(
                 mol.bond_entities.push(ent);
             }
 
-            // === SPLIT COLOR, NO GAPS (flat cylinders, slight overlap into spheres) ===
+            // flat cylinders, slight overlap into spheres) ===
             BondColorMode::AtomSplit => {
                 // Push the visible segment slightly inside each atom sphere to guarantee no seam.
                 // Using a generous overlap fraction looks best on bright backgrounds.
