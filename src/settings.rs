@@ -40,6 +40,7 @@ pub enum BondColorMode {
 pub struct MolSettings {
     // geometry
     pub atom_scale: f32,        // multiplier on covalent radius for spheres
+    pub atom_resolution: u32,   // atom resolution 
     pub bond_thresh_scale: f32, // neighbor cutoff factor
     pub hbond_cutoff: f32,      // neighbor cutoff factor
     pub bond_radius_pct: f32,   // fraction (0.05..1.0) of the smaller covalent radius
@@ -86,6 +87,7 @@ impl Default for MolSettings {
         MolSettings {
             // requested defaults
             atom_scale: 0.6,
+            atom_resolution: 6,
             bond_thresh_scale: 1.2,
             hbond_cutoff: 3.0,
             bond_radius_pct: 0.40, // 50% of smaller covalent radius

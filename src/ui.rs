@@ -211,6 +211,9 @@ pub fn ui_panel(
                     .add(egui::Slider::new(&mut settings.atom_scale, 0.1..=3.0).text("Atom scale"))
                     .changed();
                 changed |= ui
+                    .add(egui::Slider::new(&mut settings.atom_resolution, 1..=10).text("Atom resolution"))
+                    .changed();
+                changed |= ui
                     .add(
                         egui::Slider::new(&mut settings.bond_radius_pct, 0.05..=1.0)
                             .text("Bond radius (% of smaller atom)"),
