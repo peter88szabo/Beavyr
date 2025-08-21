@@ -369,7 +369,7 @@ pub fn rebuild_if_dirty(
             BondColorMode::AtomSplit => {
                 // Push the visible segment slightly inside each atom sphere to guarantee no seam.
                 // Using a generous overlap fraction looks best on bright backgrounds.
-                let overlap = radius * 0.25; // 25% of bond radius
+                let overlap = radius * 0.40; // 40% of bond radius
                 let start = p0 + dir_n * (ri_sphere - overlap);
                 let end   = p1 - dir_n * (rj_sphere - overlap);
 

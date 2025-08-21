@@ -114,7 +114,7 @@ pub fn ui_panel(
     // Side panel
     // -------------------------
     egui::SidePanel::right("controls")
-        .default_width(380.0)
+        .default_width(350.0)
         .resizable(true)
         .show(&ctx, |ui| {
             // ===========================
@@ -168,7 +168,8 @@ pub fn ui_panel(
 
                 ui.add(
                     egui::TextEdit::multiline(&mut xyz_buf.text)
-                        .desired_rows(10)
+                        //.desired_rows(14)
+                        .desired_width(f32::INFINITY)
                         .code_editor()
                         .lock_focus(true),
                 );
@@ -211,7 +212,7 @@ pub fn ui_panel(
                     .add(egui::Slider::new(&mut settings.atom_scale, 0.1..=3.0).text("Atom scale"))
                     .changed();
                 changed |= ui
-                    .add(egui::Slider::new(&mut settings.atom_resolution, 1..=10).text("Atom resolution"))
+                    .add(egui::Slider::new(&mut settings.atom_resolution, 0..=10).text("Atom resolution"))
                     .changed();
                 changed |= ui
                     .add(
