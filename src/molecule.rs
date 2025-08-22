@@ -32,22 +32,96 @@ impl Molecule {
     }
 
     pub fn recompute_bonds(&mut self, thresh_scale: f32, hbond_cutoff: f32) {
-        //pub fn recompute_bonds(&mut self, thresh_scale: f32) {
+        // Tunable element sets (extend/trim as you like)
+        let is_donor = |s: &str| matches!(s, "O" | "N" | "S" | "F" | "P");
+        let is_acceptor = |s: &str| matches!(s, "O" | "N" | "S" | "F" | "Cl" | "Br" | "I" | "P");
+
+        let ha_cut = hbond_cutoff.max(1.2); // H···A cutoff (Å)
+        let da_cut = (hbond_cutoff + 1.0).min(4.0); // D···A cutoff (Å), a bit looser
+
         self.bonds.clear();
+        self.hydrogen_bonds.clear();
+
         let n = self.atoms.len();
+        if n == 0 {
+            return;
+        }
+
+        // 1) Covalent bonds (your rule)
         for i in 0..n {
             for j in (i + 1)..n {
                 let ri = covalent_radius_angstrom(&self.atoms[i]);
                 let rj = covalent_radius_angstrom(&self.atoms[j]);
-
-                //Threshold for cutoff:
                 let cutoff = (ri + rj) * thresh_scale;
                 let d = self.pos[i].distance(self.pos[j]);
-
                 if d > 0.01 && d <= cutoff {
                     self.bonds.push((i, j, d));
-                } else if (self.atoms[i] == "H" || self.atoms[j] == "H") && d > 0.01 && d <= hbond_cutoff {
-                    self.hydrogen_bonds.push((i, j, d));
+                }
+            }
+        }
+
+        // Build adjacency from covalent bonds
+        let mut bonded_to: Vec<Vec<usize>> = vec![Vec::new(); n];
+        for &(i, j, _) in &self.bonds {
+            bonded_to[i].push(j);
+            bonded_to[j].push(i);
+        }
+
+        // 2) H-bonds (distance-only), store (H, A, H···A) and SKIP acceptors that are donor-neighbors
+        for h in 0..n {
+            if self.atoms[h] != "H" {
+                continue;
+            }
+
+            // donor D must be a heavy atom covalently bonded to this H
+            let mut donor: Option<usize> = None;
+            for &nb in &bonded_to[h] {
+                if self.atoms[nb] != "H" && is_donor(&self.atoms[nb]) {
+                    donor = Some(nb);
+                    break;
+                }
+            }
+            let Some(d) = donor else {
+                continue;
+            };
+
+            for a in 0..n {
+                if a == h || a == d {
+                    continue;
+                }
+                if self.atoms[a] == "H" {
+                    continue;
+                }
+                if !is_acceptor(&self.atoms[a]) {
+                    continue;
+                }
+
+                // exclude nearest-neighbor heavy atoms: A must NOT be covalently bonded to D
+                if bonded_to[d].contains(&a) {
+                    continue;
+                }
+
+                // distance checks
+                let ha = self.pos[h].distance(self.pos[a]); // H···A
+                if ha > ha_cut {
+                    continue;
+                }
+                let da = self.pos[d].distance(self.pos[a]); // D···A
+                if da > da_cut {
+                    continue;
+                }
+
+                // record H→A (avoid duplicates; keep shortest H···A)
+                if let Some(ex) = self
+                    .hydrogen_bonds
+                    .iter_mut()
+                    .find(|(hi, ai, _)| *hi == h && *ai == a)
+                {
+                    if ha < ex.2 {
+                        ex.2 = ha;
+                    }
+                } else {
+                    self.hydrogen_bonds.push((h, a, ha));
                 }
             }
         }

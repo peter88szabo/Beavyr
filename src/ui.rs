@@ -206,7 +206,7 @@ pub fn ui_panel(
             // ===========================
             // 2) Geometry — collapsible
             // ===========================
-            ui.collapsing("Geometry Scaling", |ui| {
+            ui.collapsing("Atom & Bond Scaling", |ui| {
                 let mut changed = false;
                 changed |= ui
                     .add(egui::Slider::new(&mut settings.atom_scale, 0.1..=3.0).text("Atom scale"))
@@ -214,6 +214,11 @@ pub fn ui_panel(
                 changed |= ui
                     .add(egui::Slider::new(&mut settings.atom_resolution, 0..=10).text("Atom resolution"))
                     .changed();
+
+                ui.add_space(8.0);
+                ui.separator();
+                ui.add_space(8.0);
+
                 changed |= ui
                     .add(
                         egui::Slider::new(&mut settings.bond_radius_pct, 0.05..=1.0)
@@ -227,10 +232,29 @@ pub fn ui_panel(
                             .text("Bond cutoff × covalent radii"),
                     )
                     .changed();
+
+                ui.add_space(8.0);
+                ui.separator();
+                ui.add_space(8.0);
+
                 changed |= ui
                     .add(
                         egui::Slider::new(&mut settings.hbond_cutoff, 1.2..=5.0)
                             .text("Hydrogen bond cutoff in Å"),
+                    )
+                    .changed();
+
+                // ---- NEW: H-bond thickness & dash gaps ----
+                changed |= ui
+                    .add(
+                        egui::Slider::new(&mut settings.hbond_thickness, 1.0..=80.0)
+                            .text("H-bond thickness"),
+                    )
+                    .changed();
+                changed |= ui
+                    .add(
+                        egui::Slider::new(&mut settings.hbond_gap_scale, 0.2..=5.0)
+                            .text("H-bond dash gap scale"),
                     )
                     .changed();
 
@@ -366,6 +390,16 @@ pub fn ui_panel(
                     let mut bc = color_to_egui(settings.uniform_bond_color);
                     if ui.color_edit_button_srgba(&mut bc).changed() {
                         settings.uniform_bond_color = egui_to_color(bc);
+                        settings.dirty = true;
+                    }
+                });
+
+                // ---- NEW: Hydrogen-bond color ----
+                ui.horizontal(|ui| {
+                    ui.label("H-bond color:");
+                    let mut hc = color_to_egui(settings.hbond_color);
+                    if ui.color_edit_button_srgba(&mut hc).changed() {
+                        settings.hbond_color = egui_to_color(hc);
                         settings.dirty = true;
                     }
                 });

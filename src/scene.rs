@@ -36,15 +36,21 @@ pub const DEFAULT_WATER: &str = r#"
  H  0.37  -1.95  0.79
 "#;
 
+#[derive(Component)]
+pub struct AtomMarker;
+#[derive(Component)]
+pub struct BondMarker;
+#[derive(Component)]
+pub struct MainCamera;
+#[derive(Component)]
+pub struct AxisCamera;
 
-#[derive(Component)] pub struct AtomMarker;
-#[derive(Component)] pub struct BondMarker;
-#[derive(Component)] pub struct MainCamera;
-#[derive(Component)] pub struct AxisCamera;
-
-#[derive(Component)] pub struct KeyLight;
-#[derive(Component)] pub struct FillLight;
-#[derive(Component)] pub struct RimLight;
+#[derive(Component)]
+pub struct KeyLight;
+#[derive(Component)]
+pub struct FillLight;
+#[derive(Component)]
+pub struct RimLight;
 
 pub const LAYER_MAIN: usize = 0;
 pub const LAYER_AXES: usize = 1;
@@ -83,7 +89,11 @@ pub fn setup(
             range: 200.0,
             ..default()
         },
-        Transform::from_xyz(settings.light_distance, settings.light_distance, settings.light_distance),
+        Transform::from_xyz(
+            settings.light_distance,
+            settings.light_distance,
+            settings.light_distance,
+        ),
         KeyLight,
         RenderLayers::layer(LAYER_MAIN),
     ));
@@ -96,7 +106,11 @@ pub fn setup(
             range: 200.0,
             ..default()
         },
-        Transform::from_xyz(-settings.fill_distance, settings.fill_distance * 0.5, settings.fill_distance),
+        Transform::from_xyz(
+            -settings.fill_distance,
+            settings.fill_distance * 0.5,
+            settings.fill_distance,
+        ),
         FillLight,
         RenderLayers::layer(LAYER_MAIN),
     ));
@@ -109,7 +123,11 @@ pub fn setup(
             range: 200.0,
             ..default()
         },
-        Transform::from_xyz(settings.rim_distance, settings.rim_distance * 0.5, -settings.rim_distance),
+        Transform::from_xyz(
+            settings.rim_distance,
+            settings.rim_distance * 0.5,
+            -settings.rim_distance,
+        ),
         RimLight,
         RenderLayers::layer(LAYER_MAIN),
     ));
@@ -142,7 +160,11 @@ pub fn setup(
     });
 
     let axes_root = commands
-        .spawn((Transform::default(), Visibility::Visible, RenderLayers::layer(LAYER_AXES)))
+        .spawn((
+            Transform::default(),
+            Visibility::Visible,
+            RenderLayers::layer(LAYER_AXES),
+        ))
         .id();
 
     let to_x = Quat::from_rotation_arc(Vec3::Y, Vec3::X);
@@ -152,7 +174,11 @@ pub fn setup(
         .spawn((
             Mesh3d(shaft.clone()),
             MeshMaterial3d(red.clone()),
-            Transform { rotation: to_x, translation: Vec3::X * (axis_len * 0.5), ..default() },
+            Transform {
+                rotation: to_x,
+                translation: Vec3::X * (axis_len * 0.5),
+                ..default()
+            },
             RenderLayers::layer(LAYER_AXES),
         ))
         .id();
@@ -161,7 +187,11 @@ pub fn setup(
         .spawn((
             Mesh3d(head.clone()),
             MeshMaterial3d(red),
-            Transform { rotation: to_x, translation: Vec3::X * (axis_len + head_len * 0.5), ..default() },
+            Transform {
+                rotation: to_x,
+                translation: Vec3::X * (axis_len + head_len * 0.5),
+                ..default()
+            },
             RenderLayers::layer(LAYER_AXES),
         ))
         .id();
@@ -171,7 +201,10 @@ pub fn setup(
         .spawn((
             Mesh3d(shaft.clone()),
             MeshMaterial3d(green.clone()),
-            Transform { translation: Vec3::Y * (axis_len * 0.5), ..default() },
+            Transform {
+                translation: Vec3::Y * (axis_len * 0.5),
+                ..default()
+            },
             RenderLayers::layer(LAYER_AXES),
         ))
         .id();
@@ -180,7 +213,10 @@ pub fn setup(
         .spawn((
             Mesh3d(head.clone()),
             MeshMaterial3d(green),
-            Transform { translation: Vec3::Y * (axis_len + head_len * 0.5), ..default() },
+            Transform {
+                translation: Vec3::Y * (axis_len + head_len * 0.5),
+                ..default()
+            },
             RenderLayers::layer(LAYER_AXES),
         ))
         .id();
@@ -190,7 +226,11 @@ pub fn setup(
         .spawn((
             Mesh3d(shaft),
             MeshMaterial3d(blue.clone()),
-            Transform { rotation: to_z, translation: Vec3::Z * (axis_len * 0.5), ..default() },
+            Transform {
+                rotation: to_z,
+                translation: Vec3::Z * (axis_len * 0.5),
+                ..default()
+            },
             RenderLayers::layer(LAYER_AXES),
         ))
         .id();
@@ -199,7 +239,11 @@ pub fn setup(
         .spawn((
             Mesh3d(head),
             MeshMaterial3d(blue),
-            Transform { rotation: to_z, translation: Vec3::Z * (axis_len + head_len * 0.5), ..default() },
+            Transform {
+                rotation: to_z,
+                translation: Vec3::Z * (axis_len + head_len * 0.5),
+                ..default()
+            },
             RenderLayers::layer(LAYER_AXES),
         ))
         .id();
@@ -211,7 +255,12 @@ pub fn setup(
         Transform::from_xyz(2.5, 2.5, 2.5).looking_at(Vec3::ZERO, Vec3::Y),
         AxisCamera,
         RenderLayers::layer(LAYER_AXES),
-        Camera { order: 1, clear_color: ClearColorConfig::None, viewport: None, ..default() },
+        Camera {
+            order: 1,
+            clear_color: ClearColorConfig::None,
+            viewport: None,
+            ..default()
+        },
     ));
 }
 
@@ -224,12 +273,23 @@ pub fn rebuild_if_dirty(
     mut settings: ResMut<MolSettings>,
     q_atoms: Query<Entity, With<AtomMarker>>,
     q_bonds: Query<Entity, With<BondMarker>>,
-    mut q_key: Query<(&mut PointLight, &mut Transform), (With<KeyLight>, Without<FillLight>, Without<RimLight>)>,
-    mut q_fill: Query<(&mut PointLight, &mut Transform), (With<FillLight>, Without<KeyLight>, Without<RimLight>)>,
-    mut q_rim:  Query<(&mut PointLight, &mut Transform), (With<RimLight>,  Without<KeyLight>, Without<FillLight>)>,
+    mut q_key: Query<
+        (&mut PointLight, &mut Transform),
+        (With<KeyLight>, Without<FillLight>, Without<RimLight>),
+    >,
+    mut q_fill: Query<
+        (&mut PointLight, &mut Transform),
+        (With<FillLight>, Without<KeyLight>, Without<RimLight>),
+    >,
+    mut q_rim: Query<
+        (&mut PointLight, &mut Transform),
+        (With<RimLight>, Without<KeyLight>, Without<FillLight>),
+    >,
     mut amb: ResMut<AmbientLight>,
 ) {
-    if !settings.dirty { return; }
+    if !settings.dirty {
+        return;
+    }
     settings.dirty = false;
 
     // Background
@@ -237,25 +297,53 @@ pub fn rebuild_if_dirty(
 
     // Ambient
     amb.color = settings.ambient_color;
-    amb.brightness = if settings.use_ambient { settings.ambient_brightness } else { 0.0 };
+    amb.brightness = if settings.use_ambient {
+        settings.ambient_brightness
+    } else {
+        0.0
+    };
 
     // Update lights to current settings
     if let Ok((mut l, mut tf)) = q_key.get_single_mut() {
         l.intensity = settings.light_intensity;
-        tf.translation = Vec3::new(settings.light_distance, settings.light_distance, settings.light_distance);
+        tf.translation = Vec3::new(
+            settings.light_distance,
+            settings.light_distance,
+            settings.light_distance,
+        );
     }
     if let Ok((mut l, mut tf)) = q_fill.get_single_mut() {
-        l.intensity = if matches!(settings.lighting_mode, LightingMode::ThreePoint) { settings.fill_intensity } else { 0.0 };
-        tf.translation = Vec3::new(-settings.fill_distance, settings.fill_distance * 0.5, settings.fill_distance);
+        l.intensity = if matches!(settings.lighting_mode, LightingMode::ThreePoint) {
+            settings.fill_intensity
+        } else {
+            0.0
+        };
+        tf.translation = Vec3::new(
+            -settings.fill_distance,
+            settings.fill_distance * 0.5,
+            settings.fill_distance,
+        );
     }
     if let Ok((mut l, mut tf)) = q_rim.get_single_mut() {
-        l.intensity = if matches!(settings.lighting_mode, LightingMode::ThreePoint) { settings.rim_intensity } else { 0.0 };
-        tf.translation = Vec3::new(settings.rim_distance, settings.rim_distance * 0.5, -settings.rim_distance);
+        l.intensity = if matches!(settings.lighting_mode, LightingMode::ThreePoint) {
+            settings.rim_intensity
+        } else {
+            0.0
+        };
+        tf.translation = Vec3::new(
+            settings.rim_distance,
+            settings.rim_distance * 0.5,
+            -settings.rim_distance,
+        );
     }
 
     // Despawn old geometry
-    for e in q_atoms.iter() { commands.entity(e).despawn(); }
-    for e in q_bonds.iter() { commands.entity(e).despawn(); }
+    for e in q_atoms.iter() {
+        commands.entity(e).despawn();
+    }
+    for e in q_bonds.iter() {
+        commands.entity(e).despawn();
+    }
     mol.atom_entities.clear();
     mol.bond_entities.clear();
 
@@ -263,15 +351,15 @@ pub fn rebuild_if_dirty(
 
     // material parameters from settings
     let metallic = settings.metallic.clamp(0.0, 1.0);
-    let rough    = settings.roughness.clamp(0.02, 1.0);
-    let refl     = settings.reflectance.clamp(0.0, 1.0);
+    let rough = settings.roughness.clamp(0.02, 1.0);
+    let refl = settings.reflectance.clamp(0.0, 1.0);
 
     let emissive = if settings.use_emissive {
         let lr = settings.emissive_color.to_linear();
         LinearRgba::new(
-            lr.red   * settings.emissive_strength.max(0.0),
+            lr.red * settings.emissive_strength.max(0.0),
             lr.green * settings.emissive_strength.max(0.0),
-            lr.blue  * settings.emissive_strength.max(0.0),
+            lr.blue * settings.emissive_strength.max(0.0),
             1.0,
         )
     } else {
@@ -289,7 +377,10 @@ pub fn rebuild_if_dirty(
             .copied()
             .unwrap_or_else(|| color_for(sym, settings.scheme));
 
-        let sphere_mesh = Sphere::new(r_cov).mesh().ico(settings.atom_resolution).unwrap();
+        let sphere_mesh = Sphere::new(r_cov)
+            .mesh()
+            .ico(settings.atom_resolution)
+            .unwrap();
         //let sphere_mesh = Sphere::new(r_cov).mesh().ico(6).unwrap();
 
         let mat = materials.add(StandardMaterial {
@@ -319,7 +410,9 @@ pub fn rebuild_if_dirty(
     for (i, j, len_cc) in bonds {
         let p0 = mol.pos[i];
         let p1 = mol.pos[j];
-        if len_cc <= 0.0001 { continue; }
+        if len_cc <= 0.0001 {
+            continue;
+        }
 
         let dir = p1 - p0;
         let dir_n = dir.normalize();
@@ -342,7 +435,10 @@ pub fn rebuild_if_dirty(
                 // This is the original half-length formula
                 // half_length = (center-to-center distance)/2 - radius
                 let half_length = (len_cc * 0.5 - radius).max(0.0);
-                let cap = Mesh::from(Capsule3d { radius, half_length });
+                let cap = Mesh::from(Capsule3d {
+                    radius,
+                    half_length,
+                });
 
                 let mat = materials.add(StandardMaterial {
                     base_color: settings.uniform_bond_color,
@@ -357,7 +453,11 @@ pub fn rebuild_if_dirty(
                     .spawn((
                         Mesh3d(meshes.add(cap)),
                         MeshMaterial3d(mat),
-                        Transform { translation: center, rotation: rot, ..default() },
+                        Transform {
+                            translation: center,
+                            rotation: rot,
+                            ..default()
+                        },
                         BondMarker,
                         RenderLayers::layer(LAYER_MAIN),
                     ))
@@ -371,10 +471,12 @@ pub fn rebuild_if_dirty(
                 // Using a generous overlap fraction looks best on bright backgrounds.
                 let overlap = radius * 0.40; // 40% of bond radius
                 let start = p0 + dir_n * (ri_sphere - overlap);
-                let end   = p1 - dir_n * (rj_sphere - overlap);
+                let end = p1 - dir_n * (rj_sphere - overlap);
 
                 let visible_len = (end - start).length();
-                if visible_len <= 0.0 { continue; }
+                if visible_len <= 0.0 {
+                    continue;
+                }
 
                 let half_len = visible_len * 0.5;
 
@@ -417,7 +519,11 @@ pub fn rebuild_if_dirty(
                     .spawn((
                         Mesh3d(meshes.add(cyl_half.clone())),
                         MeshMaterial3d(mat_i),
-                        Transform { translation: c0, rotation: rot, ..default() },
+                        Transform {
+                            translation: c0,
+                            rotation: rot,
+                            ..default()
+                        },
                         BondMarker,
                         RenderLayers::layer(LAYER_MAIN),
                     ))
@@ -428,7 +534,11 @@ pub fn rebuild_if_dirty(
                     .spawn((
                         Mesh3d(meshes.add(cyl_half)),
                         MeshMaterial3d(mat_j),
-                        Transform { translation: c1, rotation: rot, ..default() },
+                        Transform {
+                            translation: c1,
+                            rotation: rot,
+                            ..default()
+                        },
                         BondMarker,
                         RenderLayers::layer(LAYER_MAIN),
                     ))
@@ -436,7 +546,8 @@ pub fn rebuild_if_dirty(
                 mol.bond_entities.push(e1);
             }
         }
-    }
+    } //end of bonds
+
 }
 
 // ---------------------- Axis viewport & sync ----------------------
@@ -445,8 +556,12 @@ pub fn update_axis_viewport_on_resize(
     windows: Query<&Window>,
     mut q_axis_cam: Query<&mut Camera, With<AxisCamera>>,
 ) {
-    let Ok(window) = windows.single() else { return; };
-    let Ok(mut cam) = q_axis_cam.single_mut() else { return; };
+    let Ok(window) = windows.single() else {
+        return;
+    };
+    let Ok(mut cam) = q_axis_cam.single_mut() else {
+        return;
+    };
 
     let w = window.physical_width();
     let h = window.physical_height();
@@ -472,8 +587,12 @@ pub fn sync_axis_camera_to_main(
     q_main_cam: Query<&Transform, (With<Camera3d>, With<MainCamera>, Without<AxisCamera>)>,
     mut q_axis_cam: Query<&mut Transform, (With<Camera3d>, With<AxisCamera>, Without<MainCamera>)>,
 ) {
-    let Ok(main_tf) = q_main_cam.single() else { return; };
-    let Ok(mut axis_tf) = q_axis_cam.single_mut() else { return; };
+    let Ok(main_tf) = q_main_cam.single() else {
+        return;
+    };
+    let Ok(mut axis_tf) = q_axis_cam.single_mut() else {
+        return;
+    };
 
     let radius = axis_tf.translation.length();
     let forward: Vec3 = main_tf.forward().as_vec3();
@@ -487,4 +606,3 @@ pub fn sync_axis_camera_to_main(
         ..*axis_tf
     };
 }
-

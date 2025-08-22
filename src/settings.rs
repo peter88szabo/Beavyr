@@ -78,6 +78,12 @@ pub struct MolSettings {
     pub bond_color_mode: BondColorMode,
     pub uniform_bond_color: Color,
 
+    // --- new: hydrogen-bond (gizmo) options ---
+    pub hbond_color: Color,
+    pub hbond_thickness: f32,
+    pub hbond_gap_scale: f32,
+    pub hbond_line_scale: f32,
+
     // dirty flag
     pub dirty: bool,
 }
@@ -123,7 +129,14 @@ impl Default for MolSettings {
             bond_color_mode: BondColorMode::AtomSplit,
             uniform_bond_color: Color::srgb(0.85, 0.85, 0.88),
 
+            // pleasant blue for H-bonds
+            hbond_color: Color::srgb(0.20, 0.60, 1.00),
+            hbond_thickness: 30.0,
+            hbond_gap_scale: 1.0,
+            hbond_line_scale: 1.0,
+
             dirty: true,
         }
     }
 }
+
