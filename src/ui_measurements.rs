@@ -12,13 +12,25 @@ pub fn measurements_panel(
     mol: &Molecule,
     settings: &MolSettings,
 ) {
+    // =======================
+    // Distance panel
+    // =======================
     ui.collapsing("Distance", |ui| {
         // Controls
         ui.horizontal(|ui| {
-            ui.toggle_value(&mut measurements.is_active, "Activate picking");
+            // Highlighted status (not a toggle)
+            active_status_pill(ui, measurements.is_active);
+
+            // Start exclusive picking for distance
             if ui.button("New distance").clicked() {
                 measurements.is_active = true;
                 measurements.pending = None;
+
+                // Exclusivity
+                measurements.angle_active = false;
+                measurements.pending_angle.clear();
+                measurements.dihedral_active = false;
+                measurements.pending_dihedral.clear();
             }
             if ui.button("Clear all").clicked() {
                 measurements.clear();
@@ -35,6 +47,7 @@ pub fn measurements_panel(
                 );
                 if ui.button("Cancel").clicked() {
                     measurements.pending = None;
+                    measurements.is_active = false; // cancel picking
                 }
             });
         }
@@ -57,7 +70,7 @@ pub fn measurements_panel(
             );
             ui.checkbox(&mut measurements.show_labels, "Show labels next to line");
 
-            // Global color picker (same style as elsewhere in your UI)
+            // Global color picker
             {
                 let s = measurements.color.to_srgba();
                 let mut eg = egui::Color32::from_rgba_premultiplied(
@@ -77,6 +90,7 @@ pub fn measurements_panel(
             }
 
             // Picking configuration (Å slack + pixel radius)
+            /*
             ui.separator();
             ui.label("Picking");
             ui.add(
@@ -92,36 +106,196 @@ pub fn measurements_panel(
                 settings.atom_scale,
                 measurements.pick_radius * settings.atom_scale
             ));
+            */
         }); // end Change Distance Style
 
         // Pairs list
         ui.separator();
         if measurements.pairs.is_empty() {
             ui.weak("No measurement pairs yet. Activate picking, then click two atoms.");
-            return;
-        }
+        } else {
+            egui::ScrollArea::vertical()
+                .id_salt("measure_pairs_scroll")
+                .max_height(240.0)
+                .show(ui, |ui| {
+                    let ids: Vec<u32> = measurements.pairs.iter().map(|p| p.id).collect();
+                    let mut to_delete: Vec<u32> = Vec::new();
 
-        egui::ScrollArea::vertical()
-            .id_salt("measure_pairs_scroll")
-            .auto_shrink([false, false])
-            .max_height(240.0)
-            .show(ui, |ui| {
-                let ids: Vec<u32> = measurements.pairs.iter().map(|p| p.id).collect();
-                let mut to_delete: Vec<u32> = Vec::new();
-
-                for id in ids {
-                    if let Some(idx) = measurements.pairs.iter().position(|p| p.id == id) {
-                        if pair_row(ui, &mut measurements.pairs[idx], mol) {
-                            to_delete.push(id); // delete requested
+                    for id in ids {
+                        if let Some(idx) = measurements.pairs.iter().position(|p| p.id == id) {
+                            if pair_row(ui, &mut measurements.pairs[idx], mol) {
+                                to_delete.push(id); // delete requested
+                            }
+                            ui.separator();
                         }
-                        ui.separator();
                     }
-                }
 
-                if !to_delete.is_empty() {
-                    measurements.pairs.retain(|p| !to_delete.contains(&p.id));
+                    if !to_delete.is_empty() {
+                        measurements.pairs.retain(|p| !to_delete.contains(&p.id));
+                    }
+                });
+        }
+    });
+
+    // =======================
+    // Angle panel
+    // =======================
+    //ui.separator();
+    ui.add_space(4.0);
+    ui.collapsing("Angle", |ui| {
+        ui.horizontal(|ui| {
+            active_status_pill(ui, measurements.angle_active);
+
+            if ui.button("New angle").clicked() {
+                measurements.angle_active = true;
+                measurements.pending_angle.clear();
+
+                measurements.is_active = false;
+                measurements.pending = None;
+                measurements.dihedral_active = false;
+                measurements.pending_dihedral.clear();
+            }
+            if ui.button("Clear all").clicked() {
+                measurements.clear_angles();
+            }
+        });
+
+        if !measurements.pending_angle.is_empty() {
+            let mut labels: Vec<String> = Vec::new();
+            for &idx in &measurements.pending_angle {
+                let name = mol.atoms.get(idx).map(|s| s.as_str()).unwrap_or("?");
+                labels.push(format!("{}({})", name, idx + 1));
+            }
+            ui.horizontal(|ui| {
+                ui.colored_label(
+                    egui::Color32::from_rgb(200, 200, 80),
+                    format!("Picked: {}", labels.join(" - ")),
+                );
+                if ui.button("Cancel").clicked() {
+                    measurements.pending_angle.clear();
+                    measurements.angle_active = false;
                 }
             });
+        }
+
+        ui.separator();
+        if measurements.angles.is_empty() {
+            ui.weak("No angles yet. Activate picking, then click three atoms (A-B-C).");
+        } else {
+            egui::ScrollArea::vertical()
+                .id_salt("angle_list_scroll")
+                .max_height(220.0)
+                .show(ui, |ui| {
+                    let ids: Vec<u32> = measurements.angles.iter().map(|a| a.id).collect();
+                    let mut to_delete: Vec<u32> = Vec::new();
+
+                    for id in ids {
+                        if let Some(idx) = measurements.angles.iter().position(|a| a.id == id) {
+                            let a = &measurements.angles[idx];
+                            let na = mol.atoms.get(a.a).map(|s| s.as_str()).unwrap_or("?");
+                            let nb = mol.atoms.get(a.b).map(|s| s.as_str()).unwrap_or("?");
+                            let nc = mol.atoms.get(a.c).map(|s| s.as_str()).unwrap_or("?");
+
+                            ui.horizontal(|ui| {
+                                ui.monospace(format!(
+                                    "{}({})-{}({})-{}({}) | {:.1}°",
+                                    na, a.a + 1, nb, a.b + 1, nc, a.c + 1, a.degrees
+                                ));
+                                ui.add_space(8.0);
+                                if ui.button("Delete").clicked() {
+                                    to_delete.push(id);
+                                }
+                            });
+                            ui.separator();
+                        }
+                    }
+
+                    if !to_delete.is_empty() {
+                        measurements.angles.retain(|a| !to_delete.contains(&a.id));
+                    }
+                });
+        }
+    });
+
+    // =======================
+    // Dihedral panel
+    // =======================
+    //ui.separator();
+    ui.add_space(4.0);
+    ui.collapsing("Dihedral", |ui| {
+        ui.horizontal(|ui| {
+            active_status_pill(ui, measurements.dihedral_active);
+
+            if ui.button("New dihedral").clicked() {
+                measurements.dihedral_active = true;
+                measurements.pending_dihedral.clear();
+
+                measurements.is_active = false;
+                measurements.pending = None;
+                measurements.angle_active = false;
+                measurements.pending_angle.clear();
+            }
+            if ui.button("Clear all").clicked() {
+                measurements.clear_dihedrals();
+            }
+        });
+
+        if !measurements.pending_dihedral.is_empty() {
+            let mut labels: Vec<String> = Vec::new();
+            for &idx in &measurements.pending_dihedral {
+                let name = mol.atoms.get(idx).map(|s| s.as_str()).unwrap_or("?");
+                labels.push(format!("{}({})", name, idx + 1));
+            }
+            ui.horizontal(|ui| {
+                ui.colored_label(
+                    egui::Color32::from_rgb(80, 200, 200),
+                    format!("Picked: {}", labels.join(" - ")),
+                );
+                if ui.button("Cancel").clicked() {
+                    measurements.pending_dihedral.clear();
+                    measurements.dihedral_active = false;
+                }
+            });
+        }
+
+        ui.separator();
+        if measurements.dihedrals.is_empty() {
+            ui.weak("No dihedrals yet. Activate picking, then click four atoms (A-B-C-D).");
+        } else {
+            egui::ScrollArea::vertical()
+                .id_salt("dihedral_list_scroll")
+                .max_height(220.0)
+                .show(ui, |ui| {
+                    let ids: Vec<u32> = measurements.dihedrals.iter().map(|d| d.id).collect();
+                    let mut to_delete: Vec<u32> = Vec::new();
+
+                    for id in ids {
+                        if let Some(idx) = measurements.dihedrals.iter().position(|d| d.id == id) {
+                            let dmeas = &measurements.dihedrals[idx];
+                            let na = mol.atoms.get(dmeas.a).map(|s| s.as_str()).unwrap_or("?");
+                            let nb = mol.atoms.get(dmeas.b).map(|s| s.as_str()).unwrap_or("?");
+                            let nc = mol.atoms.get(dmeas.c).map(|s| s.as_str()).unwrap_or("?");
+                            let nd = mol.atoms.get(dmeas.d).map(|s| s.as_str()).unwrap_or("?");
+
+                            ui.horizontal(|ui| {
+                                ui.monospace(format!(
+                                    "{}({})-{}({})-{}({})-{}({}) | {:+.1}°",
+                                    na, dmeas.a + 1, nb, dmeas.b + 1, nc, dmeas.c + 1, nd, dmeas.d + 1, dmeas.degrees
+                                ));
+                                ui.add_space(8.0);
+                                if ui.button("Delete").clicked() {
+                                    to_delete.push(id);
+                                }
+                            });
+                            ui.separator();
+                        }
+                    }
+
+                    if !to_delete.is_empty() {
+                        measurements.dihedrals.retain(|d| !to_delete.contains(&d.id));
+                    }
+                });
+        }
     });
 }
 
@@ -139,7 +313,6 @@ pub fn distance_labels_overlay(
         return;
     }
 
-    // Need egui ctx + camera + window to project 3D -> screen
     let Ok(ctx) = contexts.ctx_mut() else { return; };
     let Ok((cam, cam_xform)) = q_cam.single() else { return; };
     let Ok(window) = windows.single() else { return; };
@@ -152,13 +325,12 @@ pub fn distance_labels_overlay(
             let painter = ui.painter();
             let scale = window.scale_factor() as f32;
 
-            for pair in measurements.pairs.iter().filter(|p| p.visible && p.label_on) {
+            for pair in measurements.pairs.iter().filter(|p| p.visible) {
                 let n = mol.pos.len();
                 if pair.a >= n || pair.b >= n {
                     continue;
                 }
 
-                // Recompute the visible endpoints the same way as gizmo lines
                 let p0 = mol.pos[pair.a];
                 let p1 = mol.pos[pair.b];
                 let d = p1 - p0;
@@ -186,7 +358,6 @@ pub fn distance_labels_overlay(
                 if let Ok(screen_px) = cam.world_to_viewport(cam_xform, mid) {
                     let pos = egui::pos2(screen_px.x / scale, screen_px.y / scale);
 
-                    // Text: 3 decimals  (matches list readout)
                     let text = format!("{:.3}", pair.distance);
                     let galley = ctx.fonts(|f| {
                         f.layout_no_wrap(
@@ -196,7 +367,6 @@ pub fn distance_labels_overlay(
                         )
                     });
 
-                    // Slight offset so it doesn't sit exactly on the dashed line
                     let offset = egui::vec2(6.0, -6.0);
                     painter.galley(pos + offset, galley, egui::Color32::WHITE);
                 }
@@ -204,20 +374,17 @@ pub fn distance_labels_overlay(
         });
 }
 
-/// Row UI; returns true if user clicked delete.
 fn pair_row(ui: &mut egui::Ui, pair: &mut MeasurePair, mol: &Molecule) -> bool {
     let name_a = mol.atoms.get(pair.a).map(|s| s.as_str()).unwrap_or("?");
     let name_b = mol.atoms.get(pair.b).map(|s| s.as_str()).unwrap_or("?");
     let mut delete_me = false;
 
     ui.horizontal(|ui| {
-        // Show/Hide
         let eye = if pair.visible { "Hide" } else { "Show" };
         if ui.button(eye).clicked() {
             pair.visible = !pair.visible;
         }
 
-        // Pair info + distance (1-based indices in UI)
         ui.label(format!(
             "{}({}) — {}({})",
             name_a,
@@ -230,12 +397,29 @@ fn pair_row(ui: &mut egui::Ui, pair: &mut MeasurePair, mol: &Molecule) -> bool {
 
         ui.separator();
 
-        // Delete
         if ui.button("Delete").clicked() {
             delete_me = true;
         }
     });
 
     delete_me
+}
+
+fn active_status_pill(ui: &mut egui::Ui, active: bool) {
+    if active {
+        egui::Frame::none()
+            .fill(egui::Color32::from_rgb(40, 180, 120))
+            .rounding(egui::Rounding::same(6))        // u8
+            .inner_margin(egui::Margin::symmetric(8, 4)) // i8
+            .show(ui, |ui| {
+                ui.label(
+                    egui::RichText::new("Active picking")
+                        .strong()
+                        .color(egui::Color32::WHITE),
+                );
+            });
+    } else {
+        ui.label("Inactive Picking");
+    }
 }
 
