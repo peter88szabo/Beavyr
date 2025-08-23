@@ -97,7 +97,7 @@ fn consume_export_requests(
         return;
     }
 
-    let (_main_cam, main_proj, main_cam_xform) = match main_cam_q.get_single() {
+    let (_main_cam, main_proj, main_cam_xform) = match main_cam_q.single() {
         Ok(t) => t,
         Err(_) => return,
     };
@@ -173,7 +173,7 @@ fn tick_and_cleanup_temp_cameras(
     for (e, mut m) in &mut q {
         m.frames_waited = m.frames_waited.saturating_add(1);
         if m.frames_waited >= m.wait_frames {
-            commands.entity(e).despawn_recursive();
+            commands.entity(e).despawn();
         }
     }
 }
@@ -203,7 +203,7 @@ fn tick_and_trigger_delayed_exports(
         ));
 
         // Remove the arming entity so it doesn't trigger again.
-        commands.entity(e).despawn_recursive();
+        commands.entity(e).despawn();
     }
 }
 
@@ -214,7 +214,7 @@ fn tick_and_cleanup_exporters(
     for (e, mut m) in &mut q {
         m.frames_waited = m.frames_waited.saturating_add(1);
         if m.frames_waited >= m.wait_frames {
-            commands.entity(e).despawn_recursive(); // stop after exactly one frame
+            commands.entity(e).despawn(); // stop after exactly one frame
         }
     }
 }

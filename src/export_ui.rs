@@ -64,13 +64,13 @@ pub fn export_section(
         ui.label("Size (mm):");
         ui.add(
             egui::DragValue::new(&mut ui_state.width_mm)
-                .clamp_range(5.0..=2000.0)
+                .range(5.0..=2000.0)
                 .speed(1.0),
         );
         ui.label("×");
         ui.add(
             egui::DragValue::new(&mut ui_state.height_mm)
-                .clamp_range(5.0..=2000.0)
+                .range(5.0..=2000.0)
                 .speed(1.0),
         );
     });

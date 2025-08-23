@@ -175,7 +175,7 @@ pub fn ui_panel(
                 );
 
                 ui.horizontal(|ui| {
-                    if ui.button("Load XYZ (Å)").clicked() {
+                    if ui.button("Update XYZ (Å)").clicked() {
                         let (_n, atoms, qxyz) = parse_xyz_angstrom(&xyz_buf.text);
                         mol.atoms = atoms;
                         mol.pos = qxyz
@@ -197,7 +197,8 @@ pub fn ui_panel(
                     }
                 });
 
-                ui.small("Tip: right-click near an atom in the 3D view to set it as the rotation center.");
+                ui.add_space(8.0);
+                ui.label("Tip: Right-Click on an atom to set it as rotation center.");
             });
 
             ui.add_space(8.0);

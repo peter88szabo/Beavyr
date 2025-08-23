@@ -304,7 +304,7 @@ pub fn rebuild_if_dirty(
     };
 
     // Update lights to current settings
-    if let Ok((mut l, mut tf)) = q_key.get_single_mut() {
+    if let Ok((mut l, mut tf)) = q_key.single_mut() {
         l.intensity = settings.light_intensity;
         tf.translation = Vec3::new(
             settings.light_distance,
@@ -312,7 +312,7 @@ pub fn rebuild_if_dirty(
             settings.light_distance,
         );
     }
-    if let Ok((mut l, mut tf)) = q_fill.get_single_mut() {
+    if let Ok((mut l, mut tf)) = q_fill.single_mut() {
         l.intensity = if matches!(settings.lighting_mode, LightingMode::ThreePoint) {
             settings.fill_intensity
         } else {
@@ -324,7 +324,7 @@ pub fn rebuild_if_dirty(
             settings.fill_distance,
         );
     }
-    if let Ok((mut l, mut tf)) = q_rim.get_single_mut() {
+    if let Ok((mut l, mut tf)) = q_rim.single_mut() {
         l.intensity = if matches!(settings.lighting_mode, LightingMode::ThreePoint) {
             settings.rim_intensity
         } else {
