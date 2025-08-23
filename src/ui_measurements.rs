@@ -140,7 +140,6 @@ pub fn measurements_panel(
     // =======================
     // Angle panel
     // =======================
-    //ui.separator();
     ui.add_space(4.0);
     ui.collapsing("Angle", |ui| {
         ui.horizontal(|ui| {
@@ -188,6 +187,8 @@ pub fn measurements_panel(
                 .show(ui, |ui| {
                     let ids: Vec<u32> = measurements.angles.iter().map(|a| a.id).collect();
                     let mut to_delete: Vec<u32> = Vec::new();
+                    let mut req_set: Option<Vec<usize>> = None;
+                    let mut req_clear: bool = false;
 
                     for id in ids {
                         if let Some(idx) = measurements.angles.iter().position(|a| a.id == id) {
@@ -196,7 +197,27 @@ pub fn measurements_panel(
                             let nb = mol.atoms.get(a.b).map(|s| s.as_str()).unwrap_or("?");
                             let nc = mol.atoms.get(a.c).map(|s| s.as_str()).unwrap_or("?");
 
+                            let is_hl = is_highlighted_for(
+                                &measurements.preview_highlight,
+                                &[a.a, a.b, a.c],
+                            );
+
                             ui.horizontal(|ui| {
+                                // Highlight toggle at the BEGINNING of the row
+                                let label = if is_hl { "Hide" } else { "Show" };
+                                let mut btn = egui::Button::new(label);
+                                if is_hl {
+                                    btn = btn.fill(egui::Color32::from_rgb(60, 120, 200));
+                                }
+                                if ui.add(btn).clicked() {
+                                    if is_hl {
+                                        req_clear = true;
+                                    } else {
+                                        req_set = Some(vec![a.a, a.b, a.c]);
+                                    }
+                                }
+
+                                ui.add_space(8.0);
                                 ui.monospace(format!(
                                     "{}({})-{}({})-{}({}) | {:.1}°",
                                     na, a.a + 1, nb, a.b + 1, nc, a.c + 1, a.degrees
@@ -213,6 +234,11 @@ pub fn measurements_panel(
                     if !to_delete.is_empty() {
                         measurements.angles.retain(|a| !to_delete.contains(&a.id));
                     }
+                    if req_clear {
+                        measurements.preview_highlight = None;
+                    } else if let Some(v) = req_set {
+                        measurements.preview_highlight = Some(v);
+                    }
                 });
         }
     });
@@ -220,7 +246,6 @@ pub fn measurements_panel(
     // =======================
     // Dihedral panel
     // =======================
-    //ui.separator();
     ui.add_space(4.0);
     ui.collapsing("Dihedral", |ui| {
         ui.horizontal(|ui| {
@@ -268,6 +293,8 @@ pub fn measurements_panel(
                 .show(ui, |ui| {
                     let ids: Vec<u32> = measurements.dihedrals.iter().map(|d| d.id).collect();
                     let mut to_delete: Vec<u32> = Vec::new();
+                    let mut req_set: Option<Vec<usize>> = None;
+                    let mut req_clear: bool = false;
 
                     for id in ids {
                         if let Some(idx) = measurements.dihedrals.iter().position(|d| d.id == id) {
@@ -277,7 +304,27 @@ pub fn measurements_panel(
                             let nc = mol.atoms.get(dmeas.c).map(|s| s.as_str()).unwrap_or("?");
                             let nd = mol.atoms.get(dmeas.d).map(|s| s.as_str()).unwrap_or("?");
 
+                            let is_hl = is_highlighted_for(
+                                &measurements.preview_highlight,
+                                &[dmeas.a, dmeas.b, dmeas.c, dmeas.d],
+                            );
+
                             ui.horizontal(|ui| {
+                                // Highlight toggle at the BEGINNING of the row
+                                let label = if is_hl { "Hide" } else { "Show" };
+                                let mut btn = egui::Button::new(label);
+                                if is_hl {
+                                    btn = btn.fill(egui::Color32::from_rgb(60, 120, 200));
+                                }
+                                if ui.add(btn).clicked() {
+                                    if is_hl {
+                                        req_clear = true;
+                                    } else {
+                                        req_set = Some(vec![dmeas.a, dmeas.b, dmeas.c, dmeas.d]);
+                                    }
+                                }
+
+                                ui.add_space(8.0);
                                 ui.monospace(format!(
                                     "{}({})-{}({})-{}({})-{}({}) | {:+.1}°",
                                     na, dmeas.a + 1, nb, dmeas.b + 1, nc, dmeas.c + 1, nd, dmeas.d + 1, dmeas.degrees
@@ -293,6 +340,11 @@ pub fn measurements_panel(
 
                     if !to_delete.is_empty() {
                         measurements.dihedrals.retain(|d| !to_delete.contains(&d.id));
+                    }
+                    if req_clear {
+                        measurements.preview_highlight = None;
+                    } else if let Some(v) = req_set {
+                        measurements.preview_highlight = Some(v);
                     }
                 });
         }
@@ -395,6 +447,8 @@ fn pair_row(ui: &mut egui::Ui, pair: &mut MeasurePair, mol: &Molecule) -> bool {
         ui.separator();
         ui.monospace(format!("{:.3} Å", pair.distance));
 
+        ui.add_space(8.0);
+
         ui.separator();
 
         if ui.button("Delete").clicked() {
@@ -420,6 +474,14 @@ fn active_status_pill(ui: &mut egui::Ui, active: bool) {
             });
     } else {
         ui.label("Inactive Picking");
+    }
+}
+
+// Helper: whether the current preview highlight matches exactly this candidate set (ordered).
+fn is_highlighted_for(current: &Option<Vec<usize>>, candidate: &[usize]) -> bool {
+    match current {
+        Some(v) => v.as_slice() == candidate,
+        None => false,
     }
 }
 

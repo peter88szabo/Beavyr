@@ -64,6 +64,9 @@ pub struct Measurements {
     pub pick_radius: f32,
     pub pick_radius_px: f32,
 
+    // NEW: preview highlight of measured items (indices in order A, B, C, D)
+    pub preview_highlight: Option<Vec<usize>>,
+
     next_id: u32,
 }
 
@@ -89,6 +92,9 @@ impl Default for Measurements {
             show_labels: true,
             pick_radius: 0.2,
             pick_radius_px: 18.0,
+
+            preview_highlight: None,
+
             next_id: 1,
         }
     }
@@ -199,6 +205,9 @@ pub fn handle_measurement_picking(
     );
     let Some((hit_idx, _)) = hit else { return; };
 
+    // Any picking action cancels preview highlight to avoid confusion
+    measurements.preview_highlight = None;
+
     // --- Priority: dihedral > angle > distance
     if measurements.dihedral_active {
         measurements.pending_dihedral.push(hit_idx);
@@ -278,7 +287,7 @@ pub fn update_measurement_distances(
     }
 }
 
-/// Draw gizmos (distance lines + pending highlights for distance/angle/dihedral)
+/// Draw gizmos (distance lines + pending highlights + preview highlights)
 pub fn draw_measurement_lines(
     mut gizmos: Gizmos<MeasurementGizmos>,
     measurements: Res<Measurements>,
@@ -304,6 +313,7 @@ pub fn draw_measurement_lines(
     let magenta = Color::srgba(1.0, 0.0, 0.8, 1.0);
     let cyan_blue = Color::srgba(0.0, 0.8, 1.0, 1.0);
     let neon_green = Color::srgba(0.2, 1.0, 0.2, 1.0);
+    let yellow = Color::srgba(1.0, 1.0, 0.2, 1.0);
 
     // Distance pending (first atom)
     if let Some(i) = measurements.pending {
@@ -331,6 +341,20 @@ pub fn draw_measurement_lines(
         if let Some(&i2) = measurements.pending_dihedral.get(2) {
             draw_highlight(i2, neon_green);
         }
+    }
+
+    // ---------- Preview highlight of existing measurements ----------
+    if let Some(ref inds) = measurements.preview_highlight {
+        for (k, &idx) in inds.iter().enumerate() {
+            let color = match k {
+                0 => magenta,
+                1 => cyan_blue,
+                2 => neon_green,
+                _ => yellow, // final atom (or any extra) = yellow
+            };
+            draw_highlight(idx, color);
+        }
+        // Note: we DO NOT auto-clear here; it persists until user triggers another highlight
     }
 
     // ---------- Distance lines (as before) ----------

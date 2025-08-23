@@ -210,6 +210,7 @@ pub fn handle_measurement_picking(
             let deg = dihedral_degrees(mol.pos[a], mol.pos[b], mol.pos[c], mol.pos[d]);
             measurements.add_dihedral(a, b, c, d, deg);
             measurements.pending_dihedral.clear();
+            measurements.dihedral_active = false; // auto-off when complete
         }
         return;
     }
@@ -223,6 +224,7 @@ pub fn handle_measurement_picking(
             let deg = angle_degrees(mol.pos[a], mol.pos[b], mol.pos[c]);
             measurements.add_angle(a, b, c, deg);
             measurements.pending_angle.clear();
+            measurements.angle_active = false; // auto-off when complete
         }
         return;
     }
@@ -236,6 +238,7 @@ pub fn handle_measurement_picking(
                 let dist = mol.pos[first].distance(mol.pos[hit_idx]);
                 measurements.new_pair(first, hit_idx, dist);
                 measurements.pending = None;
+                measurements.is_active = false; // auto-off when complete
             }
         } else {
             measurements.pending = Some(hit_idx);
