@@ -9,10 +9,6 @@ use crate::settings::{BondColorMode, ColorScheme, LightingMode, MolSettings};
 use crate::export_ui;
 use crate::export::{ExportRequestQueue, ExportUiState};
 
-// NEW: measurements UI + resource
-use crate::measurements::Measurements;
-use crate::ui_measurements;
-
 #[derive(Resource, Clone)]
 pub struct XyzBuffer {
     pub text: String,
@@ -37,9 +33,6 @@ pub fn ui_panel(
     // NEW: export resources for the inline export section
     mut export_ui_state: ResMut<ExportUiState>,
     mut export_queue: ResMut<ExportRequestQueue>,
-
-    // NEW: measurements resource for the Measurements panel
-    mut measurements: ResMut<Measurements>,
 ) {
     // bevy_egui 0.36: ctx_mut() returns Result; if it fails, skip this frame
     let Ok(ctx) = contexts.ctx_mut() else { return; };
@@ -489,21 +482,7 @@ pub fn ui_panel(
             });
 
             // ===========================
-            // 5) Measurements — collapsible (NEW)
-            // ===========================
-            ui.add_space(8.0);
-            ui.separator();
-            ui.collapsing("Measurements", |ui| {
-                ui_measurements::measurements_panel(
-                    ui,
-                    &mut measurements,
-                    &mol,
-                    &settings,
-                );
-            });
-
-            // ===========================
-            // 6) Export Image — collapsible (NEW)
+            // 5) Export Image — collapsible (NEW)
             // ===========================
             ui.add_space(8.0);
             ui.separator();
