@@ -1,51 +1,61 @@
+// src/ui.rs
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 
 use crate::color_schemes::color_scheme_map;
+use crate::events::{MoleculeChanged, MoleculeChangeReason};
 use crate::molecule::{parse_xyz_angstrom, Molecule};
 use crate::settings::{BondColorMode, ColorScheme, LightingMode, MolSettings};
 
-// NEW: import inline export section + resources
+// Export UI + resources
 use crate::export_ui;
 use crate::export::{ExportRequestQueue, ExportUiState};
 
-// NEW: measurements UI + resource
+// Measurements UI + resource
 use crate::measurements::Measurements;
 use crate::ui_measurements;
+
+// NEW: shared picking helper (egui-friendly shim)
+use crate::picking::screen::find_nearest_atom_screen_space_egui;
 
 #[derive(Resource, Clone)]
 pub struct XyzBuffer {
     pub text: String,
 }
 
-/// Same behavior as before +
-/// - Two toggles in Structure block: show atom Type, show atom Index
-/// - Labels drawn in the 3D view (overlay) using egui painter
-/// - "Center molecule" button (and auto-center after load)
-/// - Right-click near atom -> popup to use as rotation center
+/// Right-side control panel + overlays.
+///
+/// Key features:
+/// - Show atom type / index labels in 3D overlay
+/// - Right-click pick atom → popup (set camera target)
+/// - "Structure (XYZ)" block:
+///     * View mode: live read-only XYZ from Molecule.pos
+///     * Edit mode: multiline text editor; Apply → parse → write Molecule + emit MoleculeChanged
+///     * Copy XYZ → copies current live geometry
 pub fn ui_panel(
     mut contexts: EguiContexts,
     mut settings: ResMut<MolSettings>,
     mut mol: ResMut<Molecule>,
     mut xyz_buf: ResMut<XyzBuffer>,
-    // control orbit target
+    mut ev_changed: EventWriter<MoleculeChanged>,
+    // orbit target control
     mut cam: ResMut<crate::camera::OrbitCamera>,
-    // need camera/projection to project atoms to screen for picking + labels
+    // camera for picking + label projection
     q_cam: Query<(&Camera, &GlobalTransform), (With<Camera3d>, With<crate::scene::MainCamera>)>,
     windows: Query<&Window>,
 
-    // NEW: export resources for the inline export section
+    // export section
     mut export_ui_state: ResMut<ExportUiState>,
     mut export_queue: ResMut<ExportRequestQueue>,
 
-    // NEW: measurements resource for the Measurements panel
+    // measurements panel
     mut measurements: ResMut<Measurements>,
 ) {
     // bevy_egui 0.36: ctx_mut() returns Result; if it fails, skip this frame
     let Ok(ctx) = contexts.ctx_mut() else { return; };
 
     // -------------------------
-    // Right-click picking: detect click in empty space (not over egui)
+    // Right-click picking (not over egui)
     // -------------------------
     let (latest_pos_opt, right_clicked) =
         ctx.input(|i| (i.pointer.latest_pos(), i.pointer.secondary_clicked()));
@@ -53,14 +63,14 @@ pub fn ui_panel(
     if let (Some(pos_points), true) = (latest_pos_opt, right_clicked) {
         if !mouse_over_ui {
             if let (Ok((cam_comp, cam_xform)), Ok(win)) = (q_cam.single(), windows.single()) {
-                // Egui uses logical points; world_to_viewport returns PHYSICAL px. Convert:
+                // Convert egui logical points → PHYSICAL px
                 let scale = win.scale_factor() as f32;
-                let mouse_px = pos_points * scale;
+                let mouse_px = egui::pos2(pos_points.x * scale, pos_points.y * scale);
 
                 if let Some((hit_idx, hit_px_pos)) =
-                    find_nearest_atom_screen_space(cam_comp, cam_xform, &mol.pos, mouse_px, 18.0)
+                    find_nearest_atom_screen_space_egui(cam_comp, cam_xform, &mol.pos, mouse_px, 18.0)
                 {
-                    // Store the picked atom + popup location in egui memory (persist across frames)
+                    // Persist picked atom + popup position (store in logical points)
                     let pick_id = egui::Id::new("picked_atom_idx");
                     let popup_id = egui::Id::new("rc_popup_open");
                     let popup_pos_id = egui::Id::new("rc_popup_pos_px");
@@ -68,14 +78,17 @@ pub fn ui_panel(
                     ctx.data_mut(|d| {
                         d.insert_persisted(pick_id, hit_idx as i32);
                         d.insert_persisted(popup_id, true);
-                        d.insert_persisted(popup_pos_id, hit_px_pos / scale); // store as logical points
+                        d.insert_persisted(
+                            popup_pos_id,
+                            egui::pos2(hit_px_pos.x / scale, hit_px_pos.y / scale),
+                        );
                     });
                 }
             }
         }
     }
 
-    // If popup is open, draw a tiny context menu at stored mouse position
+    // Right-click popup at stored position
     {
         let popup_id = egui::Id::new("rc_popup_open");
         let popup_pos_id = egui::Id::new("rc_popup_pos_px");
@@ -103,7 +116,7 @@ pub fn ui_panel(
                                 if idx < mol.pos.len() {
                                     cam.target = mol.pos[idx];
                                 }
-                                open = false; // close popup
+                                open = false;
                             }
                             if ui.button("Cancel").clicked() {
                                 open = false;
@@ -118,27 +131,26 @@ pub fn ui_panel(
     }
 
     // -------------------------
-    // Side panel
+    // Right side panel
     // -------------------------
     egui::SidePanel::right("controls")
         .default_width(350.0)
         .resizable(true)
         .show(&ctx, |ui| {
             // ===========================
-            // 1) Structure (XYZ) — collapsible
+            // 1) Structure (XYZ)
             // ===========================
             ui.collapsing("Structure (XYZ)", |ui| {
-                ui.label("Paste or edit XYZ. Input is assumed in Å (Angstrom).");
-
-                // Two toggles: show type / show index
                 let show_type_id = egui::Id::new("show_atom_type");
                 let show_index_id = egui::Id::new("show_atom_index");
+                let edit_mode_id = egui::Id::new("xyz_edit_mode");
 
-                // read current state
-                let (mut show_type, mut show_index) = ctx.data_mut(|d| {
+                // load flags
+                let (mut show_type, mut show_index, mut edit_mode) = ctx.data_mut(|d| {
                     (
                         d.get_persisted::<bool>(show_type_id).unwrap_or(false),
                         d.get_persisted::<bool>(show_index_id).unwrap_or(false),
+                        d.get_persisted::<bool>(edit_mode_id).unwrap_or(false),
                     )
                 });
 
@@ -146,7 +158,6 @@ pub fn ui_panel(
                     let sel = ui.visuals().selection.bg_fill;
                     let dim = ui.visuals().widgets.inactive.bg_fill;
 
-                    // Toggle: show element symbol
                     if ui
                         .add(
                             egui::Button::new("Show Atom Type")
@@ -158,7 +169,6 @@ pub fn ui_panel(
                         ctx.data_mut(|d| d.insert_persisted(show_type_id, show_type));
                     }
 
-                    // Toggle: show 1-based index
                     if ui
                         .add(
                             egui::Button::new("Show Atom Index")
@@ -169,50 +179,110 @@ pub fn ui_panel(
                         show_index = !show_index;
                         ctx.data_mut(|d| d.insert_persisted(show_index_id, show_index));
                     }
-                });
 
-                ui.add_space(8.0);
-
-                ui.add(
-                    egui::TextEdit::multiline(&mut xyz_buf.text)
-                        //.desired_rows(14)
-                        .desired_width(f32::INFINITY)
-                        .code_editor()
-                        .lock_focus(true),
-                );
-
-                ui.horizontal(|ui| {
-                    if ui.button("Update XYZ (Å)").clicked() {
-                        let (_n, atoms, qxyz) = parse_xyz_angstrom(&xyz_buf.text);
-                        mol.atoms = atoms;
-                        mol.pos = qxyz
-                            .into_iter()
-                            .map(|v| Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32))
-                            .collect();
-                        mol.recompute_bonds(settings.bond_thresh_scale, settings.hbond_cutoff);
-                        // auto-center after loading
-                        if let Some(c) = compute_centroid(&mol.pos) {
-                            cam.target = c;
+                    if ui
+                        .add(
+                            egui::Button::new("Edit as text")
+                                .fill(if edit_mode { sel } else { dim }),
+                        )
+                        .on_hover_text("Toggle free-form XYZ editing")
+                        .clicked()
+                    {
+                        edit_mode = !edit_mode;
+                        if edit_mode {
+                            // entering edit mode: prefill from live geometry
+                            xyz_buf.text = format_xyz_from_molecule(&mol);
                         }
-                        settings.dirty = true;
+                        ctx.data_mut(|d| d.insert_persisted(edit_mode_id, edit_mode));
                     }
 
-                    if ui.button("Center molecule").clicked() {
-                        if let Some(c) = compute_centroid(&mol.pos) {
-                            cam.target = c;
-                        }
+                    if ui.button("Copy XYZ").clicked() {
+                        let live = format_xyz_from_molecule(&mol);
+                        ui.output_mut(|o| o.copied_text = live);
                     }
                 });
 
                 ui.add_space(8.0);
-                ui.label("Tip: Right-Click on an atom to set it as rotation center.");
+
+                if edit_mode {
+                    // ---- EDIT MODE ----
+                    ui.label("Paste or edit XYZ. Input is assumed in Å (Angstrom).");
+                    ui.add(
+                        egui::TextEdit::multiline(&mut xyz_buf.text)
+                            .desired_width(f32::INFINITY)
+                            .code_editor()
+                            .lock_focus(true),
+                    );
+
+                    ui.horizontal(|ui| {
+                        if ui.button("Apply (Parse XYZ)").clicked() {
+                            let (_n, atoms, qxyz) = parse_xyz_angstrom(&xyz_buf.text);
+                            mol.atoms = atoms;
+                            mol.set_pos(
+                                qxyz
+                                    .into_iter()
+                                    .map(|v| Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32))
+                                    .collect(),
+                            );
+
+                            // Emit change event; parsing a new XYZ likely changes topology
+                            ev_changed.send(MoleculeChanged::parse_xyz(true));
+
+                            // Auto-center after load
+                            if let Some(c) = compute_centroid(&mol.pos) {
+                                cam.target = c;
+                            }
+                        }
+
+                        if ui.button("Revert from live").clicked() {
+                            xyz_buf.text = format_xyz_from_molecule(&mol);
+                        }
+                    });
+
+                    ui.add_space(8.0);
+                    ui.weak("Tip: Use ‘Copy XYZ’ to copy the current live geometry without leaving edit mode.");
+                } else {
+                    // ---- VIEW MODE (LIVE XYZ) ----
+                    ui.label("Live XYZ (read-only, always in sync with 3D):");
+                    egui::ScrollArea::vertical()
+                        .max_height(260.0)
+                        .auto_shrink([false; 2])
+                        .show(ui, |ui| {
+                            ui.style_mut().override_text_style = Some(egui::TextStyle::Monospace);
+                            for (i, (sym, p)) in mol.atoms.iter().zip(mol.pos.iter()).enumerate() {
+                                let mut label = String::new();
+                                if show_type {
+                                    label.push_str(sym);
+                                    label.push(' ');
+                                }
+                                if show_index {
+                                    label.push('(');
+                                    label.push_str(&(i + 1).to_string());
+                                    label.push(')');
+                                    label.push(' ');
+                                }
+                                label.push_str(&format!("{:>12.6} {:>12.6} {:>12.6}", p.x, p.y, p.z));
+                                ui.monospace(label);
+                            }
+                        });
+
+                    ui.add_space(6.0);
+                    ui.horizontal(|ui| {
+                        if ui.button("Center molecule").clicked() {
+                            if let Some(c) = compute_centroid(&mol.pos) {
+                                cam.target = c;
+                            }
+                        }
+                        ui.weak("Switch to Edit as text to paste/modify coordinates.");
+                    });
+                }
             });
 
             ui.add_space(8.0);
             ui.separator();
 
             // ===========================
-            // 2) Geometry — collapsible
+            // 2) Geometry
             // ===========================
             ui.collapsing("Atom & Bond Scaling", |ui| {
                 let mut changed = false;
@@ -252,7 +322,7 @@ pub fn ui_panel(
                     )
                     .changed();
 
-                // ---- NEW: H-bond thickness & dash gaps ----
+                // H-bond style
                 changed |= ui
                     .add(
                         egui::Slider::new(&mut settings.hbond_thickness, 1.0..=80.0)
@@ -275,7 +345,7 @@ pub fn ui_panel(
             ui.add_space(8.0);
 
             // ===========================
-            // 3) Color & Materials — collapsible
+            // 3) Color & Materials
             // ===========================
             ui.collapsing("Color & Materials", |ui| {
                 // Background quick picks + picker
@@ -364,9 +434,7 @@ pub fn ui_panel(
                 ui.add_space(8.0);
                 ui.separator();
 
-                // ---------------------------
-                // NEW: Bond appearance block
-                // ---------------------------
+                // Bond appearance
                 ui.label("Bond appearance:");
                 ui.horizontal(|ui| {
                     let sel = ui.visuals().selection.bg_fill;
@@ -392,7 +460,6 @@ pub fn ui_panel(
                     }
                 });
 
-                // Uniform bond color picker (enabled for both modes; useful to preselect)
                 ui.horizontal(|ui| {
                     ui.label("Uniform bond color:");
                     let mut bc = color_to_egui(settings.uniform_bond_color);
@@ -402,7 +469,6 @@ pub fn ui_panel(
                     }
                 });
 
-                // ---- NEW: Hydrogen-bond color ----
                 ui.horizontal(|ui| {
                     ui.label("H-bond color:");
                     let mut hc = color_to_egui(settings.hbond_color);
@@ -416,7 +482,7 @@ pub fn ui_panel(
             ui.add_space(8.0);
 
             // ===========================
-            // 4) Lighting — collapsible
+            // 4) Lighting
             // ===========================
             ui.collapsing("Lighting", |ui| {
                 let mut changed = false;
@@ -489,7 +555,7 @@ pub fn ui_panel(
             });
 
             // ===========================
-            // 5) Measurements — collapsible (NEW)
+            // 5) Measurements
             // ===========================
             ui.add_space(8.0);
             ui.separator();
@@ -503,7 +569,7 @@ pub fn ui_panel(
             });
 
             // ===========================
-            // 6) Export Image — collapsible (NEW)
+            // 6) Export Image
             // ===========================
             ui.add_space(8.0);
             ui.separator();
@@ -513,32 +579,27 @@ pub fn ui_panel(
         });
 
     // -------------------------
-    // Overlay: draw labels next to atoms (types / indices) if toggled
+    // Overlay: atom labels (type/index)
     // -------------------------
     let show_type = ctx.data_mut(|d| d.get_persisted::<bool>(egui::Id::new("show_atom_type")).unwrap_or(false));
     let show_index = ctx.data_mut(|d| d.get_persisted::<bool>(egui::Id::new("show_atom_index")).unwrap_or(false));
 
     if (show_type || show_index) && mol.pos.len() == mol.atoms.len() {
         if let (Ok((cam_comp, cam_xform)), Ok(win)) = (q_cam.single(), windows.single()) {
-            // paint on a full-screen, non-interactive egui area
             egui::Area::new(egui::Id::new("atom_labels_overlay"))
                 .movable(false)
                 .interactable(false)
-                .order(egui::Order::Tooltip) // on top but below popups
+                .order(egui::Order::Tooltip)
                 .show(&ctx, |ui| {
                     let painter = ui.painter();
                     let scale = win.scale_factor() as f32;
 
                     for (i, (&p_world, sym)) in mol.pos.iter().zip(mol.atoms.iter()).enumerate() {
                         if let Ok(screen_px) = cam_comp.world_to_viewport(cam_xform, p_world) {
-                            // Convert to egui logical points for painting
                             let pos = egui::pos2(screen_px.x / scale, screen_px.y / scale);
 
-                            // Compose label text
                             let mut text = String::new();
-                            if show_type {
-                                text.push_str(sym);
-                            }
+                            if show_type { text.push_str(sym); }
                             if show_index {
                                 if !text.is_empty() {
                                     text.push('(');
@@ -548,11 +609,8 @@ pub fn ui_panel(
                                     text.push_str(&(i + 1).to_string());
                                 }
                             }
-                            if text.is_empty() {
-                                continue;
-                            }
+                            if text.is_empty() { continue; }
 
-                            // Layout text (measure size) with egui fonts
                             let galley = ctx.fonts(|f| {
                                 f.layout_no_wrap(
                                     text.clone(),
@@ -560,7 +618,6 @@ pub fn ui_panel(
                                     egui::Color32::WHITE,
                                 )
                             });
-                            // Draw the text galley
                             painter.galley(pos, galley, egui::Color32::WHITE);
                         }
                     }
@@ -580,38 +637,6 @@ fn compute_centroid(points: &[Vec3]) -> Option<Vec3> {
     Some(acc / (points.len() as f32))
 }
 
-/// Return (index, mouse_px_pos) of nearest atom within `radius_px` of `mouse_px`.
-fn find_nearest_atom_screen_space(
-    cam: &Camera,
-    cam_xform: &GlobalTransform,
-    atoms: &[Vec3],
-    mouse_px: egui::Pos2,
-    radius_px: f32,
-) -> Option<(usize, egui::Pos2)> {
-    // Convert mouse to Vec2 for distance math
-    let mouse_v = Vec2::new(mouse_px.x, mouse_px.y);
-    let mut best: Option<(usize, f32, Vec2)> = None;
-
-    for (i, &p_world) in atoms.iter().enumerate() {
-        // Bevy 0.16: world_to_viewport -> Result<Vec2, ViewportConversionError>
-        if let Ok(screen_px) = cam.world_to_viewport(cam_xform, p_world) {
-            let d = screen_px.distance(mouse_v);
-            if d <= radius_px {
-                if let Some((_, best_d, _)) = best {
-                    if d < best_d {
-                        best = Some((i, d, screen_px));
-                    }
-                } else {
-                    best = Some((i, d, screen_px));
-                }
-            }
-        }
-    }
-
-    best.map(|(i, _d, s)| (i, egui::pos2(s.x, s.y)))
-}
-
-// --- color helpers (identical behavior) ---
 fn color_to_egui(c: Color) -> egui::Color32 {
     let s = c.to_srgba();
     egui::Color32::from_rgba_premultiplied(
@@ -628,5 +653,20 @@ fn egui_to_color(c: egui::Color32) -> Color {
         c.b() as f32 / 255.0,
         c.a() as f32 / 255.0,
     )
+}
+
+/// Format current `Molecule` as simple XYZ lines: "Sym  x  y  z"
+fn format_xyz_from_molecule(mol: &Molecule) -> String {
+    let mut out = String::new();
+    for (sym, p) in mol.atoms.iter().zip(mol.pos.iter()) {
+        out.push_str(&format!(
+            "{:<2} {:>14.8} {:>14.8} {:>14.8}\n",
+            sym,
+            p.x as f64,
+            p.y as f64,
+            p.z as f64
+        ));
+    }
+    out
 }
 

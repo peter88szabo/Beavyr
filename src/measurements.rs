@@ -1,6 +1,7 @@
+// src/measurements.rs
 use bevy::prelude::*;
-use bevy_egui::EguiContexts;
 
+use crate::events::{AtomPicked, ToolKind};
 use crate::molecule::{covalent_radius_angstrom, Molecule};
 use crate::settings::MolSettings;
 
@@ -60,11 +61,11 @@ pub struct Measurements {
     pub dash_line_scale: f32,
     pub show_labels: bool,
 
-    // Picking settings
+    // Picking settings (kept for UI consistency; picker now lives elsewhere)
     pub pick_radius: f32,
     pub pick_radius_px: f32,
 
-    // NEW: preview highlight of measured items (indices in order A, B, C, D)
+    // preview highlight of measured items (indices in order A, B, C, D)
     pub preview_highlight: Option<Vec<usize>>,
 
     next_id: u32,
@@ -174,83 +175,71 @@ pub fn configure_measurement_gizmos(
     };
 }
 
-/// Screen-space picking for all three modes.
+/// Consume AtomPicked events when any measurement picking mode is active.
 /// Priority if multiple toggles are on: dihedral > angle > distance.
 pub fn handle_measurement_picking(
-    mut contexts: EguiContexts,
-    buttons: Res<ButtonInput<MouseButton>>,
-    windows: Query<&Window>,
-    q_cam: Query<(&Camera, &GlobalTransform), (With<Camera3d>, With<crate::scene::MainCamera>)>,
-    _settings: Res<MolSettings>,
+    mut ev_picked: EventReader<AtomPicked>,
     mol: Option<Res<Molecule>>,
     mut measurements: ResMut<Measurements>,
 ) {
     let Some(mol) = mol else { return; };
-
     let any_active = measurements.dihedral_active || measurements.angle_active || measurements.is_active;
     if !any_active { return; }
-    if !buttons.just_pressed(MouseButton::Left) { return; }
 
-    let Ok(ctx) = contexts.ctx_mut() else { return; };
-    if ctx.is_pointer_over_area() {
-        return;
-    }
-
-    let Ok(window) = windows.single() else { return; };
-    let Ok((cam, cam_xform)) = q_cam.single() else { return; };
-    let Some(mouse_px) = window.cursor_position() else { return; };
-
-    let hit = find_nearest_atom_screen_space(
-        cam, cam_xform, &mol.pos, mouse_px, measurements.pick_radius_px,
-    );
-    let Some((hit_idx, _)) = hit else { return; };
-
-    // Any picking action cancels preview highlight to avoid confusion
-    measurements.preview_highlight = None;
-
-    // --- Priority: dihedral > angle > distance
-    if measurements.dihedral_active {
-        measurements.pending_dihedral.push(hit_idx);
-        if measurements.pending_dihedral.len() == 4 {
-            let a = measurements.pending_dihedral[0];
-            let b = measurements.pending_dihedral[1];
-            let c = measurements.pending_dihedral[2];
-            let d = measurements.pending_dihedral[3];
-            let deg = dihedral_degrees(mol.pos[a], mol.pos[b], mol.pos[c], mol.pos[d]);
-            measurements.add_dihedral(a, b, c, d, deg);
-            measurements.pending_dihedral.clear();
-            measurements.dihedral_active = false; // auto-off when complete
+    for ev in ev_picked.read() {
+        // Only react to picks emitted for the Measurements tool
+        if !matches!(ev.tool, ToolKind::Measurements) {
+            continue;
         }
-        return;
-    }
+        let hit_idx = ev.index;
 
-    if measurements.angle_active {
-        measurements.pending_angle.push(hit_idx);
-        if measurements.pending_angle.len() == 3 {
-            let a = measurements.pending_angle[0];
-            let b = measurements.pending_angle[1];
-            let c = measurements.pending_angle[2];
-            let deg = angle_degrees(mol.pos[a], mol.pos[b], mol.pos[c]);
-            measurements.add_angle(a, b, c, deg);
-            measurements.pending_angle.clear();
-            measurements.angle_active = false; // auto-off when complete
-        }
-        return;
-    }
+        // Any picking action cancels preview highlight to avoid confusion
+        measurements.preview_highlight = None;
 
-    // Distance
-    if measurements.is_active {
-        if let Some(first) = measurements.pending {
-            if first == hit_idx {
-                measurements.pending = Some(first);
-            } else {
-                let dist = mol.pos[first].distance(mol.pos[hit_idx]);
-                measurements.new_pair(first, hit_idx, dist);
-                measurements.pending = None;
-                measurements.is_active = false; // auto-off when complete
+        // --- Priority: dihedral > angle > distance
+        if measurements.dihedral_active {
+            measurements.pending_dihedral.push(hit_idx);
+            if measurements.pending_dihedral.len() == 4 {
+                let a = measurements.pending_dihedral[0];
+                let b = measurements.pending_dihedral[1];
+                let c = measurements.pending_dihedral[2];
+                let d = measurements.pending_dihedral[3];
+                let deg = dihedral_degrees(mol.pos[a], mol.pos[b], mol.pos[c], mol.pos[d]);
+                measurements.add_dihedral(a, b, c, d, deg);
+                measurements.pending_dihedral.clear();
+                measurements.dihedral_active = false; // auto-off when complete
             }
-        } else {
-            measurements.pending = Some(hit_idx);
+            continue;
+        }
+
+        if measurements.angle_active {
+            measurements.pending_angle.push(hit_idx);
+            if measurements.pending_angle.len() == 3 {
+                let a = measurements.pending_angle[0];
+                let b = measurements.pending_angle[1];
+                let c = measurements.pending_angle[2];
+                let deg = angle_degrees(mol.pos[a], mol.pos[b], mol.pos[c]);
+                measurements.add_angle(a, b, c, deg);
+                measurements.pending_angle.clear();
+                measurements.angle_active = false; // auto-off when complete
+            }
+            continue;
+        }
+
+        // Distance
+        if measurements.is_active {
+            if let Some(first) = measurements.pending {
+                if first == hit_idx {
+                    measurements.pending = Some(first);
+                } else {
+                    let dist = mol.pos[first].distance(mol.pos[hit_idx]);
+                    measurements.new_pair(first, hit_idx, dist);
+                    measurements.pending = None;
+                    measurements.is_active = false; // auto-off when complete
+                }
+            } else {
+                measurements.pending = Some(hit_idx);
+            }
         }
     }
 }
@@ -299,7 +288,6 @@ pub fn draw_measurement_lines(
     if n == 0 { return; }
 
     // ---------- Pending highlights ----------
-    // Common radius calculator
     let mut draw_highlight = |idx: usize, color: Color| {
         if idx < n {
             let center = mol.pos[idx];
@@ -354,10 +342,9 @@ pub fn draw_measurement_lines(
             };
             draw_highlight(idx, color);
         }
-        // Note: we DO NOT auto-clear here; it persists until user triggers another highlight
     }
 
-    // ---------- Distance lines (as before) ----------
+    // ---------- Distance lines ----------
     for pair in measurements.pairs.iter().filter(|p| p.visible) {
         if pair.a >= n || pair.b >= n { continue; }
 
@@ -384,35 +371,7 @@ pub fn draw_measurement_lines(
     }
 }
 
-// ---------- helpers ----------
-
-/// Return (index, mouse_px_pos) of nearest atom within `radius_px` in PHYSICAL px.
-fn find_nearest_atom_screen_space(
-    cam: &Camera,
-    cam_xform: &GlobalTransform,
-    atoms: &[Vec3],
-    mouse_px: Vec2,
-    radius_px: f32,
-) -> Option<(usize, Vec2)> {
-    let mut best: Option<(usize, f32, Vec2)> = None;
-
-    for (i, &p_world) in atoms.iter().enumerate() {
-        if let Ok(screen_px) = cam.world_to_viewport(cam_xform, p_world) {
-            let d = screen_px.distance(mouse_px);
-            if d <= radius_px {
-                if let Some((_, best_d, _)) = best {
-                    if d < best_d {
-                        best = Some((i, d, screen_px));
-                    }
-                } else {
-                    best = Some((i, d, screen_px));
-                }
-            }
-        }
-    }
-
-    best.map(|(i, _d, s)| (i, s))
-}
+// ---------- helpers (math only) ----------
 
 fn angle_degrees(p1: Vec3, p2: Vec3, p3: Vec3) -> f32 {
     let v1 = (p1 - p2);

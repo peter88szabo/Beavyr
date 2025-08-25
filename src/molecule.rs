@@ -1,4 +1,10 @@
+// src/molecule.rs
+
 use bevy::prelude::*;
+
+/// A lightweight snapshot of molecular coordinates (Å).
+/// This is intentionally just a clone of `pos` so it’s cheap to create/apply.
+pub type MolSnapshot = Vec<Vec3>;
 
 /// Positions are stored in Å (Angstrom). All parsing is Å.
 #[derive(Resource, Clone)]
@@ -12,6 +18,7 @@ pub struct Molecule {
 }
 
 impl Molecule {
+    /// Build from simple XYZ text (Å).
     pub fn from_xyz(xyz: &str) -> Self {
         let (_n, atoms, qxyz) = parse_xyz_angstrom(xyz);
         let pos: Vec<Vec3> = qxyz
@@ -31,6 +38,24 @@ impl Molecule {
         mol
     }
 
+    /// Replace atom positions with `new_pos` (Å).
+    /// This function **only** updates `pos` — it does not recompute bonds or update transforms.
+    /// Callers can decide when to trigger recompute/sync.
+    pub fn set_pos(&mut self, new_pos: Vec<Vec3>) {
+        self.pos = new_pos;
+    }
+
+    /// Create a snapshot of the current coordinates (Å).
+    pub fn snapshot(&self) -> MolSnapshot {
+        self.pos.clone()
+    }
+
+    /// Apply a previously captured coordinate snapshot (Å).
+    pub fn apply_snapshot(&mut self, snap: &MolSnapshot) {
+        self.pos = snap.clone();
+    }
+
+    /// Recompute covalent and hydrogen-bond lists based on current positions and settings.
     pub fn recompute_bonds(&mut self, thresh_scale: f32, hbond_cutoff: f32) {
         // Tunable element sets (extend/trim as you like)
         let is_donor = |s: &str| matches!(s, "O" | "N" | "S" | "F" | "P");
@@ -164,3 +189,4 @@ pub fn covalent_radius_angstrom(sym: &str) -> f32 {
         _ => 0.77,
     }
 }
+

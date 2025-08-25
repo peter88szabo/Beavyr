@@ -1,3 +1,5 @@
+// src/scene.rs
+
 use bevy::math::primitives::{Capsule3d, Cone, Cylinder, Sphere};
 use bevy::prelude::*;
 use bevy::render::camera::Viewport;
@@ -6,6 +8,10 @@ use bevy::render::view::RenderLayers;
 use crate::color_schemes::color_for;
 use crate::molecule::{covalent_radius_angstrom, Molecule};
 use crate::settings::{BondColorMode, LightingMode, MolSettings};
+
+// NEW: react to coordinate-change events (only to mark dirty when topology might have changed)
+use crate::events::MoleculeChanged;
+use crate::events::MoleculeChangeReason;
 
 // default molecule (Å)
 //pub const DEFAULT_WATER: &str = r#"
@@ -264,6 +270,27 @@ pub fn setup(
     ));
 }
 
+/// React to molecule coordinate changes (event).  
+/// If the change may affect bond topology/meshes, mark the scene dirty so
+/// `rebuild_if_dirty` will rebuild geometry next frame.
+pub fn react_to_molecule_changed_mark_dirty(
+    mut evr: EventReader<MoleculeChanged>,
+    mut settings: ResMut<MolSettings>,
+) {
+    for ev in evr.read() {
+
+        match ev.reason {
+            MoleculeChangeReason::ParseXyz { .. }
+            | MoleculeChangeReason::SetPos
+            | MoleculeChangeReason::BuilderRotate
+            | MoleculeChangeReason::Undo
+            | MoleculeChangeReason::Redo => {
+                settings.dirty = true;
+            }
+        }
+    }
+}
+
 pub fn rebuild_if_dirty(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -347,6 +374,7 @@ pub fn rebuild_if_dirty(
     mol.atom_entities.clear();
     mol.bond_entities.clear();
 
+    // Recompute bond connectivity with current settings (topology & lengths)
     mol.recompute_bonds(settings.bond_thresh_scale, settings.hbond_cutoff);
 
     // material parameters from settings
@@ -381,7 +409,6 @@ pub fn rebuild_if_dirty(
             .mesh()
             .ico(settings.atom_resolution)
             .unwrap();
-        //let sphere_mesh = Sphere::new(r_cov).mesh().ico(6).unwrap();
 
         let mat = materials.add(StandardMaterial {
             base_color: color,
@@ -430,10 +457,8 @@ pub fn rebuild_if_dirty(
 
         match settings.bond_color_mode {
             BondColorMode::Uniform => {
-                // Single capsule centered between atom centers, like the original
+                // Single capsule centered between atom centers
                 let center = (p0 + p1) * 0.5;
-                // This is the original half-length formula
-                // half_length = (center-to-center distance)/2 - radius
                 let half_length = (len_cc * 0.5 - radius).max(0.0);
                 let cap = Mesh::from(Capsule3d {
                     radius,
@@ -465,10 +490,9 @@ pub fn rebuild_if_dirty(
                 mol.bond_entities.push(ent);
             }
 
-            // flat cylinders, slight overlap into spheres) ===
+            // AtomSplit: two cylinders with a clean, flat joint at the midpoint,
+            // each slightly overlapping inside its atom sphere to hide seams.
             BondColorMode::AtomSplit => {
-                // Push the visible segment slightly inside each atom sphere to guarantee no seam.
-                // Using a generous overlap fraction looks best on bright backgrounds.
                 let overlap = radius * 0.40; // 40% of bond radius
                 let start = p0 + dir_n * (ri_sphere - overlap);
                 let end = p1 - dir_n * (rj_sphere - overlap);
@@ -480,7 +504,6 @@ pub fn rebuild_if_dirty(
 
                 let half_len = visible_len * 0.5;
 
-                // Centers for each half (flat ends meet at the exact midpoint)
                 let mid = (start + end) * 0.5;
                 let c0 = mid - dir_n * (half_len * 0.5);
                 let c1 = mid + dir_n * (half_len * 0.5);
@@ -546,8 +569,7 @@ pub fn rebuild_if_dirty(
                 mol.bond_entities.push(e1);
             }
         }
-    } //end of bonds
-
+    } // end bonds
 }
 
 // ---------------------- Axis viewport & sync ----------------------
@@ -606,3 +628,4 @@ pub fn sync_axis_camera_to_main(
         ..*axis_tf
     };
 }
+

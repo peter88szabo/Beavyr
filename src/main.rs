@@ -1,3 +1,4 @@
+// src/main.rs
 use bevy::prelude::*;
 use bevy_egui::{EguiPlugin, EguiPrimaryContextPass};
 
@@ -10,10 +11,11 @@ mod ui;
 mod export;
 mod export_ui;
 mod hbonds;
-// --- added ---
 mod measurements;
 mod ui_measurements;
-// --- end added ---
+mod molecule_builder;
+mod events;
+mod picking;
 
 use camera::orbit_camera_system;
 use scene::{rebuild_if_dirty, setup, sync_axis_camera_to_main, update_axis_viewport_on_resize};
@@ -21,54 +23,67 @@ use settings::MolSettings;
 use ui::XyzBuffer;
 use hbonds::{HbondGizmos, draw_hydrogen_bonds_dashed};
 
+use molecule_builder::builder_ui::{
+    builder_ui_panel, configure_builder_gizmos, draw_builder_highlights,
+    EditorRotateState, BuilderGizmos
+};
+
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins.set(ImagePlugin::default_nearest()))
         .add_plugins(EguiPlugin::default())
-        .add_plugins(export::ExportPlugin) 
+        .add_plugins(export::ExportPlugin)
+        // picker plugin (now active)
+        .add_plugins(picking::PickerPlugin)
+        // events
+        .add_event::<events::AtomPicked>()
+        .add_event::<events::MoleculeChanged>()
         // resources
         .insert_resource(MolSettings::default())
         .insert_resource(camera::OrbitCamera::default())
         .insert_resource(molecule::Molecule::from_xyz(scene::DEFAULT_WATER))
-        .insert_resource(XyzBuffer {
-            text: scene::DEFAULT_WATER.trim().to_string(),
-        })
-        // ensure export UI resources exist before any egui systems run
+        .insert_resource(XyzBuffer { text: scene::DEFAULT_WATER.trim().to_string() })
+        // export UI resources
         .init_resource::<export::ExportUiState>()
         .init_resource::<export::ExportRequestQueue>()
-        // --- added: measurements resource & gizmo group ---
+        // measurements
         .init_resource::<measurements::Measurements>()
         .init_gizmo_group::<measurements::MeasurementGizmos>()
-        // --- end added ---
-        // gizmos for dashed hydrogen bonds
+        // hbonds
         .init_gizmo_group::<HbondGizmos>()
+        // molecule editor
+        .init_resource::<EditorRotateState>()
+        .init_gizmo_group::<BuilderGizmos>()
         // scene
         .add_systems(Startup, setup)
-        // egui must run in this pass on bevy_egui 0.36
+        // egui pass
         .add_systems(EguiPrimaryContextPass, ui::ui_panel)
-        .add_systems(EguiPrimaryContextPass, ui_measurements::distance_labels_overlay)//to display
-                                                                                      //measured
-                                                                                      //distances
-                                                                                      //on 3D
-                                                                                      //structure
+        .add_systems(EguiPrimaryContextPass, ui_measurements::distance_labels_overlay)
+        .add_systems(EguiPrimaryContextPass, builder_ui_panel)
+        // update
         .add_systems(
             Update,
             (
-                orbit_camera_system,
+                camera::orbit_camera_system,
                 rebuild_if_dirty,
                 update_axis_viewport_on_resize,
                 sync_axis_camera_to_main,
 
-                // --- added: measurements systems (order matters; before drawing gizmos) ---
+                // measurements
                 measurements::configure_measurement_gizmos,
-                measurements::handle_measurement_picking,
+                measurements::handle_measurement_picking, // keep if you haven't migrated to events
                 measurements::update_measurement_distances,
                 measurements::draw_measurement_lines,
-                // --- end added ---
 
+                // hbonds
                 draw_hydrogen_bonds_dashed,
                 hbonds::configure_hbond_gizmos,
                 hbonds::draw_hydrogen_bonds_dashed,
+
+                // builder (no more local click handler)
+                configure_builder_gizmos,
+                molecule_builder::builder_ui::handle_builder_atom_picked,
+                draw_builder_highlights,
             ).chain(),
         )
         .run();
