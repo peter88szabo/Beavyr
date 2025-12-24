@@ -1,6 +1,7 @@
 // src/camera.rs
 use bevy::input::mouse::{MouseMotion, MouseWheel};
 use bevy::prelude::*;
+use bevy::window::CursorGrabMode;
 use bevy_egui::EguiContexts;
 
 use crate::scene::MainCamera;
@@ -12,6 +13,7 @@ pub struct OrbitCamera {
     pub theta: f32,
     pub phi: f32,
     pub target: Vec3, // world position we look at
+    pub orientation: Quat,
     pub rotate_sensitivity: f32,
     pub zoom_sensitivity: f32,
     pub pan_sensitivity: f32,
@@ -21,11 +23,21 @@ pub struct OrbitCamera {
 
 impl Default for OrbitCamera {
     fn default() -> Self {
+        let radius: f32 = 12.0;
+        let theta: f32 = 0.7;
+        let phi: f32 = 0.9;
+        let offset = Vec3::new(
+            theta.cos() * phi.sin(),
+            phi.cos(),
+            theta.sin() * phi.sin(),
+        );
+        let orientation = Quat::from_rotation_arc(Vec3::Z, offset.normalize());
         OrbitCamera {
-            radius: 12.0,
-            theta: 0.7,
-            phi: 0.9,
+            radius,
+            theta,
+            phi,
             target: Vec3::ZERO,
+            orientation,
             rotate_sensitivity: 0.005,
             zoom_sensitivity: 1.0,
             pan_sensitivity: 0.004,
@@ -43,11 +55,11 @@ pub fn orbit_camera_system(
     mut scroll_evr: EventReader<MouseWheel>,  // <-- fixed: no extra '>'
     keys: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
-    windows: Query<&Window>,
+    mut windows: Query<&mut Window>,
     mut settings: ResMut<crate::settings::MolSettings>,
     mut contexts: EguiContexts,
 ) {
-    let Ok(window) = windows.single() else { return; };
+    let Ok(mut window) = windows.single_mut() else { return; };
     let pointer_over_ui = contexts
         .ctx_mut()
         .ok()
@@ -56,17 +68,25 @@ pub fn orbit_camera_system(
 
     // --- begin/end interaction modes (mutually exclusive) ---
     if window.cursor_position().is_some() {
-        if buttons.just_pressed(MouseButton::Left) {
+        if buttons.just_pressed(MouseButton::Left) && !pointer_over_ui {
             cam.rotating = true;
             cam.panning = false;
+            window.cursor_options.grab_mode = CursorGrabMode::Locked;
+            window.cursor_options.visible = false;
         }
-        if buttons.just_pressed(MouseButton::Right) {
+        if buttons.just_pressed(MouseButton::Right) && !pointer_over_ui {
             cam.panning = true;
             cam.rotating = false;
+            window.cursor_options.grab_mode = CursorGrabMode::Locked;
+            window.cursor_options.visible = false;
         }
     }
     if buttons.just_released(MouseButton::Left)  { cam.rotating = false; }
     if buttons.just_released(MouseButton::Right) { cam.panning  = false; }
+    if !buttons.pressed(MouseButton::Left) && !buttons.pressed(MouseButton::Right) {
+        window.cursor_options.grab_mode = CursorGrabMode::None;
+        window.cursor_options.visible = true;
+    }
 
     // collect mouse delta
     let mut mouse_delta = Vec2::ZERO;
@@ -74,32 +94,25 @@ pub fn orbit_camera_system(
         mouse_delta += ev.delta;
     }
 
-    // spherical offset from target
-    let offset = Vec3::new(
-        cam.theta.cos() * cam.phi.sin(),
-        cam.phi.cos(),
-        cam.theta.sin() * cam.phi.sin(),
-    ) * cam.radius;
+    // offset from target (using quaternion orientation)
+    let offset = (cam.orientation * Vec3::Z) * cam.radius;
 
     // eye = target + offset
     let mut eye = cam.target + offset;
 
-    // view basis from current view direction
-    let forward = (cam.target - eye).normalize();
-    let world_up = Vec3::Y;
-    let mut right = forward.cross(world_up);
-    if right.length_squared() < 1e-6 {
-        right = Vec3::X;
-    } else {
-        right = right.normalize();
-    }
-    let up = right.cross(forward).normalize();
+    // view basis from current orientation
+    let right = cam.orientation * Vec3::X;
+    let up = cam.orientation * Vec3::Y;
 
     // rotate (LMB)
     if cam.rotating {
-        cam.theta -= mouse_delta.x * cam.rotate_sensitivity;
-        cam.phi   -= mouse_delta.y * cam.rotate_sensitivity;
-        cam.phi = cam.phi.clamp(0.01, std::f32::consts::PI - 0.01);
+        let yaw = -mouse_delta.x * cam.rotate_sensitivity;
+        let pitch = -mouse_delta.y * cam.rotate_sensitivity;
+        let yaw_q = Quat::from_axis_angle(Vec3::Y, yaw);
+        let right_axis = (cam.orientation * Vec3::X).normalize();
+        let pitch_q = Quat::from_axis_angle(right_axis, pitch);
+        cam.orientation = (yaw_q * pitch_q) * cam.orientation;
+        cam.orientation = cam.orientation.normalize();
     }
     // pan (RMB): move target AND eye together in camera plane
     else if cam.panning {
@@ -132,15 +145,10 @@ pub fn orbit_camera_system(
     }
 
     // recompute final eye from (theta,phi,radius) & updated target
-    let final_offset = Vec3::new(
-        cam.theta.cos() * cam.phi.sin(),
-        cam.phi.cos(),
-        cam.theta.sin() * cam.phi.sin(),
-    ) * cam.radius;
-    let final_eye = cam.target + final_offset;
+    let final_eye = cam.target + (cam.orientation * Vec3::Z) * cam.radius;
 
     if let Ok(mut tf) = q_cam.single_mut() {
-        *tf = Transform::from_translation(final_eye).looking_at(cam.target, Vec3::Y);
+        *tf = Transform::from_translation(final_eye).looking_at(cam.target, up);
     }
 
     // quick BG toggles (unchanged)

@@ -25,6 +25,7 @@ use scene::{
     setup,
     sync_axis_camera_to_main,
     update_axis_viewport_on_resize,
+    update_light_positions,
 };
 use settings::MolSettings;
 use ui::XyzBuffer;
@@ -77,6 +78,7 @@ fn main() {
                 camera::orbit_camera_system,
                 react_to_molecule_changed_mark_dirty,
                 rebuild_if_dirty,
+                update_light_positions,
                 update_axis_viewport_on_resize,
                 sync_axis_camera_to_main,
 

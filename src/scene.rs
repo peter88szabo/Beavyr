@@ -349,11 +349,6 @@ pub fn rebuild_if_dirty(
     // Update lights to current settings
     if let Ok((mut l, mut tf)) = q_key.single_mut() {
         l.intensity = settings.light_intensity;
-        tf.translation = Vec3::new(
-            settings.light_distance,
-            settings.light_distance,
-            settings.light_distance,
-        );
     }
     if let Ok((mut l, mut tf)) = q_fill.single_mut() {
         l.intensity = if matches!(settings.lighting_mode, LightingMode::ThreePoint) {
@@ -361,11 +356,6 @@ pub fn rebuild_if_dirty(
         } else {
             0.0
         };
-        tf.translation = Vec3::new(
-            -settings.fill_distance,
-            settings.fill_distance * 0.5,
-            settings.fill_distance,
-        );
     }
     if let Ok((mut l, mut tf)) = q_rim.single_mut() {
         l.intensity = if matches!(settings.lighting_mode, LightingMode::ThreePoint) {
@@ -373,11 +363,6 @@ pub fn rebuild_if_dirty(
         } else {
             0.0
         };
-        tf.translation = Vec3::new(
-            settings.rim_distance,
-            settings.rim_distance * 0.5,
-            -settings.rim_distance,
-        );
     }
 
     // Despawn old geometry
@@ -586,6 +571,45 @@ pub fn rebuild_if_dirty(
             }
         }
     } // end bonds
+}
+
+/// Keep the light rig centered on the current camera target (molecule center).
+pub fn update_light_positions(
+    settings: Res<MolSettings>,
+    cam: Res<crate::camera::OrbitCamera>,
+    q_cam: Query<&GlobalTransform, (With<MainCamera>, Without<AxisCamera>)>,
+    mut q_key: Query<&mut Transform, (With<KeyLight>, Without<FillLight>, Without<RimLight>)>,
+    mut q_fill: Query<&mut Transform, (With<FillLight>, Without<KeyLight>, Without<RimLight>)>,
+    mut q_rim: Query<&mut Transform, (With<RimLight>, Without<KeyLight>, Without<FillLight>)>,
+) {
+    let Ok(cam_tf) = q_cam.single() else { return; };
+    let rot = cam_tf.rotation();
+    let t = cam.target;
+
+    if let Ok(mut tf) = q_key.single_mut() {
+        tf.translation = t
+            + rot * Vec3::new(
+                settings.light_distance,
+                settings.light_distance,
+                settings.light_distance,
+            );
+    }
+    if let Ok(mut tf) = q_fill.single_mut() {
+        tf.translation = t
+            + rot * Vec3::new(
+                -settings.fill_distance,
+                settings.fill_distance * 0.5,
+                settings.fill_distance,
+            );
+    }
+    if let Ok(mut tf) = q_rim.single_mut() {
+        tf.translation = t
+            + rot * Vec3::new(
+                settings.rim_distance,
+                settings.rim_distance * 0.5,
+                -settings.rim_distance,
+            );
+    }
 }
 
 // ---------------------- Axis viewport & sync ----------------------
