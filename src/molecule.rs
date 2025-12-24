@@ -157,11 +157,17 @@ impl Molecule {
 
 pub fn parse_xyz_angstrom(xyz: &str) -> (usize, Vec<String>, Vec<Vec<f64>>) {
     let mut lines: Vec<&str> = xyz.lines().filter(|l| !l.trim().is_empty()).collect();
-    if lines.len() >= 2 {
-        let first = lines[0].trim();
-        if first.parse::<usize>().is_ok() {
+    if !lines.is_empty() {
+        let first_parts: Vec<&str> = lines[0].split_whitespace().collect();
+        if first_parts.len() == 1 && first_parts[0].parse::<usize>().is_ok() {
             // Support standard XYZ header: atom count + comment line.
-            lines.drain(0..2);
+            lines.remove(0);
+            if !lines.is_empty() {
+                let second_parts: Vec<&str> = lines[0].split_whitespace().collect();
+                if second_parts.len() < 4 {
+                    lines.remove(0);
+                }
+            }
         }
     }
     let n = lines.len();

@@ -1,6 +1,8 @@
 // src/ui.rs
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
+use std::fs;
+use std::path::PathBuf;
 
 use crate::color_schemes::color_scheme_map;
 use crate::events::{MoleculeChanged, MoleculeChangeReason};
@@ -21,6 +23,7 @@ use crate::picking::screen::find_nearest_atom_screen_space_egui;
 #[derive(Resource, Clone)]
 pub struct XyzBuffer {
     pub text: String,
+    pub last_dir: Option<PathBuf>,
 }
 
 /// Right-side control panel + overlays.
@@ -53,6 +56,16 @@ pub fn ui_panel(
 ) {
     // bevy_egui 0.36: ctx_mut() returns Result; if it fails, skip this frame
     let Ok(ctx) = contexts.ctx_mut() else { return; };
+    ctx.style_mut(|style| {
+        style.text_styles = [
+            (egui::TextStyle::Heading, egui::FontId::proportional(22.0)),
+            (egui::TextStyle::Body, egui::FontId::proportional(16.0)),
+            (egui::TextStyle::Monospace, egui::FontId::monospace(15.0)),
+            (egui::TextStyle::Button, egui::FontId::proportional(16.0)),
+            (egui::TextStyle::Small, egui::FontId::proportional(13.0)),
+        ]
+        .into();
+    });
 
     // -------------------------
     // Right-click picking (not over egui)
@@ -134,7 +147,9 @@ pub fn ui_panel(
     // Right side panel
     // -------------------------
     egui::SidePanel::right("controls")
-        .default_width(350.0)
+        .default_width(320.0)
+        .min_width(240.0)
+        .max_width(520.0)
         .resizable(true)
         .show(&ctx, |ui| {
             // ===========================
@@ -180,6 +195,32 @@ pub fn ui_panel(
                         ctx.data_mut(|d| d.insert_persisted(show_index_id, show_index));
                     }
 
+                });
+
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    let sel = ui.visuals().selection.bg_fill;
+                    let dim = ui.visuals().widgets.inactive.bg_fill;
+
+                    if ui.button("Load XYZ file").clicked() {
+                        let mut dlg = rfd::FileDialog::new().add_filter("XYZ", &["xyz"]);
+                        if let Some(dir) = &xyz_buf.last_dir {
+                            dlg = dlg.set_directory(dir);
+                        }
+                        if let Some(path) = dlg.pick_file() {
+                            xyz_buf.last_dir = path.parent().map(|p| p.to_path_buf());
+                            if let Ok(text) = fs::read_to_string(&path) {
+                                xyz_buf.text = normalize_xyz_text_for_editor(&text);
+                                apply_xyz_text(
+                                    &xyz_buf.text,
+                                    &mut mol,
+                                    &mut cam,
+                                    &mut ev_changed,
+                                );
+                            }
+                        }
+                    }
+
                     if ui
                         .add(
                             egui::Button::new(if edit_mode { "View mode" } else { "Edit as text" })
@@ -198,10 +239,9 @@ pub fn ui_panel(
 
                     if ui.button("Copy XYZ").clicked() {
                         let live = format_xyz_from_molecule(&mol);
-                        ui.output_mut(|o| o.copied_text = live);
+                        ctx.copy_text(live);
                     }
                 });
-
                 ui.add_space(8.0);
 
                 if edit_mode {
@@ -221,22 +261,12 @@ pub fn ui_panel(
 
                     ui.horizontal(|ui| {
                         if ui.button("Apply (Parse XYZ)").clicked() {
-                            let (_n, atoms, qxyz) = parse_xyz_angstrom(&xyz_buf.text);
-                            mol.atoms = atoms;
-                            mol.set_pos(
-                                qxyz
-                                    .into_iter()
-                                    .map(|v| Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32))
-                                    .collect(),
+                            apply_xyz_text(
+                                &xyz_buf.text,
+                                &mut mol,
+                                &mut cam,
+                                &mut ev_changed,
                             );
-
-                            // Emit change event; parsing a new XYZ likely changes topology
-                            ev_changed.send(MoleculeChanged::parse_xyz(true));
-
-                            // Auto-center after load
-                            if let Some(c) = compute_centroid(&mol.pos) {
-                                cam.target = c;
-                            }
                         }
 
                         if ui.button("Clear text").clicked() {
@@ -252,7 +282,7 @@ pub fn ui_panel(
                     ui.weak("Tip: Use ‘Copy XYZ’ to copy the current live geometry without leaving edit mode.");
                 } else {
                     // ---- VIEW MODE (LIVE XYZ) ----
-                    ui.label("Live XYZ (read-only, always in sync with 3D):");
+                    ui.label("Live XYZ (read-only):");
                     egui::ScrollArea::vertical()
                         .max_height(260.0)
                         .auto_shrink([false; 2])
@@ -260,7 +290,7 @@ pub fn ui_panel(
                             ui.style_mut().override_text_style = Some(egui::TextStyle::Monospace);
                             for (i, (sym, p)) in mol.atoms.iter().zip(mol.pos.iter()).enumerate() {
                                 let label = format!(
-                                    "{:>4} {:<2} {:>12.6} {:>12.6} {:>12.6}",
+                                    "{:>3} {:<2} {:>7.3} {:>7.3} {:>7.3}",
                                     i + 1,
                                     sym,
                                     p.x,
@@ -278,7 +308,6 @@ pub fn ui_panel(
                                 cam.target = c;
                             }
                         }
-                        ui.weak("Switch to Edit as text to paste/modify coordinates.");
                     });
                 }
             });
@@ -658,6 +687,47 @@ fn egui_to_color(c: egui::Color32) -> Color {
         c.b() as f32 / 255.0,
         c.a() as f32 / 255.0,
     )
+}
+
+fn apply_xyz_text(
+    text: &str,
+    mol: &mut Molecule,
+    cam: &mut crate::camera::OrbitCamera,
+    ev_changed: &mut EventWriter<MoleculeChanged>,
+) {
+    let (_n, atoms, qxyz) = parse_xyz_angstrom(text);
+    mol.atoms = atoms;
+    mol.set_pos(
+        qxyz
+            .into_iter()
+            .map(|v| Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32))
+            .collect(),
+    );
+
+    // Emit change event; parsing a new XYZ likely changes topology
+    ev_changed.send(MoleculeChanged::parse_xyz(true));
+
+    // Auto-center after load
+    if let Some(c) = compute_centroid(&mol.pos) {
+        cam.target = c;
+    }
+}
+
+fn normalize_xyz_text_for_editor(text: &str) -> String {
+    let mut lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
+    if !lines.is_empty() {
+        let first_parts: Vec<&str> = lines[0].split_whitespace().collect();
+        if first_parts.len() == 1 && first_parts[0].parse::<usize>().is_ok() {
+            lines.remove(0);
+            if !lines.is_empty() {
+                let second_parts: Vec<&str> = lines[0].split_whitespace().collect();
+                if second_parts.len() < 4 {
+                    lines.remove(0);
+                }
+            }
+        }
+    }
+    lines.join("\n")
 }
 
 /// Format current `Molecule` as simple XYZ lines: "Sym  x  y  z"

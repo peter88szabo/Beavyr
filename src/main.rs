@@ -49,7 +49,10 @@ fn main() {
         .insert_resource(MolSettings::default())
         .insert_resource(camera::OrbitCamera::default())
         .insert_resource(molecule::Molecule::from_xyz(scene::DEFAULT_WATER))
-        .insert_resource(XyzBuffer { text: scene::DEFAULT_WATER.trim().to_string() })
+        .insert_resource(XyzBuffer {
+            text: scene::DEFAULT_WATER.trim().to_string(),
+            last_dir: None,
+        })
         // export UI resources
         .init_resource::<export::ExportUiState>()
         .init_resource::<export::ExportRequestQueue>()
