@@ -22,7 +22,6 @@ pub fn configure_hbond_gizmos(
 }
 
 /// Draw dashed hydrogen bonds as gizmo lines
-/// Draw dashed hydrogen bonds as gizmo lines
 pub fn draw_hydrogen_bonds_dashed(
     mut gizmos: Gizmos<HbondGizmos>,
     mol: Res<Molecule>,
@@ -30,14 +29,31 @@ pub fn draw_hydrogen_bonds_dashed(
 ) {
     let hb_color = settings.hbond_color;
 
+    let n_pos   = mol.pos.len();
+    let n_atoms = mol.atoms.len();
+
     for &(i, j, hdist) in &mol.hydrogen_bonds {
-        if hdist <= 0.0001 { continue; }
+        // Skip degenerate / “off” hbonds
+        if hdist <= 0.0001 {
+            continue;
+        }
+
+        // Defensive: skip bonds whose indices are no longer valid
+        if i >= n_pos || j >= n_pos {
+            continue;
+        }
+        if i >= n_atoms || j >= n_atoms {
+            continue;
+        }
+
         let p0 = mol.pos[i];
         let p1 = mol.pos[j];
 
         let d = p1 - p0;
         let len = d.length();
-        if len <= 1e-4 { continue; }
+        if len <= 1e-4 {
+            continue;
+        }
         let dn = d / len;
 
         // Use a small fraction of each atom's visual radius so it doesn't depend on line width
@@ -51,9 +67,11 @@ pub fn draw_hydrogen_bonds_dashed(
         let a = p0 + dn * (ri - inset_i); // start just inside sphere i
         let b = p1 - dn * (rj - inset_j); // end   just inside sphere j
 
-        if (b - a).length() <= 1e-4 { continue; }
+        if (b - a).length() <= 1e-4 {
+            continue;
+        }
+
         gizmos.line(a, b, hb_color);
     }
 }
-
 
