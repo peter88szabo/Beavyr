@@ -18,7 +18,14 @@ mod events;
 mod picking;
 
 use camera::orbit_camera_system;
-use scene::{rebuild_if_dirty, setup, sync_axis_camera_to_main, update_axis_viewport_on_resize};
+use scene::{
+    center_camera_on_startup,
+    react_to_molecule_changed_mark_dirty,
+    rebuild_if_dirty,
+    setup,
+    sync_axis_camera_to_main,
+    update_axis_viewport_on_resize,
+};
 use settings::MolSettings;
 use ui::XyzBuffer;
 use hbonds::{HbondGizmos, draw_hydrogen_bonds_dashed};
@@ -55,7 +62,7 @@ fn main() {
         .init_resource::<EditorRotateState>()
         .init_gizmo_group::<BuilderGizmos>()
         // scene
-        .add_systems(Startup, setup)
+        .add_systems(Startup, (setup, center_camera_on_startup))
         // egui pass
         .add_systems(EguiPrimaryContextPass, ui::ui_panel)
         .add_systems(EguiPrimaryContextPass, ui_measurements::distance_labels_overlay)
@@ -65,6 +72,7 @@ fn main() {
             Update,
             (
                 camera::orbit_camera_system,
+                react_to_molecule_changed_mark_dirty,
                 rebuild_if_dirty,
                 update_axis_viewport_on_resize,
                 sync_axis_camera_to_main,
@@ -88,4 +96,3 @@ fn main() {
         )
         .run();
 }
-

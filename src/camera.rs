@@ -1,6 +1,7 @@
 // src/camera.rs
 use bevy::input::mouse::{MouseMotion, MouseWheel};
 use bevy::prelude::*;
+use bevy_egui::EguiContexts;
 
 use crate::scene::MainCamera;
 
@@ -44,8 +45,14 @@ pub fn orbit_camera_system(
     time: Res<Time>,
     windows: Query<&Window>,
     mut settings: ResMut<crate::settings::MolSettings>,
+    mut contexts: EguiContexts,
 ) {
     let Ok(window) = windows.single() else { return; };
+    let pointer_over_ui = contexts
+        .ctx_mut()
+        .ok()
+        .map(|ctx| ctx.is_pointer_over_area())
+        .unwrap_or(false);
 
     // --- begin/end interaction modes (mutually exclusive) ---
     if window.cursor_position().is_some() {
@@ -118,8 +125,10 @@ pub fn orbit_camera_system(
     }
 
     // zoom
-    for ev in scroll_evr.read() {
-        cam.radius = (cam.radius - ev.y * cam.zoom_sensitivity).clamp(2.0, 200.0);
+    if !pointer_over_ui {
+        for ev in scroll_evr.read() {
+            cam.radius = (cam.radius - ev.y * cam.zoom_sensitivity).clamp(2.0, 200.0);
+        }
     }
 
     // recompute final eye from (theta,phi,radius) & updated target
@@ -144,4 +153,3 @@ pub fn orbit_camera_system(
         settings.dirty = true;
     }
 }
-

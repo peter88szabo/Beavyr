@@ -156,13 +156,23 @@ impl Molecule {
 // ---- Parsers (Ångström) ----
 
 pub fn parse_xyz_angstrom(xyz: &str) -> (usize, Vec<String>, Vec<Vec<f64>>) {
-    let lines: Vec<&str> = xyz.lines().filter(|l| !l.trim().is_empty()).collect();
+    let mut lines: Vec<&str> = xyz.lines().filter(|l| !l.trim().is_empty()).collect();
+    if lines.len() >= 2 {
+        let first = lines[0].trim();
+        if first.parse::<usize>().is_ok() {
+            // Support standard XYZ header: atom count + comment line.
+            lines.drain(0..2);
+        }
+    }
     let n = lines.len();
     let mut atoms = Vec::new();
     let mut qxyz = Vec::with_capacity(n);
 
     for line in lines {
         let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() < 4 {
+            continue;
+        }
         let atom = parts[0].to_string();
         let x = parts[1].parse::<f64>().unwrap();
         let y = parts[2].parse::<f64>().unwrap();
@@ -189,4 +199,3 @@ pub fn covalent_radius_angstrom(sym: &str) -> f32 {
         _ => 0.77,
     }
 }
-

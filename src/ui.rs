@@ -182,7 +182,7 @@ pub fn ui_panel(
 
                     if ui
                         .add(
-                            egui::Button::new("Edit as text")
+                            egui::Button::new(if edit_mode { "View mode" } else { "Edit as text" })
                                 .fill(if edit_mode { sel } else { dim }),
                         )
                         .on_hover_text("Toggle free-form XYZ editing")
@@ -207,12 +207,17 @@ pub fn ui_panel(
                 if edit_mode {
                     // ---- EDIT MODE ----
                     ui.label("Paste or edit XYZ. Input is assumed in Å (Angstrom).");
-                    ui.add(
-                        egui::TextEdit::multiline(&mut xyz_buf.text)
-                            .desired_width(f32::INFINITY)
-                            .code_editor()
-                            .lock_focus(true),
-                    );
+                    egui::ScrollArea::vertical()
+                        .max_height(260.0)
+                        .auto_shrink([false; 2])
+                        .show(ui, |ui| {
+                            ui.add(
+                                egui::TextEdit::multiline(&mut xyz_buf.text)
+                                    .desired_width(f32::INFINITY)
+                                    .code_editor()
+                                    .lock_focus(true),
+                            );
+                        });
 
                     ui.horizontal(|ui| {
                         if ui.button("Apply (Parse XYZ)").clicked() {
@@ -234,6 +239,10 @@ pub fn ui_panel(
                             }
                         }
 
+                        if ui.button("Clear text").clicked() {
+                            xyz_buf.text.clear();
+                        }
+
                         if ui.button("Revert from live").clicked() {
                             xyz_buf.text = format_xyz_from_molecule(&mol);
                         }
@@ -250,18 +259,14 @@ pub fn ui_panel(
                         .show(ui, |ui| {
                             ui.style_mut().override_text_style = Some(egui::TextStyle::Monospace);
                             for (i, (sym, p)) in mol.atoms.iter().zip(mol.pos.iter()).enumerate() {
-                                let mut label = String::new();
-                                if show_type {
-                                    label.push_str(sym);
-                                    label.push(' ');
-                                }
-                                if show_index {
-                                    label.push('(');
-                                    label.push_str(&(i + 1).to_string());
-                                    label.push(')');
-                                    label.push(' ');
-                                }
-                                label.push_str(&format!("{:>12.6} {:>12.6} {:>12.6}", p.x, p.y, p.z));
+                                let label = format!(
+                                    "{:>4} {:<2} {:>12.6} {:>12.6} {:>12.6}",
+                                    i + 1,
+                                    sym,
+                                    p.x,
+                                    p.y,
+                                    p.z
+                                );
                                 ui.monospace(label);
                             }
                         });
@@ -669,4 +674,3 @@ fn format_xyz_from_molecule(mol: &Molecule) -> String {
     }
     out
 }
-

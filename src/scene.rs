@@ -8,6 +8,7 @@ use bevy::render::view::RenderLayers;
 use crate::color_schemes::color_for;
 use crate::molecule::{covalent_radius_angstrom, Molecule};
 use crate::settings::{BondColorMode, LightingMode, MolSettings};
+use crate::camera::OrbitCamera;
 
 // NEW: react to coordinate-change events (only to mark dirty when topology might have changed)
 use crate::events::MoleculeChanged;
@@ -270,17 +271,32 @@ pub fn setup(
     ));
 }
 
+/// Center the orbit camera on the initial molecule when the app starts.
+pub fn center_camera_on_startup(
+    mol: Res<Molecule>,
+    mut cam: ResMut<OrbitCamera>,
+) {
+    auto_fit_camera(&mol.pos, &mut cam);
+}
+
 /// React to molecule coordinate changes (event).  
 /// If the change may affect bond topology/meshes, mark the scene dirty so
 /// `rebuild_if_dirty` will rebuild geometry next frame.
 pub fn react_to_molecule_changed_mark_dirty(
     mut evr: EventReader<MoleculeChanged>,
     mut settings: ResMut<MolSettings>,
+    mol: Res<Molecule>,
+    mut cam: ResMut<OrbitCamera>,
 ) {
     for ev in evr.read() {
 
         match ev.reason {
-            MoleculeChangeReason::ParseXyz { .. }
+            MoleculeChangeReason::ParseXyz { recenter } => {
+                if recenter {
+                    auto_fit_camera(&mol.pos, &mut cam);
+                }
+                settings.dirty = true;
+            }
             | MoleculeChangeReason::SetPos
             | MoleculeChangeReason::BuilderRotate
             | MoleculeChangeReason::Undo
@@ -629,3 +645,32 @@ pub fn sync_axis_camera_to_main(
     };
 }
 
+fn compute_centroid(points: &[Vec3]) -> Option<Vec3> {
+    if points.is_empty() {
+        return None;
+    }
+    let mut acc = Vec3::ZERO;
+    for &p in points {
+        acc += p;
+    }
+    Some(acc / (points.len() as f32))
+}
+
+fn auto_fit_camera(points: &[Vec3], cam: &mut OrbitCamera) {
+    let Some(c) = compute_centroid(points) else {
+        return;
+    };
+    cam.target = c;
+
+    let mut max_r = 0.0_f32;
+    for &p in points {
+        let r = p.distance(c);
+        if r > max_r {
+            max_r = r;
+        }
+    }
+
+    // Keep a comfortable framing margin and clamp to usable bounds.
+    let desired = (max_r * 3.0).max(2.0);
+    cam.radius = desired.clamp(2.0, 200.0);
+}
