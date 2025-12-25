@@ -105,7 +105,7 @@ impl Default for MolSettings {
             bg_color: Color::srgb(0.0, 0.0, 0.0),
 
             metallic: 0.05,
-            roughness: 0.25,
+            roughness: 0.20,
             reflectance: 0.2,
             use_emissive: false,
             emissive_color: Color::srgb(1.0, 1.0, 1.0),
