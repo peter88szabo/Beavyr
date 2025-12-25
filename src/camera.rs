@@ -10,7 +10,9 @@ use crate::scene::MainCamera;
 #[derive(Resource)]
 pub struct OrbitCamera {
     pub radius: f32,
+    #[allow(dead_code)]
     pub theta: f32,
+    #[allow(dead_code)]
     pub phi: f32,
     pub target: Vec3, // world position we look at
     pub orientation: Quat,

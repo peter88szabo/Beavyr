@@ -18,7 +18,6 @@ mod events;
 mod picking;
 mod trajectory;
 
-use camera::orbit_camera_system;
 use scene::{
     center_camera_on_startup,
     react_to_molecule_changed_mark_dirty,

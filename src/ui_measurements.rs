@@ -10,7 +10,7 @@ pub fn measurements_panel(
     ui: &mut egui::Ui,
     measurements: &mut Measurements,
     mol: &Molecule,
-    settings: &MolSettings,
+    _settings: &MolSettings,
 ) {
     // =======================
     // Distance panel
@@ -461,9 +461,9 @@ fn pair_row(ui: &mut egui::Ui, pair: &mut MeasurePair, mol: &Molecule) -> bool {
 
 fn active_status_pill(ui: &mut egui::Ui, active: bool) {
     if active {
-        egui::Frame::none()
+        egui::Frame::NONE
             .fill(egui::Color32::from_rgb(40, 180, 120))
-            .rounding(egui::Rounding::same(6))        // u8
+            .corner_radius(egui::CornerRadius::same(6))        // u8
             .inner_margin(egui::Margin::symmetric(8, 4)) // i8
             .show(ui, |ui| {
                 ui.label(
@@ -484,4 +484,3 @@ fn is_highlighted_for(current: &Option<Vec<usize>>, candidate: &[usize]) -> bool
         None => false,
     }
 }
-

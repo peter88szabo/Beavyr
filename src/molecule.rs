@@ -4,6 +4,7 @@ use bevy::prelude::*;
 
 /// A lightweight snapshot of molecular coordinates (Å).
 /// This is intentionally just a clone of `pos` so it’s cheap to create/apply.
+#[allow(dead_code)]
 pub type MolSnapshot = Vec<Vec3>;
 
 /// Positions are stored in Å (Angstrom). All parsing is Å.
@@ -46,11 +47,13 @@ impl Molecule {
     }
 
     /// Create a snapshot of the current coordinates (Å).
+    #[allow(dead_code)]
     pub fn snapshot(&self) -> MolSnapshot {
         self.pos.clone()
     }
 
     /// Apply a previously captured coordinate snapshot (Å).
+    #[allow(dead_code)]
     pub fn apply_snapshot(&mut self, snap: &MolSnapshot) {
         self.pos = snap.clone();
     }

@@ -114,3 +114,114 @@ pub fn rotate_side(
     new_coords
 }
 
+/// Translate the atoms on the chosen side of bond (A,B) along the bond axis by `distance` (Å).
+pub fn translate_side(
+    atoms: &[String],
+    coords: &[Vec3],
+    a: usize,
+    b: usize,
+    which: RotateSide,
+    distance: f32,
+    bond_th_hx: f32,
+    bond_th_xx: f32,
+) -> Vec<Vec3> {
+    assert!(a < atoms.len() && b < atoms.len());
+
+    let axis_vec = coords[b] - coords[a];
+    let axis_len = axis_vec.length();
+    if axis_len <= 1e-6 || distance.abs() <= 1e-6 {
+        return coords.to_vec();
+    }
+
+    let (side_a, side_b) = split_sides(atoms, coords, a, b, bond_th_hx, bond_th_xx);
+    let (dir, moving_set) = match which {
+        RotateSide::A => (-axis_vec / axis_len, side_a),
+        RotateSide::B => (axis_vec / axis_len, side_b),
+    };
+
+    let mut new_coords = coords.to_vec();
+    let delta = dir * distance;
+    for &i in &moving_set {
+        new_coords[i] = coords[i] + delta;
+    }
+
+    new_coords
+}
+
+/// Bend the atoms on the chosen side so the picked atom makes `target_angle_deg`
+/// with the bond axis (A→B), using the side's endpoint as the angle vertex.
+pub fn bend_side(
+    atoms: &[String],
+    coords: &[Vec3],
+    a: usize,
+    b: usize,
+    which: RotateSide,
+    picked_idx: usize,
+    target_angle_deg: f32,
+    bond_th_hx: f32,
+    bond_th_xx: f32,
+) -> Vec<Vec3> {
+    assert!(a < atoms.len() && b < atoms.len());
+    if picked_idx >= atoms.len() {
+        return coords.to_vec();
+    }
+
+    let axis_vec = coords[b] - coords[a];
+    let axis_len = axis_vec.length();
+    if axis_len <= 1e-6 {
+        return coords.to_vec();
+    }
+    let axis = axis_vec / axis_len;
+
+    let (side_a, side_b) = split_sides(atoms, coords, a, b, bond_th_hx, bond_th_xx);
+    let (center_idx, rotating_set) = match which {
+        RotateSide::A => (a, side_a),
+        RotateSide::B => (b, side_b),
+    };
+    if !rotating_set.contains(&picked_idx) {
+        // If the picked atom isn't on the rotating side, don't apply.
+        return coords.to_vec();
+    }
+
+    let center = coords[center_idx];
+    let v = coords[picked_idx] - center;
+    let v_len = v.length();
+    if v_len <= 1e-6 {
+        return coords.to_vec();
+    }
+    let v_n = v / v_len;
+
+    let mut dot = axis.dot(v_n);
+    dot = dot.clamp(-1.0, 1.0);
+    let current_angle = dot.acos();
+    let target_angle = target_angle_deg.to_radians();
+    let delta = target_angle - current_angle;
+    if delta.abs() <= 1e-6 {
+        return coords.to_vec();
+    }
+
+    let mut rot_axis = axis.cross(v_n);
+    if rot_axis.length() <= 1e-6 {
+        // Pick a stable perpendicular axis when v is (anti)parallel to axis.
+        rot_axis = axis.cross(Vec3::X);
+        if rot_axis.length() <= 1e-6 {
+            rot_axis = axis.cross(Vec3::Y);
+        }
+        if rot_axis.length() <= 1e-6 {
+            return coords.to_vec();
+        }
+    }
+    let rot_axis = rot_axis.normalize();
+
+    let mut new_coords = coords.to_vec();
+    for &i in &rotating_set {
+        if i == center_idx { continue; }
+        let p = coords[i] - center;
+        let p_rot = p * delta.cos()
+            + rot_axis.cross(p) * delta.sin()
+            + rot_axis * (rot_axis.dot(p)) * (1.0 - delta.cos());
+        new_coords[i] = center + p_rot;
+    }
+
+    new_coords
+}

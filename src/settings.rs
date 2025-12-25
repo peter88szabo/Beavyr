@@ -14,6 +14,7 @@ pub enum ColorScheme {
     Molden0,
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ShadingPreset {
     MoldenClassic,
@@ -79,6 +80,7 @@ pub struct MolSettings {
     pub uniform_bond_color: Color,
 
     // --- new: hydrogen-bond (gizmo) options ---
+    pub show_hbonds: bool,
     pub hbond_color: Color,
     pub hbond_thickness: f32,
     pub hbond_gap_scale: f32,
@@ -102,8 +104,8 @@ impl Default for MolSettings {
             element_colors: color_scheme_map(ColorScheme::Jmol),
             bg_color: Color::srgb(0.0, 0.0, 0.0),
 
-            metallic: 0.1,
-            roughness: 0.2,
+            metallic: 0.05,
+            roughness: 0.25,
             reflectance: 0.2,
             use_emissive: false,
             emissive_color: Color::srgb(1.0, 1.0, 1.0),
@@ -121,7 +123,7 @@ impl Default for MolSettings {
 
             // three-point defaults (gentle)
             fill_intensity: 4_000_000.0,
-            fill_distance: 15.0,
+            fill_distance: 10.0,
             rim_intensity: 4_000_000.0,
             rim_distance: 10.0,
 
@@ -130,6 +132,7 @@ impl Default for MolSettings {
             uniform_bond_color: Color::srgb(0.85, 0.85, 0.88),
 
             // pleasant blue for H-bonds
+            show_hbonds: true,
             hbond_color: Color::srgb(0.20, 0.60, 1.00),
             hbond_thickness: 30.0,
             hbond_gap_scale: 1.0,
@@ -139,4 +142,3 @@ impl Default for MolSettings {
         }
     }
 }
-

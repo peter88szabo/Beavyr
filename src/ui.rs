@@ -5,7 +5,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use crate::color_schemes::color_scheme_map;
-use crate::events::{MoleculeChanged, MoleculeChangeReason};
+use crate::events::MoleculeChanged;
 use crate::molecule::{parse_xyz_angstrom, Molecule};
 use crate::settings::{BondColorMode, ColorScheme, LightingMode, MolSettings};
 
@@ -83,23 +83,24 @@ pub fn ui_panel(
                 let scale = win.scale_factor() as f32;
                 let mouse_px = egui::pos2(pos_points.x * scale, pos_points.y * scale);
 
-                if let Some((hit_idx, hit_px_pos)) =
+                let (picked_idx, popup_pos) = if let Some((hit_idx, hit_px_pos)) =
                     find_nearest_atom_screen_space_egui(cam_comp, cam_xform, &mol.pos, mouse_px, 18.0)
                 {
-                    // Persist picked atom + popup position (store in logical points)
-                    let pick_id = egui::Id::new("picked_atom_idx");
-                    let popup_id = egui::Id::new("rc_popup_open");
-                    let popup_pos_id = egui::Id::new("rc_popup_pos_px");
+                    (hit_idx as i32, egui::pos2(hit_px_pos.x / scale, hit_px_pos.y / scale))
+                } else {
+                    (-1, pos_points)
+                };
 
-                    ctx.data_mut(|d| {
-                        d.insert_persisted(pick_id, hit_idx as i32);
-                        d.insert_persisted(popup_id, true);
-                        d.insert_persisted(
-                            popup_pos_id,
-                            egui::pos2(hit_px_pos.x / scale, hit_px_pos.y / scale),
-                        );
-                    });
-                }
+                // Persist picked atom + popup position (store in logical points)
+                let pick_id = egui::Id::new("picked_atom_idx");
+                let popup_id = egui::Id::new("rc_popup_open");
+                let popup_pos_id = egui::Id::new("rc_popup_pos_px");
+
+                ctx.data_mut(|d| {
+                    d.insert_persisted(pick_id, picked_idx);
+                    d.insert_persisted(popup_id, true);
+                    d.insert_persisted(popup_pos_id, popup_pos);
+                });
             }
         }
     }
@@ -119,20 +120,37 @@ pub fn ui_panel(
             )
         });
 
-        if open && picked >= 0 {
+        if open {
             egui::Area::new(egui::Id::new("rc_atom_popup"))
                 .fixed_pos(pos_pts)
                 .order(egui::Order::Foreground)
                 .show(&ctx, |ui| {
                     egui::Frame::popup(&ctx.style()).show(ui, |ui| {
+                        if picked >= 0 {
+                            ui.set_min_width(220.0);
+                        }
                         ui.vertical(|ui| {
-                            ui.label(format!("Atom #{} (right-click)", picked));
-                            if ui.button("Use as rotation center").clicked() {
-                                let idx = picked as usize;
-                                if idx < mol.pos.len() {
-                                    cam.target = mol.pos[idx];
+                            ui.label("Background:");
+                            ui.horizontal(|ui| {
+                                if ui.button("Black").clicked() {
+                                    settings.bg_color = Color::srgb(0.0, 0.0, 0.0);
+                                    settings.dirty = true;
                                 }
-                                open = false;
+                                if ui.button("White").clicked() {
+                                    settings.bg_color = Color::srgb(1.0, 1.0, 1.0);
+                                    settings.dirty = true;
+                                }
+                            });
+                            if picked >= 0 {
+                                ui.separator();
+                                ui.label(format!("Atom #{} (right-click)", picked));
+                                if ui.button("Use as rotation center").clicked() {
+                                    let idx = picked as usize;
+                                    if idx < mol.pos.len() {
+                                        cam.target = mol.pos[idx];
+                                    }
+                                    open = false;
+                                }
                             }
                             if ui.button("Cancel").clicked() {
                                 open = false;
@@ -311,6 +329,14 @@ pub fn ui_panel(
                             if let Some(c) = compute_centroid(&mol.pos) {
                                 cam.target = c;
                             }
+                        }
+                        let hbond_label = if settings.show_hbonds {
+                            "H-bonds Off"
+                        } else {
+                            "H-bonds On"
+                        };
+                        if ui.button(hbond_label).clicked() {
+                            settings.show_hbonds = !settings.show_hbonds;
                         }
                     });
                 }
@@ -658,7 +684,7 @@ pub fn ui_panel(
                     ui.label("PBR material (atoms + bonds):");
                     let mut mat_changed = false;
                     mat_changed |= ui
-                        .add(egui::Slider::new(&mut settings.metallic, 0.0..=1.0).text("Metallic"))
+                        .add(egui::Slider::new(&mut settings.metallic, 0.0..=0.5).text("Metallic"))
                         .changed();
                     mat_changed |= ui
                         .add(egui::Slider::new(&mut settings.roughness, 0.005..=1.0).text("Roughness"))
@@ -821,14 +847,14 @@ pub fn ui_panel(
                         ui.label("Fill & Rim (three-point)");
 
                         changed |= ui
-                            .add(egui::Slider::new(&mut settings.fill_intensity, 0.0..=6_000_000.0).text("Fill intensity"))
+                            .add(egui::Slider::new(&mut settings.fill_intensity, 0.0..=10_000_000.0).text("Fill intensity"))
                             .changed();
                         changed |= ui
                             .add(egui::Slider::new(&mut settings.fill_distance, 3.0..=50.0).text("Fill distance"))
                             .changed();
 
                         changed |= ui
-                            .add(egui::Slider::new(&mut settings.rim_intensity, 0.0..=6_000_000.0).text("Rim intensity"))
+                            .add(egui::Slider::new(&mut settings.rim_intensity, 0.0..=10_000_000.0).text("Rim intensity"))
                             .changed();
                         changed |= ui
                             .add(egui::Slider::new(&mut settings.rim_distance, 3.0..=50.0).text("Rim distance"))
@@ -942,7 +968,7 @@ fn apply_xyz_text(
     );
 
     // Emit change event; parsing a new XYZ likely changes topology
-    ev_changed.send(MoleculeChanged::parse_xyz(true));
+    ev_changed.write(MoleculeChanged::parse_xyz(true));
 
     // Auto-center after load
     if let Some(c) = compute_centroid(&mol.pos) {

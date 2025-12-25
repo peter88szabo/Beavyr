@@ -4,7 +4,7 @@ use bevy_egui::{egui, EguiContexts};
 use crate::events::{AtomPicked, ToolKind};
 use crate::molecule::{Molecule, covalent_radius_angstrom};
 use crate::settings::MolSettings;
-use super::rotator::{rotate_side, split_sides, RotateSide};
+use super::rotator::{bend_side, rotate_side, split_sides, translate_side, RotateSide};
 
 #[derive(Default, Reflect, GizmoConfigGroup)]
 pub struct BuilderGizmos;
@@ -15,7 +15,13 @@ pub struct EditorRotateState {
     pub picks: Vec<usize>,                // [A, B, side-indicator (any atom on that side)]
     pub chosen_side: Option<RotateSide>,  // inferred from 3rd pick
     pub angle_deg: f32,                   // degrees
-    pub last_snapshot: Option<Vec<Vec3>>, // undo buffer
+    pub axis_len_target: f32,             // Å, absolute axis length target
+    pub axis_pair: Option<(usize, usize)>,
+    pub bend_angle_deg: f32,              // degrees
+    pub bend_ref: Option<(usize, usize, usize)>,
+    pub last_rotate_snapshot: Option<Vec<Vec3>>,    // undo buffer
+    pub last_translate_snapshot: Option<Vec<Vec3>>, // undo buffer
+    pub last_bend_snapshot: Option<Vec<Vec3>>,      // undo buffer
     pub bond_th_hx: f32,                  // Å
     pub bond_th_xx: f32,                  // Å
 }
@@ -27,7 +33,13 @@ impl EditorRotateState {
             picks: Vec::new(),
             chosen_side: None,
             angle_deg: 0.0,
-            last_snapshot: None,
+            axis_len_target: 0.0,
+            axis_pair: None,
+            bend_angle_deg: 0.0,
+            bend_ref: None,
+            last_rotate_snapshot: None,
+            last_translate_snapshot: None,
+            last_bend_snapshot: None,
             bond_th_hx: 1.4,
             bond_th_xx: 1.8,
         };
@@ -83,6 +95,12 @@ pub fn handle_builder_atom_picked(
                     } else if reach_b {
                         state.picks.push(hit_idx);
                         state.chosen_side = Some(RotateSide::B);
+                    } else {
+                        // Final fallback: pick the closer endpoint so the UI never dead-ends.
+                        let da = mol.pos[hit_idx].distance(mol.pos[a]);
+                        let db = mol.pos[hit_idx].distance(mol.pos[b]);
+                        state.picks.push(hit_idx);
+                        state.chosen_side = if da <= db { Some(RotateSide::A) } else { Some(RotateSide::B) };
                     }
                     // else: ignore click (not connected to either side by our thresholds)
                 }
@@ -180,15 +198,14 @@ pub fn builder_ui_panel(
 
                 ui.add_space(6.0);
                 ui.add(egui::Slider::new(&mut state.angle_deg, -180.0..=180.0).text("Angle (°)"));
-
                 ui.horizontal(|ui| {
-                    if ui.button("Apply").clicked() {
+                    if ui.button("Rotate").clicked() {
                         if state.picks.len() >= 3 {
                             let a = state.picks[0];
                             let b = state.picks[1];
                             if let Some(side) = state.chosen_side {
                                 // Save undo snapshot
-                                state.last_snapshot = Some(mol.pos.clone());
+                                state.last_rotate_snapshot = Some(mol.pos.clone());
 
                                 // Rotate fragment coordinates
                                 mol.pos = rotate_side(
@@ -206,16 +223,152 @@ pub fn builder_ui_panel(
                         }
                     }
                     if ui.button("Undo").clicked() {
-                        if let Some(snapshot) = &mut state.last_snapshot {
+                        if let Some(snapshot) = &mut state.last_rotate_snapshot {
                             mol.pos = snapshot.clone();
                             mol.recompute_bonds(2.0, 3.0);
                             settings.dirty = true; // rebuild to keep atoms+bonds in sync
+                        }
+                    }
+                });
+
+                ui.add_space(6.0);
+                ui.separator();
+                ui.add_space(6.0);
+
+                ui.label("Translate along axis");
+
+                let axis_len = if state.picks.len() >= 2 {
+                    let a = state.picks[0];
+                    let b = state.picks[1];
+                    mol.pos[a].distance(mol.pos[b])
+                } else {
+                    0.0
+                };
+                if state.picks.len() >= 2 {
+                    let pair = (state.picks[0], state.picks[1]);
+                    if state.axis_pair != Some(pair) {
+                        state.axis_pair = Some(pair);
+                        state.axis_len_target = axis_len;
+                    }
+                } else {
+                    state.axis_pair = None;
+                    state.axis_len_target = 0.0;
+                }
+
+                let max_len = (axis_len * 2.0).max(0.5);
+                ui.add_enabled(
+                    state.picks.len() >= 2,
+                    egui::Slider::new(&mut state.axis_len_target, 0.0..=max_len)
+                        .text("Axis length (Å)"),
+                );
+
+                ui.horizontal(|ui| {
+                    if ui.button("Set Distance").clicked() {
+                        if state.picks.len() >= 3 {
+                            let a = state.picks[0];
+                            let b = state.picks[1];
+                            if let Some(side) = state.chosen_side {
+                                let current_len = mol.pos[a].distance(mol.pos[b]);
+                                let delta = state.axis_len_target - current_len;
+                                if delta.abs() > 1e-6 {
+                                    state.last_translate_snapshot = Some(mol.pos.clone());
+                                    mol.pos = translate_side(
+                                        &mol.atoms, &mol.pos, a, b,
+                                        side, delta,
+                                        state.bond_th_hx, state.bond_th_xx,
+                                    );
+                                    mol.recompute_bonds(2.0, 3.0);
+                                    settings.dirty = true;
+                                }
+                            }
+                        }
+                    }
+                    if ui.button("Undo").clicked() {
+                        if let Some(snapshot) = &mut state.last_translate_snapshot {
+                            mol.pos = snapshot.clone();
+                            mol.recompute_bonds(2.0, 3.0);
+                            settings.dirty = true;
+                        }
+                    }
+                });
+
+                ui.add_space(6.0);
+                ui.separator();
+                ui.add_space(6.0);
+
+                ui.label("Bend relative to axis");
+
+                let bend_ready = state.picks.len() >= 3 && state.chosen_side.is_some();
+                if bend_ready {
+                    let a = state.picks[0];
+                    let b = state.picks[1];
+                    let p = state.picks[2];
+                    let ref_key = (a, b, p);
+                    if state.bend_ref != Some(ref_key) {
+                        if let Some(side) = state.chosen_side {
+                            let center = if side == RotateSide::A { a } else { b };
+                            let axis_vec = mol.pos[b] - mol.pos[a];
+                            let axis_len = axis_vec.length();
+                            let v = mol.pos[p] - mol.pos[center];
+                            if axis_len > 1e-6 && v.length() > 1e-6 {
+                                let axis = axis_vec / axis_len;
+                                let v_n = v.normalize();
+                                let mut dot = axis.dot(v_n);
+                                dot = dot.clamp(-1.0, 1.0);
+                                state.bend_angle_deg = dot.acos().to_degrees();
+                            } else {
+                                state.bend_angle_deg = 0.0;
+                            }
+                            state.bend_ref = Some(ref_key);
+                        }
+                    }
+                } else {
+                    state.bend_ref = None;
+                    state.bend_angle_deg = 0.0;
+                }
+
+                ui.add_enabled(
+                    bend_ready,
+                    egui::Slider::new(&mut state.bend_angle_deg, 0.0..=180.0)
+                        .text("Axis angle (°)"),
+                );
+
+                ui.horizontal(|ui| {
+                    if ui.button("Set Angle").clicked() {
+                        if state.picks.len() >= 3 {
+                            let a = state.picks[0];
+                            let b = state.picks[1];
+                            let p = state.picks[2];
+                            if let Some(side) = state.chosen_side {
+                                state.last_bend_snapshot = Some(mol.pos.clone());
+                                mol.pos = bend_side(
+                                    &mol.atoms, &mol.pos, a, b,
+                                    side, p, state.bend_angle_deg,
+                                    state.bond_th_hx, state.bond_th_xx,
+                                );
+                                mol.recompute_bonds(2.0, 3.0);
+                                settings.dirty = true;
+                            }
+                        }
+                    }
+                    if ui.button("Undo").clicked() {
+                        if let Some(snapshot) = &mut state.last_bend_snapshot {
+                            mol.pos = snapshot.clone();
+                            mol.recompute_bonds(2.0, 3.0);
+                            settings.dirty = true;
                         }
                     }
                     if ui.button("Cancel").clicked() {
                         state.picks.clear();
                         state.chosen_side = None;
                         state.angle_deg = 0.0;
+                        state.axis_len_target = 0.0;
+                        state.axis_pair = None;
+                        state.bend_angle_deg = 0.0;
+                        state.bend_ref = None;
+                        state.last_rotate_snapshot = None;
+                        state.last_translate_snapshot = None;
+                        state.last_bend_snapshot = None;
                         state.active = false;
                     }
                 });
@@ -275,4 +428,3 @@ fn reaches_without(
     }
     false
 }
-

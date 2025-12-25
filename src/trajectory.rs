@@ -138,7 +138,7 @@ pub fn apply_current_frame(
     mol.set_pos(traj.frames[idx].clone());
     mol.recompute_bonds(settings.bond_thresh_scale, settings.hbond_cutoff);
     settings.dirty = true;
-    ev_changed.send(MoleculeChanged::set_pos());
+    ev_changed.write(MoleculeChanged::set_pos());
 
     if recenter {
         if let Some(c) = compute_centroid(&mol.pos) {

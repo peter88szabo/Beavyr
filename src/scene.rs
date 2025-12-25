@@ -347,17 +347,17 @@ pub fn rebuild_if_dirty(
     };
 
     // Update lights to current settings
-    if let Ok((mut l, mut tf)) = q_key.single_mut() {
+    if let Ok((mut l, _)) = q_key.single_mut() {
         l.intensity = settings.light_intensity;
     }
-    if let Ok((mut l, mut tf)) = q_fill.single_mut() {
+    if let Ok((mut l, _)) = q_fill.single_mut() {
         l.intensity = if matches!(settings.lighting_mode, LightingMode::ThreePoint) {
             settings.fill_intensity
         } else {
             0.0
         };
     }
-    if let Ok((mut l, mut tf)) = q_rim.single_mut() {
+    if let Ok((mut l, _)) = q_rim.single_mut() {
         l.intensity = if matches!(settings.lighting_mode, LightingMode::ThreePoint) {
             settings.rim_intensity
         } else {

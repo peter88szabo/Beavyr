@@ -12,7 +12,7 @@ pub fn configure_hbond_gizmos(
     settings: Res<MolSettings>,
 ) {
     let (cfg, _) = cfg_store.config_mut::<HbondGizmos>();
-    cfg.enabled = true;
+    cfg.enabled = settings.show_hbonds;
     cfg.line.width = settings.hbond_thickness.max(1.0).min(50.0);
     cfg.line.perspective = true;
     cfg.line.style = GizmoLineStyle::Dashed {
@@ -27,6 +27,10 @@ pub fn draw_hydrogen_bonds_dashed(
     mol: Res<Molecule>,
     settings: Res<MolSettings>,
 ) {
+    if !settings.show_hbonds {
+        return;
+    }
+
     let hb_color = settings.hbond_color;
 
     let n_pos   = mol.pos.len();
@@ -74,4 +78,3 @@ pub fn draw_hydrogen_bonds_dashed(
         gizmos.line(a, b, hb_color);
     }
 }
-

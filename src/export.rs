@@ -30,6 +30,7 @@ impl Plugin for ExportPlugin {
 /// UI state for export panel.
 #[derive(Resource)]
 pub struct ExportUiState {
+    #[allow(dead_code)]
     pub open: bool,
     pub dpi: u32,        // 300 / 600 / 1200
     pub width_mm: f32,   // physical size
@@ -218,4 +219,3 @@ fn tick_and_cleanup_exporters(
         }
     }
 }
-

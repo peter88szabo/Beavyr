@@ -70,7 +70,3 @@ fn pick_and_emit_atom(
     }
 }
 
-// Re-exports for convenience if you want to call helpers directly elsewhere.
-pub use screen::find_nearest_atom_screen_space;
-pub use screen::find_nearest_atom_screen_space_egui;
-

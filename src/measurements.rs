@@ -15,6 +15,7 @@ pub struct MeasurePair {
     pub b: usize,
     pub distance: f32, // Å
     pub visible: bool,
+    #[allow(dead_code)]
     pub label_on: bool,
 }
 
@@ -62,7 +63,9 @@ pub struct Measurements {
     pub show_labels: bool,
 
     // Picking settings (kept for UI consistency; picker now lives elsewhere)
+    #[allow(dead_code)]
     pub pick_radius: f32,
+    #[allow(dead_code)]
     pub pick_radius_px: f32,
 
     // preview highlight of measured items (indices in order A, B, C, D)
@@ -119,6 +122,7 @@ impl Measurements {
             label_on: true,
         });
     }
+    #[allow(dead_code)]
     pub fn remove_pair(&mut self, id: u32) {
         self.pairs.retain(|p| p.id != id);
     }
@@ -374,8 +378,8 @@ pub fn draw_measurement_lines(
 // ---------- helpers (math only) ----------
 
 fn angle_degrees(p1: Vec3, p2: Vec3, p3: Vec3) -> f32 {
-    let v1 = (p1 - p2);
-    let v2 = (p3 - p2);
+    let v1 = p1 - p2;
+    let v2 = p3 - p2;
     let n1 = v1.length();
     let n2 = v2.length();
     if n1 <= 1e-6 || n2 <= 1e-6 {
@@ -406,4 +410,3 @@ fn dihedral_degrees(p1: Vec3, p2: Vec3, p3: Vec3, p4: Vec3) -> f32 {
 
     y.atan2(x).to_degrees()
 }
-

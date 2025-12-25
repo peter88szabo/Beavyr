@@ -15,6 +15,7 @@ pub struct AtomPicked {
 }
 
 /// Reasons why the molecule changed (useful for UI/state integration).
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MoleculeChangeReason {
     /// Parsed/loaded text XYZ; recenter camera?
@@ -41,8 +42,8 @@ impl MoleculeChanged {
     pub fn set_pos() -> Self {
         Self { reason: MoleculeChangeReason::SetPos }
     }
+    #[allow(dead_code)]
     pub fn builder_rotate() -> Self {
         Self { reason: MoleculeChangeReason::BuilderRotate }
     }
 }
-
