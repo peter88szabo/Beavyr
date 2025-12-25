@@ -4,7 +4,7 @@ use bevy_egui::{egui, EguiContexts};
 use std::fs;
 use std::path::PathBuf;
 
-use crate::color_schemes::color_scheme_map;
+use crate::color_schemes::{color_scheme_map, ELEMENT_SYMBOLS};
 use crate::events::MoleculeChanged;
 use crate::molecule::{parse_xyz_angstrom, Molecule};
 use crate::settings::{BondColorMode, ColorScheme, LightingMode, MolSettings};
@@ -141,6 +141,12 @@ pub fn ui_panel(
                                     settings.dirty = true;
                                 }
                             });
+                            if ui.button("Center molecule").clicked() {
+                                if let Some(c) = compute_centroid(&mol.pos) {
+                                    cam.target = c;
+                                }
+                                open = false;
+                            }
                             if picked >= 0 {
                                 ui.separator();
                                 ui.label(format!("Atom #{} (right-click)", picked));
@@ -726,22 +732,36 @@ pub fn ui_panel(
                     });
 
                     ui.collapsing("Per-element overrides (active in Custom)", |ui| {
-                        let keys: Vec<String> = settings.element_colors.keys().cloned().collect();
-                        for k in keys {
-                            if let Some(old) = settings.element_colors.get(&k).copied() {
-                                let mut col = color_to_egui(old);
-                                ui.horizontal(|ui| {
-                                    ui.label(k.as_str());
-                                    if ui.color_edit_button_srgba(&mut col).changed() {
-                                        settings
-                                            .element_colors
-                                            .insert(k.clone(), egui_to_color(col));
-                                        settings.scheme = ColorScheme::Custom;
-                                        settings.dirty = true;
-                                    }
-                                });
-                            }
-                        }
+                        ui.spacing_mut().item_spacing = egui::vec2(6.0, 4.0);
+                        egui::ScrollArea::vertical()
+                            .max_height(240.0)
+                            .show(ui, |ui| {
+                                let per_row = 6;
+                                for chunk in ELEMENT_SYMBOLS.chunks(per_row) {
+                                    ui.horizontal(|ui| {
+                                        for &sym in chunk {
+                                            if let Some(old) = settings.element_colors.get(sym).copied() {
+                                                let key = sym.to_string();
+                                                let mut col = color_to_egui(old);
+                                                ui.allocate_ui_with_layout(
+                                                    egui::vec2(70.0, 0.0),
+                                                    egui::Layout::left_to_right(egui::Align::Center),
+                                                    |ui| {
+                                                        ui.add_sized([22.0, 0.0], egui::Label::new(sym));
+                                                        if ui.color_edit_button_srgba(&mut col).changed() {
+                                                            settings
+                                                                .element_colors
+                                                                .insert(key.clone(), egui_to_color(col));
+                                                            settings.scheme = ColorScheme::Custom;
+                                                            settings.dirty = true;
+                                                        }
+                                                    },
+                                                );
+                                            }
+                                        }
+                                    });
+                                }
+                            });
                     });
 
                     ui.add_space(8.0);

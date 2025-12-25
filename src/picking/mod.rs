@@ -4,7 +4,7 @@ use bevy_egui::EguiContexts;
 use crate::events::{AtomPicked, ToolKind};
 use crate::molecule::Molecule;
 use crate::measurements::Measurements;
-use crate::molecule_builder::builder_ui::EditorRotateState;
+use crate::molecule_builder::builder_ui::{EditorRotateState, ZMatrixBuilderState};
 
 pub mod screen;
 
@@ -28,6 +28,7 @@ fn pick_and_emit_atom(
     mol: Option<Res<Molecule>>,
     measurements: Option<Res<Measurements>>,
     builder: Option<Res<EditorRotateState>>,
+    zmat_builder: Option<Res<ZMatrixBuilderState>>,
     mut ev_pick: EventWriter<AtomPicked>,
 ) {
     let Some(mol) = mol else { return; };
@@ -41,6 +42,9 @@ fn pick_and_emit_atom(
     }
     if let Some(b) = &builder {
         want_builder = b.active;
+    }
+    if let Some(z) = &zmat_builder {
+        want_builder = want_builder || z.pick_active;
     }
     if !(want_measure || want_builder) { return; }
 
@@ -69,4 +73,3 @@ fn pick_and_emit_atom(
         }
     }
 }
-

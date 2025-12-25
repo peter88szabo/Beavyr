@@ -34,7 +34,7 @@ use trajectory::TrajectoryState;
 
 use molecule_builder::builder_ui::{
     builder_ui_panel, configure_builder_gizmos, draw_builder_highlights,
-    EditorRotateState, BuilderGizmos
+    EditorRotateState, BuilderGizmos, ZMatrixBuilderState
 };
 
 fn main() {
@@ -65,6 +65,7 @@ fn main() {
         .init_gizmo_group::<HbondGizmos>()
         // molecule editor
         .init_resource::<EditorRotateState>()
+        .init_resource::<ZMatrixBuilderState>()
         .init_gizmo_group::<BuilderGizmos>()
         // trajectory
         .init_resource::<TrajectoryState>()
