@@ -16,6 +16,7 @@ use crate::export::{ExportRequestQueue, ExportUiState};
 // Measurements UI + resource
 use crate::measurements::Measurements;
 use crate::ui_measurements;
+use crate::trajectory;
 
 // NEW: shared picking helper (egui-friendly shim)
 use crate::picking::screen::find_nearest_atom_screen_space_egui;
@@ -53,6 +54,8 @@ pub fn ui_panel(
 
     // measurements panel
     mut measurements: ResMut<Measurements>,
+    // trajectory
+    mut traj: ResMut<trajectory::TrajectoryState>,
 ) {
     // bevy_egui 0.36: ctx_mut() returns Result; if it fails, skip this frame
     let Ok(ctx) = contexts.ctx_mut() else { return; };
@@ -155,6 +158,7 @@ pub fn ui_panel(
             // ===========================
             // 1) Structure (XYZ)
             // ===========================
+            ui.add_space(8.0);
             ui.collapsing("Structure (XYZ)", |ui| {
                 let show_type_id = egui::Id::new("show_atom_type");
                 let show_index_id = egui::Id::new("show_atom_index");
@@ -316,280 +320,242 @@ pub fn ui_panel(
             ui.separator();
 
             // ===========================
-            // 2) Geometry
+            // 1b) Trajectory
             // ===========================
-            ui.collapsing("Atom & Bond Scaling", |ui| {
-                let mut changed = false;
-                changed |= ui
-                    .add(egui::Slider::new(&mut settings.atom_scale, 0.1..=3.0).text("Atom scale"))
-                    .changed();
-                changed |= ui
-                    .add(egui::Slider::new(&mut settings.atom_resolution, 0..=10).text("Atom resolution"))
-                    .changed();
-
-                ui.add_space(8.0);
-                ui.separator();
-                ui.add_space(8.0);
-
-                changed |= ui
-                    .add(
-                        egui::Slider::new(&mut settings.bond_radius_pct, 0.05..=1.0)
-                            .text("Bond radius (% of smaller atom)"),
-                    )
-                    .changed();
-
-                changed |= ui
-                    .add(
-                        egui::Slider::new(&mut settings.bond_thresh_scale, 0.8..=3.0)
-                            .text("Bond cutoff × covalent radii"),
-                    )
-                    .changed();
-
-                ui.add_space(8.0);
-                ui.separator();
-                ui.add_space(8.0);
-
-                changed |= ui
-                    .add(
-                        egui::Slider::new(&mut settings.hbond_cutoff, 1.2..=5.0)
-                            .text("Hydrogen bond cutoff in Å"),
-                    )
-                    .changed();
-
-                // H-bond style
-                changed |= ui
-                    .add(
-                        egui::Slider::new(&mut settings.hbond_thickness, 1.0..=80.0)
-                            .text("H-bond thickness"),
-                    )
-                    .changed();
-                changed |= ui
-                    .add(
-                        egui::Slider::new(&mut settings.hbond_gap_scale, 0.2..=5.0)
-                            .text("H-bond dash gap scale"),
-                    )
-                    .changed();
-
-                if changed {
-                    mol.recompute_bonds(settings.bond_thresh_scale, settings.hbond_cutoff);
-                    settings.dirty = true;
-                }
-            });
-
             ui.add_space(8.0);
-
-            // ===========================
-            // 3) Color & Materials
-            // ===========================
-            ui.collapsing("Color & Materials", |ui| {
-                // Background quick picks + picker
-                ui.horizontal(|ui| {
-                    ui.label("Background:");
-                    if ui.button("Black").clicked() {
-                        settings.bg_color = Color::srgb(0.0, 0.0, 0.0);
-                        settings.dirty = true;
+            ui.collapsing("Trajectory", |ui| {
+                if ui.button("Load trajectory XYZ").clicked() {
+                    let mut dlg = rfd::FileDialog::new().add_filter("XYZ", &["xyz"]);
+                    if let Some(dir) = &traj.last_dir {
+                        dlg = dlg.set_directory(dir);
                     }
-                    if ui.button("White").clicked() {
-                        settings.bg_color = Color::srgb(1.0, 1.0, 1.0);
-                        settings.dirty = true;
-                    }
-                    ui.label("or pick:");
-                    let mut eg = color_to_egui(settings.bg_color);
-                    if ui.color_edit_button_srgba(&mut eg).changed() {
-                        settings.bg_color = egui_to_color(eg);
-                        settings.dirty = true;
-                    }
-                });
-
-                ui.add_space(6.0);
-                ui.label("PBR material (atoms + bonds):");
-                let mut mat_changed = false;
-                mat_changed |= ui
-                    .add(egui::Slider::new(&mut settings.metallic, 0.0..=1.0).text("Metallic"))
-                    .changed();
-                mat_changed |= ui
-                    .add(egui::Slider::new(&mut settings.roughness, 0.005..=1.0).text("Roughness"))
-                    .changed();
-                mat_changed |= ui
-                    .add(egui::Slider::new(&mut settings.reflectance, 0.0..=1.0).text("Reflectance"))
-                    .changed();
-                if mat_changed {
-                    settings.dirty = true;
-                }
-
-                ui.add_space(6.0);
-                ui.label("Colors:");
-                ui.horizontal(|ui| {
-                    ui.label("Scheme:");
-                    egui::ComboBox::from_id_salt("scheme_combo")
-                        .selected_text(format!("{:?}", settings.scheme))
-                        .show_ui(ui, |ui| {
-                            for &sc in &[
-                                ColorScheme::Custom,
-                                ColorScheme::CPK,
-                                ColorScheme::Jmol,
-                                ColorScheme::VMD,
-                                ColorScheme::Molden,
-                                ColorScheme::Molden0,
-                            ] {
-                                if ui
-                                    .selectable_label(settings.scheme == sc, format!("{:?}", sc))
-                                    .clicked()
-                                {
-                                    settings.scheme = sc;
-                                    if sc != ColorScheme::Custom {
-                                        settings.element_colors = color_scheme_map(sc);
-                                    }
-                                    settings.dirty = true;
+                    if let Some(path) = dlg.pick_file() {
+                        traj.last_dir = path.parent().map(|p| p.to_path_buf());
+                        if let Ok(text) = fs::read_to_string(&path) {
+                            match trajectory::parse_multi_xyz(&text) {
+                                Ok((atoms, frames)) => {
+                                    traj.atoms = atoms;
+                                    traj.frames = frames;
+                                    traj.current_frame = 0;
+                                    traj.playing = false;
+                                    traj.accum = 0.0;
+                                    traj.last_applied = None;
+                                    traj.overlay_dirty = true;
+                                    trajectory::apply_current_frame(
+                                        &mut traj,
+                                        &mut mol,
+                                        &mut settings,
+                                        &mut ev_changed,
+                                        true,
+                                        Some(&mut cam),
+                                    );
                                 }
+                                Err(_) => {}
                             }
-                        });
-                });
-
-                ui.collapsing("Per-element overrides (active in Custom)", |ui| {
-                    let keys: Vec<String> = settings.element_colors.keys().cloned().collect();
-                    for k in keys {
-                        if let Some(old) = settings.element_colors.get(&k).copied() {
-                            let mut col = color_to_egui(old);
-                            ui.horizontal(|ui| {
-                                ui.label(k.as_str());
-                                if ui.color_edit_button_srgba(&mut col).changed() {
-                                    settings
-                                        .element_colors
-                                        .insert(k.clone(), egui_to_color(col));
-                                    settings.scheme = ColorScheme::Custom;
-                                    settings.dirty = true;
-                                }
-                            });
                         }
                     }
-                });
-
-                ui.add_space(8.0);
-                ui.separator();
-
-                // Bond appearance
-                ui.label("Bond appearance:");
-                ui.horizontal(|ui| {
-                    let sel = ui.visuals().selection.bg_fill;
-                    let dim = ui.visuals().widgets.inactive.bg_fill;
-
-                    let is_uniform = matches!(settings.bond_color_mode, BondColorMode::Uniform);
-                    let is_split   = matches!(settings.bond_color_mode, BondColorMode::AtomSplit);
-
-                    if ui
-                        .add(egui::Button::new("Uniform bonds").fill(if is_uniform { sel } else { dim }))
-                        .clicked()
-                    {
-                        settings.bond_color_mode = BondColorMode::Uniform;
-                        settings.dirty = true;
-                    }
-
-                    if ui
-                        .add(egui::Button::new("Atom-split bonds").fill(if is_split { sel } else { dim }))
-                        .clicked()
-                    {
-                        settings.bond_color_mode = BondColorMode::AtomSplit;
-                        settings.dirty = true;
-                    }
-                });
-
-                ui.horizontal(|ui| {
-                    ui.label("Uniform bond color:");
-                    let mut bc = color_to_egui(settings.uniform_bond_color);
-                    if ui.color_edit_button_srgba(&mut bc).changed() {
-                        settings.uniform_bond_color = egui_to_color(bc);
-                        settings.dirty = true;
-                    }
-                });
-
-                ui.horizontal(|ui| {
-                    ui.label("H-bond color:");
-                    let mut hc = color_to_egui(settings.hbond_color);
-                    if ui.color_edit_button_srgba(&mut hc).changed() {
-                        settings.hbond_color = egui_to_color(hc);
-                        settings.dirty = true;
-                    }
-                });
-            });
-
-            ui.add_space(8.0);
-
-            // ===========================
-            // 4) Lighting
-            // ===========================
-            ui.collapsing("Lighting", |ui| {
-                let mut changed = false;
-
-                // Ambient
-                changed |= ui.checkbox(&mut settings.use_ambient, "Ambient (omnidirectional fill)").changed();
-                ui.horizontal(|ui| {
-                    ui.label("Ambient color");
-                    let mut ac = color_to_egui(settings.ambient_color);
-                    if ui.color_edit_button_srgba(&mut ac).changed() {
-                        settings.ambient_color = egui_to_color(ac);
-                        settings.dirty = true;
-                    }
-                });
-                changed |= ui
-                    .add(egui::Slider::new(&mut settings.ambient_brightness, 0.0..=3000.0).text("Ambient brightness"))
-                    .changed();
-
-                ui.separator();
-
-                // Lighting rig
-                ui.horizontal(|ui| {
-                    ui.label("Rig:");
-                    egui::ComboBox::from_id_salt("lighting_mode_combo")
-                        .selected_text(match settings.lighting_mode {
-                            LightingMode::SinglePoint => "Single point",
-                            LightingMode::ThreePoint  => "Three-point",
-                        })
-                        .show_ui(ui, |ui| {
-                            if ui.selectable_label(matches!(settings.lighting_mode, LightingMode::SinglePoint), "Single point").clicked() {
-                                settings.lighting_mode = LightingMode::SinglePoint;
-                                settings.dirty = true;
-                            }
-                            if ui.selectable_label(matches!(settings.lighting_mode, LightingMode::ThreePoint), "Three-point").clicked() {
-                                settings.lighting_mode = LightingMode::ThreePoint;
-                                settings.dirty = true;
-                            }
-                        });
-                });
-
-                // Key
-                changed |= ui
-                    .add(egui::Slider::new(&mut settings.light_intensity, 50_000.0..=8_000_000.0).text("Key intensity"))
-                    .changed();
-                changed |= ui
-                    .add(egui::Slider::new(&mut settings.light_distance, 3.0..=40.0).text("Key distance"))
-                    .changed();
-
-                // Fill / Rim (only in three-point)
-                if matches!(settings.lighting_mode, LightingMode::ThreePoint) {
-                    ui.separator();
-                    ui.label("Fill & Rim (three-point)");
-
-                    changed |= ui
-                        .add(egui::Slider::new(&mut settings.fill_intensity, 0.0..=6_000_000.0).text("Fill intensity"))
-                        .changed();
-                    changed |= ui
-                        .add(egui::Slider::new(&mut settings.fill_distance, 3.0..=50.0).text("Fill distance"))
-                        .changed();
-
-                    changed |= ui
-                        .add(egui::Slider::new(&mut settings.rim_intensity, 0.0..=6_000_000.0).text("Rim intensity"))
-                        .changed();
-                    changed |= ui
-                        .add(egui::Slider::new(&mut settings.rim_distance, 3.0..=50.0).text("Rim distance"))
-                        .changed();
                 }
 
-                if changed { settings.dirty = true; }
-            });
+                if traj.frames.is_empty() {
+                    ui.weak("No trajectory loaded.");
+                } else {
+                    let total = traj.frames.len();
+                    ui.label(format!("Frame {}/{}", traj.current_frame + 1, total));
 
+                    let mut frame_display = (traj.current_frame + 1) as i32;
+                    if ui
+                        .add(egui::Slider::new(&mut frame_display, 1..=total as i32).text("Frame"))
+                        .changed()
+                    {
+                        traj.current_frame = (frame_display - 1) as usize;
+                        traj.playing = false;
+                        trajectory::apply_current_frame(
+                            &mut traj,
+                            &mut mol,
+                            &mut settings,
+                            &mut ev_changed,
+                            false,
+                            None,
+                        );
+                    }
+
+                    ui.horizontal(|ui| {
+                        if ui.button("|◀").clicked() {
+                            traj.current_frame = 0;
+                            traj.playing = false;
+                            trajectory::apply_current_frame(
+                                &mut traj,
+                                &mut mol,
+                                &mut settings,
+                                &mut ev_changed,
+                                false,
+                                None,
+                            );
+                        }
+                        if ui.button("Play ◀").clicked() {
+                            traj.direction = -1;
+                            traj.playing = true;
+                        }
+                        if ui.button("Pause").clicked() {
+                            traj.playing = false;
+                        }
+                        if ui.button("Play ▶").clicked() {
+                            traj.direction = 1;
+                            traj.playing = true;
+                        }
+                        if ui.button("▶|").clicked() {
+                            traj.current_frame = total - 1;
+                            traj.playing = false;
+                            trajectory::apply_current_frame(
+                                &mut traj,
+                                &mut mol,
+                                &mut settings,
+                                &mut ev_changed,
+                                false,
+                                None,
+                            );
+                        }
+                    });
+
+                    ui.horizontal(|ui| {
+                        if ui.button("Step ◀").clicked() {
+                            if traj.current_frame > 0 {
+                                traj.current_frame -= 1;
+                                traj.playing = false;
+                                trajectory::apply_current_frame(
+                                    &mut traj,
+                                    &mut mol,
+                                    &mut settings,
+                                    &mut ev_changed,
+                                    false,
+                                    None,
+                                );
+                            }
+                        }
+                        if ui.button("Step ▶").clicked() {
+                            if traj.current_frame + 1 < total {
+                                traj.current_frame += 1;
+                                traj.playing = false;
+                                trajectory::apply_current_frame(
+                                    &mut traj,
+                                    &mut mol,
+                                    &mut settings,
+                                    &mut ev_changed,
+                                    false,
+                                    None,
+                                );
+                            }
+                        }
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label("Speed (fps)");
+                        ui.add(egui::Slider::new(&mut traj.fps, 1.0..=100.0).show_value(true));
+                    });
+
+                    ui.horizontal(|ui| {
+                        let sel = ui.visuals().selection.bg_fill;
+                        let dim = ui.visuals().widgets.inactive.bg_fill;
+
+                        let is_loop = matches!(traj.mode, trajectory::PlaybackMode::Loop);
+                        let is_once = matches!(traj.mode, trajectory::PlaybackMode::Once);
+                        let is_ping = matches!(traj.mode, trajectory::PlaybackMode::PingPong);
+
+                        if ui
+                            .add(egui::Button::new("Loop").fill(if is_loop { sel } else { dim }))
+                            .clicked()
+                        {
+                            traj.mode = trajectory::PlaybackMode::Loop;
+                        }
+                        if ui
+                            .add(egui::Button::new("Once").fill(if is_once { sel } else { dim }))
+                            .clicked()
+                        {
+                            traj.mode = trajectory::PlaybackMode::Once;
+                        }
+                        if ui
+                            .add(egui::Button::new("Ping-pong").fill(if is_ping { sel } else { dim }))
+                            .clicked()
+                        {
+                            traj.mode = trajectory::PlaybackMode::PingPong;
+                        }
+                    });
+
+                    ui.add_space(8.0);
+                    ui.separator();
+                    ui.add_space(8.0);
+
+                    ui.horizontal(|ui| {
+                        let sel = ui.visuals().selection.bg_fill;
+                        let dim = ui.visuals().widgets.inactive.bg_fill;
+                        ui.add_space(4.0);
+                        if ui
+                            .add(egui::Button::new("Overlay").fill(if traj.overlay_enabled { sel } else { dim }))
+                            .clicked()
+                        {
+                            traj.overlay_enabled = !traj.overlay_enabled;
+                            traj.overlay_dirty = true;
+                        }
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label("Full overlay stride");
+                        let mut stride_val = traj.overlay_full_stride as i32;
+                        if ui
+                            .add(
+                                egui::Slider::new(&mut stride_val, 0..=500)
+                                    .show_value(true),
+                            )
+                            .changed()
+                        {
+                            traj.overlay_full_stride = stride_val.max(0) as usize;
+                            traj.overlay_dirty = true;
+                        }
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label("Ghost overlay stride");
+                        let mut stride_val = traj.overlay_ghost_stride as i32;
+                        if ui
+                            .add(
+                                egui::Slider::new(&mut stride_val, 0..=500)
+                                    .show_value(true),
+                            )
+                            .changed()
+                        {
+                            traj.overlay_ghost_stride = stride_val.max(0) as usize;
+                            traj.overlay_dirty = true;
+                        }
+                    });
+
+                    ui.horizontal(|ui| {
+                        let sel = ui.visuals().selection.bg_fill;
+                        let dim = ui.visuals().widgets.inactive.bg_fill;
+                        if ui
+                            .add(
+                                egui::Button::new("Full-last")
+                                    .fill(if traj.overlay_full_last { sel } else { dim }),
+                            )
+                            .clicked()
+                        {
+                            traj.overlay_full_last = !traj.overlay_full_last;
+                            traj.overlay_dirty = true;
+                        }
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label("Ghost transparency");
+                        if ui
+                            .add(egui::Slider::new(&mut traj.ghost_alpha, 0.05..=0.8))
+                            .changed()
+                        {
+                            traj.overlay_dirty = true;
+                        }
+                    });
+                }
+            });
             // ===========================
-            // 5) Measurements
+            // 2) Measurements
             // ===========================
             ui.add_space(8.0);
             ui.separator();
@@ -603,7 +569,278 @@ pub fn ui_panel(
             });
 
             // ===========================
-            // 6) Export Image
+            // 3) Appearance
+            // ===========================
+            ui.add_space(8.0);
+            ui.separator();
+            ui.collapsing("Appearance", |ui| {
+                ui.collapsing("Atom & Bond Scaling", |ui| {
+                    let mut changed = false;
+                    changed |= ui
+                        .add(egui::Slider::new(&mut settings.atom_scale, 0.1..=3.0).text("Atom scale"))
+                        .changed();
+                    changed |= ui
+                        .add(egui::Slider::new(&mut settings.atom_resolution, 0..=10).text("Atom resolution"))
+                        .changed();
+
+                    ui.add_space(8.0);
+                    ui.separator();
+                    ui.add_space(8.0);
+
+                    changed |= ui
+                        .add(
+                            egui::Slider::new(&mut settings.bond_radius_pct, 0.05..=1.0)
+                                .text("Bond radius (% of smaller atom)"),
+                        )
+                        .changed();
+
+                    changed |= ui
+                        .add(
+                            egui::Slider::new(&mut settings.bond_thresh_scale, 0.8..=3.0)
+                                .text("Bond cutoff × covalent radii"),
+                        )
+                        .changed();
+
+                    ui.add_space(8.0);
+                    ui.separator();
+                    ui.add_space(8.0);
+
+                    changed |= ui
+                        .add(
+                            egui::Slider::new(&mut settings.hbond_cutoff, 1.2..=5.0)
+                                .text("Hydrogen bond cutoff in Å"),
+                        )
+                        .changed();
+
+                    // H-bond style
+                    changed |= ui
+                        .add(
+                            egui::Slider::new(&mut settings.hbond_thickness, 1.0..=80.0)
+                                .text("H-bond thickness"),
+                        )
+                        .changed();
+                    changed |= ui
+                        .add(
+                            egui::Slider::new(&mut settings.hbond_gap_scale, 0.2..=5.0)
+                                .text("H-bond dash gap scale"),
+                        )
+                        .changed();
+
+                    if changed {
+                        mol.recompute_bonds(settings.bond_thresh_scale, settings.hbond_cutoff);
+                        settings.dirty = true;
+                    }
+                });
+
+                ui.add_space(8.0);
+
+                ui.collapsing("Color & Materials", |ui| {
+                    // Background quick picks + picker
+                    ui.horizontal(|ui| {
+                        ui.label("Background:");
+                        if ui.button("Black").clicked() {
+                            settings.bg_color = Color::srgb(0.0, 0.0, 0.0);
+                            settings.dirty = true;
+                        }
+                        if ui.button("White").clicked() {
+                            settings.bg_color = Color::srgb(1.0, 1.0, 1.0);
+                            settings.dirty = true;
+                        }
+                        ui.label("or pick:");
+                        let mut eg = color_to_egui(settings.bg_color);
+                        if ui.color_edit_button_srgba(&mut eg).changed() {
+                            settings.bg_color = egui_to_color(eg);
+                            settings.dirty = true;
+                        }
+                    });
+
+                    ui.add_space(6.0);
+                    ui.label("PBR material (atoms + bonds):");
+                    let mut mat_changed = false;
+                    mat_changed |= ui
+                        .add(egui::Slider::new(&mut settings.metallic, 0.0..=1.0).text("Metallic"))
+                        .changed();
+                    mat_changed |= ui
+                        .add(egui::Slider::new(&mut settings.roughness, 0.005..=1.0).text("Roughness"))
+                        .changed();
+                    mat_changed |= ui
+                        .add(egui::Slider::new(&mut settings.reflectance, 0.0..=1.0).text("Reflectance"))
+                        .changed();
+                    if mat_changed {
+                        settings.dirty = true;
+                    }
+
+                    ui.add_space(6.0);
+                    ui.label("Colors:");
+                    ui.horizontal(|ui| {
+                        ui.label("Scheme:");
+                        egui::ComboBox::from_id_salt("scheme_combo")
+                            .selected_text(format!("{:?}", settings.scheme))
+                            .show_ui(ui, |ui| {
+                                for &sc in &[
+                                    ColorScheme::Custom,
+                                    ColorScheme::CPK,
+                                    ColorScheme::Jmol,
+                                    ColorScheme::VMD,
+                                    ColorScheme::Molden,
+                                    ColorScheme::Molden0,
+                                ] {
+                                    if ui
+                                        .selectable_label(settings.scheme == sc, format!("{:?}", sc))
+                                        .clicked()
+                                    {
+                                        settings.scheme = sc;
+                                        if sc != ColorScheme::Custom {
+                                            settings.element_colors = color_scheme_map(sc);
+                                        }
+                                        settings.dirty = true;
+                                    }
+                                }
+                            });
+                    });
+
+                    ui.collapsing("Per-element overrides (active in Custom)", |ui| {
+                        let keys: Vec<String> = settings.element_colors.keys().cloned().collect();
+                        for k in keys {
+                            if let Some(old) = settings.element_colors.get(&k).copied() {
+                                let mut col = color_to_egui(old);
+                                ui.horizontal(|ui| {
+                                    ui.label(k.as_str());
+                                    if ui.color_edit_button_srgba(&mut col).changed() {
+                                        settings
+                                            .element_colors
+                                            .insert(k.clone(), egui_to_color(col));
+                                        settings.scheme = ColorScheme::Custom;
+                                        settings.dirty = true;
+                                    }
+                                });
+                            }
+                        }
+                    });
+
+                    ui.add_space(8.0);
+                    ui.separator();
+
+                    // Bond appearance
+                    ui.label("Bond appearance:");
+                    ui.horizontal(|ui| {
+                        let sel = ui.visuals().selection.bg_fill;
+                        let dim = ui.visuals().widgets.inactive.bg_fill;
+
+                        let is_uniform = matches!(settings.bond_color_mode, BondColorMode::Uniform);
+                        let is_split   = matches!(settings.bond_color_mode, BondColorMode::AtomSplit);
+
+                        if ui
+                            .add(egui::Button::new("Uniform bonds").fill(if is_uniform { sel } else { dim }))
+                            .clicked()
+                        {
+                            settings.bond_color_mode = BondColorMode::Uniform;
+                            settings.dirty = true;
+                        }
+
+                        if ui
+                            .add(egui::Button::new("Atom-split bonds").fill(if is_split { sel } else { dim }))
+                            .clicked()
+                        {
+                            settings.bond_color_mode = BondColorMode::AtomSplit;
+                            settings.dirty = true;
+                        }
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label("Uniform bond color:");
+                        let mut bc = color_to_egui(settings.uniform_bond_color);
+                        if ui.color_edit_button_srgba(&mut bc).changed() {
+                            settings.uniform_bond_color = egui_to_color(bc);
+                            settings.dirty = true;
+                        }
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label("H-bond color:");
+                        let mut hc = color_to_egui(settings.hbond_color);
+                        if ui.color_edit_button_srgba(&mut hc).changed() {
+                            settings.hbond_color = egui_to_color(hc);
+                            settings.dirty = true;
+                        }
+                    });
+                });
+
+                ui.add_space(8.0);
+
+                ui.collapsing("Lighting", |ui| {
+                    let mut changed = false;
+
+                    // Ambient
+                    changed |= ui.checkbox(&mut settings.use_ambient, "Ambient (omnidirectional fill)").changed();
+                    ui.horizontal(|ui| {
+                        ui.label("Ambient color");
+                        let mut ac = color_to_egui(settings.ambient_color);
+                        if ui.color_edit_button_srgba(&mut ac).changed() {
+                            settings.ambient_color = egui_to_color(ac);
+                            settings.dirty = true;
+                        }
+                    });
+                    changed |= ui
+                        .add(egui::Slider::new(&mut settings.ambient_brightness, 0.0..=3000.0).text("Ambient brightness"))
+                        .changed();
+
+                    ui.separator();
+
+                    // Lighting rig
+                    ui.horizontal(|ui| {
+                        ui.label("Rig:");
+                        egui::ComboBox::from_id_salt("lighting_mode_combo")
+                            .selected_text(match settings.lighting_mode {
+                                LightingMode::SinglePoint => "Single point",
+                                LightingMode::ThreePoint  => "Three-point",
+                            })
+                            .show_ui(ui, |ui| {
+                                if ui.selectable_label(matches!(settings.lighting_mode, LightingMode::SinglePoint), "Single point").clicked() {
+                                    settings.lighting_mode = LightingMode::SinglePoint;
+                                    settings.dirty = true;
+                                }
+                                if ui.selectable_label(matches!(settings.lighting_mode, LightingMode::ThreePoint), "Three-point").clicked() {
+                                    settings.lighting_mode = LightingMode::ThreePoint;
+                                    settings.dirty = true;
+                                }
+                            });
+                    });
+
+                    // Key
+                    changed |= ui
+                        .add(egui::Slider::new(&mut settings.light_intensity, 50_000.0..=8_000_000.0).text("Key intensity"))
+                        .changed();
+                    changed |= ui
+                        .add(egui::Slider::new(&mut settings.light_distance, 3.0..=40.0).text("Key distance"))
+                        .changed();
+
+                    // Fill / Rim (only in three-point)
+                    if matches!(settings.lighting_mode, LightingMode::ThreePoint) {
+                        ui.separator();
+                        ui.label("Fill & Rim (three-point)");
+
+                        changed |= ui
+                            .add(egui::Slider::new(&mut settings.fill_intensity, 0.0..=6_000_000.0).text("Fill intensity"))
+                            .changed();
+                        changed |= ui
+                            .add(egui::Slider::new(&mut settings.fill_distance, 3.0..=50.0).text("Fill distance"))
+                            .changed();
+
+                        changed |= ui
+                            .add(egui::Slider::new(&mut settings.rim_intensity, 0.0..=6_000_000.0).text("Rim intensity"))
+                            .changed();
+                        changed |= ui
+                            .add(egui::Slider::new(&mut settings.rim_distance, 3.0..=50.0).text("Rim distance"))
+                            .changed();
+                    }
+
+                    if changed { settings.dirty = true; }
+                });
+            });
+
+            // ===========================
+            // 5) Export Image
             // ===========================
             ui.add_space(8.0);
             ui.separator();

@@ -16,6 +16,7 @@ mod ui_measurements;
 mod molecule_builder;
 mod events;
 mod picking;
+mod trajectory;
 
 use camera::orbit_camera_system;
 use scene::{
@@ -30,6 +31,7 @@ use scene::{
 use settings::MolSettings;
 use ui::XyzBuffer;
 use hbonds::{HbondGizmos, draw_hydrogen_bonds_dashed};
+use trajectory::TrajectoryState;
 
 use molecule_builder::builder_ui::{
     builder_ui_panel, configure_builder_gizmos, draw_builder_highlights,
@@ -65,6 +67,8 @@ fn main() {
         // molecule editor
         .init_resource::<EditorRotateState>()
         .init_gizmo_group::<BuilderGizmos>()
+        // trajectory
+        .init_resource::<TrajectoryState>()
         // scene
         .add_systems(Startup, (setup, center_camera_on_startup))
         // egui pass
@@ -97,6 +101,10 @@ fn main() {
                 configure_builder_gizmos,
                 molecule_builder::builder_ui::handle_builder_atom_picked,
                 draw_builder_highlights,
+
+                // trajectory
+                trajectory::advance_trajectory,
+                trajectory::rebuild_trajectory_overlay,
             ).chain(),
         )
         .run();
