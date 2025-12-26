@@ -193,6 +193,52 @@ pub fn parse_xyz_angstrom(xyz: &str) -> (usize, Vec<String>, Vec<Vec<f64>>) {
     (n, atoms, qxyz)
 }
 
+/// Parse only the first XYZ frame (Å). Returns (atoms, coords, extra_frames).
+pub fn parse_xyz_first_frame_angstrom(xyz: &str) -> (Vec<String>, Vec<Vec<f64>>, bool) {
+    let lines: Vec<&str> = xyz.lines().filter(|l| !l.trim().is_empty()).collect();
+    if lines.is_empty() {
+        return (Vec::new(), Vec::new(), false);
+    }
+
+    let first_parts: Vec<&str> = lines[0].split_whitespace().collect();
+    let has_count = first_parts.len() == 1 && first_parts[0].parse::<usize>().is_ok();
+    if !has_count {
+        let (_n, atoms, coords) = parse_xyz_angstrom(xyz);
+        return (atoms, coords, false);
+    }
+
+    let count = first_parts[0].parse::<usize>().unwrap_or(0);
+    let mut idx = 1;
+    if idx < lines.len() {
+        let second_parts: Vec<&str> = lines[idx].split_whitespace().collect();
+        if second_parts.len() < 4 {
+            idx += 1;
+        }
+    }
+
+    let mut atoms = Vec::new();
+    let mut qxyz = Vec::new();
+    for line in lines.iter().skip(idx).take(count) {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() < 4 {
+            continue;
+        }
+        let atom = parts[0].to_string();
+        let x = parts[1].parse::<f64>().unwrap();
+        let y = parts[2].parse::<f64>().unwrap();
+        let z = parts[3].parse::<f64>().unwrap();
+        atoms.push(atom);
+        qxyz.push(vec![x, y, z]);
+    }
+
+    let extra_frames = lines
+        .iter()
+        .skip(idx + count)
+        .any(|l| !l.trim().is_empty());
+
+    (atoms, qxyz, extra_frames)
+}
+
 /// Covalent radii in Å (no Bohr conversion anymore)
 pub fn covalent_radius_angstrom(sym: &str) -> f32 {
     match sym {

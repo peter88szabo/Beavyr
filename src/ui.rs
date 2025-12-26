@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 use crate::color_schemes::{color_scheme_map, ELEMENT_SYMBOLS};
 use crate::events::MoleculeChanged;
-use crate::molecule::{parse_xyz_angstrom, Molecule};
+use crate::molecule::{parse_xyz_first_frame_angstrom, Molecule};
 use crate::settings::{BondColorMode, ColorScheme, LightingMode, MolSettings, RepresentationMode};
 
 // Export UI + resources
@@ -46,6 +46,7 @@ const ELEMENT_FILTER_F_BLOCK: [&str; 30] = [
 pub struct XyzBuffer {
     pub text: String,
     pub last_dir: Option<PathBuf>,
+    pub warning: Option<String>,
 }
 
 /// Right-side control panel + overlays.
@@ -259,8 +260,8 @@ pub fn ui_panel(
                         if let Some(path) = dlg.pick_file() {
                             xyz_buf.last_dir = path.parent().map(|p| p.to_path_buf());
                             if let Ok(text) = fs::read_to_string(&path) {
-                                xyz_buf.text = normalize_xyz_text_for_editor(&text);
-                                apply_xyz_text(
+                                xyz_buf.text = text;
+                                xyz_buf.warning = apply_xyz_text(
                                     &xyz_buf.text,
                                     &mut mol,
                                     &mut cam,
@@ -293,6 +294,13 @@ pub fn ui_panel(
                 });
                 ui.add_space(8.0);
 
+                if let Some(warn) = &xyz_buf.warning {
+                    ui.colored_label(
+                        egui::Color32::from_rgb(255, 170, 0),
+                        format!("Warning: {}", warn),
+                    );
+                }
+
                 if edit_mode {
                     // ---- EDIT MODE ----
                     ui.label("Paste or edit XYZ. Input is assumed in Å (Angstrom).");
@@ -310,7 +318,7 @@ pub fn ui_panel(
 
                     ui.horizontal(|ui| {
                         if ui.button("Apply (Parse XYZ)").clicked() {
-                            apply_xyz_text(
+                            xyz_buf.warning = apply_xyz_text(
                                 &xyz_buf.text,
                                 &mut mol,
                                 &mut cam,
@@ -384,6 +392,7 @@ pub fn ui_panel(
                     }
                     if let Some(path) = dlg.pick_file() {
                         traj.last_dir = path.parent().map(|p| p.to_path_buf());
+                        xyz_buf.warning = None;
                         if let Ok(text) = fs::read_to_string(&path) {
                             match trajectory::parse_multi_xyz(&text) {
                                 Ok((atoms, frames)) => {
@@ -1260,8 +1269,8 @@ fn apply_xyz_text(
     mol: &mut Molecule,
     cam: &mut crate::camera::OrbitCamera,
     ev_changed: &mut EventWriter<MoleculeChanged>,
-) {
-    let (_n, atoms, qxyz) = parse_xyz_angstrom(text);
+) -> Option<String> {
+    let (atoms, qxyz, extra_frames) = parse_xyz_first_frame_angstrom(text);
     mol.atoms = atoms;
     mol.set_pos(
         qxyz
@@ -1277,23 +1286,12 @@ fn apply_xyz_text(
     if let Some(c) = compute_centroid(&mol.pos) {
         cam.target = c;
     }
-}
 
-fn normalize_xyz_text_for_editor(text: &str) -> String {
-    let mut lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
-    if !lines.is_empty() {
-        let first_parts: Vec<&str> = lines[0].split_whitespace().collect();
-        if first_parts.len() == 1 && first_parts[0].parse::<usize>().is_ok() {
-            lines.remove(0);
-            if !lines.is_empty() {
-                let second_parts: Vec<&str> = lines[0].split_whitespace().collect();
-                if second_parts.len() < 4 {
-                    lines.remove(0);
-                }
-            }
-        }
+    if extra_frames {
+        Some("Multiple XYZ frames detected; loaded only the first frame.".to_string())
+    } else {
+        None
     }
-    lines.join("\n")
 }
 
 /// Format current `Molecule` as simple XYZ lines: "Sym  x  y  z"

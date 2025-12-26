@@ -60,6 +60,7 @@ fn main() {
         .insert_resource(XyzBuffer {
             text: scene::DEFAULT_WATER.trim().to_string(),
             last_dir: None,
+            warning: None,
         })
         // export UI resources
         .init_resource::<export::ExportUiState>()
