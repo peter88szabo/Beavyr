@@ -594,15 +594,7 @@ pub fn rebuild_if_dirty(
                     continue;
                 }
 
-                let half_len = if matches!(
-                    settings.representation,
-                    RepresentationMode::SticksRounded
-                ) {
-                    let overlap = (radius * 0.10).max(0.001);
-                    visible_len * 0.5 + overlap
-                } else {
-                    visible_len * 0.5
-                };
+                let half_len = visible_len * 0.5;
 
                 let mid = (start + end) * 0.5;
                 let c0 = mid - dir_n * (visible_len * 0.25);
