@@ -4,11 +4,136 @@ use bevy_egui::{egui, EguiContexts};
 use crate::events::{AtomPicked, ToolKind};
 use crate::molecule::{Molecule, covalent_radius_angstrom};
 use crate::settings::MolSettings;
+use crate::color_schemes::color_for;
 use super::rotator::{bend_side, rotate_side, split_sides, translate_side, RotateSide};
 use super::zmat2xyz::{self, ZAtom};
 
-const DEFAULT_ANGLE_DEG: f64 = 109.45;
-const DEFAULT_DIHEDRAL_DEG: f64 = 120.0;
+const ANGLE_SINGLE_DEG: f64 = 109.47;
+const ANGLE_DOUBLE_DEG: f64 = 120.0;
+const ANGLE_TRIPLE_DEG: f64 = 179.95;
+
+const DIHEDRAL_SINGLE_DEG: f64 = 0.0;
+const DIHEDRAL_DOUBLE_DEG: f64 = 120.0;
+const DIHEDRAL_TRIPLE_DEG: f64 = 180.0;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BondOrder {
+    Single,
+    Double,
+    Triple,
+}
+
+impl BondOrder {
+    fn label(self) -> &'static str {
+        match self {
+            BondOrder::Single => "Single",
+            BondOrder::Double => "Double",
+            BondOrder::Triple => "Triple",
+        }
+    }
+
+    fn default_angle(self) -> f64 {
+        match self {
+            BondOrder::Single => ANGLE_SINGLE_DEG,
+            BondOrder::Double => ANGLE_DOUBLE_DEG,
+            BondOrder::Triple => ANGLE_TRIPLE_DEG,
+        }
+    }
+
+    fn default_dihedral(self) -> f64 {
+        match self {
+            BondOrder::Single => DIHEDRAL_SINGLE_DEG,
+            BondOrder::Double => DIHEDRAL_DOUBLE_DEG,
+            BondOrder::Triple => DIHEDRAL_TRIPLE_DEG,
+        }
+    }
+}
+
+fn single_bond_radius(sym: &str) -> Option<f64> {
+    match sym {
+        "H" => Some(0.31),
+        "C" => Some(0.76),
+        "N" => Some(0.71),
+        "O" => Some(0.66),
+        "F" => Some(0.57),
+        "Cl" => Some(1.02),
+        "Br" => Some(1.20),
+        "I" => Some(1.39),
+        "P" => Some(1.07),
+        "S" => Some(1.05),
+        "Al" => Some(1.21),
+        "Si" => Some(1.11),
+        "Fe" => Some(1.24),
+        _ => None,
+    }
+}
+
+fn double_bond_radius(sym: &str) -> Option<f64> {
+    match sym {
+        "C" => Some(0.67),
+        "N" => Some(0.60),
+        "O" => Some(0.57),
+        "S" => Some(0.94),
+        "P" => Some(1.00),
+        "Si" => Some(1.02),
+        "Fe" => Some(1.16),
+        _ => None,
+    }
+}
+
+fn triple_bond_radius(sym: &str) -> Option<f64> {
+    match sym {
+        "C" => Some(0.60),
+        "N" => Some(0.54),
+        "P" => Some(0.94),
+        _ => None,
+    }
+}
+
+fn bond_length_for(
+    sym_a: &str,
+    sym_b: &str,
+    order: BondOrder,
+    fallback_a: f32,
+    fallback_b: f32,
+) -> f64 {
+    let (a, b) = if sym_a <= sym_b { (sym_a, sym_b) } else { (sym_b, sym_a) };
+    match order {
+        BondOrder::Triple => {
+            if a == "C" && b == "C" { return 1.20; }
+            if a == "C" && b == "N" { return 1.16; }
+            if a == "C" && b == "P" { return 1.55; }
+            if a == "N" && b == "P" { return 1.55; }
+        }
+        BondOrder::Double => {}
+        BondOrder::Single => {}
+    }
+
+    match order {
+        BondOrder::Single => {
+            if let (Some(ra), Some(rb)) = (single_bond_radius(a), single_bond_radius(b)) {
+                return ra + rb;
+            }
+        }
+        BondOrder::Double => {
+            if let (Some(ra), Some(rb)) = (double_bond_radius(a), double_bond_radius(b)) {
+                return ra + rb;
+            }
+        }
+        BondOrder::Triple => {
+            if let (Some(ra), Some(rb)) = (triple_bond_radius(a), triple_bond_radius(b)) {
+                return ra + rb;
+            }
+        }
+    }
+
+    let sum = (fallback_a + fallback_b) as f64;
+    match order {
+        BondOrder::Single => sum,
+        BondOrder::Double => sum * 0.90,
+        BondOrder::Triple => sum * 0.80,
+    }
+}
 
 #[derive(Default, Reflect, GizmoConfigGroup)]
 pub struct BuilderGizmos;
@@ -34,12 +159,21 @@ pub struct EditorRotateState {
 pub struct ZMatrixBuilderState {
     pub zmat: Vec<ZAtom>,
     pub new_symbol: String,
+    pub new_bond_order: BondOrder,
+    pub new_angle_deg: f64,
+    pub new_dihedral_deg: f64,
     pub pick_active: bool,
     pub pick_indices: Vec<usize>,
     pub pick_hint: Option<String>,
     pub edit_rows: Vec<ZAtomEditRow>,
     pub edit_refresh: bool,
     pub edit_preview: Vec<usize>,
+    pub selected_index: Option<usize>,
+    pub selected_symbol: Option<String>,
+    pub remove_popup_open: bool,
+    pub remove_popup_pos: Option<egui::Pos2>,
+    pub last_remove_snapshot: Option<Vec<ZAtom>>,
+    pub redo_remove_visible: bool,
     pub original_atoms: Option<Vec<String>>,
     pub original_pos: Option<Vec<Vec3>>,
     pub last_error: Option<String>,
@@ -99,15 +233,75 @@ impl Default for ZMatrixBuilderState {
         Self {
             zmat: Vec::new(),
             new_symbol: "C".to_string(),
+            new_bond_order: BondOrder::Single,
+            new_angle_deg: ANGLE_SINGLE_DEG,
+            new_dihedral_deg: DIHEDRAL_SINGLE_DEG,
             pick_active: false,
             pick_indices: Vec::new(),
             pick_hint: None,
             edit_rows: Vec::new(),
             edit_refresh: false,
             edit_preview: Vec::new(),
+            selected_index: None,
+            selected_symbol: None,
+            remove_popup_open: false,
+            remove_popup_pos: None,
+            last_remove_snapshot: None,
+            redo_remove_visible: false,
             original_atoms: None,
             original_pos: None,
             last_error: None,
+        }
+    }
+}
+
+fn color_to_egui(c: Color) -> egui::Color32 {
+    let s = c.to_srgba();
+    egui::Color32::from_rgba_premultiplied(
+        (s.red * 255.0).round() as u8,
+        (s.green * 255.0).round() as u8,
+        (s.blue * 255.0).round() as u8,
+        (s.alpha * 255.0).round() as u8,
+    )
+}
+
+fn can_remove_zmat_index(zmat: &[ZAtom], idx: usize) -> bool {
+    let target = idx + 1;
+    for (i, atom) in zmat.iter().enumerate() {
+        if i <= idx {
+            continue;
+        }
+        if atom.bond_ref == Some(target)
+            || atom.angle_ref == Some(target)
+            || atom.dihedral_ref == Some(target)
+        {
+            return false;
+        }
+    }
+    true
+}
+
+fn remove_zmat_index(zmat: &mut Vec<ZAtom>, idx: usize) {
+    if idx >= zmat.len() {
+        return;
+    }
+    zmat.remove(idx);
+    let removed = idx + 1;
+    for atom in zmat.iter_mut() {
+        if let Some(r) = atom.bond_ref {
+            if r > removed {
+                atom.bond_ref = Some(r - 1);
+            }
+        }
+        if let Some(r) = atom.angle_ref {
+            if r > removed {
+                atom.angle_ref = Some(r - 1);
+            }
+        }
+        if let Some(r) = atom.dihedral_ref {
+            if r > removed {
+                atom.dihedral_ref = Some(r - 1);
+            }
         }
     }
 }
@@ -394,7 +588,15 @@ pub fn handle_builder_atom_picked(
                 } else {
                     let r_new = covalent_radius_angstrom(&symbol);
                     let r_ref = covalent_radius_angstrom(&mol.atoms[bond_ref]);
-                    let bond_len = (r_new + r_ref) as f64;
+                    let bond_len = bond_length_for(
+                        &symbol,
+                        &mol.atoms[bond_ref],
+                        zmat_state.new_bond_order,
+                        r_new,
+                        r_ref,
+                    );
+                    let angle_deg = zmat_state.new_angle_deg;
+                    let dihedral_deg = zmat_state.new_dihedral_deg;
 
                     let entry = match required_picks {
                         1 => ZAtom {
@@ -411,7 +613,7 @@ pub fn handle_builder_atom_picked(
                             bond_ref: Some(bond_ref + 1),
                             bond_len,
                             angle_ref: angle_ref.map(|v| v + 1),
-                            angle_deg: DEFAULT_ANGLE_DEG,
+                            angle_deg,
                             dihedral_ref: None,
                             dihedral_deg: 0.0,
                         },
@@ -420,9 +622,9 @@ pub fn handle_builder_atom_picked(
                             bond_ref: Some(bond_ref + 1),
                             bond_len,
                             angle_ref: angle_ref.map(|v| v + 1),
-                            angle_deg: DEFAULT_ANGLE_DEG,
+                            angle_deg,
                             dihedral_ref: dihedral_ref.map(|v| v + 1),
-                            dihedral_deg: DEFAULT_DIHEDRAL_DEG,
+                            dihedral_deg,
                         },
                     };
                     zmat_state.zmat.push(entry);
@@ -640,13 +842,15 @@ pub fn builder_ui_panel(
                     ensure_zmat_edit_buffers(&mut zmat_state);
                     zmat_state.edit_preview.clear();
                     let mut preview_indices: Option<Vec<usize>> = None;
+                    let mut grid_rect: Option<egui::Rect> = None;
+                    let mut suppress_clear = false;
                     let col_idx = [20.0, 28.0, 28.0, 68.0, 28.0, 60.0, 28.0, 60.0];
                     let row_height = 22.0;
                     let max_height = row_height * 15.0;
                     egui::ScrollArea::vertical()
                         .max_height(max_height)
                         .show(ui, |ui| {
-                            egui::Grid::new("zmat_rows")
+                            let grid_resp = egui::Grid::new("zmat_rows")
                                 .striped(true)
                                 .spacing(egui::vec2(4.0, 4.0))
                                 .show(ui, |ui| {
@@ -660,16 +864,106 @@ pub fn builder_ui_panel(
                                     ui.add_sized([col_idx[7], 0.0], egui::Label::new("Dihedral"));
                                     ui.end_row();
 
+                                    let selected_idx = zmat_state.selected_index;
+                                    let selected_sym = zmat_state.selected_symbol.clone();
+                                    #[derive(Copy, Clone, Debug, PartialEq, Eq)]
+                                    enum SelectionAction {
+                                        Clear,
+                                    }
+                                    let mut pending_select: Option<(usize, String)> = None;
+                                    let mut pending_popup_pos: Option<egui::Pos2> = None;
+                                    let mut pending_open_popup = false;
+                                    let mut pending_action: Option<SelectionAction> = None;
+
                                     for (i, row) in zmat_state.edit_rows.iter_mut().enumerate() {
+                                        let is_selected = selected_idx == Some(i);
+                                        let same_element = selected_sym
+                                            .as_deref()
+                                            .map(|s| s == row.symbol.as_str())
+                                            .unwrap_or(false);
+                                        let sym_color = if !row.symbol.trim().is_empty() {
+                                            settings
+                                                .element_colors
+                                                .get(row.symbol.trim())
+                                                .copied()
+                                                .unwrap_or_else(|| color_for(row.symbol.trim(), settings.scheme))
+                                        } else {
+                                            Color::WHITE
+                                        };
+                                        let mut hl_bg: Option<egui::Color32> = None;
+                                        if same_element && is_selected {
+                                            let c = color_to_egui(sym_color);
+                                            hl_bg = Some(egui::Color32::from_rgba_premultiplied(
+                                                c.r(),
+                                                c.g(),
+                                                c.b(),
+                                                if is_selected { 90 } else { 40 },
+                                            ));
+                                        } else if is_selected {
+                                            hl_bg = Some(egui::Color32::from_rgba_premultiplied(200, 200, 200, 60));
+                                        }
                                         let idx_label = format!("{}", i + 1);
-                                        ui.add_sized([col_idx[0], 0.0], egui::Label::new(idx_label));
+                                        let idx_resp = ui.add_sized(
+                                            [col_idx[0], 0.0],
+                                            egui::Button::new(idx_label).selected(is_selected),
+                                        );
+                                        if idx_resp.clicked() {
+                                            if selected_idx == Some(i) {
+                                                pending_action = Some(SelectionAction::Clear);
+                                            } else {
+                                                pending_select = Some((i, row.symbol.clone()));
+                                            }
+                                        }
+                                        if idx_resp.secondary_clicked() {
+                                            pending_select = Some((i, row.symbol.clone()));
+                                            pending_popup_pos = Some(idx_resp.rect.right_top());
+                                            pending_open_popup = true;
+                                        }
+
                                         let sym_edit = egui::TextEdit::singleline(&mut row.symbol)
                                             .desired_width(col_idx[1] - 4.0);
-                                        if ui.add_sized([col_idx[1], 0.0], sym_edit).changed() {
+                                        let mut sym_changed = false;
+                                        let sym_resp = if let Some(bg) = hl_bg {
+                                            let mut resp = None;
+                                            egui::Frame::NONE.fill(bg).show(ui, |ui| {
+                                                let r = ui.add_sized([col_idx[1], 0.0], sym_edit);
+                                                if r.changed() {
+                                                    sym_changed = true;
+                                                }
+                                                resp = Some(r);
+                                            });
+                                            resp.unwrap()
+                                        } else {
+                                            let r = ui.add_sized([col_idx[1], 0.0], sym_edit);
+                                            if r.changed() {
+                                                sym_changed = true;
+                                            }
+                                            r
+                                        };
+                                        if sym_resp.clicked() {
+                                            if selected_idx == Some(i) {
+                                                pending_action = Some(SelectionAction::Clear);
+                                            } else {
+                                                pending_select = Some((i, row.symbol.clone()));
+                                            }
+                                        }
+                                        if sym_resp.secondary_clicked() {
+                                            pending_select = Some((i, row.symbol.clone()));
+                                            pending_popup_pos = Some(sym_resp.rect.right_top());
+                                            pending_open_popup = true;
+                                        }
+                                        if sym_changed {
                                             let trimmed = row.symbol.trim();
                                             if !trimmed.is_empty() {
                                                 row.symbol = trimmed.to_string();
                                             }
+                                        }
+                                        if selected_idx == Some(i)
+                                            && pending_action.is_none()
+                                            && pending_select.is_none()
+                                            && sym_changed
+                                        {
+                                            pending_select = Some((i, row.symbol.clone()));
                                         }
                                         if i >= 1 {
                                             let bond_ref_resp = ui
@@ -775,13 +1069,103 @@ pub fn builder_ui_panel(
                                         }
                                         ui.end_row();
                                     }
+
+                                    if let Some(SelectionAction::Clear) = pending_action {
+                                        zmat_state.selected_index = None;
+                                        zmat_state.selected_symbol = None;
+                                        zmat_state.edit_preview.clear();
+                                        zmat_state.remove_popup_open = false;
+                                        zmat_state.remove_popup_pos = None;
+                                        zmat_state.redo_remove_visible = false;
+                                        zmat_state.last_error = None;
+                                    } else if let Some((idx, sym)) = pending_select {
+                                        zmat_state.selected_index = Some(idx);
+                                        zmat_state.selected_symbol = Some(sym);
+                                        zmat_state.edit_preview = vec![idx];
+                                        if pending_open_popup {
+                                            zmat_state.remove_popup_open = true;
+                                            zmat_state.remove_popup_pos = pending_popup_pos;
+                                        }
+                                        zmat_state.redo_remove_visible = false;
+                                        zmat_state.last_error = None;
+                                    }
                                 });
+                            grid_rect = Some(grid_resp.response.rect);
                         });
                     if let Some(preview) = preview_indices {
                         zmat_state.edit_preview = preview;
+                    } else if let Some(sel) = zmat_state.selected_index {
+                        zmat_state.edit_preview = vec![sel];
                     }
                     if ui.button("Apply Changes").clicked() {
                         apply_zmat_edits(&mut zmat_state, &mut mol, &mut settings);
+                        zmat_state.last_error = None;
+                        suppress_clear = true;
+                    }
+                    if let Some(idx) = zmat_state.selected_index {
+                        if can_remove_zmat_index(&zmat_state.zmat, idx) {
+                            if ui.button("Remove Atom").clicked() {
+                                suppress_clear = true;
+                                zmat_state.last_remove_snapshot = Some(zmat_state.zmat.clone());
+                                remove_zmat_index(&mut zmat_state.zmat, idx);
+                                let coords = zmat2xyz::zmat_to_xyz(&zmat_state.zmat);
+                                mol.atoms = zmat_state
+                                    .zmat
+                                    .iter()
+                                    .map(|atom| atom.symbol.clone())
+                                    .collect();
+                                mol.pos = coords;
+                                mol.recompute_bonds(2.0, 3.0);
+                                settings.dirty = true;
+                                zmat_state.edit_refresh = true;
+                                zmat_state.selected_index = None;
+                                zmat_state.selected_symbol = None;
+                                zmat_state.edit_preview.clear();
+                                zmat_state.redo_remove_visible = true;
+                                zmat_state.last_error = None;
+                            }
+                        } else {
+                            zmat_state.last_error =
+                                Some("Cannot remove: referenced by later rows.".to_string());
+                        }
+                    }
+                    if zmat_state.redo_remove_visible {
+                        if ui.button("Undo Remove Atom").clicked() {
+                            suppress_clear = true;
+                            if let Some(prev) = zmat_state.last_remove_snapshot.take() {
+                                zmat_state.zmat = prev;
+                                let coords = zmat2xyz::zmat_to_xyz(&zmat_state.zmat);
+                                mol.atoms = zmat_state
+                                    .zmat
+                                    .iter()
+                                    .map(|atom| atom.symbol.clone())
+                                    .collect();
+                                mol.pos = coords;
+                                mol.recompute_bonds(2.0, 3.0);
+                                settings.dirty = true;
+                                zmat_state.edit_refresh = true;
+                            }
+                            zmat_state.redo_remove_visible = false;
+                        }
+                    }
+                    if let Some(err) = &zmat_state.last_error {
+                        ui.colored_label(egui::Color32::LIGHT_RED, err);
+                    }
+
+                    if let Some(rect) = grid_rect {
+                        if !zmat_state.remove_popup_open
+                            && !suppress_clear
+                            && ctx.input(|i| {
+                                i.pointer.any_click()
+                                    && i.pointer.latest_pos().is_some_and(|p| !rect.contains(p))
+                            })
+                        {
+                            zmat_state.selected_index = None;
+                            zmat_state.selected_symbol = None;
+                            zmat_state.edit_preview.clear();
+                            zmat_state.redo_remove_visible = false;
+                            zmat_state.last_error = None;
+                        }
                     }
                 }
 
@@ -797,6 +1181,33 @@ pub fn builder_ui_panel(
                         [32.0, row_h],
                         egui::TextEdit::singleline(&mut zmat_state.new_symbol),
                     );
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Bond");
+                    egui::ComboBox::from_id_salt("zmat_new_bond_order")
+                        .selected_text(zmat_state.new_bond_order.label())
+                        .show_ui(ui, |ui| {
+                            for &bo in &[BondOrder::Single, BondOrder::Double, BondOrder::Triple] {
+                                if ui
+                                    .selectable_value(
+                                        &mut zmat_state.new_bond_order,
+                                        bo,
+                                        bo.label(),
+                                    )
+                                    .clicked()
+                                {
+                                    zmat_state.new_angle_deg = bo.default_angle();
+                                    zmat_state.new_dihedral_deg = bo.default_dihedral();
+                                }
+                            }
+                        });
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Angle (deg)");
+                    ui.add(egui::DragValue::new(&mut zmat_state.new_angle_deg).speed(0.1));
+                    ui.add_space(12.0);
+                    ui.label("Dihedral (deg)");
+                    ui.add(egui::DragValue::new(&mut zmat_state.new_dihedral_deg).speed(0.1));
                 });
 
                 ui.horizontal(|ui| {
@@ -855,8 +1266,18 @@ pub fn builder_ui_panel(
                         }
                     }
                     if ui.button("Remove Last").clicked() {
-                        zmat_state.zmat.pop();
-                        zmat_state.edit_refresh = true;
+                        if zmat_state.zmat.pop().is_some() {
+                            let coords = zmat2xyz::zmat_to_xyz(&zmat_state.zmat);
+                            mol.atoms = zmat_state
+                                .zmat
+                                .iter()
+                                .map(|atom| atom.symbol.clone())
+                                .collect();
+                            mol.pos = coords;
+                            mol.recompute_bonds(2.0, 3.0);
+                            settings.dirty = true;
+                            zmat_state.edit_refresh = true;
+                        }
                     }
                 });
 
@@ -874,10 +1295,57 @@ pub fn builder_ui_panel(
                     ui.weak(hint);
                 }
 
-                if let Some(err) = &zmat_state.last_error {
-                    ui.colored_label(egui::Color32::LIGHT_RED, err);
-                }
             });
+
+    if zmat_state.remove_popup_open {
+        let popup_pos = zmat_state
+            .remove_popup_pos
+            .unwrap_or(egui::pos2(40.0, 40.0));
+        let popup_id = egui::Id::new("zmat_remove_popup");
+        egui::Area::new(popup_id)
+            .fixed_pos(popup_pos)
+            .order(egui::Order::Foreground)
+            .show(&ctx, |ui| {
+                egui::Frame::popup(&ctx.style()).show(ui, |ui| {
+                    ui.label("Remove selected atom?");
+                    let Some(idx) = zmat_state.selected_index else {
+                        if ui.button("Close").clicked() {
+                            zmat_state.remove_popup_open = false;
+                        }
+                        return;
+                    };
+
+                    let can_remove = can_remove_zmat_index(&zmat_state.zmat, idx);
+                    if !can_remove {
+                        ui.colored_label(
+                            egui::Color32::LIGHT_RED,
+                            "Cannot remove: referenced by later rows.",
+                        );
+                    }
+                    if ui.add_enabled(can_remove, egui::Button::new("Remove")).clicked() {
+                        remove_zmat_index(&mut zmat_state.zmat, idx);
+                        let coords = zmat2xyz::zmat_to_xyz(&zmat_state.zmat);
+                        mol.atoms = zmat_state
+                            .zmat
+                            .iter()
+                            .map(|atom| atom.symbol.clone())
+                            .collect();
+                        mol.pos = coords;
+                        mol.recompute_bonds(2.0, 3.0);
+                        settings.dirty = true;
+                        zmat_state.edit_refresh = true;
+                        zmat_state.selected_index = None;
+                        zmat_state.selected_symbol = None;
+                        zmat_state.edit_preview.clear();
+                        zmat_state.remove_popup_open = false;
+                        zmat_state.remove_popup_pos = None;
+                    }
+                    if ui.button("Close").clicked() {
+                        zmat_state.remove_popup_open = false;
+                    }
+                });
+            });
+    }
 
             ui.add_space(8.0);
             ui.separator();
