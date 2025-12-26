@@ -7,7 +7,7 @@ use bevy::render::view::RenderLayers;
 
 use crate::color_schemes::color_for;
 use crate::molecule::{covalent_radius_angstrom, Molecule};
-use crate::settings::{BondColorMode, LightingMode, MolSettings};
+use crate::settings::{BondColorMode, LightingMode, MolSettings, RepresentationMode};
 use crate::camera::OrbitCamera;
 
 // NEW: react to coordinate-change events (only to mark dirty when topology might have changed)
@@ -59,11 +59,18 @@ pub struct FillLight;
 #[derive(Component)]
 pub struct RimLight;
 
+#[derive(Default, Reflect, GizmoConfigGroup)]
+pub struct BondLineGizmos;
+
 pub const LAYER_MAIN: usize = 0;
 pub const LAYER_AXES: usize = 1;
 
 const AXIS_VP_SIZE: u32 = 140;
 const AXIS_VP_MARGIN: u32 = 12;
+
+fn element_visible(sym: &str, settings: &MolSettings) -> bool {
+    settings.element_visibility.get(sym).copied().unwrap_or(true)
+}
 
 pub fn setup(
     mut commands: Commands,
@@ -396,46 +403,110 @@ pub fn rebuild_if_dirty(
     };
 
     // Atoms
-    for i in 0..mol.atoms.len() {
-        let sym = &mol.atoms[i];
-        let r_cov = covalent_radius_angstrom(sym) * settings.atom_scale;
+    let draw_atoms = matches!(
+        settings.representation,
+        RepresentationMode::BallAndStick
+            | RepresentationMode::LowResBallsAndLines
+            | RepresentationMode::SpaceFilling
+    ) || (matches!(settings.representation, RepresentationMode::BackboneTrace)
+        && settings.trace_show_atoms);
+    if draw_atoms {
+        let atom_resolution = match settings.representation {
+            RepresentationMode::BallAndStick => settings.atom_resolution,
+            RepresentationMode::LowResBallsAndLines => settings.low_res_atom_resolution,
+            RepresentationMode::BackboneTrace => settings.low_res_atom_resolution,
+            RepresentationMode::SpaceFilling => settings.cpk_atom_resolution,
+            _ => settings.atom_resolution,
+        };
 
-        let color = settings
-            .element_colors
-            .get(sym)
-            .copied()
-            .unwrap_or_else(|| color_for(sym, settings.scheme));
+        for i in 0..mol.atoms.len() {
+            let sym = &mol.atoms[i];
+            if matches!(settings.representation, RepresentationMode::BackboneTrace) && sym == "H" {
+                continue;
+            }
+            if !element_visible(sym, &settings) {
+                continue;
+            }
+            let scale = if matches!(settings.representation, RepresentationMode::LowResBallsAndLines)
+            {
+                settings.low_res_atom_scale
+            } else if matches!(settings.representation, RepresentationMode::BackboneTrace) {
+                settings.trace_atom_scale
+            } else if matches!(settings.representation, RepresentationMode::SpaceFilling) {
+                settings.cpk_atom_scale
+            } else {
+                1.0
+            };
+            let r_cov = covalent_radius_angstrom(sym) * settings.atom_scale * scale;
 
-        let sphere_mesh = Sphere::new(r_cov)
-            .mesh()
-            .ico(settings.atom_resolution)
-            .unwrap();
+            let color = settings
+                .element_colors
+                .get(sym)
+                .copied()
+                .unwrap_or_else(|| color_for(sym, settings.scheme));
 
-        let mat = materials.add(StandardMaterial {
-            base_color: color,
-            metallic,
-            perceptual_roughness: rough,
-            reflectance: refl,
-            emissive,
-            ..default()
-        });
+            let sphere_mesh = Sphere::new(r_cov)
+                .mesh()
+                .ico(atom_resolution)
+                .unwrap();
 
-        let pos = mol.pos[i];
-        let ent = commands
-            .spawn((
-                Mesh3d(meshes.add(sphere_mesh)),
-                MeshMaterial3d(mat),
-                Transform::from_translation(pos),
-                AtomMarker,
-                RenderLayers::layer(LAYER_MAIN),
-            ))
-            .id();
-        mol.atom_entities.push(ent);
+            let mat = materials.add(StandardMaterial {
+                base_color: color,
+                metallic,
+                perceptual_roughness: rough,
+                reflectance: refl,
+                emissive,
+                ..default()
+            });
+
+            let pos = mol.pos[i];
+            let ent = commands
+                .spawn((
+                    Mesh3d(meshes.add(sphere_mesh)),
+                    MeshMaterial3d(mat),
+                    Transform::from_translation(pos),
+                    AtomMarker,
+                    RenderLayers::layer(LAYER_MAIN),
+                ))
+                .id();
+            mol.atom_entities.push(ent);
+        }
+    }
+
+    if matches!(
+        settings.representation,
+        RepresentationMode::LowResBallsAndLines
+            | RepresentationMode::LinesOnly
+            | RepresentationMode::BackboneTrace
+            | RepresentationMode::SpaceFilling
+    ) {
+        return;
     }
 
     // Bonds
     let bonds = mol.bonds.clone();
+    let mut degree: Vec<usize> = Vec::new();
+    if matches!(settings.representation, RepresentationMode::SticksRounded) {
+        degree = vec![0; mol.atoms.len()];
+        for &(i, j, _d) in &bonds {
+            if i < degree.len() {
+                degree[i] += 1;
+            }
+            if j < degree.len() {
+                degree[j] += 1;
+            }
+        }
+    }
     for (i, j, len_cc) in bonds {
+        if i >= mol.atoms.len() || j >= mol.atoms.len() {
+            continue;
+        }
+        if !element_visible(&mol.atoms[i], &settings)
+            || !element_visible(&mol.atoms[j], &settings)
+        {
+            continue;
+        }
+
         let p0 = mol.pos[i];
         let p1 = mol.pos[j];
         if len_cc <= 0.0001 {
@@ -451,12 +522,23 @@ pub fn rebuild_if_dirty(
 
         // Bond cylinder/capsule radius based on smaller atom radius
         let base = ri_sphere.min(rj_sphere);
-        let radius = (base * settings.bond_radius_pct).clamp(0.01, base);
+        let radius = if matches!(settings.representation, RepresentationMode::SticksRounded) {
+            settings.stick_radius.clamp(0.01, 1.0)
+        } else {
+            (base * settings.bond_radius_pct).clamp(0.01, base)
+        };
 
         // Common rotation (align local +Y with bond direction)
         let rot = Quat::from_rotation_arc(Vec3::Y, dir_n);
 
-        match settings.bond_color_mode {
+        let bond_color_mode = if matches!(settings.representation, RepresentationMode::SticksRounded)
+        {
+            BondColorMode::AtomSplit
+        } else {
+            settings.bond_color_mode
+        };
+
+        match bond_color_mode {
             BondColorMode::Uniform => {
                 // Single capsule centered between atom centers
                 let center = (p0 + p1) * 0.5;
@@ -491,25 +573,42 @@ pub fn rebuild_if_dirty(
                 mol.bond_entities.push(ent);
             }
 
-            // AtomSplit: two cylinders with a clean, flat joint at the midpoint,
-            // each slightly overlapping inside its atom sphere to hide seams.
+            // AtomSplit: two segments with a clean joint at the midpoint,
+            // optionally extended to overlap for rounded-stick mode.
             BondColorMode::AtomSplit => {
-                let overlap = radius * 0.40; // 40% of bond radius
-                let start = p0 + dir_n * (ri_sphere - overlap);
-                let end = p1 - dir_n * (rj_sphere - overlap);
+                let (start, end) = if matches!(
+                    settings.representation,
+                    RepresentationMode::SticksRounded
+                ) {
+                    (p0, p1)
+                } else {
+                    let overlap = radius * 0.40; // 40% of bond radius
+                    (
+                        p0 + dir_n * (ri_sphere - overlap),
+                        p1 - dir_n * (rj_sphere - overlap),
+                    )
+                };
 
                 let visible_len = (end - start).length();
                 if visible_len <= 0.0 {
                     continue;
                 }
 
-                let half_len = visible_len * 0.5;
+                let half_len = if matches!(
+                    settings.representation,
+                    RepresentationMode::SticksRounded
+                ) {
+                    let overlap = (radius * 0.10).max(0.001);
+                    visible_len * 0.5 + overlap
+                } else {
+                    visible_len * 0.5
+                };
 
                 let mid = (start + end) * 0.5;
-                let c0 = mid - dir_n * (half_len * 0.5);
-                let c1 = mid + dir_n * (half_len * 0.5);
-
+                let c0 = mid - dir_n * (visible_len * 0.25);
+                let c1 = mid + dir_n * (visible_len * 0.25);
                 let cyl_half = Mesh::from(Cylinder::new(radius, half_len));
+                let (mesh_i, mesh_j) = (cyl_half.clone(), cyl_half);
 
                 let col_i = settings
                     .element_colors
@@ -541,8 +640,8 @@ pub fn rebuild_if_dirty(
 
                 let e0 = commands
                     .spawn((
-                        Mesh3d(meshes.add(cyl_half.clone())),
-                        MeshMaterial3d(mat_i),
+                        Mesh3d(meshes.add(mesh_i)),
+                        MeshMaterial3d(mat_i.clone()),
                         Transform {
                             translation: c0,
                             rotation: rot,
@@ -556,8 +655,8 @@ pub fn rebuild_if_dirty(
 
                 let e1 = commands
                     .spawn((
-                        Mesh3d(meshes.add(cyl_half)),
-                        MeshMaterial3d(mat_j),
+                        Mesh3d(meshes.add(mesh_j)),
+                        MeshMaterial3d(mat_j.clone()),
                         Transform {
                             translation: c1,
                             rotation: rot,
@@ -568,9 +667,113 @@ pub fn rebuild_if_dirty(
                     ))
                     .id();
                 mol.bond_entities.push(e1);
+
+                if matches!(settings.representation, RepresentationMode::SticksRounded) {
+                    let cap_mesh = Mesh::from(Sphere::new(radius).mesh().ico(2).unwrap());
+                    if i < degree.len() {
+                        let cap_i = commands
+                            .spawn((
+                                Mesh3d(meshes.add(cap_mesh.clone())),
+                                MeshMaterial3d(mat_i.clone()),
+                                Transform::from_translation(p0),
+                                BondMarker,
+                                RenderLayers::layer(LAYER_MAIN),
+                            ))
+                            .id();
+                        mol.bond_entities.push(cap_i);
+                    }
+                    if j < degree.len() {
+                        let cap_j = commands
+                            .spawn((
+                                Mesh3d(meshes.add(cap_mesh.clone())),
+                                MeshMaterial3d(mat_j.clone()),
+                                Transform::from_translation(p1),
+                                BondMarker,
+                                RenderLayers::layer(LAYER_MAIN),
+                            ))
+                            .id();
+                        mol.bond_entities.push(cap_j);
+                    }
+                }
             }
         }
     } // end bonds
+}
+
+/// Draw bonds as simple line segments (used in line-based representations).
+pub fn draw_bond_lines(
+    mut gizmos: Gizmos<BondLineGizmos>,
+    mol: Res<Molecule>,
+    settings: Res<MolSettings>,
+) {
+    if !matches!(
+        settings.representation,
+        RepresentationMode::LowResBallsAndLines
+            | RepresentationMode::LinesOnly
+            | RepresentationMode::BackboneTrace
+    ) {
+        return;
+    }
+
+    let n_pos = mol.pos.len();
+    let n_atoms = mol.atoms.len();
+    if n_pos == 0 || n_atoms == 0 {
+        return;
+    }
+
+    for &(i, j, _len_cc) in &mol.bonds {
+        if i >= n_pos || j >= n_pos || i >= n_atoms || j >= n_atoms {
+            continue;
+        }
+        if !element_visible(&mol.atoms[i], &settings)
+            || !element_visible(&mol.atoms[j], &settings)
+        {
+            continue;
+        }
+        if matches!(settings.representation, RepresentationMode::BackboneTrace) {
+            if mol.atoms[i] == "H" || mol.atoms[j] == "H" {
+                continue;
+            }
+        }
+
+        let p0 = mol.pos[i];
+        let p1 = mol.pos[j];
+        let d = p1 - p0;
+        if d.length() <= 1e-4 {
+            continue;
+        }
+
+        let a = p0;
+        let b = p1;
+        let mid = (a + b) * 0.5;
+        let col_i = settings
+            .element_colors
+            .get(&mol.atoms[i])
+            .copied()
+            .unwrap_or_else(|| color_for(&mol.atoms[i], settings.scheme));
+        let col_j = settings
+            .element_colors
+            .get(&mol.atoms[j])
+            .copied()
+            .unwrap_or_else(|| color_for(&mol.atoms[j], settings.scheme));
+        gizmos.line(a, mid, col_i);
+        gizmos.line(mid, b, col_j);
+    }
+}
+
+pub fn configure_bond_line_gizmos(
+    mut cfg_store: ResMut<GizmoConfigStore>,
+    settings: Res<MolSettings>,
+) {
+    let (cfg, _) = cfg_store.config_mut::<BondLineGizmos>();
+    cfg.enabled = matches!(
+        settings.representation,
+        RepresentationMode::LowResBallsAndLines
+            | RepresentationMode::LinesOnly
+            | RepresentationMode::BackboneTrace
+    );
+    cfg.line.width = settings.line_bond_thickness.max(1.0).min(24.0);
+    cfg.line.perspective = true;
 }
 
 /// Keep the light rig centered on the current camera target (molecule center).

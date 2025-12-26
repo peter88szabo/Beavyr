@@ -30,6 +30,17 @@ pub enum LightingMode {
     ThreePoint,
 }
 
+/// Atom/bond rendering styles for performance vs fidelity.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum RepresentationMode {
+    BallAndStick,
+    SticksRounded,
+    LowResBallsAndLines,
+    LinesOnly,
+    BackboneTrace,
+    SpaceFilling,
+}
+
 /// Bond color modes: a single uniform color or split by the colors of the two atoms.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum BondColorMode {
@@ -45,6 +56,18 @@ pub struct MolSettings {
     pub bond_thresh_scale: f32, // neighbor cutoff factor
     pub hbond_cutoff: f32,      // neighbor cutoff factor
     pub bond_radius_pct: f32,   // fraction (0.05..1.0) of the smaller covalent radius
+
+    // representation
+    pub representation: RepresentationMode,
+    pub low_res_atom_resolution: u32,
+    pub low_res_atom_scale: f32,
+    pub cpk_atom_scale: f32,
+    pub cpk_atom_resolution: u32,
+    pub stick_radius: f32,
+    pub line_bond_thickness: f32,
+    pub element_visibility: HashMap<String, bool>,
+    pub trace_show_atoms: bool,
+    pub trace_atom_scale: f32,
 
     // appearance
     pub scheme: ColorScheme,
@@ -99,6 +122,17 @@ impl Default for MolSettings {
             bond_thresh_scale: 1.2,
             hbond_cutoff: 3.0,
             bond_radius_pct: 0.40, // 50% of smaller covalent radius
+
+            representation: RepresentationMode::BallAndStick,
+            low_res_atom_resolution: 2,
+            low_res_atom_scale: 1.0,
+            cpk_atom_scale: 1.8,
+            cpk_atom_resolution: 6,
+            stick_radius: 0.12,
+            line_bond_thickness: 4.0,
+            element_visibility: HashMap::new(),
+            trace_show_atoms: false,
+            trace_atom_scale: 1.0,
 
             scheme: ColorScheme::Jmol,
             element_colors: color_scheme_map(ColorScheme::Jmol),

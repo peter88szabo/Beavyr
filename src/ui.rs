@@ -1,13 +1,14 @@
 // src/ui.rs
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
+use std::collections::{BTreeSet, HashSet};
 use std::fs;
 use std::path::PathBuf;
 
 use crate::color_schemes::{color_scheme_map, ELEMENT_SYMBOLS};
 use crate::events::MoleculeChanged;
 use crate::molecule::{parse_xyz_angstrom, Molecule};
-use crate::settings::{BondColorMode, ColorScheme, LightingMode, MolSettings};
+use crate::settings::{BondColorMode, ColorScheme, LightingMode, MolSettings, RepresentationMode};
 
 // Export UI + resources
 use crate::export_ui;
@@ -20,6 +21,26 @@ use crate::trajectory;
 
 // NEW: shared picking helper (egui-friendly shim)
 use crate::picking::screen::find_nearest_atom_screen_space_egui;
+
+const ELEMENT_FILTER_S_BLOCK: [&str; 14] = [
+    "H", "He", "Li", "Be", "Na", "Mg", "K", "Ca", "Rb", "Sr", "Cs", "Ba", "Fr", "Ra",
+];
+const ELEMENT_FILTER_D_BLOCK: [&str; 29] = [
+    "Sc", "Ti", "V", "Cr", "Mn", "Fe", "Co", "Ni", "Cu", "Zn",
+    "Y", "Zr", "Nb", "Mo", "Tc", "Ru", "Rh", "Pd", "Ag", "Cd",
+    "Hf", "Ta", "W", "Re", "Os", "Ir", "Pt", "Au", "Hg",
+];
+const ELEMENT_FILTER_P_BLOCK: [&str; 29] = [
+    "B", "C", "N", "O", "F", "Ne",
+    "Al", "Si", "P", "S", "Cl", "Ar",
+    "Ga", "Ge", "As", "Se", "Br", "Kr",
+    "In", "Sn", "Sb", "Te", "I", "Xe",
+    "Tl", "Pb", "Bi", "Po", "At",
+];
+const ELEMENT_FILTER_F_BLOCK: [&str; 30] = [
+    "La", "Ce", "Pr", "Nd", "Pm", "Sm", "Eu", "Gd", "Tb", "Dy", "Ho", "Er", "Tm", "Yb", "Lu",
+    "Ac", "Th", "Pa", "U", "Np", "Pu", "Am", "Cm", "Bk", "Cf", "Es", "Fm", "Md", "No", "Lr",
+];
 
 #[derive(Resource, Clone)]
 pub struct XyzBuffer {
@@ -606,6 +627,268 @@ pub fn ui_panel(
             ui.add_space(8.0);
             ui.separator();
             ui.collapsing("Appearance", |ui| {
+                ui.collapsing("Representation", |ui| {
+                    let mut changed = false;
+
+                    changed |= ui
+                        .radio_value(
+                            &mut settings.representation,
+                            RepresentationMode::BallAndStick,
+                            "Ball & stick (best <2k atoms)",
+                        )
+                        .clicked();
+                    changed |= ui
+                        .radio_value(
+                            &mut settings.representation,
+                            RepresentationMode::SpaceFilling,
+                            "Space-filling (CPK)",
+                        )
+                        .clicked();
+                    changed |= ui
+                        .radio_value(
+                            &mut settings.representation,
+                            RepresentationMode::SticksRounded,
+                            "Sticks only (rounded joints)",
+                        )
+                        .clicked();
+                    changed |= ui
+                        .radio_value(
+                            &mut settings.representation,
+                            RepresentationMode::LowResBallsAndLines,
+                            "Low-res balls + lines",
+                        )
+                        .clicked();
+                    changed |= ui
+                        .radio_value(
+                            &mut settings.representation,
+                            RepresentationMode::LinesOnly,
+                            "Lines only",
+                        )
+                        .clicked();
+                    changed |= ui
+                        .radio_value(
+                            &mut settings.representation,
+                            RepresentationMode::BackboneTrace,
+                            "Backbone/trace (non-H lines)",
+                        )
+                        .clicked();
+
+                    if matches!(settings.representation, RepresentationMode::LowResBallsAndLines) {
+                        ui.add_space(6.0);
+                        if ui
+                            .add(
+                                egui::Slider::new(&mut settings.low_res_atom_resolution, 0..=6)
+                                    .text("Low-res atom resolution"),
+                            )
+                            .changed()
+                        {
+                            changed = true;
+                        }
+                        if ui
+                            .add(
+                                egui::Slider::new(&mut settings.low_res_atom_scale, 0.2..=1.5)
+                                    .text("Low-res atom scale"),
+                            )
+                            .changed()
+                        {
+                            changed = true;
+                        }
+                    }
+
+                    if matches!(settings.representation, RepresentationMode::SpaceFilling) {
+                        ui.add_space(6.0);
+                        if ui
+                            .add(
+                                egui::Slider::new(&mut settings.cpk_atom_resolution, 0..=10)
+                                    .text("CPK atom resolution"),
+                            )
+                            .changed()
+                        {
+                            changed = true;
+                        }
+                        if ui
+                            .add(
+                                egui::Slider::new(&mut settings.cpk_atom_scale, 0.6..=2.6)
+                                    .text("CPK atom scale"),
+                            )
+                            .changed()
+                        {
+                            changed = true;
+                        }
+                    }
+
+                    if matches!(settings.representation, RepresentationMode::SticksRounded) {
+                        ui.add_space(6.0);
+                        if ui
+                            .add(
+                                egui::Slider::new(&mut settings.stick_radius, 0.02..=0.40)
+                                    .text("Stick thickness"),
+                            )
+                            .changed()
+                        {
+                            changed = true;
+                        }
+                    }
+
+                    if matches!(
+                        settings.representation,
+                        RepresentationMode::LowResBallsAndLines
+                            | RepresentationMode::LinesOnly
+                            | RepresentationMode::BackboneTrace
+                    ) {
+                        ui.add_space(6.0);
+                        if ui
+                            .add(
+                                egui::Slider::new(&mut settings.line_bond_thickness, 1.0..=50.0)
+                                    .text("Line thickness"),
+                            )
+                            .changed()
+                        {
+                            changed = true;
+                        }
+                    }
+
+                    if matches!(settings.representation, RepresentationMode::BackboneTrace) {
+                        ui.add_space(4.0);
+                        if ui
+                            .checkbox(&mut settings.trace_show_atoms, "Show trace atoms")
+                            .changed()
+                        {
+                            changed = true;
+                        }
+                        if settings.trace_show_atoms {
+                            if ui
+                                .add(
+                                    egui::Slider::new(&mut settings.low_res_atom_resolution, 0..=6)
+                                        .text("Trace atom resolution"),
+                                )
+                                .changed()
+                            {
+                                changed = true;
+                            }
+                            if ui
+                                .add(
+                                    egui::Slider::new(&mut settings.trace_atom_scale, 0.2..=1.5)
+                                        .text("Trace atom scale"),
+                                )
+                                .changed()
+                            {
+                                changed = true;
+                            }
+                        }
+                    }
+
+                    if changed {
+                        settings.dirty = true;
+                    }
+                });
+
+                ui.add_space(8.0);
+
+                ui.collapsing("Element Filter", |ui| {
+                    let mut elements: Vec<String> = Vec::new();
+                    elements.extend(ELEMENT_FILTER_S_BLOCK.iter().map(|s| s.to_string()));
+                    elements.extend(ELEMENT_FILTER_D_BLOCK.iter().map(|s| s.to_string()));
+                    elements.extend(ELEMENT_FILTER_P_BLOCK.iter().map(|s| s.to_string()));
+                    elements.extend(ELEMENT_FILTER_F_BLOCK.iter().map(|s| s.to_string()));
+
+                    let mut default_set: HashSet<&str> = HashSet::new();
+                    default_set.extend(ELEMENT_FILTER_S_BLOCK);
+                    default_set.extend(ELEMENT_FILTER_D_BLOCK);
+                    default_set.extend(ELEMENT_FILTER_P_BLOCK);
+                    default_set.extend(ELEMENT_FILTER_F_BLOCK);
+
+                    let mut extras: BTreeSet<String> = BTreeSet::new();
+                    for sym in &mol.atoms {
+                        if !default_set.contains(sym.as_str()) {
+                            extras.insert(sym.clone());
+                        }
+                    }
+                    elements.extend(extras.iter().cloned());
+
+                    if elements.is_empty() {
+                        ui.weak("No atoms loaded.");
+                        return;
+                    }
+
+                    let mut changed = false;
+                    ui.horizontal(|ui| {
+                        if ui.button("Show all").clicked() {
+                            for sym in &elements {
+                                settings.element_visibility.insert(sym.clone(), true);
+                            }
+                            changed = true;
+                        }
+                        if ui.button("Hide all").clicked() {
+                            for sym in &elements {
+                                settings.element_visibility.insert(sym.clone(), false);
+                            }
+                            changed = true;
+                        }
+                    });
+
+                    ui.add_space(4.0);
+                    ui.spacing_mut().item_spacing = egui::vec2(6.0, 4.0);
+                    egui::ScrollArea::vertical()
+                        .max_height(220.0)
+                        .show(ui, |ui| {
+                            let render_block = |ui: &mut egui::Ui,
+                                                block: &[&str],
+                                                settings: &mut MolSettings,
+                                                changed: &mut bool| {
+                                let cols = 4;
+                                let rows = (block.len() + cols - 1) / cols;
+                                for r in 0..rows {
+                                    ui.horizontal(|ui| {
+                                        for c in 0..cols {
+                                            let idx = r * cols + c;
+                                            if let Some(sym) = block.get(idx) {
+                                                let entry = settings
+                                                    .element_visibility
+                                                    .entry((*sym).to_string())
+                                                    .or_insert(true);
+                                                if ui.checkbox(entry, *sym).changed() {
+                                                    *changed = true;
+                                                }
+                                            } else {
+                                                ui.add_space(52.0);
+                                            }
+                                        }
+                                    });
+                                }
+                            };
+
+                            ui.label("Hydrogen");
+                            let h_block = ["H"];
+                            render_block(ui, &h_block, &mut settings, &mut changed);
+                            ui.separator();
+                            ui.label("P-block");
+                            render_block(ui, &ELEMENT_FILTER_P_BLOCK, &mut settings, &mut changed);
+                            ui.separator();
+                            ui.label("S-block");
+                            render_block(ui, &ELEMENT_FILTER_S_BLOCK, &mut settings, &mut changed);
+                            ui.separator();
+                            ui.label("D-block");
+                            render_block(ui, &ELEMENT_FILTER_D_BLOCK, &mut settings, &mut changed);
+                            ui.separator();
+                            ui.label("F-block");
+                            render_block(ui, &ELEMENT_FILTER_F_BLOCK, &mut settings, &mut changed);
+
+                            if !extras.is_empty() {
+                                ui.separator();
+                                ui.label("Other");
+                                let other: Vec<&str> = extras.iter().map(|s| s.as_str()).collect();
+                                render_block(ui, &other, &mut settings, &mut changed);
+                            }
+                        });
+
+                    if changed {
+                        settings.dirty = true;
+                    }
+                });
+
+                ui.add_space(8.0);
+
                 ui.collapsing("Atom & Bond Scaling", |ui| {
                     let mut changed = false;
                     changed |= ui

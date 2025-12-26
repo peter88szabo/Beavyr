@@ -20,6 +20,7 @@ mod trajectory;
 
 use scene::{
     center_camera_on_startup,
+    draw_bond_lines,
     react_to_molecule_changed_mark_dirty,
     rebuild_if_dirty,
     setup,
@@ -31,6 +32,7 @@ use settings::MolSettings;
 use ui::XyzBuffer;
 use hbonds::{HbondGizmos, draw_hydrogen_bonds_dashed};
 use trajectory::TrajectoryState;
+use scene::BondLineGizmos;
 
 use molecule_builder::builder_ui::{
     builder_ui_panel, configure_builder_gizmos, draw_builder_highlights,
@@ -39,7 +41,11 @@ use molecule_builder::builder_ui::{
 
 fn main() {
     App::new()
-        .add_plugins(DefaultPlugins.set(ImagePlugin::default_nearest()))
+        .add_plugins(
+            DefaultPlugins
+                .set(ImagePlugin::default_nearest())
+                .disable::<bevy::audio::AudioPlugin>(),
+        )
         .add_plugins(EguiPlugin::default())
         .add_plugins(export::ExportPlugin)
         // picker plugin (now active)
@@ -63,6 +69,8 @@ fn main() {
         .init_gizmo_group::<measurements::MeasurementGizmos>()
         // hbonds
         .init_gizmo_group::<HbondGizmos>()
+        // bond lines
+        .init_gizmo_group::<BondLineGizmos>()
         // molecule editor
         .init_resource::<EditorRotateState>()
         .init_resource::<ZMatrixBuilderState>()
@@ -96,6 +104,8 @@ fn main() {
                 draw_hydrogen_bonds_dashed,
                 hbonds::configure_hbond_gizmos,
                 hbonds::draw_hydrogen_bonds_dashed,
+                scene::configure_bond_line_gizmos,
+                draw_bond_lines,
 
                 // builder (no more local click handler)
                 configure_builder_gizmos,
