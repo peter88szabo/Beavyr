@@ -791,9 +791,10 @@ pub fn builder_ui_panel(
 
                 ui.label("Add atom (pick references)");
                 ui.horizontal(|ui| {
-                    ui.label("Symbol");
+                    let row_h = ui.spacing().interact_size.y;
+                    ui.add_sized([0.0, row_h], egui::Label::new("Symbol"));
                     ui.add_sized(
-                        [32.0, 0.0],
+                        [32.0, row_h],
                         egui::TextEdit::singleline(&mut zmat_state.new_symbol),
                     );
                 });
