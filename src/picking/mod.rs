@@ -44,7 +44,7 @@ fn pick_and_emit_atom(
         want_builder = b.active;
     }
     if let Some(z) = &zmat_builder {
-        want_builder = want_builder || z.pick_active;
+        want_builder = want_builder || z.pick_active || z.frag_pick_active;
     }
     if !(want_measure || want_builder) { return; }
 

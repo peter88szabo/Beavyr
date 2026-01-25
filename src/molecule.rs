@@ -183,9 +183,9 @@ pub fn parse_xyz_angstrom(xyz: &str) -> (usize, Vec<String>, Vec<Vec<f64>>) {
             continue;
         }
         let atom = parts[0].to_string();
-        let x = parts[1].parse::<f64>().unwrap();
-        let y = parts[2].parse::<f64>().unwrap();
-        let z = parts[3].parse::<f64>().unwrap();
+        let Ok(x) = parts[1].parse::<f64>() else { continue };
+        let Ok(y) = parts[2].parse::<f64>() else { continue };
+        let Ok(z) = parts[3].parse::<f64>() else { continue };
         atoms.push(atom);
         qxyz.push(vec![x, y, z]);
     }
@@ -218,22 +218,27 @@ pub fn parse_xyz_first_frame_angstrom(xyz: &str) -> (Vec<String>, Vec<Vec<f64>>,
 
     let mut atoms = Vec::new();
     let mut qxyz = Vec::new();
-    for line in lines.iter().skip(idx).take(count) {
+    let mut consumed = idx;
+    for line in lines.iter().skip(idx) {
+        consumed += 1;
         let parts: Vec<&str> = line.split_whitespace().collect();
         if parts.len() < 4 {
             continue;
         }
         let atom = parts[0].to_string();
-        let x = parts[1].parse::<f64>().unwrap();
-        let y = parts[2].parse::<f64>().unwrap();
-        let z = parts[3].parse::<f64>().unwrap();
+        let Ok(x) = parts[1].parse::<f64>() else { continue };
+        let Ok(y) = parts[2].parse::<f64>() else { continue };
+        let Ok(z) = parts[3].parse::<f64>() else { continue };
         atoms.push(atom);
         qxyz.push(vec![x, y, z]);
+        if atoms.len() >= count {
+            break;
+        }
     }
 
     let extra_frames = lines
         .iter()
-        .skip(idx + count)
+        .skip(consumed)
         .any(|l| !l.trim().is_empty());
 
     (atoms, qxyz, extra_frames)

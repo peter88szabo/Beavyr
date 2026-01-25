@@ -7,14 +7,21 @@ use crate::settings::MolSettings;
 use crate::color_schemes::color_for;
 use super::rotator::{bend_side, rotate_side, split_sides, translate_side, RotateSide};
 use super::zmat2xyz::{self, ZAtom};
+use crate::molecule::parse_xyz_angstrom;
+use super::fragments;
 
 const ANGLE_SINGLE_DEG: f64 = 109.47;
 const ANGLE_DOUBLE_DEG: f64 = 120.0;
 const ANGLE_TRIPLE_DEG: f64 = 179.95;
+const ANGLE_MOLDEN_SINGLE_DEG: f64 = 109.471;
+const ANGLE_MOLDEN_NO2_DEG: f64 = 117.38;
+const ANGLE_MOLDEN_CHCH_DEG: f64 = 90.0;
 
 const DIHEDRAL_SINGLE_DEG: f64 = 0.0;
 const DIHEDRAL_DOUBLE_DEG: f64 = 120.0;
 const DIHEDRAL_TRIPLE_DEG: f64 = 180.0;
+const DIHEDRAL_MOLDEN_DEG: f64 = 180.0;
+const DIHEDRAL_MOLDEN_CYCLOPENTANE_DEG: f64 = -90.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BondOrder {
@@ -47,6 +54,12 @@ impl BondOrder {
             BondOrder::Triple => DIHEDRAL_TRIPLE_DEG,
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FragmentInsertMode {
+    Connect,
+    Replace,
 }
 
 fn single_bond_radius(sym: &str) -> Option<f64> {
@@ -135,6 +148,401 @@ fn bond_length_for(
     }
 }
 
+fn clamp_cos(c: f64) -> f64 {
+    if c > 1.0 {
+        1.0
+    } else if c < -1.0 {
+        -1.0
+    } else {
+        c
+    }
+}
+
+fn calc_angle_deg(a: Vec3, b: Vec3, c: Vec3) -> f64 {
+    let ab = b - a;
+    let cb = b - c;
+    let denom = ab.length() * cb.length();
+    if denom <= 1.0e-12 {
+        return 0.0;
+    }
+    let cos_angle = clamp_cos((ab.dot(cb) / denom) as f64);
+    cos_angle.acos().to_degrees()
+}
+
+fn pick_perpendicular(v: Vec3) -> Vec3 {
+    let axis = if v.x.abs() < 0.9 {
+        Vec3::new(1.0, 0.0, 0.0)
+    } else {
+        Vec3::new(0.0, 1.0, 0.0)
+    };
+    v.cross(axis).normalize_or_zero()
+}
+
+fn calc_dihedral_deg(p1: Vec3, p2: Vec3, p3: Vec3, p4: Vec3) -> f64 {
+    let e1 = (p1 - p2).normalize_or_zero();
+    let e2 = (p2 - p3).normalize_or_zero();
+    let mut n = e1.cross(e2);
+    if n.length() < 1.0e-6 {
+        n = pick_perpendicular(e1);
+    } else {
+        n = n.normalize();
+    }
+    let m = n.cross(e1);
+    let v = p4 - p1;
+    (v.dot(n)).atan2(v.dot(m)).to_degrees() as f64
+}
+
+fn centroid_excluding(pos: &[Vec3], exclude: usize) -> Option<Vec3> {
+    if pos.len() <= 1 {
+        return None;
+    }
+    let mut sum = Vec3::ZERO;
+    let mut count = 0;
+    for (idx, p) in pos.iter().enumerate() {
+        if idx == exclude {
+            continue;
+        }
+        sum += *p;
+        count += 1;
+    }
+    if count == 0 {
+        return None;
+    }
+    Some(sum / count as f32)
+}
+
+fn fragment_adjacency(symbols: &[String], coords: &[Vec3]) -> Vec<Vec<usize>> {
+    let n = symbols.len();
+    let mut adj = vec![Vec::new(); n];
+    let scale = 1.3_f32;
+    for i in 0..n {
+        for j in (i + 1)..n {
+            let ri = covalent_radius_angstrom(&symbols[i]);
+            let rj = covalent_radius_angstrom(&symbols[j]);
+            let cutoff = (ri + rj) * scale;
+            let d = coords[i].distance(coords[j]);
+            if d > 0.01 && d <= cutoff {
+                adj[i].push(j);
+                adj[j].push(i);
+            }
+        }
+    }
+    adj
+}
+
+fn fragment_atom_order(symbols: &[String], coords: &[Vec3]) -> Vec<usize> {
+    let n = symbols.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    let adj = fragment_adjacency(symbols, coords);
+    let mut order = Vec::with_capacity(n);
+    let mut visited = vec![false; n];
+
+    order.push(0);
+    visited[0] = true;
+
+    let mut remaining_heavy: Vec<usize> = (0..n)
+        .filter(|&i| symbols[i] != "H" && i != 0)
+        .collect();
+
+    while !remaining_heavy.is_empty() {
+        let mut best: Option<(usize, f32)> = None;
+        for &idx in &remaining_heavy {
+            let mut min_dist = f32::MAX;
+            for &v in &order {
+                if adj[idx].contains(&v) {
+                    let d = coords[idx].distance(coords[v]);
+                    if d < min_dist {
+                        min_dist = d;
+                    }
+                }
+            }
+            if min_dist < f32::MAX {
+                if best.map_or(true, |(_, bd)| min_dist < bd) {
+                    best = Some((idx, min_dist));
+                }
+            }
+        }
+        let next = if let Some((idx, _)) = best {
+            idx
+        } else {
+            remaining_heavy[0]
+        };
+        order.push(next);
+        visited[next] = true;
+        remaining_heavy.retain(|&i| i != next);
+    }
+
+    for &heavy_idx in order.clone().iter() {
+        let mut hs: Vec<usize> = adj[heavy_idx]
+            .iter()
+            .copied()
+            .filter(|&i| symbols[i] == "H" && !visited[i])
+            .collect();
+        hs.sort_by(|&a, &b| {
+            coords[a]
+                .distance(coords[heavy_idx])
+                .partial_cmp(&coords[b].distance(coords[heavy_idx]))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        for h in hs {
+            order.push(h);
+            visited[h] = true;
+        }
+    }
+
+    for i in 0..n {
+        if !visited[i] {
+            order.push(i);
+        }
+    }
+
+    order
+}
+
+fn build_fragment_zmat(symbols: &[String], coords: &[Vec3]) -> Vec<ZAtom> {
+    let n = symbols.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    let adj = fragment_adjacency(symbols, coords);
+    let order = fragment_atom_order(symbols, coords);
+    let mut index_of = vec![usize::MAX; n];
+    for (pos, &idx) in order.iter().enumerate() {
+        index_of[idx] = pos;
+    }
+
+    let mut zmat = Vec::with_capacity(n);
+    for (pos, &idx) in order.iter().enumerate() {
+        let symbol = symbols[idx].clone();
+        if pos == 0 {
+            zmat.push(ZAtom {
+                symbol,
+                bond_ref: None,
+                bond_len: 0.0,
+                angle_ref: None,
+                angle_deg: 0.0,
+                dihedral_ref: None,
+                dihedral_deg: 0.0,
+            });
+            continue;
+        }
+
+        let mut bond_ref_idx = None;
+        let mut bond_dist = f32::MAX;
+        for &nb in &adj[idx] {
+            let nb_pos = index_of[nb];
+            if nb_pos < pos {
+                let d = coords[idx].distance(coords[nb]);
+                if d < bond_dist {
+                    bond_dist = d;
+                    bond_ref_idx = Some(nb);
+                }
+            }
+        }
+        let bond_ref_idx = bond_ref_idx.unwrap_or_else(|| order[pos - 1]);
+        let bond_len = coords[idx].distance(coords[bond_ref_idx]) as f64;
+
+        let mut angle_ref_idx = None;
+        for &nb in &adj[bond_ref_idx] {
+            let nb_pos = index_of[nb];
+            if nb_pos < pos && nb != bond_ref_idx && nb != idx {
+                angle_ref_idx = Some(nb);
+                break;
+            }
+        }
+        if angle_ref_idx.is_none() {
+            angle_ref_idx = order[..pos]
+                .iter()
+                .copied()
+                .find(|&j| j != bond_ref_idx && j != idx);
+        }
+        let angle_deg = angle_ref_idx
+            .map(|a| calc_angle_deg(coords[idx], coords[bond_ref_idx], coords[a]))
+            .unwrap_or(0.0);
+
+        let mut dihedral_ref_idx = None;
+        if let Some(angle_idx) = angle_ref_idx {
+            for &nb in &adj[angle_idx] {
+                let nb_pos = index_of[nb];
+                if nb_pos < pos && nb != bond_ref_idx && nb != angle_idx && nb != idx {
+                    dihedral_ref_idx = Some(nb);
+                    break;
+                }
+            }
+            if dihedral_ref_idx.is_none() {
+                dihedral_ref_idx = order[..pos]
+                    .iter()
+                    .copied()
+                    .find(|&j| j != bond_ref_idx && j != angle_idx && j != idx);
+            }
+        }
+        let dihedral_deg = dihedral_ref_idx
+            .zip(angle_ref_idx)
+            .map(|(d, a)| calc_dihedral_deg(coords[bond_ref_idx], coords[a], coords[d], coords[idx]))
+            .unwrap_or(0.0);
+
+        zmat.push(ZAtom {
+            symbol,
+            bond_ref: Some(bond_ref_idx + 1),
+            bond_len,
+            angle_ref: angle_ref_idx.map(|v| v + 1),
+            angle_deg,
+            dihedral_ref: dihedral_ref_idx.map(|v| v + 1),
+            dihedral_deg,
+        });
+    }
+
+    zmat
+}
+
+fn build_bond_adjacency(n: usize, bonds: &[(usize, usize, f32)]) -> Vec<Vec<usize>> {
+    let mut adj = vec![Vec::new(); n];
+    for &(i, j, _) in bonds {
+        if i < n && j < n {
+            adj[i].push(j);
+            adj[j].push(i);
+        }
+    }
+    adj
+}
+
+fn pick_neighbor(adj: &[Vec<usize>], center: usize, exclude: &[usize]) -> Option<usize> {
+    adj.get(center).and_then(|nei| {
+        nei.iter()
+            .copied()
+            .find(|idx| !exclude.contains(idx))
+    })
+}
+
+fn pick_any_except(n: usize, exclude: &[usize]) -> Option<usize> {
+    (0..n).find(|idx| !exclude.contains(idx))
+}
+
+fn distance_to_axis(p: Vec3, a: Vec3, b: Vec3) -> f32 {
+    let axis = b - a;
+    let denom = axis.length_squared();
+    if denom <= 1.0e-8 {
+        return (p - a).length();
+    }
+    let t = (p - a).dot(axis) / denom;
+    let proj = a + axis * t;
+    p.distance(proj)
+}
+
+fn rotate_indices_around_axis(
+    coords: &[Vec3],
+    a: Vec3,
+    b: Vec3,
+    indices: &[usize],
+    angle_deg: f32,
+) -> Vec<Vec3> {
+    let axis = (b - a).normalize_or_zero();
+    if axis.length() <= 1.0e-6 {
+        return coords.to_vec();
+    }
+    let angle = angle_deg.to_radians();
+    let mut out = coords.to_vec();
+    for &i in indices {
+        let v = coords[i] - a;
+        let v_rot = v * angle.cos()
+            + axis.cross(v) * angle.sin()
+            + axis * (axis.dot(v)) * (1.0 - angle.cos());
+        out[i] = a + v_rot;
+    }
+    out
+}
+
+fn bend_indices_towards_angle(
+    coords: &[Vec3],
+    a: Vec3,
+    b: Vec3,
+    indices: &[usize],
+    picked_idx: usize,
+    target_angle_deg: f32,
+) -> Vec<Vec3> {
+    let axis_vec = (b - a).normalize_or_zero();
+    if axis_vec.length() <= 1.0e-6 {
+        return coords.to_vec();
+    }
+    let center = a;
+    let v = coords[picked_idx] - center;
+    let v_len = v.length();
+    if v_len <= 1.0e-6 {
+        return coords.to_vec();
+    }
+    let v_n = v / v_len;
+
+    let mut dot = axis_vec.dot(v_n);
+    dot = dot.clamp(-1.0, 1.0);
+    let current_angle = dot.acos();
+    let target_angle = target_angle_deg.to_radians();
+    let delta = target_angle - current_angle;
+    if delta.abs() <= 1.0e-6 {
+        return coords.to_vec();
+    }
+
+    let mut rot_axis = axis_vec.cross(v_n);
+    if rot_axis.length() <= 1.0e-6 {
+        rot_axis = axis_vec.cross(Vec3::X);
+        if rot_axis.length() <= 1.0e-6 {
+            rot_axis = axis_vec.cross(Vec3::Y);
+        }
+        if rot_axis.length() <= 1.0e-6 {
+            return coords.to_vec();
+        }
+    }
+    let rot_axis = rot_axis.normalize();
+
+    let mut out = coords.to_vec();
+    let angle = delta;
+    for &i in indices {
+        let p = coords[i] - center;
+        let p_rot = p * angle.cos()
+            + rot_axis.cross(p) * angle.sin()
+            + rot_axis * (rot_axis.dot(p)) * (1.0 - angle.cos());
+        out[i] = center + p_rot;
+    }
+    out
+}
+
+fn min_clearance_between(
+    coords: &[Vec3],
+    frag_indices: &[usize],
+    exclude_other: &[usize],
+) -> f32 {
+    if coords.is_empty() || frag_indices.is_empty() {
+        return 0.0;
+    }
+    let mut is_frag = vec![false; coords.len()];
+    for &idx in frag_indices {
+        if idx < is_frag.len() {
+            is_frag[idx] = true;
+        }
+    }
+    let mut min_d = f32::MAX;
+    for &fi in frag_indices {
+        if fi >= coords.len() || fi == frag_indices[0] {
+            continue;
+        }
+        let fpos = coords[fi];
+        for (mi, mpos) in coords.iter().enumerate() {
+            if is_frag[mi] {
+                continue;
+            }
+            if exclude_other.contains(&mi) {
+                continue;
+            }
+            let d = fpos.distance(*mpos);
+            if d < min_d {
+                min_d = d;
+            }
+        }
+    }
+    min_d
+}
+
 #[derive(Default, Reflect, GizmoConfigGroup)]
 pub struct BuilderGizmos;
 
@@ -162,6 +570,17 @@ pub struct ZMatrixBuilderState {
     pub new_bond_order: BondOrder,
     pub new_angle_deg: f64,
     pub new_dihedral_deg: f64,
+    pub frag_name: String,
+    pub frag_bond_order: BondOrder,
+    pub frag_angle_deg: f64,
+    pub frag_dihedral_deg: f64,
+    pub frag_pick_active: bool,
+    pub frag_pick_indices: Vec<usize>,
+    pub frag_pick_hint: Option<String>,
+    pub frag_scan_score: Option<f32>,
+    pub frag_mode: FragmentInsertMode,
+    pub last_frag_snapshot: Option<Vec<ZAtom>>,
+    pub frag_undo_visible: bool,
     pub pick_active: bool,
     pub pick_indices: Vec<usize>,
     pub pick_hint: Option<String>,
@@ -232,10 +651,24 @@ impl Default for ZMatrixBuilderState {
     fn default() -> Self {
         Self {
             zmat: Vec::new(),
-            new_symbol: "C".to_string(),
+            new_symbol: "H".to_string(),
             new_bond_order: BondOrder::Single,
             new_angle_deg: ANGLE_SINGLE_DEG,
             new_dihedral_deg: DIHEDRAL_SINGLE_DEG,
+            frag_name: fragments::FRAGMENTS
+                .first()
+                .map(|f| f.name.to_string())
+                .unwrap_or_else(|| "CH3".to_string()),
+            frag_bond_order: BondOrder::Single,
+            frag_angle_deg: ANGLE_SINGLE_DEG,
+            frag_dihedral_deg: DIHEDRAL_SINGLE_DEG,
+            frag_pick_active: false,
+            frag_pick_indices: Vec::new(),
+            frag_pick_hint: None,
+            frag_scan_score: None,
+            frag_mode: FragmentInsertMode::Connect,
+            last_frag_snapshot: None,
+            frag_undo_visible: false,
             pick_active: false,
             pick_indices: Vec::new(),
             pick_hint: None,
@@ -304,6 +737,117 @@ fn remove_zmat_index(zmat: &mut Vec<ZAtom>, idx: usize) {
             }
         }
     }
+}
+
+fn add_fragment_to_zmat(
+    zmat: &mut Vec<ZAtom>,
+    fragment_xyz: &str,
+    connector_refs: Option<(usize, Option<usize>, Option<usize>)>,
+    bond_len: f64,
+    angle_deg: f64,
+    dihedral_deg: f64,
+) {
+    let (_n, symbols, coords) = parse_xyz_angstrom(fragment_xyz);
+    let frag_coords: Vec<Vec3> = coords
+        .into_iter()
+        .map(|v| Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32))
+        .collect();
+    let frag_atoms = build_fragment_zmat(&symbols, &frag_coords);
+    if frag_atoms.is_empty() {
+        return;
+    }
+
+    let offset = zmat.len();
+    for (i, mut atom) in frag_atoms.into_iter().enumerate() {
+        if i == 0 {
+            if let Some((bond_ref, angle_ref, dihedral_ref)) = connector_refs {
+                atom.bond_ref = Some(bond_ref + 1);
+                atom.bond_len = bond_len;
+                atom.angle_ref = angle_ref.map(|v| v + 1);
+                atom.angle_deg = angle_deg;
+                atom.dihedral_ref = dihedral_ref.map(|v| v + 1);
+                atom.dihedral_deg = dihedral_deg;
+            }
+        } else {
+            if let Some(r) = atom.bond_ref {
+                atom.bond_ref = Some(r + offset);
+            }
+            if let Some(r) = atom.angle_ref {
+                atom.angle_ref = Some(r + offset);
+            }
+            if let Some(r) = atom.dihedral_ref {
+                atom.dihedral_ref = Some(r + offset);
+            }
+        }
+        zmat.push(atom);
+    }
+}
+
+fn find_fragment(name: &str) -> Option<&'static fragments::FragmentDef> {
+    fragments::FRAGMENTS.iter().find(|f| f.name == name)
+}
+
+fn fragment_molden_defaults(name: &str) -> (f64, f64) {
+    match name {
+        "-CH3" => (ANGLE_MOLDEN_SINGLE_DEG, DIHEDRAL_MOLDEN_DEG),
+        "-CH=CH2" => (ANGLE_DOUBLE_DEG, DIHEDRAL_MOLDEN_DEG),
+        "-CH=O" => (ANGLE_DOUBLE_DEG, DIHEDRAL_MOLDEN_DEG),
+        "-COOH" => (ANGLE_DOUBLE_DEG, DIHEDRAL_MOLDEN_DEG),
+        "-NH2" => (ANGLE_MOLDEN_SINGLE_DEG, DIHEDRAL_MOLDEN_DEG),
+        "-OH" => (ANGLE_MOLDEN_SINGLE_DEG, DIHEDRAL_MOLDEN_DEG),
+        "-CCH" => (ANGLE_MOLDEN_CHCH_DEG, DIHEDRAL_MOLDEN_DEG),
+        "-Phenyl" => (ANGLE_DOUBLE_DEG, DIHEDRAL_MOLDEN_DEG),
+        "-Pyrrole" => (ANGLE_DOUBLE_DEG, DIHEDRAL_MOLDEN_DEG),
+        "-OCH3" => (ANGLE_MOLDEN_SINGLE_DEG, DIHEDRAL_MOLDEN_DEG),
+        "-NO2" => (ANGLE_MOLDEN_NO2_DEG, DIHEDRAL_MOLDEN_DEG),
+        "-OOH" => (ANGLE_MOLDEN_SINGLE_DEG, DIHEDRAL_MOLDEN_DEG),
+        "-CycloPentane" => (ANGLE_MOLDEN_SINGLE_DEG, DIHEDRAL_MOLDEN_CYCLOPENTANE_DEG),
+        "-CycloHexane" => (ANGLE_MOLDEN_SINGLE_DEG, DIHEDRAL_MOLDEN_DEG),
+        _ => (ANGLE_MOLDEN_SINGLE_DEG, DIHEDRAL_MOLDEN_DEG),
+    }
+}
+
+fn replace_atom_with_fragment_zmat(
+    zmat: &mut Vec<ZAtom>,
+    frag_atoms: Vec<ZAtom>,
+    replace_idx: usize,
+    bond_len: f64,
+    angle_deg: f64,
+    dihedral_deg: f64,
+) -> Vec<usize> {
+    if replace_idx >= zmat.len() || frag_atoms.is_empty() {
+        return Vec::new();
+    }
+    let connector_symbol = frag_atoms[0].symbol.clone();
+    let mut target = zmat[replace_idx].clone();
+    target.symbol = connector_symbol;
+    if target.bond_ref.is_some() {
+        target.bond_len = bond_len;
+        target.angle_deg = angle_deg;
+        target.dihedral_deg = dihedral_deg;
+    }
+    zmat[replace_idx] = target;
+
+    let base_len = zmat.len();
+    let mut map: Vec<usize> = Vec::with_capacity(frag_atoms.len());
+    map.push(replace_idx);
+    for i in 1..frag_atoms.len() {
+        map.push(base_len + (i - 1));
+    }
+
+    for (_i, mut atom) in frag_atoms.into_iter().enumerate().skip(1) {
+        if let Some(r) = atom.bond_ref {
+            atom.bond_ref = Some(map[r - 1] + 1);
+        }
+        if let Some(r) = atom.angle_ref {
+            atom.angle_ref = Some(map[r - 1] + 1);
+        }
+        if let Some(r) = atom.dihedral_ref {
+            atom.dihedral_ref = Some(map[r - 1] + 1);
+        }
+        zmat.push(atom);
+    }
+    map
 }
 
 fn ensure_zmat_edit_buffers(zmat_state: &mut ZMatrixBuilderState) {
@@ -650,6 +1194,277 @@ pub fn handle_builder_atom_picked(
         return;
     }
 
+    if zmat_state.frag_pick_active {
+        for AtomPicked { index: hit_idx, tool } in ev.read().copied() {
+            if tool != ToolKind::Builder { continue; }
+
+            if zmat_state.zmat.len() != mol.atoms.len() {
+                zmat_state.last_error = Some(
+                    "Z-matrix is out of sync with molecule. Sync first.".to_string(),
+                );
+                zmat_state.frag_pick_active = false;
+                zmat_state.frag_pick_indices.clear();
+                zmat_state.frag_pick_hint = None;
+                zmat_state.edit_refresh = true;
+                break;
+            }
+            if zmat_state.zmat.is_empty() {
+                zmat_state.last_error = Some(
+                    "Add the first atom before using fragment pick-add.".to_string(),
+                );
+                zmat_state.frag_pick_active = false;
+                zmat_state.frag_pick_indices.clear();
+                zmat_state.frag_pick_hint = None;
+                zmat_state.edit_refresh = true;
+                break;
+            }
+
+            if !zmat_state.frag_pick_indices.contains(&hit_idx) {
+                zmat_state.frag_pick_indices.push(hit_idx);
+            }
+
+            let required_picks = match zmat_state.frag_mode {
+                FragmentInsertMode::Connect => zmat_state.zmat.len().min(3),
+                FragmentInsertMode::Replace => 1,
+            };
+            if zmat_state.frag_pick_indices.len() >= required_picks {
+                let Some(frag) = find_fragment(&zmat_state.frag_name) else {
+                    zmat_state.last_error = Some("Fragment not found.".to_string());
+                    break;
+                };
+                match zmat_state.frag_mode {
+                    FragmentInsertMode::Connect => {
+                        zmat_state.last_frag_snapshot = Some(zmat_state.zmat.clone());
+                        zmat_state.frag_undo_visible = true;
+                        let bond_ref = zmat_state.frag_pick_indices[0];
+                        let angle_ref = zmat_state.frag_pick_indices.get(1).copied();
+                        let dihedral_ref = zmat_state.frag_pick_indices.get(2).copied();
+
+                        let (_n, symbols, _coords) = parse_xyz_angstrom(frag.xyz);
+                        let connector_symbol = symbols.get(0).cloned().unwrap_or_else(|| "C".to_string());
+                        let r_new = covalent_radius_angstrom(&connector_symbol);
+                        let r_ref = covalent_radius_angstrom(&mol.atoms[bond_ref]);
+                        let bond_len = bond_length_for(
+                            &connector_symbol,
+                            &mol.atoms[bond_ref],
+                            zmat_state.frag_bond_order,
+                            r_new,
+                            r_ref,
+                        );
+
+                        let frag_angle_deg = zmat_state.frag_angle_deg;
+                        let frag_dihedral_deg = zmat_state.frag_dihedral_deg;
+                        add_fragment_to_zmat(
+                            &mut zmat_state.zmat,
+                            frag.xyz,
+                            Some((bond_ref, angle_ref, dihedral_ref)),
+                            bond_len,
+                            frag_angle_deg,
+                            frag_dihedral_deg,
+                        );
+
+                        let coords = zmat2xyz::zmat_to_xyz(&zmat_state.zmat);
+                        mol.atoms = zmat_state
+                            .zmat
+                            .iter()
+                            .map(|atom| atom.symbol.clone())
+                            .collect();
+                        mol.pos = coords;
+                        mol.recompute_bonds(2.0, 3.0);
+                        settings.dirty = true;
+                        zmat_state.last_error = None;
+                    }
+                    FragmentInsertMode::Replace => {
+                        let replace_idx = zmat_state.frag_pick_indices[0];
+                        let (_n, symbols, coords) = parse_xyz_angstrom(frag.xyz);
+                        if symbols.is_empty() {
+                            zmat_state.last_error = Some("Fragment is empty.".to_string());
+                            break;
+                        }
+                        let frag_coords: Vec<Vec3> = coords
+                            .into_iter()
+                            .map(|v| Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32))
+                            .collect();
+
+                        zmat_state.last_frag_snapshot = Some(zmat_state.zmat.clone());
+                        zmat_state.frag_undo_visible = true;
+
+                        let connector_symbol = symbols[0].clone();
+                        let Some(target) = zmat_state.zmat.get(replace_idx) else {
+                            zmat_state.last_error = Some("Invalid replacement index.".to_string());
+                            break;
+                        };
+                        let target_bond_ref = target.bond_ref;
+                        let mut target_angle_ref = target.angle_ref;
+                        let mut target_dihedral_ref = target.dihedral_ref;
+                        let mut bond_len = 0.0;
+                        let mut angle_deg = 0.0;
+                        let mut dihedral_deg = 0.0;
+                        let Some(bond_ref) = target_bond_ref else {
+                            zmat_state.last_error = Some(
+                                "Selected atom has no bond reference to replace.".to_string(),
+                            );
+                            break;
+                        };
+                        let ref_idx = bond_ref - 1;
+                        let r_new = covalent_radius_angstrom(&connector_symbol);
+                        let r_ref = covalent_radius_angstrom(&mol.atoms[ref_idx]);
+                        bond_len = bond_length_for(
+                            &connector_symbol,
+                            &mol.atoms[ref_idx],
+                            BondOrder::Single,
+                            r_new,
+                            r_ref,
+                        );
+
+                        let frag_atoms = build_fragment_zmat(&symbols, &frag_coords);
+                        let (default_angle, default_dihedral) =
+                            fragment_molden_defaults(&zmat_state.frag_name);
+                        angle_deg = default_angle;
+                        dihedral_deg = default_dihedral;
+
+                        if target_angle_ref.is_none() {
+                            angle_deg = 0.0;
+                        }
+                        if target_dihedral_ref.is_none() {
+                            dihedral_deg = 0.0;
+                        }
+                        let frag_indices = replace_atom_with_fragment_zmat(
+                            &mut zmat_state.zmat,
+                            frag_atoms,
+                            replace_idx,
+                            bond_len,
+                            angle_deg,
+                            dihedral_deg,
+                        );
+
+                        if !frag_indices.is_empty() {
+                            if target_angle_ref.is_none() || target_dihedral_ref.is_none() {
+                                let adj = build_bond_adjacency(mol.atoms.len(), &mol.bonds);
+                                if target_angle_ref.is_none() {
+                                    target_angle_ref = pick_neighbor(&adj, ref_idx, &[replace_idx])
+                                        .map(|v| v + 1)
+                                        .or_else(|| pick_any_except(mol.atoms.len(), &[ref_idx, replace_idx]).map(|v| v + 1));
+                                }
+                                if target_dihedral_ref.is_none() {
+                                    let angle_idx = target_angle_ref.map(|v| v - 1);
+                                    if let Some(aidx) = angle_idx {
+                                        target_dihedral_ref = pick_neighbor(&adj, aidx, &[ref_idx, replace_idx])
+                                            .map(|v| v + 1)
+                                            .or_else(|| {
+                                                pick_any_except(mol.atoms.len(), &[ref_idx, replace_idx, aidx])
+                                                    .map(|v| v + 1)
+                                            });
+                                    }
+                                }
+                                zmat_state.zmat[replace_idx].angle_ref = target_angle_ref;
+                                zmat_state.zmat[replace_idx].dihedral_ref = target_dihedral_ref;
+                            }
+                            let coords_base = zmat2xyz::zmat_to_xyz(&zmat_state.zmat);
+                            let atoms: Vec<String> = zmat_state
+                                .zmat
+                                .iter()
+                                .map(|atom| atom.symbol.clone())
+                                .collect();
+                            let (side_a, side_b) = split_sides(
+                                &atoms,
+                                &coords_base,
+                                ref_idx,
+                                replace_idx,
+                                state.bond_th_hx,
+                                state.bond_th_xx,
+                            );
+                            let side_indices = if side_b.contains(&replace_idx) {
+                                side_b
+                            } else {
+                                side_a
+                            };
+                            let mut picked_idx = replace_idx;
+                            let mut best_axis_dist = -1.0_f32;
+                            for &idx in &side_indices {
+                                if idx == replace_idx {
+                                    continue;
+                                }
+                                if !frag_indices.contains(&idx) {
+                                    continue;
+                                }
+                                let d = distance_to_axis(
+                                    coords_base[idx],
+                                    coords_base[ref_idx],
+                                    coords_base[replace_idx],
+                                );
+                                if d > best_axis_dist {
+                                    best_axis_dist = d;
+                                    picked_idx = idx;
+                                }
+                            }
+
+                            let angle_candidates: Vec<f32> = (12..=36).map(|i| i as f32 * 5.0).collect();
+                            let dihedral_candidates: Vec<f32> = (0..36).map(|i| i as f32 * 10.0).collect();
+                            let mut best_angle = angle_deg;
+                            let mut best_dihedral = dihedral_deg;
+                            let mut best_clear = -1.0_f32;
+                            for &cand_angle in &angle_candidates {
+                                let bent = bend_indices_towards_angle(
+                                    &coords_base,
+                                    coords_base[ref_idx],
+                                    coords_base[replace_idx],
+                                    &side_indices,
+                                    picked_idx,
+                                    cand_angle,
+                                );
+                                for &cand_dihedral in &dihedral_candidates {
+                                    let rotated = rotate_indices_around_axis(
+                                        &bent,
+                                        coords_base[ref_idx],
+                                        coords_base[replace_idx],
+                                        &side_indices,
+                                        cand_dihedral,
+                                    );
+                                    let clear = min_clearance_between(
+                                        &rotated,
+                                        &frag_indices,
+                                        &[ref_idx, replace_idx],
+                                    );
+                                    if clear > best_clear {
+                                        best_clear = clear;
+                                        best_angle = cand_angle as f64;
+                                        best_dihedral = cand_dihedral as f64;
+                                    }
+                                }
+                            }
+                            zmat_state.zmat[replace_idx].angle_deg = best_angle;
+                            zmat_state.zmat[replace_idx].dihedral_deg = best_dihedral;
+                            zmat_state.frag_scan_score = if best_clear >= 0.0 {
+                                Some(best_clear)
+                            } else {
+                                None
+                            };
+                        }
+
+                        let coords = zmat2xyz::zmat_to_xyz(&zmat_state.zmat);
+                        mol.atoms = zmat_state
+                            .zmat
+                            .iter()
+                            .map(|atom| atom.symbol.clone())
+                            .collect();
+                        mol.pos = coords;
+                        mol.recompute_bonds(2.0, 3.0);
+                        settings.dirty = true;
+                        zmat_state.edit_refresh = true;
+                        zmat_state.last_error = None;
+                    }
+                }
+
+                zmat_state.frag_pick_active = false;
+                zmat_state.frag_pick_indices.clear();
+                zmat_state.frag_pick_hint = None;
+                zmat_state.edit_refresh = true;
+            }
+        }
+        return;
+    }
+
     if !state.active { return; }
 
     for AtomPicked { index: hit_idx, tool } in ev.read().copied() {
@@ -752,6 +1567,20 @@ pub fn draw_builder_highlights(
             }
         }
         if let Some(&i2) = zmat_state.pick_indices.get(2) {
+            draw_hl(&mut gizmos, i2, green);
+        }
+    }
+    if zmat_state.frag_pick_active {
+        if let Some(&i0) = zmat_state.frag_pick_indices.get(0) {
+            draw_hl(&mut gizmos, i0, magenta);
+        }
+        if let Some(&i1) = zmat_state.frag_pick_indices.get(1) {
+            draw_hl(&mut gizmos, i1, cyan);
+            if let Some(&i0) = zmat_state.frag_pick_indices.get(0) {
+                gizmos.line(mol.pos[i0], mol.pos[i1], Color::WHITE);
+            }
+        }
+        if let Some(&i2) = zmat_state.frag_pick_indices.get(2) {
             draw_hl(&mut gizmos, i2, green);
         }
     }
@@ -1077,6 +1906,7 @@ pub fn builder_ui_panel(
                                         zmat_state.remove_popup_open = false;
                                         zmat_state.remove_popup_pos = None;
                                         zmat_state.redo_remove_visible = false;
+                                        zmat_state.frag_undo_visible = false;
                                         zmat_state.last_error = None;
                                     } else if let Some((idx, sym)) = pending_select {
                                         zmat_state.selected_index = Some(idx);
@@ -1087,6 +1917,7 @@ pub fn builder_ui_panel(
                                             zmat_state.remove_popup_pos = pending_popup_pos;
                                         }
                                         zmat_state.redo_remove_visible = false;
+                                        zmat_state.frag_undo_visible = false;
                                         zmat_state.last_error = None;
                                     }
                                 });
@@ -1122,6 +1953,7 @@ pub fn builder_ui_panel(
                                 zmat_state.selected_symbol = None;
                                 zmat_state.edit_preview.clear();
                                 zmat_state.redo_remove_visible = true;
+                                zmat_state.frag_undo_visible = false;
                                 zmat_state.last_error = None;
                             }
                         } else {
@@ -1146,6 +1978,7 @@ pub fn builder_ui_panel(
                                 zmat_state.edit_refresh = true;
                             }
                             zmat_state.redo_remove_visible = false;
+                            zmat_state.frag_undo_visible = false;
                         }
                     }
                     if let Some(err) = &zmat_state.last_error {
@@ -1164,6 +1997,7 @@ pub fn builder_ui_panel(
                             zmat_state.selected_symbol = None;
                             zmat_state.edit_preview.clear();
                             zmat_state.redo_remove_visible = false;
+                            zmat_state.frag_undo_visible = false;
                             zmat_state.last_error = None;
                         }
                     }
@@ -1247,6 +2081,8 @@ pub fn builder_ui_panel(
                         } else {
                             zmat_state.pick_active = true;
                             zmat_state.pick_indices.clear();
+                            zmat_state.frag_pick_active = false;
+                            zmat_state.frag_pick_indices.clear();
                             let required_picks = zmat_state.zmat.len().min(3);
                             let hint = match required_picks {
                                 1 => "Pick 1 reference atom for the bond.",
@@ -1280,6 +2116,180 @@ pub fn builder_ui_panel(
                         }
                     }
                 });
+
+                ui.add_space(8.0);
+                ui.separator();
+                ui.add_space(6.0);
+
+                ui.label("Add fragment");
+                ui.horizontal(|ui| {
+                    ui.label("Mode");
+                    if ui
+                        .selectable_value(
+                            &mut zmat_state.frag_mode,
+                            FragmentInsertMode::Connect,
+                            "Connect",
+                        )
+                        .clicked()
+                    {
+                        zmat_state.frag_pick_active = false;
+                        zmat_state.frag_pick_indices.clear();
+                        zmat_state.frag_pick_hint = None;
+                        zmat_state.last_error = None;
+                    }
+                    if ui
+                        .selectable_value(
+                            &mut zmat_state.frag_mode,
+                            FragmentInsertMode::Replace,
+                            "Replace",
+                        )
+                        .clicked()
+                    {
+                        zmat_state.frag_pick_active = false;
+                        zmat_state.frag_pick_indices.clear();
+                        zmat_state.frag_pick_hint = None;
+                        zmat_state.last_error = None;
+                    }
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Fragment");
+                    egui::ComboBox::from_id_salt("frag_combo")
+                        .selected_text(zmat_state.frag_name.clone())
+                        .show_ui(ui, |ui| {
+                            for frag in fragments::FRAGMENTS {
+                                ui.selectable_value(
+                                    &mut zmat_state.frag_name,
+                                    frag.name.to_string(),
+                                    frag.name,
+                                );
+                            }
+                        });
+                });
+                if matches!(zmat_state.frag_mode, FragmentInsertMode::Connect) {
+                    ui.horizontal(|ui| {
+                        ui.label("Bond");
+                        egui::ComboBox::from_id_salt("frag_bond_order")
+                            .selected_text(zmat_state.frag_bond_order.label())
+                            .show_ui(ui, |ui| {
+                                for &bo in &[BondOrder::Single, BondOrder::Double, BondOrder::Triple] {
+                                    if ui
+                                        .selectable_value(
+                                            &mut zmat_state.frag_bond_order,
+                                            bo,
+                                            bo.label(),
+                                        )
+                                        .clicked()
+                                    {
+                                        zmat_state.frag_angle_deg = bo.default_angle();
+                                        zmat_state.frag_dihedral_deg = bo.default_dihedral();
+                                    }
+                                }
+                            });
+                    });
+                    ui.horizontal(|ui| {
+                        ui.label("Angle (deg)");
+                        ui.add(egui::DragValue::new(&mut zmat_state.frag_angle_deg).speed(0.1));
+                        ui.add_space(12.0);
+                        ui.label("Dihedral (deg)");
+                        ui.add(egui::DragValue::new(&mut zmat_state.frag_dihedral_deg).speed(0.1));
+                    });
+                }
+
+                ui.horizontal(|ui| {
+                    let pick_on = zmat_state.frag_pick_active;
+                    let sel = ui.visuals().selection.bg_fill;
+                    let dim = ui.visuals().widgets.inactive.bg_fill;
+                    if ui
+                        .add(egui::Button::new("Add Fragment").fill(if pick_on { sel } else { dim }))
+                        .clicked()
+                    {
+                        if zmat_state.zmat.is_empty() {
+                            if let Some(frag) = find_fragment(&zmat_state.frag_name) {
+                                zmat_state.last_frag_snapshot = Some(zmat_state.zmat.clone());
+                                zmat_state.frag_undo_visible = true;
+                                let frag_angle_deg = zmat_state.frag_angle_deg;
+                                let frag_dihedral_deg = zmat_state.frag_dihedral_deg;
+                                add_fragment_to_zmat(
+                                    &mut zmat_state.zmat,
+                                    frag.xyz,
+                                    None,
+                                    0.0,
+                                    frag_angle_deg,
+                                    frag_dihedral_deg,
+                                );
+                                let coords = zmat2xyz::zmat_to_xyz(&zmat_state.zmat);
+                                mol.atoms = zmat_state
+                                    .zmat
+                                    .iter()
+                                    .map(|atom| atom.symbol.clone())
+                                    .collect();
+                                mol.pos = coords;
+                                mol.recompute_bonds(2.0, 3.0);
+                                settings.dirty = true;
+                                zmat_state.edit_refresh = true;
+                                zmat_state.last_error = None;
+                            } else {
+                                zmat_state.last_error = Some("Fragment not found.".to_string());
+                            }
+                        } else {
+                            zmat_state.frag_pick_active = true;
+                            zmat_state.frag_pick_indices.clear();
+                            zmat_state.pick_active = false;
+                            zmat_state.pick_indices.clear();
+                            let required_picks = match zmat_state.frag_mode {
+                                FragmentInsertMode::Connect => zmat_state.zmat.len().min(3),
+                                FragmentInsertMode::Replace => 1,
+                            };
+                            let hint = match required_picks {
+                                1 if matches!(zmat_state.frag_mode, FragmentInsertMode::Replace) => {
+                                    "Pick 1 atom to replace."
+                                }
+                                1 => "Pick 1 reference atom for the bond.",
+                                2 => "Pick 2 reference atoms: bond then angle.",
+                                _ => "Pick 3 reference atoms: bond, angle, dihedral.",
+                            };
+                            zmat_state.frag_pick_hint = Some(hint.to_string());
+                            zmat_state.last_error = None;
+                        }
+                    }
+                    if zmat_state.frag_pick_active {
+                        if ui.button("Cancel Fragment Picking").clicked() {
+                            zmat_state.frag_pick_active = false;
+                            zmat_state.frag_pick_indices.clear();
+                            zmat_state.frag_pick_hint = None;
+                            zmat_state.last_error = None;
+                        }
+                    }
+                });
+
+                if let Some(hint) = &zmat_state.frag_pick_hint {
+                    ui.weak(hint);
+                }
+                if let Some(score) = zmat_state.frag_scan_score {
+                    ui.weak(format!("Fragment scan min distance: {:.3} Å", score));
+                }
+                if zmat_state.frag_undo_visible {
+                    if ui.button("Undo Fragment").clicked() {
+                        if let Some(snapshot) = zmat_state.last_frag_snapshot.take() {
+                            zmat_state.zmat = snapshot;
+                            let coords = zmat2xyz::zmat_to_xyz(&zmat_state.zmat);
+                            mol.atoms = zmat_state
+                                .zmat
+                                .iter()
+                                .map(|atom| atom.symbol.clone())
+                                .collect();
+                            mol.pos = coords;
+                            mol.recompute_bonds(2.0, 3.0);
+                            settings.dirty = true;
+                            zmat_state.edit_refresh = true;
+                        }
+                        zmat_state.frag_pick_active = false;
+                        zmat_state.frag_pick_indices.clear();
+                        zmat_state.frag_pick_hint = None;
+                        zmat_state.frag_undo_visible = false;
+                        zmat_state.last_error = None;
+                    }
+                }
 
                 if let Some(hint) = &zmat_state.pick_hint {
                     ui.weak(hint);

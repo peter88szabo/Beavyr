@@ -6,7 +6,7 @@ use crate::events::MoleculeChanged;
 use crate::molecule::{covalent_radius_angstrom, Molecule};
 use crate::settings::MolSettings;
 use crate::scene::LAYER_MAIN;
-use bevy::render::view::RenderLayers;
+use bevy::camera::visibility::RenderLayers;
 
 #[derive(Component)]
 pub struct TrajGhostAtom;

@@ -1,7 +1,7 @@
 // src/camera.rs
 use bevy::input::mouse::{MouseMotion, MouseWheel};
 use bevy::prelude::*;
-use bevy::window::CursorGrabMode;
+use bevy::window::{CursorGrabMode, CursorOptions};
 use bevy_egui::EguiContexts;
 
 use crate::scene::MainCamera;
@@ -57,37 +57,45 @@ pub fn orbit_camera_system(
     mut scroll_evr: EventReader<MouseWheel>,  // <-- fixed: no extra '>'
     keys: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
-    mut windows: Query<&mut Window>,
+    mut windows: Query<(&mut Window, &mut CursorOptions)>,
     mut settings: ResMut<crate::settings::MolSettings>,
     mut contexts: EguiContexts,
+    export_select_area: Res<crate::export_image::ExportSelectArea>,
 ) {
-    let Ok(mut window) = windows.single_mut() else { return; };
+    let Ok((window, mut cursor_options)) = windows.single_mut() else { return; };
     let pointer_over_ui = contexts
         .ctx_mut()
         .ok()
         .map(|ctx| ctx.is_pointer_over_area())
         .unwrap_or(false);
+    if export_select_area.active || export_select_area.dragging {
+        cam.rotating = false;
+        cam.panning = false;
+        cursor_options.grab_mode = CursorGrabMode::None;
+        cursor_options.visible = true;
+        return;
+    }
 
     // --- begin/end interaction modes (mutually exclusive) ---
     if window.cursor_position().is_some() {
         if buttons.just_pressed(MouseButton::Left) && !pointer_over_ui {
             cam.rotating = true;
             cam.panning = false;
-            window.cursor_options.grab_mode = CursorGrabMode::Locked;
-            window.cursor_options.visible = false;
+            cursor_options.grab_mode = CursorGrabMode::Locked;
+            cursor_options.visible = false;
         }
         if buttons.just_pressed(MouseButton::Right) && !pointer_over_ui {
             cam.panning = true;
             cam.rotating = false;
-            window.cursor_options.grab_mode = CursorGrabMode::Locked;
-            window.cursor_options.visible = false;
+            cursor_options.grab_mode = CursorGrabMode::Locked;
+            cursor_options.visible = false;
         }
     }
     if buttons.just_released(MouseButton::Left)  { cam.rotating = false; }
     if buttons.just_released(MouseButton::Right) { cam.panning  = false; }
     if !buttons.pressed(MouseButton::Left) && !buttons.pressed(MouseButton::Right) {
-        window.cursor_options.grab_mode = CursorGrabMode::None;
-        window.cursor_options.visible = true;
+        cursor_options.grab_mode = CursorGrabMode::None;
+        cursor_options.visible = true;
     }
 
     // collect mouse delta

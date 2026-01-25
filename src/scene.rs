@@ -2,8 +2,8 @@
 
 use bevy::math::primitives::{Capsule3d, Cone, Cylinder, Sphere};
 use bevy::prelude::*;
-use bevy::render::camera::Viewport;
-use bevy::render::view::RenderLayers;
+use bevy::camera::Viewport;
+use bevy::camera::visibility::RenderLayers;
 
 use crate::color_schemes::color_for;
 use crate::molecule::{covalent_radius_angstrom, Molecule};

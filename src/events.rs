@@ -8,7 +8,7 @@ pub enum ToolKind {
 }
 
 /// Emitted when the shared picker reports a picked atom for a specific tool.
-#[derive(Event, Debug, Clone, Copy)]
+#[derive(Message, Debug, Clone, Copy)]
 pub struct AtomPicked {
     pub index: usize,
     pub tool: ToolKind,
@@ -30,7 +30,7 @@ pub enum MoleculeChangeReason {
 }
 
 /// Emitted whenever `Molecule` data changes and views should refresh.
-#[derive(Event, Debug, Clone, Copy)]
+#[derive(Message, Debug, Clone, Copy)]
 pub struct MoleculeChanged {
     pub reason: MoleculeChangeReason,
 }

@@ -11,8 +11,7 @@ use crate::molecule::{parse_xyz_first_frame_angstrom, Molecule};
 use crate::settings::{BondColorMode, ColorScheme, LightingMode, MolSettings, RepresentationMode};
 
 // Export UI + resources
-use crate::export_ui;
-use crate::export::{ExportRequestQueue, ExportUiState};
+use crate::export_image::{ExportCounter, ExportFormat, ExportSelectArea, ExportSettings};
 
 // Measurements UI + resource
 use crate::measurements::Measurements;
@@ -59,7 +58,9 @@ pub struct XyzBuffer {
 ///     * Edit mode: multiline text editor; Apply → parse → write Molecule + emit MoleculeChanged
 ///     * Copy XYZ → copies current live geometry
 pub fn ui_panel(
+    mut commands: Commands,
     mut contexts: EguiContexts,
+    mut images: ResMut<Assets<Image>>,
     mut settings: ResMut<MolSettings>,
     mut mol: ResMut<Molecule>,
     mut xyz_buf: ResMut<XyzBuffer>,
@@ -67,12 +68,13 @@ pub fn ui_panel(
     // orbit target control
     mut cam: ResMut<crate::camera::OrbitCamera>,
     // camera for picking + label projection
-    q_cam: Query<(&Camera, &GlobalTransform), (With<Camera3d>, With<crate::scene::MainCamera>)>,
+    q_cam: Query<(&Camera, &Projection, &GlobalTransform), (With<Camera3d>, With<crate::scene::MainCamera>)>,
     windows: Query<&Window>,
 
     // export section
-    mut export_ui_state: ResMut<ExportUiState>,
-    mut export_queue: ResMut<ExportRequestQueue>,
+    mut export_settings: ResMut<ExportSettings>,
+    mut export_counter: ResMut<ExportCounter>,
+    mut export_select_area: ResMut<ExportSelectArea>,
 
     // measurements panel
     mut measurements: ResMut<Measurements>,
@@ -100,7 +102,7 @@ pub fn ui_panel(
     let mouse_over_ui = ctx.is_pointer_over_area();
     if let (Some(pos_points), true) = (latest_pos_opt, right_clicked) {
         if !mouse_over_ui {
-            if let (Ok((cam_comp, cam_xform)), Ok(win)) = (q_cam.single(), windows.single()) {
+            if let (Ok((cam_comp, _proj, cam_xform)), Ok(win)) = (q_cam.single(), windows.single()) {
                 // Convert egui logical points → PHYSICAL px
                 let scale = win.scale_factor() as f32;
                 let mouse_px = egui::pos2(pos_points.x * scale, pos_points.y * scale);
@@ -1183,7 +1185,106 @@ pub fn ui_panel(
             ui.add_space(8.0);
             ui.separator();
             ui.collapsing("Export Image", |ui| {
-                export_ui::export_section(ui, &mut export_ui_state, &mut export_queue);
+                let warn_id = egui::Id::new("export_no_selection_warn");
+                let mut warn = ctx.data_mut(|d| d.get_persisted::<bool>(warn_id).unwrap_or(false));
+                if export_select_area.has_area {
+                    warn = false;
+                }
+
+                ui.horizontal(|ui| {
+                    ui.label("Format");
+                    egui::ComboBox::from_id_salt("export_format")
+                        .selected_text(match export_settings.format {
+                            ExportFormat::Png => "PNG",
+                            ExportFormat::Jpg => "JPG",
+                        })
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut export_settings.format, ExportFormat::Png, "PNG");
+                            ui.selectable_value(&mut export_settings.format, ExportFormat::Jpg, "JPG");
+                        });
+                });
+                ui.horizontal(|ui| {
+                    ui.label("DPI");
+                    egui::ComboBox::from_id_salt("export_dpi")
+                        .selected_text(format!("{} DPI", export_settings.dpi))
+                        .show_ui(ui, |ui| {
+                            for dpi in [150_u32, 200, 300, 600, 1200] {
+                                ui.selectable_value(
+                                    &mut export_settings.dpi,
+                                    dpi,
+                                    format!("{dpi} DPI"),
+                                );
+                            }
+                        });
+                });
+                ui.horizontal(|ui| {
+                    ui.label("Canvas");
+                    ui.add(egui::DragValue::new(&mut export_settings.canvas_width).range(256..=8192));
+                    ui.label("x");
+                    ui.add(egui::DragValue::new(&mut export_settings.canvas_height).range(256..=8192));
+                });
+                ui.horizontal(|ui| {
+                    let label = if export_select_area.active {
+                        "Selecting..."
+                    } else {
+                        "Select Area"
+                    };
+                    if ui.add(egui::Button::new(label)).clicked() {
+                        warn = false;
+                        export_select_area.active = true;
+                        export_select_area.dragging = false;
+                        export_select_area.start = None;
+                        export_select_area.end = None;
+                        export_select_area.has_area = false;
+                    }
+                    if export_select_area.has_area && ui.button("Clear Area").clicked() {
+                        export_select_area.active = false;
+                        export_select_area.dragging = false;
+                        export_select_area.start = None;
+                        export_select_area.end = None;
+                        export_select_area.has_area = false;
+                    }
+                });
+                ui.horizontal(|ui| {
+                    let button_size = egui::vec2(120.0, 24.0);
+                    if ui
+                        .add_sized(button_size, egui::Button::new("Export Image"))
+                        .clicked()
+                    {
+                        if !export_select_area.has_area {
+                            warn = true;
+                            return;
+                        }
+                        let (Ok((_cam, proj, cam_xform)), Ok(win)) = (q_cam.single(), windows.single()) else {
+                            return;
+                        };
+                        let ok = crate::export_image::start_export_capture(
+                            &mut commands,
+                            &mut images,
+                            &mut export_settings,
+                            &mut export_counter,
+                            &export_select_area,
+                            &win,
+                            proj,
+                            cam_xform,
+                        );
+                        if ok {
+                            export_select_area.active = false;
+                            export_select_area.dragging = false;
+                            export_select_area.start = None;
+                            export_select_area.end = None;
+                            export_select_area.has_area = false;
+                        }
+                    }
+                });
+                if warn {
+                    ui.add_space(4.0);
+                    ui.colored_label(
+                        egui::Color32::from_rgb(220, 80, 80),
+                        "Select an area before exporting.",
+                    );
+                }
+                ctx.data_mut(|d| d.insert_persisted(warn_id, warn));
             });
         });
 
@@ -1194,7 +1295,7 @@ pub fn ui_panel(
     let show_index = ctx.data_mut(|d| d.get_persisted::<bool>(egui::Id::new("show_atom_index")).unwrap_or(false));
 
     if (show_type || show_index) && mol.pos.len() == mol.atoms.len() {
-        if let (Ok((cam_comp, cam_xform)), Ok(win)) = (q_cam.single(), windows.single()) {
+        if let (Ok((cam_comp, _proj, cam_xform)), Ok(win)) = (q_cam.single(), windows.single()) {
             egui::Area::new(egui::Id::new("atom_labels_overlay"))
                 .movable(false)
                 .interactable(false)
@@ -1232,6 +1333,24 @@ pub fn ui_panel(
                     }
                 });
         }
+    }
+
+    if export_select_area.dragging || export_select_area.has_area {
+        egui::Area::new(egui::Id::new("export_selection_overlay"))
+            .movable(false)
+            .interactable(false)
+            .order(egui::Order::Foreground)
+            .show(&ctx, |ui| {
+                if let Some((min, max)) = export_select_area.bounds() {
+                    let rect = egui::Rect::from_min_max(
+                        egui::pos2(min.x, min.y),
+                        egui::pos2(max.x, max.y),
+                    );
+                    let stroke = egui::Stroke::new(1.5, egui::Color32::from_rgb(70, 190, 90));
+                    let fill = egui::Color32::from_rgba_premultiplied(70, 190, 90, 30);
+                    ui.painter().rect(rect, 0.0, fill, stroke, egui::StrokeKind::Inside);
+                }
+            });
     }
 }
 
