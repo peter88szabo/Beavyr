@@ -120,7 +120,7 @@ impl Default for MolSettings {
             atom_scale: 0.6,
             atom_resolution: 7,
             bond_thresh_scale: 1.2,
-            hbond_cutoff: 3.0,
+            hbond_cutoff: 2.5,
             bond_radius_pct: 0.40, // 50% of smaller covalent radius
 
             representation: RepresentationMode::BallAndStick,

@@ -65,6 +65,7 @@ fn main() {
         .insert_resource(XyzBuffer {
             text: scene::DEFAULT_WATER.trim().to_string(),
             last_dir: None,
+            current_file: None,
             warning: None,
         })
         // export resources

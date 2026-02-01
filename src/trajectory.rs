@@ -24,10 +24,15 @@ pub enum PlaybackMode {
     PingPong,
 }
 
+#[derive(Clone)]
+pub struct TrajectoryFrame {
+    pub atoms: Vec<String>,
+    pub pos: Vec<Vec3>,
+}
+
 #[derive(Resource, Clone)]
 pub struct TrajectoryState {
-    pub frames: Vec<Vec<Vec3>>,
-    pub atoms: Vec<String>,
+    pub frames: Vec<TrajectoryFrame>,
     pub current_frame: usize,
     pub playing: bool,
     pub direction: i32,
@@ -42,13 +47,13 @@ pub struct TrajectoryState {
     pub accum: f32,
     pub last_applied: Option<usize>,
     pub last_dir: Option<PathBuf>,
+    pub current_file: Option<PathBuf>,
 }
 
 impl Default for TrajectoryState {
     fn default() -> Self {
         Self {
             frames: Vec::new(),
-            atoms: Vec::new(),
             current_frame: 0,
             playing: false,
             direction: 1,
@@ -63,59 +68,135 @@ impl Default for TrajectoryState {
             accum: 0.0,
             last_applied: None,
             last_dir: None,
+            current_file: None,
         }
     }
 }
 
-pub fn parse_multi_xyz(text: &str) -> Result<(Vec<String>, Vec<Vec<Vec3>>), String> {
-    let mut lines = text.lines().filter(|l| !l.trim().is_empty()).peekable();
-    let mut atoms: Vec<String> = Vec::new();
-    let mut frames: Vec<Vec<Vec3>> = Vec::new();
+pub fn parse_multi_xyz(text: &str) -> Result<Vec<TrajectoryFrame>, String> {
+    let mut lines = text.lines().enumerate().peekable();
+    let mut frames: Vec<TrajectoryFrame> = Vec::new();
+    let mut frame_idx: usize = 0;
 
+    let looks_like_coord = |line: &str| -> bool {
+        let parts: Vec<&str> = line.split_whitespace().collect();
+        if parts.len() < 4 {
+            return false;
+        }
+        parts[1].parse::<f32>().is_ok()
+            && parts[2].parse::<f32>().is_ok()
+            && parts[3].parse::<f32>().is_ok()
+    };
+
+    let mut expected_count: Option<usize> = None;
     loop {
-        let Some(count_line) = lines.next() else { break };
-        let count = count_line
+        // Skip blank lines before the count line.
+        let mut count_line = None;
+        while let Some((line_no, line)) = lines.next() {
+            if !line.trim().is_empty() {
+                count_line = Some((line_no + 1, line));
+                break;
+            }
+        }
+        let Some(count_line) = count_line else { break };
+
+        let (count_line_no, count_line_text) = count_line;
+        let count = count_line_text
             .trim()
             .parse::<usize>()
-            .map_err(|_| "Invalid atom count line in trajectory".to_string())?;
+            .map_err(|_| {
+                format!(
+                    "Invalid atom count line in trajectory (frame {}, line {}): {}",
+                    frame_idx + 1,
+                    count_line_no,
+                    count_line_text.trim()
+                )
+            })?;
+        if let Some(expected) = expected_count {
+            if count != expected {
+                return Err(format!(
+                    "Trajectory frames have inconsistent atom counts (frame {}, line {}, expected {}, got {}): {}",
+                    frame_idx + 1,
+                    count_line_no,
+                    expected,
+                    count,
+                    count_line_text.trim()
+                ));
+            }
+        } else {
+            expected_count = Some(count);
+        }
 
-        // Comment line (may be empty, but consume one line if present)
-        if lines.peek().is_some() {
-            let _ = lines.next();
+        // Optional comment line: consume one line unless it looks like a coordinate line.
+        if let Some((_, next)) = lines.peek() {
+            if next.trim().is_empty() || !looks_like_coord(next) {
+                let _ = lines.next();
+            }
         }
 
         let mut frame_atoms: Vec<String> = Vec::with_capacity(count);
         let mut frame_pos: Vec<Vec3> = Vec::with_capacity(count);
-        for _ in 0..count {
-            let Some(line) = lines.next() else {
-                return Err("Unexpected end of frame data".to_string());
+        while frame_atoms.len() < count {
+            let Some((line_no, line)) = lines.next() else {
+                return Err(format!(
+                    "Unexpected end of frame data (frame {}, line {})",
+                    frame_idx + 1,
+                    count_line_no
+                ));
             };
+            if line.trim().is_empty() {
+                continue;
+            }
             let parts: Vec<&str> = line.split_whitespace().collect();
             if parts.len() < 4 {
-                return Err("Invalid coordinate line in trajectory".to_string());
+                return Err(format!(
+                    "Invalid coordinate line in trajectory (frame {}, line {}): {}",
+                    frame_idx + 1,
+                    line_no + 1,
+                    line.trim()
+                ));
             }
             let sym = parts[0].to_string();
-            let x = parts[1].parse::<f32>().map_err(|_| "Invalid X".to_string())?;
-            let y = parts[2].parse::<f32>().map_err(|_| "Invalid Y".to_string())?;
-            let z = parts[3].parse::<f32>().map_err(|_| "Invalid Z".to_string())?;
+            let x = parts[1].parse::<f32>().map_err(|_| {
+                format!(
+                    "Invalid X coordinate in trajectory (frame {}, line {}): {}",
+                    frame_idx + 1,
+                    line_no + 1,
+                    line.trim()
+                )
+            })?;
+            let y = parts[2].parse::<f32>().map_err(|_| {
+                format!(
+                    "Invalid Y coordinate in trajectory (frame {}, line {}): {}",
+                    frame_idx + 1,
+                    line_no + 1,
+                    line.trim()
+                )
+            })?;
+            let z = parts[3].parse::<f32>().map_err(|_| {
+                format!(
+                    "Invalid Z coordinate in trajectory (frame {}, line {}): {}",
+                    frame_idx + 1,
+                    line_no + 1,
+                    line.trim()
+                )
+            })?;
             frame_atoms.push(sym);
             frame_pos.push(Vec3::new(x, y, z));
         }
 
-        if frames.is_empty() {
-            atoms = frame_atoms;
-        } else if frame_atoms.len() != atoms.len() {
-            return Err("Trajectory frames have inconsistent atom counts".to_string());
-        }
-
-        frames.push(frame_pos);
+        frames.push(TrajectoryFrame {
+            atoms: frame_atoms,
+            pos: frame_pos,
+        });
+        frame_idx += 1;
     }
 
     if frames.is_empty() {
         return Err("No frames found in trajectory".to_string());
     }
 
-    Ok((atoms, frames))
+    Ok(frames)
 }
 
 pub fn apply_current_frame(
@@ -134,8 +215,9 @@ pub fn apply_current_frame(
         return;
     }
 
-    mol.atoms = traj.atoms.clone();
-    mol.set_pos(traj.frames[idx].clone());
+    let frame = &traj.frames[idx];
+    mol.atoms = frame.atoms.clone();
+    mol.set_pos(frame.pos.clone());
     mol.recompute_bonds(settings.bond_thresh_scale, settings.hbond_cutoff);
     settings.dirty = true;
     ev_changed.write(MoleculeChanged::set_pos());
@@ -277,8 +359,8 @@ pub fn rebuild_trajectory_overlay(
                 &mut commands,
                 &mut meshes,
                 &mut materials,
-                &traj.atoms,
-                frame,
+                &frame.atoms,
+                &frame.pos,
                 &settings,
                 metallic,
                 rough,
@@ -295,8 +377,8 @@ pub fn rebuild_trajectory_overlay(
             &mut commands,
             &mut meshes,
             &mut materials,
-            &traj.atoms,
-            &traj.frames[last],
+            &traj.frames[last].atoms,
+            &traj.frames[last].pos,
             &settings,
             metallic,
             rough,
@@ -313,8 +395,8 @@ pub fn rebuild_trajectory_overlay(
                 &mut commands,
                 &mut meshes,
                 &mut materials,
-                &traj.atoms,
-                frame,
+                &frame.atoms,
+                &frame.pos,
                 &settings,
                 metallic,
                 rough,

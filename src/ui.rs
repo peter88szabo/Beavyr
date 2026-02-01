@@ -45,6 +45,7 @@ const ELEMENT_FILTER_F_BLOCK: [&str; 30] = [
 pub struct XyzBuffer {
     pub text: String,
     pub last_dir: Option<PathBuf>,
+    pub current_file: Option<PathBuf>,
     pub warning: Option<String>,
 }
 
@@ -261,6 +262,7 @@ pub fn ui_panel(
                         }
                         if let Some(path) = dlg.pick_file() {
                             xyz_buf.last_dir = path.parent().map(|p| p.to_path_buf());
+                            xyz_buf.current_file = Some(path.clone());
                             if let Ok(text) = fs::read_to_string(&path) {
                                 xyz_buf.text = text;
                                 xyz_buf.warning = apply_xyz_text(
@@ -302,6 +304,13 @@ pub fn ui_panel(
                         format!("Warning: {}", warn),
                     );
                 }
+                let xyz_file_label = match &xyz_buf.current_file {
+                    Some(path) => format!("File: {}", path.display()),
+                    None => "File: (none)".to_string(),
+                };
+                ui.collapsing("Show Filename", |ui| {
+                    ui.weak(xyz_file_label);
+                });
 
                 if edit_mode {
                     // ---- EDIT MODE ----
@@ -394,11 +403,11 @@ pub fn ui_panel(
                     }
                     if let Some(path) = dlg.pick_file() {
                         traj.last_dir = path.parent().map(|p| p.to_path_buf());
+                        traj.current_file = Some(path.clone());
                         xyz_buf.warning = None;
                         if let Ok(text) = fs::read_to_string(&path) {
                             match trajectory::parse_multi_xyz(&text) {
-                                Ok((atoms, frames)) => {
-                                    traj.atoms = atoms;
+                                Ok(frames) => {
                                     traj.frames = frames;
                                     traj.current_frame = 0;
                                     traj.playing = false;
@@ -419,6 +428,14 @@ pub fn ui_panel(
                         }
                     }
                 }
+
+                let traj_file_label = match &traj.current_file {
+                    Some(path) => format!("File: {}", path.display()),
+                    None => "File: (none)".to_string(),
+                };
+                ui.collapsing("Show Filename", |ui| {
+                    ui.weak(traj_file_label);
+                });
 
                 if traj.frames.is_empty() {
                     ui.weak("No trajectory loaded.");
