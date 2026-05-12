@@ -182,7 +182,7 @@ pub fn configure_measurement_gizmos(
 /// Consume AtomPicked events when any measurement picking mode is active.
 /// Priority if multiple toggles are on: dihedral > angle > distance.
 pub fn handle_measurement_picking(
-    mut ev_picked: EventReader<AtomPicked>,
+    mut ev_picked: MessageReader<AtomPicked>,
     mol: Option<Res<Molecule>>,
     mut measurements: ResMut<Measurements>,
 ) {

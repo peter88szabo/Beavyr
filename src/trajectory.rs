@@ -43,6 +43,7 @@ pub struct TrajectoryState {
     pub overlay_ghost_stride: usize,
     pub overlay_full_last: bool,
     pub ghost_alpha: f32,
+    pub fixed_bonds: bool,
     pub fps: f32,
     pub accum: f32,
     pub last_applied: Option<usize>,
@@ -64,6 +65,7 @@ impl Default for TrajectoryState {
             overlay_ghost_stride: 1,
             overlay_full_last: false,
             ghost_alpha: 0.2,
+            fixed_bonds: false,
             fps: 12.0,
             accum: 0.0,
             last_applied: None,
@@ -203,7 +205,7 @@ pub fn apply_current_frame(
     traj: &mut TrajectoryState,
     mol: &mut Molecule,
     settings: &mut MolSettings,
-    ev_changed: &mut EventWriter<MoleculeChanged>,
+    ev_changed: &mut MessageWriter<MoleculeChanged>,
     recenter: bool,
     cam: Option<&mut crate::camera::OrbitCamera>,
 ) {
@@ -216,10 +218,27 @@ pub fn apply_current_frame(
     }
 
     let frame = &traj.frames[idx];
+    let old_bond_pairs: Vec<(usize, usize)> = mol.bonds.iter().map(|&(i, j, _)| (i, j)).collect();
+    let topology_changed = mol.atoms != frame.atoms || mol.pos.len() != frame.pos.len();
     mol.atoms = frame.atoms.clone();
     mol.set_pos(frame.pos.clone());
-    mol.recompute_bonds(settings.bond_thresh_scale, settings.hbond_cutoff);
-    settings.dirty = true;
+
+    let mut bond_topology_changed = false;
+    if topology_changed || !traj.fixed_bonds {
+        mol.recompute_bonds(settings.bond_thresh_scale, settings.hbond_cutoff);
+        bond_topology_changed = old_bond_pairs.len() != mol.bonds.len()
+            || old_bond_pairs
+                .iter()
+                .zip(mol.bonds.iter())
+                .any(|(&(oi, oj), &(ni, nj, _))| oi != ni || oj != nj);
+    }
+
+    if topology_changed || bond_topology_changed {
+        settings.geometry_dirty = true;
+        settings.bond_topology_dirty = true;
+    } else {
+        settings.coords_dirty = true;
+    }
     ev_changed.write(MoleculeChanged::set_pos());
 
     if recenter {
@@ -238,7 +257,7 @@ pub fn advance_trajectory(
     mut traj: ResMut<TrajectoryState>,
     mut mol: ResMut<Molecule>,
     mut settings: ResMut<MolSettings>,
-    mut ev_changed: EventWriter<MoleculeChanged>,
+    mut ev_changed: MessageWriter<MoleculeChanged>,
 ) {
     if !traj.playing || traj.frames.is_empty() || traj.fps <= 0.0 {
         return;

@@ -1,6 +1,7 @@
 // src/molecule.rs
 
 use bevy::prelude::*;
+use std::collections::HashMap;
 
 /// A lightweight snapshot of molecular coordinates (Å).
 /// This is intentionally just a clone of `pos` so it’s cheap to create/apply.
@@ -75,18 +76,7 @@ impl Molecule {
             return;
         }
 
-        // 1) Covalent bonds (your rule)
-        for i in 0..n {
-            for j in (i + 1)..n {
-                let ri = covalent_radius_angstrom(&self.atoms[i]);
-                let rj = covalent_radius_angstrom(&self.atoms[j]);
-                let cutoff = (ri + rj) * thresh_scale;
-                let d = self.pos[i].distance(self.pos[j]);
-                if d > 0.01 && d <= cutoff {
-                    self.bonds.push((i, j, d));
-                }
-            }
-        }
+        self.recompute_covalent_bonds(thresh_scale);
 
         // Build adjacency from covalent bonds
         let mut bonded_to: Vec<Vec<usize>> = vec![Vec::new(); n];
@@ -154,6 +144,72 @@ impl Molecule {
             }
         }
     }
+
+    fn recompute_covalent_bonds(&mut self, thresh_scale: f32) {
+        const SPATIAL_GRID_ATOM_THRESHOLD: usize = 256;
+
+        let n = self.atoms.len();
+        if n < SPATIAL_GRID_ATOM_THRESHOLD {
+            for i in 0..n {
+                for j in (i + 1)..n {
+                    self.push_bond_if_close(i, j, thresh_scale);
+                }
+            }
+            return;
+        }
+
+        let max_radius = self
+            .atoms
+            .iter()
+            .map(|sym| covalent_radius_angstrom(sym))
+            .fold(0.0_f32, f32::max);
+        let cell_size = (max_radius * 2.0 * thresh_scale).max(0.5);
+
+        let mut cells: HashMap<(i32, i32, i32), Vec<usize>> = HashMap::new();
+        for (i, &p) in self.pos.iter().enumerate() {
+            cells.entry(grid_cell(p, cell_size)).or_default().push(i);
+        }
+
+        for (&cell, indices) in &cells {
+            for dx in -1..=1 {
+                for dy in -1..=1 {
+                    for dz in -1..=1 {
+                        let neighbor_cell = (cell.0 + dx, cell.1 + dy, cell.2 + dz);
+                        let Some(other_indices) = cells.get(&neighbor_cell) else {
+                            continue;
+                        };
+
+                        for &i in indices {
+                            for &j in other_indices {
+                                if j <= i {
+                                    continue;
+                                }
+                                self.push_bond_if_close(i, j, thresh_scale);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn push_bond_if_close(&mut self, i: usize, j: usize, thresh_scale: f32) {
+        let ri = covalent_radius_angstrom(&self.atoms[i]);
+        let rj = covalent_radius_angstrom(&self.atoms[j]);
+        let cutoff = (ri + rj) * thresh_scale;
+        let d = self.pos[i].distance(self.pos[j]);
+        if d > 0.01 && d <= cutoff {
+            self.bonds.push((i, j, d));
+        }
+    }
+}
+
+fn grid_cell(p: Vec3, cell_size: f32) -> (i32, i32, i32) {
+    (
+        (p.x / cell_size).floor() as i32,
+        (p.y / cell_size).floor() as i32,
+        (p.z / cell_size).floor() as i32,
+    )
 }
 
 // ---- Parsers (Ångström) ----

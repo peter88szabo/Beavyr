@@ -109,8 +109,11 @@ pub struct MolSettings {
     pub hbond_gap_scale: f32,
     pub hbond_line_scale: f32,
 
-    // dirty flag
-    pub dirty: bool,
+    pub geometry_dirty: bool,
+    pub materials_dirty: bool,
+    pub lighting_dirty: bool,
+    pub bond_topology_dirty: bool,
+    pub coords_dirty: bool,
 }
 
 impl Default for MolSettings {
@@ -172,7 +175,11 @@ impl Default for MolSettings {
             hbond_gap_scale: 1.0,
             hbond_line_scale: 1.0,
 
-            dirty: true,
+            geometry_dirty: true,
+            materials_dirty: false,
+            lighting_dirty: false,
+            bond_topology_dirty: true,
+            coords_dirty: false,
         }
     }
 }

@@ -1,9 +1,10 @@
 // src/scene.rs
 
-use bevy::math::primitives::{Capsule3d, Cone, Cylinder, Sphere};
+use bevy::math::primitives::{Cone, Cylinder, Sphere};
 use bevy::prelude::*;
 use bevy::camera::Viewport;
 use bevy::camera::visibility::RenderLayers;
+use std::collections::HashMap;
 
 use crate::color_schemes::color_for;
 use crate::molecule::{covalent_radius_angstrom, Molecule};
@@ -44,9 +45,28 @@ pub const DEFAULT_WATER: &str = r#"
 "#;
 
 #[derive(Component)]
-pub struct AtomMarker;
+pub struct AtomMarker {
+    pub index: usize,
+}
+
+#[derive(Clone, Copy)]
+pub enum BondVisual {
+    Uniform { base_len: f32 },
+    Split {
+        start_frac: f32,
+        end_frac: f32,
+        base_len: f32,
+        color_atom: usize,
+    },
+    Cap { atom: usize },
+}
+
 #[derive(Component)]
-pub struct BondMarker;
+pub struct BondMarker {
+    pub i: usize,
+    pub j: usize,
+    pub visual: BondVisual,
+}
 #[derive(Component)]
 pub struct MainCamera;
 #[derive(Component)]
@@ -62,14 +82,150 @@ pub struct RimLight;
 #[derive(Default, Reflect, GizmoConfigGroup)]
 pub struct BondLineGizmos;
 
+#[derive(Default, Resource)]
+pub struct GeometryCache {
+    sphere_meshes: HashMap<SphereMeshKey, Handle<Mesh>>,
+    cylinder_meshes: HashMap<CylinderMeshKey, Handle<Mesh>>,
+    materials: HashMap<MaterialKey, Handle<StandardMaterial>>,
+}
+
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+struct SphereMeshKey {
+    radius_bits: u32,
+    resolution: u32,
+}
+
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+struct CylinderMeshKey {
+    radius_bits: u32,
+    height_bits: u32,
+}
+
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
+struct MaterialKey {
+    base_color: u32,
+    metallic_milli: u16,
+    roughness_milli: u16,
+    reflectance_milli: u16,
+    emissive_milli: [u16; 4],
+}
+
 pub const LAYER_MAIN: usize = 0;
 pub const LAYER_AXES: usize = 1;
 
 const AXIS_VP_SIZE: u32 = 140;
 const AXIS_VP_MARGIN: u32 = 12;
+const LARGE_MOLECULE_ATOM_THRESHOLD: usize = 1000;
 
 fn element_visible(sym: &str, settings: &MolSettings) -> bool {
     settings.element_visibility.get(sym).copied().unwrap_or(true)
+}
+
+fn apply_large_molecule_representation(mol: &Molecule, settings: &mut MolSettings) {
+    if mol.atoms.len() <= LARGE_MOLECULE_ATOM_THRESHOLD {
+        return;
+    }
+
+    if matches!(
+        settings.representation,
+        RepresentationMode::BallAndStick
+            | RepresentationMode::SticksRounded
+            | RepresentationMode::SpaceFilling
+    ) {
+        settings.representation = RepresentationMode::LowResBallsAndLines;
+    }
+}
+
+fn color_key(color: Color) -> u32 {
+    let s = color.to_srgba();
+    let r = (s.red.clamp(0.0, 1.0) * 255.0).round() as u32;
+    let g = (s.green.clamp(0.0, 1.0) * 255.0).round() as u32;
+    let b = (s.blue.clamp(0.0, 1.0) * 255.0).round() as u32;
+    let a = (s.alpha.clamp(0.0, 1.0) * 255.0).round() as u32;
+    r | (g << 8) | (b << 16) | (a << 24)
+}
+
+fn quantize_unit_milli(v: f32) -> u16 {
+    (v.clamp(0.0, 1.0) * 1000.0).round() as u16
+}
+
+fn quantize_nonnegative_milli(v: f32) -> u16 {
+    (v.max(0.0).min(65.535) * 1000.0).round() as u16
+}
+
+fn emissive_key_milli(emissive: LinearRgba) -> [u16; 4] {
+    [
+        quantize_nonnegative_milli(emissive.red),
+        quantize_nonnegative_milli(emissive.green),
+        quantize_nonnegative_milli(emissive.blue),
+        quantize_unit_milli(emissive.alpha),
+    ]
+}
+
+fn cached_sphere_mesh(
+    cache: &mut GeometryCache,
+    meshes: &mut Assets<Mesh>,
+    radius: f32,
+    resolution: u32,
+) -> Handle<Mesh> {
+    let key = SphereMeshKey {
+        radius_bits: radius.to_bits(),
+        resolution,
+    };
+    cache
+        .sphere_meshes
+        .entry(key)
+        .or_insert_with(|| meshes.add(Sphere::new(radius).mesh().ico(resolution).unwrap()))
+        .clone()
+}
+
+fn cached_cylinder_mesh(
+    cache: &mut GeometryCache,
+    meshes: &mut Assets<Mesh>,
+    radius: f32,
+    height: f32,
+) -> Handle<Mesh> {
+    let key = CylinderMeshKey {
+        radius_bits: radius.to_bits(),
+        height_bits: height.to_bits(),
+    };
+    cache
+        .cylinder_meshes
+        .entry(key)
+        .or_insert_with(|| meshes.add(Mesh::from(Cylinder::new(radius, height))))
+        .clone()
+}
+
+fn cached_material(
+    cache: &mut GeometryCache,
+    materials: &mut Assets<StandardMaterial>,
+    base_color: Color,
+    metallic: f32,
+    roughness: f32,
+    reflectance: f32,
+    emissive: LinearRgba,
+) -> Handle<StandardMaterial> {
+    let key = MaterialKey {
+        base_color: color_key(base_color),
+        metallic_milli: quantize_unit_milli(metallic),
+        roughness_milli: quantize_unit_milli(roughness),
+        reflectance_milli: quantize_unit_milli(reflectance),
+        emissive_milli: emissive_key_milli(emissive),
+    };
+    cache
+        .materials
+        .entry(key)
+        .or_insert_with(|| {
+            materials.add(StandardMaterial {
+                base_color,
+                metallic,
+                perceptual_roughness: roughness,
+                reflectance,
+                emissive,
+                ..default()
+            })
+        })
+        .clone()
 }
 
 pub fn setup(
@@ -290,7 +446,7 @@ pub fn center_camera_on_startup(
 /// If the change may affect bond topology/meshes, mark the scene dirty so
 /// `rebuild_if_dirty` will rebuild geometry next frame.
 pub fn react_to_molecule_changed_mark_dirty(
-    mut evr: EventReader<MoleculeChanged>,
+    mut evr: MessageReader<MoleculeChanged>,
     mut settings: ResMut<MolSettings>,
     mol: Res<Molecule>,
     mut cam: ResMut<OrbitCamera>,
@@ -302,50 +458,132 @@ pub fn react_to_molecule_changed_mark_dirty(
                 if recenter {
                     auto_fit_camera(&mol.pos, &mut cam);
                 }
-                settings.dirty = true;
+                settings.geometry_dirty = true;
+                settings.bond_topology_dirty = true;
             }
             | MoleculeChangeReason::SetPos
             | MoleculeChangeReason::BuilderRotate
             | MoleculeChangeReason::Undo
             | MoleculeChangeReason::Redo => {
-                settings.dirty = true;
+                settings.coords_dirty = true;
             }
         }
     }
 }
 
-pub fn rebuild_if_dirty(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    mut clear: ResMut<ClearColor>,
-    mut mol: ResMut<Molecule>,
+pub fn sync_coordinates_if_dirty(
     mut settings: ResMut<MolSettings>,
-    q_atoms: Query<Entity, With<AtomMarker>>,
-    q_bonds: Query<Entity, With<BondMarker>>,
-    mut q_key: Query<
-        (&mut PointLight, &mut Transform),
-        (With<KeyLight>, Without<FillLight>, Without<RimLight>),
-    >,
-    mut q_fill: Query<
-        (&mut PointLight, &mut Transform),
-        (With<FillLight>, Without<KeyLight>, Without<RimLight>),
-    >,
-    mut q_rim: Query<
-        (&mut PointLight, &mut Transform),
-        (With<RimLight>, Without<KeyLight>, Without<FillLight>),
-    >,
-    mut amb: ResMut<AmbientLight>,
+    mol: Res<Molecule>,
+    mut q_atoms: Query<(&AtomMarker, &mut Transform)>,
+    mut q_bonds: Query<(&BondMarker, &mut Transform), Without<AtomMarker>>,
 ) {
-    if !settings.dirty {
+    if !settings.coords_dirty || settings.geometry_dirty || settings.bond_topology_dirty {
         return;
     }
-    settings.dirty = false;
 
-    // Background
+    for (marker, mut tf) in q_atoms.iter_mut() {
+        let Some(&pos) = mol.pos.get(marker.index) else {
+            settings.geometry_dirty = true;
+            settings.coords_dirty = false;
+            return;
+        };
+        tf.translation = pos;
+    }
+
+    for (marker, mut tf) in q_bonds.iter_mut() {
+        let (Some(&p0), Some(&p1)) = (mol.pos.get(marker.i), mol.pos.get(marker.j)) else {
+            settings.geometry_dirty = true;
+            settings.coords_dirty = false;
+            return;
+        };
+        if !update_bond_transform(&mut tf, p0, p1, marker.visual) {
+            settings.geometry_dirty = true;
+            settings.coords_dirty = false;
+            return;
+        }
+    }
+
+    settings.coords_dirty = false;
+}
+
+fn update_bond_transform(tf: &mut Transform, p0: Vec3, p1: Vec3, visual: BondVisual) -> bool {
+    let dir = p1 - p0;
+    let len = dir.length();
+    if len <= 1.0e-5 {
+        return false;
+    }
+
+    let dir_n = dir / len;
+    let rot = Quat::from_rotation_arc(Vec3::Y, dir_n);
+
+    match visual {
+        BondVisual::Uniform { base_len } => {
+            if base_len <= 1.0e-5 {
+                return false;
+            }
+            tf.translation = (p0 + p1) * 0.5;
+            tf.rotation = rot;
+            tf.scale = Vec3::new(1.0, len / base_len, 1.0);
+        }
+        BondVisual::Split {
+            start_frac,
+            end_frac,
+            base_len,
+            ..
+        } => {
+            if base_len <= 1.0e-5 {
+                return false;
+            }
+            let segment_len = len * (end_frac - start_frac).max(0.0);
+            if segment_len <= 1.0e-5 {
+                return false;
+            }
+            tf.translation = p0 + dir_n * (len * (start_frac + end_frac) * 0.5);
+            tf.rotation = rot;
+            tf.scale = Vec3::new(1.0, segment_len / base_len, 1.0);
+        }
+        BondVisual::Cap { atom } => {
+            tf.translation = if atom == 0 { p0 } else { p1 };
+            tf.rotation = Quat::IDENTITY;
+            tf.scale = Vec3::ONE;
+        }
+    }
+
+    true
+}
+
+fn material_params(settings: &MolSettings) -> (f32, f32, f32, LinearRgba) {
+    let metallic = settings.metallic.clamp(0.0, 1.0);
+    let rough = settings.roughness.clamp(0.02, 1.0);
+    let refl = settings.reflectance.clamp(0.0, 1.0);
+    let emissive = if settings.use_emissive {
+        let lr = settings.emissive_color.to_linear();
+        LinearRgba::new(
+            lr.red * settings.emissive_strength.max(0.0),
+            lr.green * settings.emissive_strength.max(0.0),
+            lr.blue * settings.emissive_strength.max(0.0),
+            1.0,
+        )
+    } else {
+        LinearRgba::BLACK
+    };
+    (metallic, rough, refl, emissive)
+}
+
+pub fn update_lighting_if_dirty(
+    mut settings: ResMut<MolSettings>,
+    mut clear: ResMut<ClearColor>,
+    mut q_key: Query<&mut PointLight, (With<KeyLight>, Without<FillLight>, Without<RimLight>)>,
+    mut q_fill: Query<&mut PointLight, (With<FillLight>, Without<KeyLight>, Without<RimLight>)>,
+    mut q_rim: Query<&mut PointLight, (With<RimLight>, Without<KeyLight>, Without<FillLight>)>,
+    mut amb: ResMut<AmbientLight>,
+) {
+    if !settings.lighting_dirty {
+        return;
+    }
+    settings.lighting_dirty = false;
+
     *clear = ClearColor(settings.bg_color);
-
-    // Ambient
     amb.color = settings.ambient_color;
     amb.brightness = if settings.use_ambient {
         settings.ambient_brightness
@@ -353,24 +591,119 @@ pub fn rebuild_if_dirty(
         0.0
     };
 
-    // Update lights to current settings
-    if let Ok((mut l, _)) = q_key.single_mut() {
+    if let Ok(mut l) = q_key.single_mut() {
         l.intensity = settings.light_intensity;
     }
-    if let Ok((mut l, _)) = q_fill.single_mut() {
+    if let Ok(mut l) = q_fill.single_mut() {
         l.intensity = if matches!(settings.lighting_mode, LightingMode::ThreePoint) {
             settings.fill_intensity
         } else {
             0.0
         };
     }
-    if let Ok((mut l, _)) = q_rim.single_mut() {
+    if let Ok(mut l) = q_rim.single_mut() {
         l.intensity = if matches!(settings.lighting_mode, LightingMode::ThreePoint) {
             settings.rim_intensity
         } else {
             0.0
         };
     }
+}
+
+pub fn update_materials_if_dirty(
+    mut settings: ResMut<MolSettings>,
+    mut cache: ResMut<GeometryCache>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mol: Res<Molecule>,
+    mut q_atoms: Query<(&AtomMarker, &mut MeshMaterial3d<StandardMaterial>)>,
+    mut q_bonds: Query<(&BondMarker, &mut MeshMaterial3d<StandardMaterial>), Without<AtomMarker>>,
+) {
+    if !settings.materials_dirty || settings.geometry_dirty || settings.bond_topology_dirty {
+        return;
+    }
+    settings.materials_dirty = false;
+
+    let (metallic, rough, refl, emissive) = material_params(&settings);
+
+    for (marker, mut mat) in q_atoms.iter_mut() {
+        let Some(sym) = mol.atoms.get(marker.index) else {
+            settings.geometry_dirty = true;
+            return;
+        };
+        let color = settings
+            .element_colors
+            .get(sym)
+            .copied()
+            .unwrap_or_else(|| color_for(sym, settings.scheme));
+        *mat = MeshMaterial3d(cached_material(
+            &mut cache,
+            &mut materials,
+            color,
+            metallic,
+            rough,
+            refl,
+            emissive,
+        ));
+    }
+
+    for (marker, mut mat) in q_bonds.iter_mut() {
+        let color = match marker.visual {
+            BondVisual::Uniform { .. } => settings.uniform_bond_color,
+            BondVisual::Split { color_atom, .. } => {
+                let Some(sym) = mol.atoms.get(color_atom) else {
+                    settings.geometry_dirty = true;
+                    return;
+                };
+                settings
+                    .element_colors
+                    .get(sym)
+                    .copied()
+                    .unwrap_or_else(|| color_for(sym, settings.scheme))
+            }
+            BondVisual::Cap { atom } => {
+                let idx = if atom == 0 { marker.i } else { marker.j };
+                let Some(sym) = mol.atoms.get(idx) else {
+                    settings.geometry_dirty = true;
+                    return;
+                };
+                settings
+                    .element_colors
+                    .get(sym)
+                    .copied()
+                    .unwrap_or_else(|| color_for(sym, settings.scheme))
+            }
+        };
+        *mat = MeshMaterial3d(cached_material(
+            &mut cache,
+            &mut materials,
+            color,
+            metallic,
+            rough,
+            refl,
+            emissive,
+        ));
+    }
+}
+
+pub fn rebuild_if_dirty(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut cache: ResMut<GeometryCache>,
+    mut mol: ResMut<Molecule>,
+    mut settings: ResMut<MolSettings>,
+    q_atoms: Query<Entity, With<AtomMarker>>,
+    q_bonds: Query<Entity, With<BondMarker>>,
+) {
+    if !settings.geometry_dirty && !settings.bond_topology_dirty {
+        return;
+    }
+    settings.geometry_dirty = false;
+    settings.bond_topology_dirty = false;
+    settings.materials_dirty = false;
+    settings.coords_dirty = false;
+
+    apply_large_molecule_representation(&mol, &mut settings);
 
     // Despawn old geometry
     for e in q_atoms.iter() {
@@ -385,22 +718,7 @@ pub fn rebuild_if_dirty(
     // Recompute bond connectivity with current settings (topology & lengths)
     mol.recompute_bonds(settings.bond_thresh_scale, settings.hbond_cutoff);
 
-    // material parameters from settings
-    let metallic = settings.metallic.clamp(0.0, 1.0);
-    let rough = settings.roughness.clamp(0.02, 1.0);
-    let refl = settings.reflectance.clamp(0.0, 1.0);
-
-    let emissive = if settings.use_emissive {
-        let lr = settings.emissive_color.to_linear();
-        LinearRgba::new(
-            lr.red * settings.emissive_strength.max(0.0),
-            lr.green * settings.emissive_strength.max(0.0),
-            lr.blue * settings.emissive_strength.max(0.0),
-            1.0,
-        )
-    } else {
-        LinearRgba::BLACK
-    };
+    let (metallic, rough, refl, emissive) = material_params(&settings);
 
     // Atoms
     let draw_atoms = matches!(
@@ -445,27 +763,24 @@ pub fn rebuild_if_dirty(
                 .copied()
                 .unwrap_or_else(|| color_for(sym, settings.scheme));
 
-            let sphere_mesh = Sphere::new(r_cov)
-                .mesh()
-                .ico(atom_resolution)
-                .unwrap();
-
-            let mat = materials.add(StandardMaterial {
-                base_color: color,
+            let sphere_mesh = cached_sphere_mesh(&mut cache, &mut meshes, r_cov, atom_resolution);
+            let mat = cached_material(
+                &mut cache,
+                &mut materials,
+                color,
                 metallic,
-                perceptual_roughness: rough,
-                reflectance: refl,
+                rough,
+                refl,
                 emissive,
-                ..default()
-            });
+            );
 
             let pos = mol.pos[i];
             let ent = commands
                 .spawn((
-                    Mesh3d(meshes.add(sphere_mesh)),
+                    Mesh3d(sphere_mesh),
                     MeshMaterial3d(mat),
                     Transform::from_translation(pos),
-                    AtomMarker,
+                    AtomMarker { index: i },
                     RenderLayers::layer(LAYER_MAIN),
                 ))
                 .id();
@@ -540,33 +855,35 @@ pub fn rebuild_if_dirty(
 
         match bond_color_mode {
             BondColorMode::Uniform => {
-                // Single capsule centered between atom centers
+                // Single cached unit cylinder scaled to the current bond length.
                 let center = (p0 + p1) * 0.5;
-                let half_length = (len_cc * 0.5 - radius).max(0.0);
-                let cap = Mesh::from(Capsule3d {
-                    radius,
-                    half_length,
-                });
+                let bond_mesh = cached_cylinder_mesh(&mut cache, &mut meshes, radius, 1.0);
 
-                let mat = materials.add(StandardMaterial {
-                    base_color: settings.uniform_bond_color,
+                let mat = cached_material(
+                    &mut cache,
+                    &mut materials,
+                    settings.uniform_bond_color,
                     metallic,
-                    perceptual_roughness: rough,
-                    reflectance: refl,
+                    rough,
+                    refl,
                     emissive,
-                    ..default()
-                });
+                );
 
                 let ent = commands
                     .spawn((
-                        Mesh3d(meshes.add(cap)),
+                        Mesh3d(bond_mesh),
                         MeshMaterial3d(mat),
                         Transform {
                             translation: center,
                             rotation: rot,
+                            scale: Vec3::new(1.0, len_cc, 1.0),
                             ..default()
                         },
-                        BondMarker,
+                        BondMarker {
+                            i,
+                            j,
+                            visual: BondVisual::Uniform { base_len: 1.0 },
+                        },
                         RenderLayers::layer(LAYER_MAIN),
                     ))
                     .id();
@@ -596,10 +913,12 @@ pub fn rebuild_if_dirty(
 
                 let half_len = visible_len * 0.5;
 
+                let start_frac = (start - p0).dot(dir_n) / len_cc;
+                let end_frac = (end - p0).dot(dir_n) / len_cc;
                 let mid = (start + end) * 0.5;
                 let c0 = mid - dir_n * (visible_len * 0.25);
                 let c1 = mid + dir_n * (visible_len * 0.25);
-                let cyl_half = Mesh::from(Cylinder::new(radius, half_len));
+                let cyl_half = cached_cylinder_mesh(&mut cache, &mut meshes, radius, 1.0);
                 let (mesh_i, mesh_j) = (cyl_half.clone(), cyl_half);
 
                 let col_i = settings
@@ -613,33 +932,45 @@ pub fn rebuild_if_dirty(
                     .copied()
                     .unwrap_or_else(|| color_for(&mol.atoms[j], settings.scheme));
 
-                let mat_i = materials.add(StandardMaterial {
-                    base_color: col_i,
+                let mat_i = cached_material(
+                    &mut cache,
+                    &mut materials,
+                    col_i,
                     metallic,
-                    perceptual_roughness: rough,
-                    reflectance: refl,
+                    rough,
+                    refl,
                     emissive,
-                    ..default()
-                });
-                let mat_j = materials.add(StandardMaterial {
-                    base_color: col_j,
+                );
+                let mat_j = cached_material(
+                    &mut cache,
+                    &mut materials,
+                    col_j,
                     metallic,
-                    perceptual_roughness: rough,
-                    reflectance: refl,
+                    rough,
+                    refl,
                     emissive,
-                    ..default()
-                });
+                );
 
                 let e0 = commands
                     .spawn((
-                        Mesh3d(meshes.add(mesh_i)),
+                        Mesh3d(mesh_i),
                         MeshMaterial3d(mat_i.clone()),
                         Transform {
                             translation: c0,
                             rotation: rot,
+                            scale: Vec3::new(1.0, half_len, 1.0),
                             ..default()
                         },
-                        BondMarker,
+                        BondMarker {
+                            i,
+                            j,
+                            visual: BondVisual::Split {
+                                start_frac,
+                                end_frac: (start_frac + end_frac) * 0.5,
+                                base_len: 1.0,
+                                color_atom: i,
+                            },
+                        },
                         RenderLayers::layer(LAYER_MAIN),
                     ))
                     .id();
@@ -647,28 +978,42 @@ pub fn rebuild_if_dirty(
 
                 let e1 = commands
                     .spawn((
-                        Mesh3d(meshes.add(mesh_j)),
+                        Mesh3d(mesh_j),
                         MeshMaterial3d(mat_j.clone()),
                         Transform {
                             translation: c1,
                             rotation: rot,
+                            scale: Vec3::new(1.0, half_len, 1.0),
                             ..default()
                         },
-                        BondMarker,
+                        BondMarker {
+                            i,
+                            j,
+                            visual: BondVisual::Split {
+                                start_frac: (start_frac + end_frac) * 0.5,
+                                end_frac,
+                                base_len: 1.0,
+                                color_atom: j,
+                            },
+                        },
                         RenderLayers::layer(LAYER_MAIN),
                     ))
                     .id();
                 mol.bond_entities.push(e1);
 
                 if matches!(settings.representation, RepresentationMode::SticksRounded) {
-                    let cap_mesh = Mesh::from(Sphere::new(radius).mesh().ico(2).unwrap());
+                    let cap_mesh = cached_sphere_mesh(&mut cache, &mut meshes, radius, 2);
                     if i < degree.len() {
                         let cap_i = commands
                             .spawn((
-                                Mesh3d(meshes.add(cap_mesh.clone())),
+                                Mesh3d(cap_mesh.clone()),
                                 MeshMaterial3d(mat_i.clone()),
                                 Transform::from_translation(p0),
-                                BondMarker,
+                                BondMarker {
+                                    i,
+                                    j,
+                                    visual: BondVisual::Cap { atom: 0 },
+                                },
                                 RenderLayers::layer(LAYER_MAIN),
                             ))
                             .id();
@@ -677,10 +1022,14 @@ pub fn rebuild_if_dirty(
                     if j < degree.len() {
                         let cap_j = commands
                             .spawn((
-                                Mesh3d(meshes.add(cap_mesh.clone())),
+                                Mesh3d(cap_mesh.clone()),
                                 MeshMaterial3d(mat_j.clone()),
                                 Transform::from_translation(p1),
-                                BondMarker,
+                                BondMarker {
+                                    i,
+                                    j,
+                                    visual: BondVisual::Cap { atom: 1 },
+                                },
                                 RenderLayers::layer(LAYER_MAIN),
                             ))
                             .id();

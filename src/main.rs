@@ -11,6 +11,7 @@ mod ui;
 mod export_image;
 mod hbonds;
 mod measurements;
+mod diagnostics;
 mod ui_measurements;
 mod molecule_builder;
 mod events;
@@ -26,12 +27,16 @@ enum UpdateSet {
 use scene::{
     center_camera_on_startup,
     draw_bond_lines,
+    GeometryCache,
     react_to_molecule_changed_mark_dirty,
     rebuild_if_dirty,
     setup,
+    sync_coordinates_if_dirty,
     sync_axis_camera_to_main,
     update_axis_viewport_on_resize,
+    update_lighting_if_dirty,
     update_light_positions,
+    update_materials_if_dirty,
 };
 use settings::MolSettings;
 use ui::XyzBuffer;
@@ -79,6 +84,7 @@ fn main() {
         .init_gizmo_group::<HbondGizmos>()
         // bond lines
         .init_gizmo_group::<BondLineGizmos>()
+        .init_resource::<GeometryCache>()
         // molecule editor
         .init_resource::<EditorRotateState>()
         .init_resource::<ZMatrixBuilderState>()
@@ -99,6 +105,9 @@ fn main() {
                 camera::orbit_camera_system,
                 export_image::update_export_select_area,
                 react_to_molecule_changed_mark_dirty,
+                sync_coordinates_if_dirty,
+                update_lighting_if_dirty,
+                update_materials_if_dirty,
                 rebuild_if_dirty,
                 update_light_positions,
                 update_axis_viewport_on_resize,
@@ -119,7 +128,6 @@ fn main() {
                 // hbonds
                 draw_hydrogen_bonds_dashed,
                 hbonds::configure_hbond_gizmos,
-                hbonds::draw_hydrogen_bonds_dashed,
                 scene::configure_bond_line_gizmos,
                 draw_bond_lines,
 

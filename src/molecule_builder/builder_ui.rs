@@ -1000,7 +1000,8 @@ fn apply_zmat_edits(
         .collect();
     mol.pos = coords;
     mol.recompute_bonds(2.0, 3.0);
-    settings.dirty = true;
+    settings.geometry_dirty = true;
+                        settings.bond_topology_dirty = true;
     zmat_state.edit_refresh = true;
     zmat_state.last_error = None;
 }
@@ -1083,7 +1084,7 @@ pub fn configure_builder_gizmos(mut cfg_store: ResMut<GizmoConfigStore>) {
 
 /// Consume AtomPicked events (from shared picker) for the builder.
 pub fn handle_builder_atom_picked(
-    mut ev: EventReader<AtomPicked>,
+    mut ev: MessageReader<AtomPicked>,
     mol: Option<ResMut<Molecule>>,
     mut state: ResMut<EditorRotateState>,
     mut zmat_state: ResMut<ZMatrixBuilderState>,
@@ -1181,7 +1182,8 @@ pub fn handle_builder_atom_picked(
                         .collect();
                     mol.pos = coords;
                     mol.recompute_bonds(2.0, 3.0);
-                    settings.dirty = true;
+                    settings.geometry_dirty = true;
+                        settings.bond_topology_dirty = true;
                     zmat_state.last_error = None;
                 }
 
@@ -1271,7 +1273,8 @@ pub fn handle_builder_atom_picked(
                             .collect();
                         mol.pos = coords;
                         mol.recompute_bonds(2.0, 3.0);
-                        settings.dirty = true;
+                        settings.geometry_dirty = true;
+                        settings.bond_topology_dirty = true;
                         zmat_state.last_error = None;
                     }
                     FragmentInsertMode::Replace => {
@@ -1450,7 +1453,8 @@ pub fn handle_builder_atom_picked(
                             .collect();
                         mol.pos = coords;
                         mol.recompute_bonds(2.0, 3.0);
-                        settings.dirty = true;
+                        settings.geometry_dirty = true;
+                        settings.bond_topology_dirty = true;
                         zmat_state.edit_refresh = true;
                         zmat_state.last_error = None;
                     }
@@ -1597,7 +1601,7 @@ pub fn draw_builder_highlights(
 
 /// Left-side, resizable SidePanel with a collapsible “Molecule Editor” section.
 /// NOTE: We now do a clean jump: no immediate atom transform sync; instead we
-/// update `mol.pos` + `mol.bonds` and flag `settings.dirty = true` so the scene
+/// update `mol.pos` + `mol.bonds` and flag geometry/topology dirty so the scene
 /// rebuilds atoms & bonds together next frame (no mismatched frame).
 pub fn builder_ui_panel(
     mut contexts: EguiContexts,
@@ -1631,7 +1635,8 @@ pub fn builder_ui_panel(
                         mol.pos.clear();
                         mol.bonds.clear();
                         mol.hydrogen_bonds.clear();
-                        settings.dirty = true;
+                        settings.geometry_dirty = true;
+                        settings.bond_topology_dirty = true;
                         zmat_state.zmat.clear();
                         zmat_state.pick_indices.clear();
                         zmat_state.pick_active = false;
@@ -1647,7 +1652,8 @@ pub fn builder_ui_panel(
                             mol.atoms = atoms;
                             mol.pos = pos;
                             mol.recompute_bonds(2.0, 3.0);
-                            settings.dirty = true;
+                            settings.geometry_dirty = true;
+                        settings.bond_topology_dirty = true;
                             zmat_state.zmat = zmat2xyz::xyz_to_zmat(&mol.atoms, &mol.pos);
                             zmat_state.pick_indices.clear();
                             zmat_state.pick_active = false;
@@ -1947,7 +1953,8 @@ pub fn builder_ui_panel(
                                     .collect();
                                 mol.pos = coords;
                                 mol.recompute_bonds(2.0, 3.0);
-                                settings.dirty = true;
+                                settings.geometry_dirty = true;
+                        settings.bond_topology_dirty = true;
                                 zmat_state.edit_refresh = true;
                                 zmat_state.selected_index = None;
                                 zmat_state.selected_symbol = None;
@@ -1974,7 +1981,8 @@ pub fn builder_ui_panel(
                                     .collect();
                                 mol.pos = coords;
                                 mol.recompute_bonds(2.0, 3.0);
-                                settings.dirty = true;
+                                settings.geometry_dirty = true;
+                        settings.bond_topology_dirty = true;
                                 zmat_state.edit_refresh = true;
                             }
                             zmat_state.redo_remove_visible = false;
@@ -2074,7 +2082,8 @@ pub fn builder_ui_panel(
                                     .collect();
                                 mol.pos = coords;
                                 mol.recompute_bonds(2.0, 3.0);
-                                settings.dirty = true;
+                                settings.geometry_dirty = true;
+                        settings.bond_topology_dirty = true;
                                 zmat_state.edit_refresh = true;
                                 zmat_state.last_error = None;
                             }
@@ -2111,7 +2120,8 @@ pub fn builder_ui_panel(
                                 .collect();
                             mol.pos = coords;
                             mol.recompute_bonds(2.0, 3.0);
-                            settings.dirty = true;
+                            settings.geometry_dirty = true;
+                        settings.bond_topology_dirty = true;
                             zmat_state.edit_refresh = true;
                         }
                     }
@@ -2225,7 +2235,8 @@ pub fn builder_ui_panel(
                                     .collect();
                                 mol.pos = coords;
                                 mol.recompute_bonds(2.0, 3.0);
-                                settings.dirty = true;
+                                settings.geometry_dirty = true;
+                        settings.bond_topology_dirty = true;
                                 zmat_state.edit_refresh = true;
                                 zmat_state.last_error = None;
                             } else {
@@ -2280,7 +2291,8 @@ pub fn builder_ui_panel(
                                 .collect();
                             mol.pos = coords;
                             mol.recompute_bonds(2.0, 3.0);
-                            settings.dirty = true;
+                            settings.geometry_dirty = true;
+                        settings.bond_topology_dirty = true;
                             zmat_state.edit_refresh = true;
                         }
                         zmat_state.frag_pick_active = false;
@@ -2342,7 +2354,8 @@ pub fn builder_ui_panel(
                             .collect();
                         mol.pos = coords;
                         mol.recompute_bonds(2.0, 3.0);
-                        settings.dirty = true;
+                        settings.geometry_dirty = true;
+                        settings.bond_topology_dirty = true;
                         zmat_state.edit_refresh = true;
                         zmat_state.selected_index = None;
                         zmat_state.selected_symbol = None;
@@ -2408,19 +2421,14 @@ pub fn builder_ui_panel(
                                     state.bond_th_hx, state.bond_th_xx,
                                 );
 
-                                // Update bond list to new geometry
-                                mol.recompute_bonds(2.0, 3.0);
-
-                                // Jump-style: rebuild whole scene (atoms & bonds) next frame
-                                settings.dirty = true;
+                                settings.coords_dirty = true;
                             }
                         }
                     }
                     if ui.button("Undo").clicked() {
                         if let Some(snapshot) = &mut state.last_rotate_snapshot {
                             mol.pos = snapshot.clone();
-                            mol.recompute_bonds(2.0, 3.0);
-                            settings.dirty = true; // rebuild to keep atoms+bonds in sync
+                            settings.coords_dirty = true;
                         }
                     }
                 });
@@ -2471,8 +2479,7 @@ pub fn builder_ui_panel(
                                         side, delta,
                                         state.bond_th_hx, state.bond_th_xx,
                                     );
-                                    mol.recompute_bonds(2.0, 3.0);
-                                    settings.dirty = true;
+                                    settings.coords_dirty = true;
                                 }
                             }
                         }
@@ -2480,8 +2487,7 @@ pub fn builder_ui_panel(
                     if ui.button("Undo").clicked() {
                         if let Some(snapshot) = &mut state.last_translate_snapshot {
                             mol.pos = snapshot.clone();
-                            mol.recompute_bonds(2.0, 3.0);
-                            settings.dirty = true;
+                            settings.coords_dirty = true;
                         }
                     }
                 });
@@ -2540,16 +2546,14 @@ pub fn builder_ui_panel(
                                     side, p, state.bend_angle_deg,
                                     state.bond_th_hx, state.bond_th_xx,
                                 );
-                                mol.recompute_bonds(2.0, 3.0);
-                                settings.dirty = true;
+                                settings.coords_dirty = true;
                             }
                         }
                     }
                     if ui.button("Undo").clicked() {
                         if let Some(snapshot) = &mut state.last_bend_snapshot {
                             mol.pos = snapshot.clone();
-                            mol.recompute_bonds(2.0, 3.0);
-                            settings.dirty = true;
+                            settings.coords_dirty = true;
                         }
                     }
                     if ui.button("Cancel").clicked() {

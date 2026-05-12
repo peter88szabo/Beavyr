@@ -8,7 +8,7 @@ use crate::events::{MoleculeChanged, MoleculeChangeReason};
 /// System: sync `Molecule.pos` to atom entity `Transform`s whenever a
 /// `MoleculeChanged` event fires.
 pub fn sync_atoms_after_change(
-    mut evr_changed: EventReader<MoleculeChanged>,
+    mut evr_changed: MessageReader<MoleculeChanged>,
     mol: Option<Res<Molecule>>,
     mut q_atoms: Query<&mut Transform, With<AtomMarker>>,
 ) {
@@ -40,7 +40,7 @@ pub fn sync_atoms_after_change(
 pub fn validate_atom_sync(
     mol: Option<Res<Molecule>>,
     q_atoms: Query<&Transform, With<AtomMarker>>,
-    mut evw: EventWriter<crate::events::AtomTransformsOutOfSync>,
+    mut evw: MessageWriter<crate::events::AtomTransformsOutOfSync>,
 ) {
     let Some(mol) = mol else { return; };
 

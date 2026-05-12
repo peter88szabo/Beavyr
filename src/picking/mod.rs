@@ -29,7 +29,7 @@ fn pick_and_emit_atom(
     measurements: Option<Res<Measurements>>,
     builder: Option<Res<EditorRotateState>>,
     zmat_builder: Option<Res<ZMatrixBuilderState>>,
-    mut ev_pick: EventWriter<AtomPicked>,
+    mut ev_pick: MessageWriter<AtomPicked>,
 ) {
     let Some(mol) = mol else { return; };
     if mol.pos.is_empty() { return; }

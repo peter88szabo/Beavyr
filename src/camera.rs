@@ -52,9 +52,9 @@ impl Default for OrbitCamera {
 pub fn orbit_camera_system(
     mut q_cam: Query<&mut Transform, (With<Camera3d>, With<MainCamera>)>,
     mut cam: ResMut<OrbitCamera>,
-    mut mouse_evr: EventReader<MouseMotion>,
+    mut mouse_evr: MessageReader<MouseMotion>,
     buttons: Res<ButtonInput<MouseButton>>,
-    mut scroll_evr: EventReader<MouseWheel>,  // <-- fixed: no extra '>'
+    mut scroll_evr: MessageReader<MouseWheel>,  // <-- fixed: no extra '>'
     keys: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
     mut windows: Query<(&mut Window, &mut CursorOptions)>,
@@ -164,10 +164,10 @@ pub fn orbit_camera_system(
     // quick BG toggles (unchanged)
     if keys.just_pressed(KeyCode::KeyB) {
         settings.bg_color = Color::srgb(0.0, 0.0, 0.0);
-        settings.dirty = true;
+        settings.lighting_dirty = true;
     }
     if keys.just_pressed(KeyCode::KeyW) {
         settings.bg_color = Color::srgb(1.0, 1.0, 1.0);
-        settings.dirty = true;
+        settings.lighting_dirty = true;
     }
 }

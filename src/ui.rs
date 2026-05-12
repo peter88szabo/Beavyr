@@ -9,6 +9,7 @@ use crate::color_schemes::{color_scheme_map, ELEMENT_SYMBOLS};
 use crate::events::MoleculeChanged;
 use crate::molecule::{parse_xyz_first_frame_angstrom, Molecule};
 use crate::settings::{BondColorMode, ColorScheme, LightingMode, MolSettings, RepresentationMode};
+use crate::diagnostics::{self, DiagnosticSeverity};
 
 // Export UI + resources
 use crate::export_image::{ExportCounter, ExportFormat, ExportSelectArea, ExportSettings};
@@ -65,7 +66,7 @@ pub fn ui_panel(
     mut settings: ResMut<MolSettings>,
     mut mol: ResMut<Molecule>,
     mut xyz_buf: ResMut<XyzBuffer>,
-    mut ev_changed: EventWriter<MoleculeChanged>,
+    mut ev_changed: MessageWriter<MoleculeChanged>,
     // orbit target control
     mut cam: ResMut<crate::camera::OrbitCamera>,
     // camera for picking + label projection
@@ -159,11 +160,11 @@ pub fn ui_panel(
                             ui.horizontal(|ui| {
                                 if ui.button("Black").clicked() {
                                     settings.bg_color = Color::srgb(0.0, 0.0, 0.0);
-                                    settings.dirty = true;
+                                    settings.lighting_dirty = true;
                                 }
                                 if ui.button("White").clicked() {
                                     settings.bg_color = Color::srgb(1.0, 1.0, 1.0);
-                                    settings.dirty = true;
+                                    settings.lighting_dirty = true;
                                 }
                             });
                             if ui.button("Center molecule").clicked() {
@@ -537,6 +538,25 @@ pub fn ui_panel(
                     ui.horizontal(|ui| {
                         let sel = ui.visuals().selection.bg_fill;
                         let dim = ui.visuals().widgets.inactive.bg_fill;
+                        if ui
+                            .add(
+                                egui::Button::new("Fixed bonds")
+                                    .fill(if traj.fixed_bonds { sel } else { dim }),
+                            )
+                            .on_hover_text("Keep the current bond topology during trajectory playback")
+                            .clicked()
+                        {
+                            traj.fixed_bonds = !traj.fixed_bonds;
+                            traj.last_applied = None;
+                            if traj.fixed_bonds {
+                                traj.overlay_dirty = true;
+                            }
+                        }
+                    });
+
+                    ui.horizontal(|ui| {
+                        let sel = ui.visuals().selection.bg_fill;
+                        let dim = ui.visuals().widgets.inactive.bg_fill;
 
                         let is_loop = matches!(traj.mode, trajectory::PlaybackMode::Loop);
                         let is_once = matches!(traj.mode, trajectory::PlaybackMode::Once);
@@ -650,13 +670,62 @@ pub fn ui_panel(
             });
 
             // ===========================
-            // 3) Appearance
+            // 3) Diagnostics
+            // ===========================
+            ui.add_space(8.0);
+            ui.separator();
+            ui.collapsing("Diagnostics", |ui| {
+                let report = diagnostics::analyze_molecule(&mol);
+                let warnings = report.warning_count();
+                let info = report.info_count();
+
+                if report.items.is_empty() {
+                    ui.weak("No valence, charge, isolation, or close-contact issues detected.");
+                } else {
+                    ui.horizontal(|ui| {
+                        ui.colored_label(
+                            egui::Color32::from_rgb(255, 170, 80),
+                            format!("Warnings: {}", warnings),
+                        );
+                        ui.weak(format!("Info: {}", info));
+                    });
+                    ui.add_space(4.0);
+                    egui::ScrollArea::vertical()
+                        .max_height(220.0)
+                        .auto_shrink([false; 2])
+                        .show(ui, |ui| {
+                            for item in &report.items {
+                                let color = match item.severity {
+                                    DiagnosticSeverity::Warning => {
+                                        egui::Color32::from_rgb(255, 170, 80)
+                                    }
+                                    DiagnosticSeverity::Info => egui::Color32::LIGHT_BLUE,
+                                };
+                                let prefix = match item.atom {
+                                    Some(idx) => format!("#{} ", idx + 1),
+                                    None => String::new(),
+                                };
+                                ui.colored_label(color, format!("{}{}", prefix, item.message));
+                            }
+                        });
+                    ui.add_space(4.0);
+                    ui.weak("Diagnostics use perceived single-bond connectivity; multiple bonds and formal charges may need chemical review.");
+                }
+            });
+
+            // ===========================
+            // 4) Appearance
             // ===========================
             ui.add_space(8.0);
             ui.separator();
             ui.collapsing("Appearance", |ui| {
                 ui.collapsing("Representation", |ui| {
                     let mut changed = false;
+
+                    if mol.atoms.len() > 1000 {
+                        ui.weak("Large molecule: heavy mesh representations auto-switch to low-res.");
+                        ui.add_space(4.0);
+                    }
 
                     changed |= ui
                         .radio_value(
@@ -765,15 +834,10 @@ pub fn ui_panel(
                             | RepresentationMode::BackboneTrace
                     ) {
                         ui.add_space(6.0);
-                        if ui
-                            .add(
-                                egui::Slider::new(&mut settings.line_bond_thickness, 1.0..=50.0)
-                                    .text("Line thickness"),
-                            )
-                            .changed()
-                        {
-                            changed = true;
-                        }
+                        ui.add(
+                            egui::Slider::new(&mut settings.line_bond_thickness, 1.0..=50.0)
+                                .text("Line thickness"),
+                        );
                     }
 
                     if matches!(settings.representation, RepresentationMode::BackboneTrace) {
@@ -807,7 +871,7 @@ pub fn ui_panel(
                     }
 
                     if changed {
-                        settings.dirty = true;
+                        settings.geometry_dirty = true;
                     }
                 });
 
@@ -911,18 +975,21 @@ pub fn ui_panel(
                         });
 
                     if changed {
-                        settings.dirty = true;
+                        settings.geometry_dirty = true;
                     }
                 });
 
                 ui.add_space(8.0);
 
                 ui.collapsing("Atom & Bond Scaling", |ui| {
-                    let mut changed = false;
-                    changed |= ui
+                    let mut geometry_changed = false;
+                    let mut bond_topology_changed = false;
+                    let mut hbond_topology_changed = false;
+
+                    geometry_changed |= ui
                         .add(egui::Slider::new(&mut settings.atom_scale, 0.1..=3.0).text("Atom scale"))
                         .changed();
-                    changed |= ui
+                    geometry_changed |= ui
                         .add(egui::Slider::new(&mut settings.atom_resolution, 0..=10).text("Atom resolution"))
                         .changed();
 
@@ -930,14 +997,14 @@ pub fn ui_panel(
                     ui.separator();
                     ui.add_space(8.0);
 
-                    changed |= ui
+                    geometry_changed |= ui
                         .add(
                             egui::Slider::new(&mut settings.bond_radius_pct, 0.05..=1.0)
                                 .text("Bond radius (% of smaller atom)"),
                         )
                         .changed();
 
-                    changed |= ui
+                    bond_topology_changed |= ui
                         .add(
                             egui::Slider::new(&mut settings.bond_thresh_scale, 0.8..=3.0)
                                 .text("Bond cutoff × covalent radii"),
@@ -948,7 +1015,7 @@ pub fn ui_panel(
                     ui.separator();
                     ui.add_space(8.0);
 
-                    changed |= ui
+                    hbond_topology_changed |= ui
                         .add(
                             egui::Slider::new(&mut settings.hbond_cutoff, 1.2..=5.0)
                                 .text("Hydrogen bond cutoff in Å"),
@@ -956,22 +1023,27 @@ pub fn ui_panel(
                         .changed();
 
                     // H-bond style
-                    changed |= ui
-                        .add(
-                            egui::Slider::new(&mut settings.hbond_thickness, 1.0..=80.0)
-                                .text("H-bond thickness"),
-                        )
-                        .changed();
-                    changed |= ui
-                        .add(
-                            egui::Slider::new(&mut settings.hbond_gap_scale, 0.2..=5.0)
-                                .text("H-bond dash gap scale"),
-                        )
-                        .changed();
+                    ui.add(
+                        egui::Slider::new(&mut settings.hbond_thickness, 1.0..=80.0)
+                            .text("H-bond thickness"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut settings.hbond_gap_scale, 0.2..=5.0)
+                            .text("H-bond dash gap scale"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut settings.hbond_line_scale, 0.2..=5.0)
+                            .text("H-bond dash line scale"),
+                    );
 
-                    if changed {
+                    if bond_topology_changed || hbond_topology_changed {
                         mol.recompute_bonds(settings.bond_thresh_scale, settings.hbond_cutoff);
-                        settings.dirty = true;
+                    }
+                    if geometry_changed || bond_topology_changed {
+                        settings.geometry_dirty = true;
+                    }
+                    if bond_topology_changed {
+                        settings.bond_topology_dirty = true;
                     }
                 });
 
@@ -983,17 +1055,17 @@ pub fn ui_panel(
                         ui.label("Background:");
                         if ui.button("Black").clicked() {
                             settings.bg_color = Color::srgb(0.0, 0.0, 0.0);
-                            settings.dirty = true;
+                            settings.lighting_dirty = true;
                         }
                         if ui.button("White").clicked() {
                             settings.bg_color = Color::srgb(1.0, 1.0, 1.0);
-                            settings.dirty = true;
+                            settings.lighting_dirty = true;
                         }
                         ui.label("or pick:");
                         let mut eg = color_to_egui(settings.bg_color);
                         if ui.color_edit_button_srgba(&mut eg).changed() {
                             settings.bg_color = egui_to_color(eg);
-                            settings.dirty = true;
+                            settings.lighting_dirty = true;
                         }
                     });
 
@@ -1010,7 +1082,7 @@ pub fn ui_panel(
                         .add(egui::Slider::new(&mut settings.reflectance, 0.0..=1.0).text("Reflectance"))
                         .changed();
                     if mat_changed {
-                        settings.dirty = true;
+                        settings.materials_dirty = true;
                     }
 
                     ui.add_space(6.0);
@@ -1036,7 +1108,7 @@ pub fn ui_panel(
                                         if sc != ColorScheme::Custom {
                                             settings.element_colors = color_scheme_map(sc);
                                         }
-                                        settings.dirty = true;
+                                        settings.materials_dirty = true;
                                     }
                                 }
                             });
@@ -1064,7 +1136,7 @@ pub fn ui_panel(
                                                                 .element_colors
                                                                 .insert(key.clone(), egui_to_color(col));
                                                             settings.scheme = ColorScheme::Custom;
-                                                            settings.dirty = true;
+                                                            settings.materials_dirty = true;
                                                         }
                                                     },
                                                 );
@@ -1092,7 +1164,7 @@ pub fn ui_panel(
                             .clicked()
                         {
                             settings.bond_color_mode = BondColorMode::Uniform;
-                            settings.dirty = true;
+                            settings.geometry_dirty = true;
                         }
 
                         if ui
@@ -1100,7 +1172,7 @@ pub fn ui_panel(
                             .clicked()
                         {
                             settings.bond_color_mode = BondColorMode::AtomSplit;
-                            settings.dirty = true;
+                            settings.geometry_dirty = true;
                         }
                     });
 
@@ -1109,7 +1181,7 @@ pub fn ui_panel(
                         let mut bc = color_to_egui(settings.uniform_bond_color);
                         if ui.color_edit_button_srgba(&mut bc).changed() {
                             settings.uniform_bond_color = egui_to_color(bc);
-                            settings.dirty = true;
+                            settings.materials_dirty = true;
                         }
                     });
 
@@ -1118,7 +1190,6 @@ pub fn ui_panel(
                         let mut hc = color_to_egui(settings.hbond_color);
                         if ui.color_edit_button_srgba(&mut hc).changed() {
                             settings.hbond_color = egui_to_color(hc);
-                            settings.dirty = true;
                         }
                     });
                 });
@@ -1135,7 +1206,7 @@ pub fn ui_panel(
                         let mut ac = color_to_egui(settings.ambient_color);
                         if ui.color_edit_button_srgba(&mut ac).changed() {
                             settings.ambient_color = egui_to_color(ac);
-                            settings.dirty = true;
+                            settings.lighting_dirty = true;
                         }
                     });
                     changed |= ui
@@ -1155,11 +1226,11 @@ pub fn ui_panel(
                             .show_ui(ui, |ui| {
                                 if ui.selectable_label(matches!(settings.lighting_mode, LightingMode::SinglePoint), "Single point").clicked() {
                                     settings.lighting_mode = LightingMode::SinglePoint;
-                                    settings.dirty = true;
+                                    settings.lighting_dirty = true;
                                 }
                                 if ui.selectable_label(matches!(settings.lighting_mode, LightingMode::ThreePoint), "Three-point").clicked() {
                                     settings.lighting_mode = LightingMode::ThreePoint;
-                                    settings.dirty = true;
+                                    settings.lighting_dirty = true;
                                 }
                             });
                     });
@@ -1192,7 +1263,7 @@ pub fn ui_panel(
                             .changed();
                     }
 
-                    if changed { settings.dirty = true; }
+                    if changed { settings.lighting_dirty = true; }
                 });
             });
 
@@ -1404,7 +1475,7 @@ fn apply_xyz_text(
     text: &str,
     mol: &mut Molecule,
     cam: &mut crate::camera::OrbitCamera,
-    ev_changed: &mut EventWriter<MoleculeChanged>,
+    ev_changed: &mut MessageWriter<MoleculeChanged>,
 ) -> Option<String> {
     let (atoms, qxyz, extra_frames) = parse_xyz_first_frame_angstrom(text);
     mol.atoms = atoms;
