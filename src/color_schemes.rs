@@ -4,21 +4,14 @@ use std::collections::HashMap;
 use crate::settings::ColorScheme;
 
 pub const ELEMENT_SYMBOLS: &[&str] = &[
-    "H", "He",
-    "Li", "Be", "B", "C", "N", "O", "F", "Ne",
-    "Na", "Mg", "Al", "Si", "P", "S", "Cl", "Ar",
-    "K", "Ca", "Sc", "Ti", "V", "Cr", "Mn", "Fe", "Co", "Ni", "Cu", "Zn",
-    "Ga", "Ge", "As", "Se", "Br", "Kr",
-    "Rb", "Sr", "Y", "Zr", "Nb", "Mo", "Tc", "Ru", "Rh", "Pd", "Ag", "Cd",
-    "In", "Sn", "Sb", "Te", "I", "Xe",
-    "Cs", "Ba", "La", "Ce", "Pr", "Nd", "Pm", "Sm", "Eu", "Gd", "Tb", "Dy",
-    "Ho", "Er", "Tm", "Yb", "Lu",
-    "Hf", "Ta", "W", "Re", "Os", "Ir", "Pt", "Au", "Hg",
-    "Tl", "Pb", "Bi", "Po", "At", "Rn",
-    "Fr", "Ra", "Ac", "Th", "Pa", "U", "Np", "Pu", "Am", "Cm", "Bk", "Cf",
-    "Es", "Fm", "Md", "No", "Lr",
-    "Rf", "Db", "Sg", "Bh", "Hs", "Mt", "Ds", "Rg", "Cn",
-    "Nh", "Fl", "Mc", "Lv", "Ts", "Og",
+    "H", "He", "Li", "Be", "B", "C", "N", "O", "F", "Ne", "Na", "Mg", "Al", "Si", "P", "S", "Cl",
+    "Ar", "K", "Ca", "Sc", "Ti", "V", "Cr", "Mn", "Fe", "Co", "Ni", "Cu", "Zn", "Ga", "Ge", "As",
+    "Se", "Br", "Kr", "Rb", "Sr", "Y", "Zr", "Nb", "Mo", "Tc", "Ru", "Rh", "Pd", "Ag", "Cd", "In",
+    "Sn", "Sb", "Te", "I", "Xe", "Cs", "Ba", "La", "Ce", "Pr", "Nd", "Pm", "Sm", "Eu", "Gd", "Tb",
+    "Dy", "Ho", "Er", "Tm", "Yb", "Lu", "Hf", "Ta", "W", "Re", "Os", "Ir", "Pt", "Au", "Hg", "Tl",
+    "Pb", "Bi", "Po", "At", "Rn", "Fr", "Ra", "Ac", "Th", "Pa", "U", "Np", "Pu", "Am", "Cm", "Bk",
+    "Cf", "Es", "Fm", "Md", "No", "Lr", "Rf", "Db", "Sg", "Bh", "Hs", "Mt", "Ds", "Rg", "Cn", "Nh",
+    "Fl", "Mc", "Lv", "Ts", "Og",
 ];
 
 const HALO_F: Color = Color::srgb(0.22, 1.0, 0.08); // neon green
@@ -75,7 +68,11 @@ pub fn color_scheme_map(s: ColorScheme) -> HashMap<String, Color> {
         }
         Molden | Molden0 => {
             // Two similar variants; Molden0 slightly softer O red + brighter H
-            let (o_r, h_w) = if matches!(s, Molden0) { (0.90, 0.95) } else { (1.0, 0.90) };
+            let (o_r, h_w) = if matches!(s, Molden0) {
+                (0.90, 0.95)
+            } else {
+                (1.0, 0.90)
+            };
             m.insert("H".into(), Color::srgb(h_w, h_w, h_w));
             m.insert("C".into(), Color::srgb(0.20, 0.20, 0.20));
             m.insert("N".into(), Color::srgb(0.15, 0.25, 0.95));
@@ -106,57 +103,63 @@ pub fn color_scheme_map(s: ColorScheme) -> HashMap<String, Color> {
 pub fn color_for(atom: &str, scheme: ColorScheme) -> Color {
     match scheme {
         ColorScheme::Custom => default_custom(atom),
-        ColorScheme::CPK    => cpk(atom),
-        ColorScheme::Jmol   => jmol(atom),
-        ColorScheme::VMD    => vmd(atom),
+        ColorScheme::CPK => cpk(atom),
+        ColorScheme::Jmol => jmol(atom),
+        ColorScheme::VMD => vmd(atom),
         ColorScheme::Molden => molden(atom),
-        ColorScheme::Molden0=> molden0(atom),
+        ColorScheme::Molden0 => molden0(atom),
     }
 }
 
 fn default_custom(a: &str) -> Color {
     match a {
-        "H"  => Color::srgb(1.0, 1.0, 1.0),
-        "C"  => Color::srgb(0.2, 0.2, 0.2),
-        "N"  => Color::srgb(0.2, 0.2, 1.0),
-        "O"  => Color::srgb(1.0, 0.0, 0.0),
-        "F"  => HALO_F,
-        "S"  => Color::srgb(1.0, 1.0, 0.0),
+        "H" => Color::srgb(1.0, 1.0, 1.0),
+        "C" => Color::srgb(0.2, 0.2, 0.2),
+        "N" => Color::srgb(0.2, 0.2, 1.0),
+        "O" => Color::srgb(1.0, 0.0, 0.0),
+        "F" => HALO_F,
+        "S" => Color::srgb(1.0, 1.0, 0.0),
         "Cl" => HALO_CL,
         "Br" => HALO_BR,
-        "I"  => HALO_I,
-        _    => Color::srgb(0.7, 0.7, 0.7),
+        "I" => HALO_I,
+        _ => Color::srgb(0.7, 0.7, 0.7),
     }
 }
-fn cpk(a: &str) -> Color { default_custom(a) }
-fn jmol(a: &str) -> Color { default_custom(a) }
-fn vmd(a: &str)  -> Color { default_custom(a) }
+fn cpk(a: &str) -> Color {
+    default_custom(a)
+}
+fn jmol(a: &str) -> Color {
+    default_custom(a)
+}
+fn vmd(a: &str) -> Color {
+    default_custom(a)
+}
 
 fn molden(a: &str) -> Color {
     match a {
-        "H"  => Color::srgb(0.95, 0.95, 0.95),
-        "C"  => Color::srgb(0.12, 0.12, 0.12),
-        "N"  => Color::srgb(0.2, 0.35, 1.0),
-        "O"  => Color::srgb(1.0, 0.2, 0.2),
-        "F"  => HALO_F,
-        "S"  => Color::srgb(1.0, 1.0, 0.2),
+        "H" => Color::srgb(0.95, 0.95, 0.95),
+        "C" => Color::srgb(0.12, 0.12, 0.12),
+        "N" => Color::srgb(0.2, 0.35, 1.0),
+        "O" => Color::srgb(1.0, 0.2, 0.2),
+        "F" => HALO_F,
+        "S" => Color::srgb(1.0, 1.0, 0.2),
         "Cl" => HALO_CL,
         "Br" => HALO_BR,
-        "I"  => HALO_I,
-        _    => Color::srgb(0.8, 0.8, 0.85),
+        "I" => HALO_I,
+        _ => Color::srgb(0.8, 0.8, 0.85),
     }
 }
 fn molden0(a: &str) -> Color {
     match a {
-        "H"  => Color::srgb(0.98, 0.98, 0.98),
-        "C"  => Color::srgb(0.15, 0.15, 0.15),
-        "N"  => Color::srgb(0.25, 0.45, 1.0),
-        "O"  => Color::srgb(1.0, 0.25, 0.25),
-        "F"  => HALO_F,
-        "S"  => Color::srgb(1.0, 1.0, 0.25),
+        "H" => Color::srgb(0.98, 0.98, 0.98),
+        "C" => Color::srgb(0.15, 0.15, 0.15),
+        "N" => Color::srgb(0.25, 0.45, 1.0),
+        "O" => Color::srgb(1.0, 0.25, 0.25),
+        "F" => HALO_F,
+        "S" => Color::srgb(1.0, 1.0, 0.25),
         "Cl" => HALO_CL,
         "Br" => HALO_BR,
-        "I"  => HALO_I,
-        _    => Color::srgb(0.86, 0.86, 0.9),
+        "I" => HALO_I,
+        _ => Color::srgb(0.86, 0.86, 0.9),
     }
 }

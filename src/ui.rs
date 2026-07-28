@@ -1,23 +1,27 @@
 // src/ui.rs
 use bevy::prelude::*;
-use bevy_egui::{egui, EguiContexts};
-use std::collections::{BTreeSet, HashSet};
+use bevy_egui::{egui, input::EguiWantsInput, EguiContexts};
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use crate::color_schemes::{color_scheme_map, ELEMENT_SYMBOLS};
+use crate::diagnostics::{self, DiagnosticSeverity};
 use crate::events::MoleculeChanged;
 use crate::molecule::{parse_xyz_first_frame_angstrom, Molecule};
 use crate::settings::{BondColorMode, ColorScheme, LightingMode, MolSettings, RepresentationMode};
-use crate::diagnostics::{self, DiagnosticSeverity};
 
 // Export UI + resources
 use crate::export_image::{ExportCounter, ExportFormat, ExportSelectArea, ExportSettings};
 
 // Measurements UI + resource
 use crate::measurements::Measurements;
-use crate::ui_measurements;
+use crate::molecule_builder::builder_ui::{
+    builder_ui_panel, EditorRotateState, ZMatrixBuilderState,
+};
 use crate::trajectory;
+use crate::ui_measurements;
 
 // NEW: shared picking helper (egui-friendly shim)
 use crate::picking::screen::find_nearest_atom_screen_space_egui;
@@ -26,20 +30,16 @@ const ELEMENT_FILTER_S_BLOCK: [&str; 14] = [
     "H", "He", "Li", "Be", "Na", "Mg", "K", "Ca", "Rb", "Sr", "Cs", "Ba", "Fr", "Ra",
 ];
 const ELEMENT_FILTER_D_BLOCK: [&str; 29] = [
-    "Sc", "Ti", "V", "Cr", "Mn", "Fe", "Co", "Ni", "Cu", "Zn",
-    "Y", "Zr", "Nb", "Mo", "Tc", "Ru", "Rh", "Pd", "Ag", "Cd",
-    "Hf", "Ta", "W", "Re", "Os", "Ir", "Pt", "Au", "Hg",
+    "Sc", "Ti", "V", "Cr", "Mn", "Fe", "Co", "Ni", "Cu", "Zn", "Y", "Zr", "Nb", "Mo", "Tc", "Ru",
+    "Rh", "Pd", "Ag", "Cd", "Hf", "Ta", "W", "Re", "Os", "Ir", "Pt", "Au", "Hg",
 ];
 const ELEMENT_FILTER_P_BLOCK: [&str; 29] = [
-    "B", "C", "N", "O", "F", "Ne",
-    "Al", "Si", "P", "S", "Cl", "Ar",
-    "Ga", "Ge", "As", "Se", "Br", "Kr",
-    "In", "Sn", "Sb", "Te", "I", "Xe",
-    "Tl", "Pb", "Bi", "Po", "At",
+    "B", "C", "N", "O", "F", "Ne", "Al", "Si", "P", "S", "Cl", "Ar", "Ga", "Ge", "As", "Se", "Br",
+    "Kr", "In", "Sn", "Sb", "Te", "I", "Xe", "Tl", "Pb", "Bi", "Po", "At",
 ];
 const ELEMENT_FILTER_F_BLOCK: [&str; 30] = [
-    "La", "Ce", "Pr", "Nd", "Pm", "Sm", "Eu", "Gd", "Tb", "Dy", "Ho", "Er", "Tm", "Yb", "Lu",
-    "Ac", "Th", "Pa", "U", "Np", "Pu", "Am", "Cm", "Bk", "Cf", "Es", "Fm", "Md", "No", "Lr",
+    "La", "Ce", "Pr", "Nd", "Pm", "Sm", "Eu", "Gd", "Tb", "Dy", "Ho", "Er", "Tm", "Yb", "Lu", "Ac",
+    "Th", "Pa", "U", "Np", "Pu", "Am", "Cm", "Bk", "Cf", "Es", "Fm", "Md", "No", "Lr",
 ];
 
 #[derive(Resource, Clone)]
@@ -48,6 +48,17 @@ pub struct XyzBuffer {
     pub last_dir: Option<PathBuf>,
     pub current_file: Option<PathBuf>,
     pub warning: Option<String>,
+    // Cached read-only XYZ rows; refreshed only when atoms or coordinates change.
+    pub live_xyz_atoms: Vec<String>,
+    pub live_xyz_pos: Vec<Vec3>,
+    pub live_xyz_lines: Vec<String>,
+    // Cached egui layout for atom labels; rebuilt only when atom symbols change.
+    pub label_atoms: Vec<String>,
+    pub type_label_galleys: Vec<Arc<egui::Galley>>,
+    pub index_label_galleys: Vec<Arc<egui::Galley>>,
+    pub type_index_label_galleys: Vec<Arc<egui::Galley>>,
+    pub element_filter_atoms: Vec<String>,
+    pub element_filter_extras: Vec<String>,
 }
 
 /// Right-side control panel + overlays.
@@ -62,6 +73,7 @@ pub struct XyzBuffer {
 pub fn ui_panel(
     mut commands: Commands,
     mut contexts: EguiContexts,
+    egui_wants_input: Res<EguiWantsInput>,
     mut images: ResMut<Assets<Image>>,
     mut settings: ResMut<MolSettings>,
     mut mol: ResMut<Molecule>,
@@ -70,49 +82,70 @@ pub fn ui_panel(
     // orbit target control
     mut cam: ResMut<crate::camera::OrbitCamera>,
     // camera for picking + label projection
-    q_cam: Query<(&Camera, &Projection, &GlobalTransform), (With<Camera3d>, With<crate::scene::MainCamera>)>,
+    q_cam: Query<
+        (&Camera, &Projection, &GlobalTransform),
+        (With<Camera3d>, With<crate::scene::MainCamera>),
+    >,
     windows: Query<&Window>,
 
     // export section
-    mut export_settings: ResMut<ExportSettings>,
-    mut export_counter: ResMut<ExportCounter>,
-    mut export_select_area: ResMut<ExportSelectArea>,
+    export_resources: (
+        ResMut<ExportSettings>,
+        ResMut<ExportCounter>,
+        ResMut<ExportSelectArea>,
+    ),
 
     // measurements panel
     mut measurements: ResMut<Measurements>,
+    diagnostics_cache: Res<diagnostics::DiagnosticsCache>,
     // trajectory
     mut traj: ResMut<trajectory::TrajectoryState>,
+    builder_resources: (
+        ResMut<EditorRotateState>,
+        ResMut<ZMatrixBuilderState>,
+        Local<bool>,
+    ),
 ) {
-    // bevy_egui 0.36: ctx_mut() returns Result; if it fails, skip this frame
-    let Ok(ctx) = contexts.ctx_mut() else { return; };
-    ctx.style_mut(|style| {
-        style.text_styles = [
-            (egui::TextStyle::Heading, egui::FontId::proportional(22.0)),
-            (egui::TextStyle::Body, egui::FontId::proportional(16.0)),
-            (egui::TextStyle::Monospace, egui::FontId::monospace(15.0)),
-            (egui::TextStyle::Button, egui::FontId::proportional(16.0)),
-            (egui::TextStyle::Small, egui::FontId::proportional(13.0)),
-        ]
-        .into();
-    });
+    // bevy_egui 0.41: ctx_mut() returns Result; if it fails, skip this frame
+    let ctx = contexts.ctx_mut().expect("missing primary egui context");
+    let (mut export_settings, mut export_counter, mut export_select_area) = export_resources;
+    let (mut editor_rotate_state, mut zmat_state, mut style_initialized) = builder_resources;
+    if !*style_initialized {
+        ctx.style_mut_of(ctx.theme(), |style| {
+            style.text_styles = [
+                (egui::TextStyle::Heading, egui::FontId::proportional(22.0)),
+                (egui::TextStyle::Body, egui::FontId::proportional(16.0)),
+                (egui::TextStyle::Monospace, egui::FontId::monospace(15.0)),
+                (egui::TextStyle::Button, egui::FontId::proportional(16.0)),
+                (egui::TextStyle::Small, egui::FontId::proportional(13.0)),
+            ]
+            .into();
+        });
+        *style_initialized = true;
+    }
 
     // -------------------------
     // Right-click picking (not over egui)
     // -------------------------
     let (latest_pos_opt, right_clicked) =
         ctx.input(|i| (i.pointer.latest_pos(), i.pointer.secondary_clicked()));
-    let mouse_over_ui = ctx.is_pointer_over_area();
+    let mouse_over_ui = egui_wants_input.is_using_pointer() || egui_wants_input.is_popup_open();
     if let (Some(pos_points), true) = (latest_pos_opt, right_clicked) {
         if !mouse_over_ui {
-            if let (Ok((cam_comp, _proj, cam_xform)), Ok(win)) = (q_cam.single(), windows.single()) {
+            if let (Ok((cam_comp, _proj, cam_xform)), Ok(win)) = (q_cam.single(), windows.single())
+            {
                 // Convert egui logical points → PHYSICAL px
                 let scale = win.scale_factor() as f32;
                 let mouse_px = egui::pos2(pos_points.x * scale, pos_points.y * scale);
 
                 let (picked_idx, popup_pos) = if let Some((hit_idx, hit_px_pos)) =
-                    find_nearest_atom_screen_space_egui(cam_comp, cam_xform, &mol.pos, mouse_px, 18.0)
-                {
-                    (hit_idx as i32, egui::pos2(hit_px_pos.x / scale, hit_px_pos.y / scale))
+                    find_nearest_atom_screen_space_egui(
+                        cam_comp, cam_xform, &mol.pos, mouse_px, 18.0,
+                    ) {
+                    (
+                        hit_idx as i32,
+                        egui::pos2(hit_px_pos.x / scale, hit_px_pos.y / scale),
+                    )
                 } else {
                     (-1, pos_points)
                 };
@@ -151,7 +184,7 @@ pub fn ui_panel(
                 .fixed_pos(pos_pts)
                 .order(egui::Order::Foreground)
                 .show(&ctx, |ui| {
-                    egui::Frame::popup(&ctx.style()).show(ui, |ui| {
+                    egui::Frame::popup(ui.style()).show(ui, |ui| {
                         if picked >= 0 {
                             ui.set_min_width(220.0);
                         }
@@ -199,12 +232,19 @@ pub fn ui_panel(
     // -------------------------
     // Right side panel
     // -------------------------
-    egui::SidePanel::right("controls")
-        .default_width(320.0)
-        .min_width(240.0)
-        .max_width(520.0)
+    let mut viewport_ui = egui::Ui::new(
+        ctx.clone(),
+        "controls_viewport".into(),
+        egui::UiBuilder::new()
+            .layer_id(egui::LayerId::background())
+            .max_rect(ctx.viewport_rect()),
+    );
+    egui::Panel::right("controls")
+        .default_size(320.0)
+        .min_size(240.0)
+        .max_size(520.0)
         .resizable(true)
-        .show(&ctx, |ui| {
+        .show(&mut viewport_ui, |ui| {
             // ===========================
             // 1) Structure (XYZ)
             // ===========================
@@ -351,21 +391,14 @@ pub fn ui_panel(
                     ui.weak("Tip: Use ‘Copy XYZ’ to copy the current live geometry without leaving edit mode.");
                 } else {
                     // ---- VIEW MODE (LIVE XYZ) ----
+                    refresh_live_xyz_cache(&mut xyz_buf, &mol);
                     ui.label("Live XYZ (read-only):");
                     egui::ScrollArea::vertical()
                         .max_height(260.0)
                         .auto_shrink([false; 2])
                         .show(ui, |ui| {
                             ui.style_mut().override_text_style = Some(egui::TextStyle::Monospace);
-                            for (i, (sym, p)) in mol.atoms.iter().zip(mol.pos.iter()).enumerate() {
-                                let label = format!(
-                                    "{:>3} {:<2} {:>7.3} {:>7.3} {:>7.3}",
-                                    i + 1,
-                                    sym,
-                                    p.x,
-                                    p.y,
-                                    p.z
-                                );
+                            for label in &xyz_buf.live_xyz_lines {
                                 ui.monospace(label);
                             }
                         });
@@ -675,7 +708,7 @@ pub fn ui_panel(
             ui.add_space(8.0);
             ui.separator();
             ui.collapsing("Diagnostics", |ui| {
-                let report = diagnostics::analyze_molecule(&mol);
+                let report = &diagnostics_cache.report;
                 let warnings = report.warning_count();
                 let info = report.info_count();
 
@@ -878,27 +911,9 @@ pub fn ui_panel(
                 ui.add_space(8.0);
 
                 ui.collapsing("Element Filter", |ui| {
-                    let mut elements: Vec<String> = Vec::new();
-                    elements.extend(ELEMENT_FILTER_S_BLOCK.iter().map(|s| s.to_string()));
-                    elements.extend(ELEMENT_FILTER_D_BLOCK.iter().map(|s| s.to_string()));
-                    elements.extend(ELEMENT_FILTER_P_BLOCK.iter().map(|s| s.to_string()));
-                    elements.extend(ELEMENT_FILTER_F_BLOCK.iter().map(|s| s.to_string()));
-
-                    let mut default_set: HashSet<&str> = HashSet::new();
-                    default_set.extend(ELEMENT_FILTER_S_BLOCK);
-                    default_set.extend(ELEMENT_FILTER_D_BLOCK);
-                    default_set.extend(ELEMENT_FILTER_P_BLOCK);
-                    default_set.extend(ELEMENT_FILTER_F_BLOCK);
-
-                    let mut extras: BTreeSet<String> = BTreeSet::new();
-                    for sym in &mol.atoms {
-                        if !default_set.contains(sym.as_str()) {
-                            extras.insert(sym.clone());
-                        }
-                    }
-                    elements.extend(extras.iter().cloned());
-
-                    if elements.is_empty() {
+                    refresh_element_filter_cache(&mut xyz_buf, &mol);
+                    let extras = &xyz_buf.element_filter_extras;
+                    if mol.atoms.is_empty() {
                         ui.weak("No atoms loaded.");
                         return;
                     }
@@ -906,13 +921,33 @@ pub fn ui_panel(
                     let mut changed = false;
                     ui.horizontal(|ui| {
                         if ui.button("Show all").clicked() {
-                            for sym in &elements {
+                            for block in [
+                                &ELEMENT_FILTER_S_BLOCK[..],
+                                &ELEMENT_FILTER_D_BLOCK[..],
+                                &ELEMENT_FILTER_P_BLOCK[..],
+                                &ELEMENT_FILTER_F_BLOCK[..],
+                            ] {
+                                for sym in block {
+                                    settings.element_visibility.insert((*sym).to_string(), true);
+                                }
+                            }
+                            for sym in extras {
                                 settings.element_visibility.insert(sym.clone(), true);
                             }
                             changed = true;
                         }
                         if ui.button("Hide all").clicked() {
-                            for sym in &elements {
+                            for block in [
+                                &ELEMENT_FILTER_S_BLOCK[..],
+                                &ELEMENT_FILTER_D_BLOCK[..],
+                                &ELEMENT_FILTER_P_BLOCK[..],
+                                &ELEMENT_FILTER_F_BLOCK[..],
+                            ] {
+                                for sym in block {
+                                    settings.element_visibility.insert((*sym).to_string(), false);
+                                }
+                            }
+                            for sym in extras {
                                 settings.element_visibility.insert(sym.clone(), false);
                             }
                             changed = true;
@@ -1376,13 +1411,28 @@ pub fn ui_panel(
             });
         });
 
+    builder_ui_panel(
+        &mut viewport_ui,
+        &mut editor_rotate_state,
+        &mut zmat_state,
+        &mut mol,
+        &mut settings,
+    );
+
     // -------------------------
     // Overlay: atom labels (type/index)
     // -------------------------
-    let show_type = ctx.data_mut(|d| d.get_persisted::<bool>(egui::Id::new("show_atom_type")).unwrap_or(false));
-    let show_index = ctx.data_mut(|d| d.get_persisted::<bool>(egui::Id::new("show_atom_index")).unwrap_or(false));
+    let show_type = ctx.data_mut(|d| {
+        d.get_persisted::<bool>(egui::Id::new("show_atom_type"))
+            .unwrap_or(false)
+    });
+    let show_index = ctx.data_mut(|d| {
+        d.get_persisted::<bool>(egui::Id::new("show_atom_index"))
+            .unwrap_or(false)
+    });
 
     if (show_type || show_index) && mol.pos.len() == mol.atoms.len() {
+        refresh_atom_label_cache(&mut xyz_buf, &mol, &ctx);
         if let (Ok((cam_comp, _proj, cam_xform)), Ok(win)) = (q_cam.single(), windows.single()) {
             egui::Area::new(egui::Id::new("atom_labels_overlay"))
                 .movable(false)
@@ -1397,7 +1447,9 @@ pub fn ui_panel(
                             let pos = egui::pos2(screen_px.x / scale, screen_px.y / scale);
 
                             let mut text = String::new();
-                            if show_type { text.push_str(sym); }
+                            if show_type {
+                                text.push_str(sym);
+                            }
                             if show_index {
                                 if !text.is_empty() {
                                     text.push('(');
@@ -1407,9 +1459,11 @@ pub fn ui_panel(
                                     text.push_str(&(i + 1).to_string());
                                 }
                             }
-                            if text.is_empty() { continue; }
+                            if text.is_empty() {
+                                continue;
+                            }
 
-                            let galley = ctx.fonts(|f| {
+                            let galley = ctx.fonts_mut(|f| {
                                 f.layout_no_wrap(
                                     text.clone(),
                                     egui::FontId::proportional(13.0),
@@ -1436,7 +1490,8 @@ pub fn ui_panel(
                     );
                     let stroke = egui::Stroke::new(1.5, egui::Color32::from_rgb(70, 190, 90));
                     let fill = egui::Color32::from_rgba_premultiplied(70, 190, 90, 30);
-                    ui.painter().rect(rect, 0.0, fill, stroke, egui::StrokeKind::Inside);
+                    ui.painter()
+                        .rect(rect, 0.0, fill, stroke, egui::StrokeKind::Inside);
                 }
             });
     }
@@ -1444,8 +1499,85 @@ pub fn ui_panel(
 
 // ---- helpers ----
 
+fn is_standard_filter_element(symbol: &str) -> bool {
+    ELEMENT_FILTER_S_BLOCK.contains(&symbol)
+        || ELEMENT_FILTER_D_BLOCK.contains(&symbol)
+        || ELEMENT_FILTER_P_BLOCK.contains(&symbol)
+        || ELEMENT_FILTER_F_BLOCK.contains(&symbol)
+}
+
+fn refresh_element_filter_cache(cache: &mut XyzBuffer, mol: &Molecule) {
+    if cache.element_filter_atoms == mol.atoms {
+        return;
+    }
+    cache.element_filter_atoms.clone_from(&mol.atoms);
+    let mut extras = BTreeSet::new();
+    for symbol in &mol.atoms {
+        if !is_standard_filter_element(symbol) {
+            extras.insert(symbol.clone());
+        }
+    }
+    cache.element_filter_extras.clear();
+    cache.element_filter_extras.extend(extras);
+}
+
+fn refresh_atom_label_cache(cache: &mut XyzBuffer, mol: &Molecule, ctx: &egui::Context) {
+    if cache.label_atoms == mol.atoms {
+        return;
+    }
+
+    cache.label_atoms.clone_from(&mol.atoms);
+    cache.type_label_galleys.clear();
+    cache.index_label_galleys.clear();
+    cache.type_index_label_galleys.clear();
+    ctx.fonts_mut(|fonts| {
+        for (index, symbol) in mol.atoms.iter().enumerate() {
+            let font = egui::FontId::proportional(13.0);
+            let color = egui::Color32::WHITE;
+            cache.type_label_galleys.push(fonts.layout_no_wrap(
+                symbol.clone(),
+                font.clone(),
+                color,
+            ));
+            cache.index_label_galleys.push(fonts.layout_no_wrap(
+                (index + 1).to_string(),
+                font.clone(),
+                color,
+            ));
+            cache.type_index_label_galleys.push(fonts.layout_no_wrap(
+                format!("{}({})", symbol, index + 1),
+                font,
+                color,
+            ));
+        }
+    });
+}
+
+fn refresh_live_xyz_cache(cache: &mut XyzBuffer, mol: &Molecule) {
+    if cache.live_xyz_atoms == mol.atoms && cache.live_xyz_pos == mol.pos {
+        return;
+    }
+
+    cache.live_xyz_atoms.clone_from(&mol.atoms);
+    cache.live_xyz_pos.clone_from(&mol.pos);
+    cache.live_xyz_lines.clear();
+    cache.live_xyz_lines.reserve(mol.atoms.len());
+    for (index, (symbol, position)) in mol.atoms.iter().zip(&mol.pos).enumerate() {
+        cache.live_xyz_lines.push(format!(
+            "{:>3} {:<2} {:>7.3} {:>7.3} {:>7.3}",
+            index + 1,
+            symbol,
+            position.x,
+            position.y,
+            position.z
+        ));
+    }
+}
+
 fn compute_centroid(points: &[Vec3]) -> Option<Vec3> {
-    if points.is_empty() { return None; }
+    if points.is_empty() {
+        return None;
+    }
     let mut acc = Vec3::ZERO;
     for &p in points {
         acc += p;
@@ -1480,8 +1612,7 @@ fn apply_xyz_text(
     let (atoms, qxyz, extra_frames) = parse_xyz_first_frame_angstrom(text);
     mol.atoms = atoms;
     mol.set_pos(
-        qxyz
-            .into_iter()
+        qxyz.into_iter()
             .map(|v| Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32))
             .collect(),
     );
@@ -1507,10 +1638,7 @@ fn format_xyz_from_molecule(mol: &Molecule) -> String {
     for (sym, p) in mol.atoms.iter().zip(mol.pos.iter()) {
         out.push_str(&format!(
             "{:<2} {:>14.8} {:>14.8} {:>14.8}\n",
-            sym,
-            p.x as f64,
-            p.y as f64,
-            p.z as f64
+            sym, p.x as f64, p.y as f64, p.z as f64
         ));
     }
     out

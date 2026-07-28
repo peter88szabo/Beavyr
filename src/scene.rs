@@ -1,19 +1,20 @@
 // src/scene.rs
 
+use bevy::camera::visibility::RenderLayers;
+use bevy::camera::Viewport;
 use bevy::math::primitives::{Cone, Cylinder, Sphere};
 use bevy::prelude::*;
-use bevy::camera::Viewport;
-use bevy::camera::visibility::RenderLayers;
+use bevy_egui::PrimaryEguiContext;
 use std::collections::HashMap;
 
+use crate::camera::OrbitCamera;
 use crate::color_schemes::color_for;
 use crate::molecule::{covalent_radius_angstrom, Molecule};
 use crate::settings::{BondColorMode, LightingMode, MolSettings, RepresentationMode};
-use crate::camera::OrbitCamera;
 
 // NEW: react to coordinate-change events (only to mark dirty when topology might have changed)
-use crate::events::MoleculeChanged;
 use crate::events::MoleculeChangeReason;
+use crate::events::MoleculeChanged;
 
 // default molecule (Å)
 //pub const DEFAULT_WATER: &str = r#"
@@ -51,14 +52,18 @@ pub struct AtomMarker {
 
 #[derive(Clone, Copy)]
 pub enum BondVisual {
-    Uniform { base_len: f32 },
+    Uniform {
+        base_len: f32,
+    },
     Split {
         start_frac: f32,
         end_frac: f32,
         base_len: f32,
         color_atom: usize,
     },
-    Cap { atom: usize },
+    Cap {
+        atom: usize,
+    },
 }
 
 #[derive(Component)]
@@ -118,7 +123,11 @@ const AXIS_VP_MARGIN: u32 = 12;
 const LARGE_MOLECULE_ATOM_THRESHOLD: usize = 1000;
 
 fn element_visible(sym: &str, settings: &MolSettings) -> bool {
-    settings.element_visibility.get(sym).copied().unwrap_or(true)
+    settings
+        .element_visibility
+        .get(sym)
+        .copied()
+        .unwrap_or(true)
 }
 
 fn apply_large_molecule_representation(mol: &Molecule, settings: &mut MolSettings) {
@@ -237,7 +246,7 @@ pub fn setup(
     commands.insert_resource(ClearColor(settings.bg_color));
 
     // Ambient (resource)
-    commands.insert_resource(AmbientLight {
+    commands.insert_resource(GlobalAmbientLight {
         brightness: settings.ambient_brightness,
         color: settings.ambient_color,
         affects_lightmapped_meshes: true,
@@ -246,6 +255,7 @@ pub fn setup(
     // Main camera
     commands.spawn((
         Camera3d::default(),
+        PrimaryEguiContext,
         Transform::from_xyz(0.0, 7.0, 14.0).looking_at(Vec3::new(0.0, 1.0, 0.0), Vec3::Y),
         MainCamera,
         RenderLayers::layer(LAYER_MAIN),
@@ -254,7 +264,7 @@ pub fn setup(
     // Key light (front-right-up)
     commands.spawn((
         PointLight {
-            shadows_enabled: false,
+            shadow_maps_enabled: false,
             intensity: settings.light_intensity,
             range: 200.0,
             ..default()
@@ -271,7 +281,7 @@ pub fn setup(
     // Fill (front-left)
     commands.spawn((
         PointLight {
-            shadows_enabled: false,
+            shadow_maps_enabled: false,
             intensity: settings.fill_intensity,
             range: 200.0,
             ..default()
@@ -288,7 +298,7 @@ pub fn setup(
     // Rim (back-right)
     commands.spawn((
         PointLight {
-            shadows_enabled: false,
+            shadow_maps_enabled: false,
             intensity: settings.rim_intensity,
             range: 200.0,
             ..default()
@@ -435,10 +445,7 @@ pub fn setup(
 }
 
 /// Center the orbit camera on the initial molecule when the app starts.
-pub fn center_camera_on_startup(
-    mol: Res<Molecule>,
-    mut cam: ResMut<OrbitCamera>,
-) {
+pub fn center_camera_on_startup(mol: Res<Molecule>, mut cam: ResMut<OrbitCamera>) {
     auto_fit_camera(&mol.pos, &mut cam);
 }
 
@@ -452,7 +459,6 @@ pub fn react_to_molecule_changed_mark_dirty(
     mut cam: ResMut<OrbitCamera>,
 ) {
     for ev in evr.read() {
-
         match ev.reason {
             MoleculeChangeReason::ParseXyz { recenter } => {
                 if recenter {
@@ -461,7 +467,7 @@ pub fn react_to_molecule_changed_mark_dirty(
                 settings.geometry_dirty = true;
                 settings.bond_topology_dirty = true;
             }
-            | MoleculeChangeReason::SetPos
+            MoleculeChangeReason::SetPos
             | MoleculeChangeReason::BuilderRotate
             | MoleculeChangeReason::Undo
             | MoleculeChangeReason::Redo => {
@@ -576,7 +582,7 @@ pub fn update_lighting_if_dirty(
     mut q_key: Query<&mut PointLight, (With<KeyLight>, Without<FillLight>, Without<RimLight>)>,
     mut q_fill: Query<&mut PointLight, (With<FillLight>, Without<KeyLight>, Without<RimLight>)>,
     mut q_rim: Query<&mut PointLight, (With<RimLight>, Without<KeyLight>, Without<FillLight>)>,
-    mut amb: ResMut<AmbientLight>,
+    mut amb: ResMut<GlobalAmbientLight>,
 ) {
     if !settings.lighting_dirty {
         return;
@@ -745,8 +751,10 @@ pub fn rebuild_if_dirty(
             if !element_visible(sym, &settings) {
                 continue;
             }
-            let scale = if matches!(settings.representation, RepresentationMode::LowResBallsAndLines)
-            {
+            let scale = if matches!(
+                settings.representation,
+                RepresentationMode::LowResBallsAndLines
+            ) {
                 settings.low_res_atom_scale
             } else if matches!(settings.representation, RepresentationMode::BackboneTrace) {
                 settings.trace_atom_scale
@@ -816,8 +824,7 @@ pub fn rebuild_if_dirty(
         if i >= mol.atoms.len() || j >= mol.atoms.len() {
             continue;
         }
-        if !element_visible(&mol.atoms[i], &settings)
-            || !element_visible(&mol.atoms[j], &settings)
+        if !element_visible(&mol.atoms[i], &settings) || !element_visible(&mol.atoms[j], &settings)
         {
             continue;
         }
@@ -846,12 +853,12 @@ pub fn rebuild_if_dirty(
         // Common rotation (align local +Y with bond direction)
         let rot = Quat::from_rotation_arc(Vec3::Y, dir_n);
 
-        let bond_color_mode = if matches!(settings.representation, RepresentationMode::SticksRounded)
-        {
-            BondColorMode::AtomSplit
-        } else {
-            settings.bond_color_mode
-        };
+        let bond_color_mode =
+            if matches!(settings.representation, RepresentationMode::SticksRounded) {
+                BondColorMode::AtomSplit
+            } else {
+                settings.bond_color_mode
+            };
 
         match bond_color_mode {
             BondColorMode::Uniform => {
@@ -893,18 +900,16 @@ pub fn rebuild_if_dirty(
             // AtomSplit: two segments with a clean joint at the midpoint,
             // optionally extended to overlap for rounded-stick mode.
             BondColorMode::AtomSplit => {
-                let (start, end) = if matches!(
-                    settings.representation,
-                    RepresentationMode::SticksRounded
-                ) {
-                    (p0, p1)
-                } else {
-                    let overlap = radius * 0.40; // 40% of bond radius
-                    (
-                        p0 + dir_n * (ri_sphere - overlap),
-                        p1 - dir_n * (rj_sphere - overlap),
-                    )
-                };
+                let (start, end) =
+                    if matches!(settings.representation, RepresentationMode::SticksRounded) {
+                        (p0, p1)
+                    } else {
+                        let overlap = radius * 0.40; // 40% of bond radius
+                        (
+                            p0 + dir_n * (ri_sphere - overlap),
+                            p1 - dir_n * (rj_sphere - overlap),
+                        )
+                    };
 
                 let visible_len = (end - start).length();
                 if visible_len <= 0.0 {
@@ -1066,8 +1071,7 @@ pub fn draw_bond_lines(
         if i >= n_pos || j >= n_pos || i >= n_atoms || j >= n_atoms {
             continue;
         }
-        if !element_visible(&mol.atoms[i], &settings)
-            || !element_visible(&mol.atoms[j], &settings)
+        if !element_visible(&mol.atoms[i], &settings) || !element_visible(&mol.atoms[j], &settings)
         {
             continue;
         }
@@ -1126,29 +1130,31 @@ pub fn update_light_positions(
     mut q_fill: Query<&mut Transform, (With<FillLight>, Without<KeyLight>, Without<RimLight>)>,
     mut q_rim: Query<&mut Transform, (With<RimLight>, Without<KeyLight>, Without<FillLight>)>,
 ) {
-    let Ok(cam_tf) = q_cam.single() else { return; };
+    let Ok(cam_tf) = q_cam.single() else {
+        return;
+    };
     let rot = cam_tf.rotation();
     let t = cam.target;
 
     if let Ok(mut tf) = q_key.single_mut() {
-        tf.translation = t
-            + rot * Vec3::new(
+        tf.translation = t + rot
+            * Vec3::new(
                 settings.light_distance,
                 settings.light_distance,
                 settings.light_distance,
             );
     }
     if let Ok(mut tf) = q_fill.single_mut() {
-        tf.translation = t
-            + rot * Vec3::new(
+        tf.translation = t + rot
+            * Vec3::new(
                 -settings.fill_distance,
                 settings.fill_distance * 0.5,
                 settings.fill_distance,
             );
     }
     if let Ok(mut tf) = q_rim.single_mut() {
-        tf.translation = t
-            + rot * Vec3::new(
+        tf.translation = t + rot
+            * Vec3::new(
                 settings.rim_distance,
                 settings.rim_distance * 0.5,
                 -settings.rim_distance,

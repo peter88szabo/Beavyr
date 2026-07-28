@@ -2,7 +2,7 @@ use bevy::prelude::*;
 use bevy_egui::egui;
 
 use crate::measurements::{MeasurePair, Measurements};
-use crate::molecule::{Molecule, covalent_radius_angstrom};
+use crate::molecule::{covalent_radius_angstrom, Molecule};
 use crate::settings::MolSettings;
 
 /// Call this from your existing right-side panel in `ui.rs`.
@@ -56,10 +56,7 @@ pub fn measurements_panel(
         ui.collapsing("Change Distance Style", |ui| {
             ui.separator();
             ui.label("Global style");
-            ui.add(
-                egui::Slider::new(&mut measurements.line_width, 1.0..=50.0)
-                    .text("Line width"),
-            );
+            ui.add(egui::Slider::new(&mut measurements.line_width, 1.0..=50.0).text("Line width"));
             ui.add(
                 egui::Slider::new(&mut measurements.dash_line_scale, 0.05..=4.0)
                     .text("Dash line scale"),
@@ -79,7 +76,11 @@ pub fn measurements_panel(
                     (s.blue * 255.0).round() as u8,
                     (s.alpha * 255.0).round() as u8,
                 );
-                if ui.color_edit_button_srgba(&mut eg).on_hover_text("Global color").changed() {
+                if ui
+                    .color_edit_button_srgba(&mut eg)
+                    .on_hover_text("Global color")
+                    .changed()
+                {
                     measurements.color = Color::srgba(
                         eg.r() as f32 / 255.0,
                         eg.g() as f32 / 255.0,
@@ -220,7 +221,13 @@ pub fn measurements_panel(
                                 ui.add_space(8.0);
                                 ui.monospace(format!(
                                     "{}({})-{}({})-{}({}) | {:.1}°",
-                                    na, a.a + 1, nb, a.b + 1, nc, a.c + 1, a.degrees
+                                    na,
+                                    a.a + 1,
+                                    nb,
+                                    a.b + 1,
+                                    nc,
+                                    a.c + 1,
+                                    a.degrees
                                 ));
                                 ui.add_space(8.0);
                                 if ui.button("Delete").clicked() {
@@ -327,7 +334,15 @@ pub fn measurements_panel(
                                 ui.add_space(8.0);
                                 ui.monospace(format!(
                                     "{}({})-{}({})-{}({})-{}({}) | {:+.1}°",
-                                    na, dmeas.a + 1, nb, dmeas.b + 1, nc, dmeas.c + 1, nd, dmeas.d + 1, dmeas.degrees
+                                    na,
+                                    dmeas.a + 1,
+                                    nb,
+                                    dmeas.b + 1,
+                                    nc,
+                                    dmeas.c + 1,
+                                    nd,
+                                    dmeas.d + 1,
+                                    dmeas.degrees
                                 ));
                                 ui.add_space(8.0);
                                 if ui.button("Delete").clicked() {
@@ -339,7 +354,9 @@ pub fn measurements_panel(
                     }
 
                     if !to_delete.is_empty() {
-                        measurements.dihedrals.retain(|d| !to_delete.contains(&d.id));
+                        measurements
+                            .dihedrals
+                            .retain(|d| !to_delete.contains(&d.id));
                     }
                     if req_clear {
                         measurements.preview_highlight = None;
@@ -360,14 +377,22 @@ pub fn distance_labels_overlay(
     settings: Option<Res<MolSettings>>,
     measurements: Option<Res<Measurements>>,
 ) {
-    let (Some(mol), Some(settings), Some(measurements)) = (mol, settings, measurements) else { return; };
+    let (Some(mol), Some(settings), Some(measurements)) = (mol, settings, measurements) else {
+        return;
+    };
     if !measurements.show_labels || measurements.pairs.is_empty() {
         return;
     }
 
-    let Ok(ctx) = contexts.ctx_mut() else { return; };
-    let Ok((cam, cam_xform)) = q_cam.single() else { return; };
-    let Ok(window) = windows.single() else { return; };
+    let Ok(ctx) = contexts.ctx_mut() else {
+        return;
+    };
+    let Ok((cam, cam_xform)) = q_cam.single() else {
+        return;
+    };
+    let Ok(window) = windows.single() else {
+        return;
+    };
 
     egui::Area::new(egui::Id::new("measurement_labels_overlay"))
         .movable(false)
@@ -411,7 +436,7 @@ pub fn distance_labels_overlay(
                     let pos = egui::pos2(screen_px.x / scale, screen_px.y / scale);
 
                     let text = format!("{:.3}", pair.distance);
-                    let galley = ctx.fonts(|f| {
+                    let galley = ctx.fonts_mut(|f| {
                         f.layout_no_wrap(
                             text.clone(),
                             egui::FontId::proportional(16.0),
@@ -463,7 +488,7 @@ fn active_status_pill(ui: &mut egui::Ui, active: bool) {
     if active {
         egui::Frame::NONE
             .fill(egui::Color32::from_rgb(40, 180, 120))
-            .corner_radius(egui::CornerRadius::same(6))        // u8
+            .corner_radius(egui::CornerRadius::same(6)) // u8
             .inner_margin(egui::Margin::symmetric(8, 4)) // i8
             .show(ui, |ui| {
                 ui.label(

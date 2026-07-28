@@ -1,11 +1,12 @@
 // src/trajectory.rs
 use bevy::prelude::*;
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use crate::events::MoleculeChanged;
 use crate::molecule::{covalent_radius_angstrom, Molecule};
-use crate::settings::MolSettings;
 use crate::scene::LAYER_MAIN;
+use crate::settings::MolSettings;
 use bevy::camera::visibility::RenderLayers;
 
 #[derive(Component)]
@@ -51,6 +52,23 @@ pub struct TrajectoryState {
     pub current_file: Option<PathBuf>,
 }
 
+/// Reuses the immutable meshes and materials created for trajectory overlays.
+#[derive(Resource, Default)]
+pub struct TrajectoryOverlayAssets {
+    atom_meshes: HashMap<(u32, u32), Handle<Mesh>>,
+    materials: HashMap<OverlayMaterialKey, Handle<StandardMaterial>>,
+}
+
+#[derive(Hash, PartialEq, Eq)]
+struct OverlayMaterialKey {
+    color: [u32; 4],
+    metallic: u32,
+    roughness: u32,
+    reflectance: u32,
+    emissive: [u32; 3],
+    transparent: bool,
+}
+
 impl Default for TrajectoryState {
     fn default() -> Self {
         Self {
@@ -65,7 +83,7 @@ impl Default for TrajectoryState {
             overlay_ghost_stride: 1,
             overlay_full_last: false,
             ghost_alpha: 0.2,
-            fixed_bonds: false,
+            fixed_bonds: true,
             fps: 12.0,
             accum: 0.0,
             last_applied: None,
@@ -103,17 +121,14 @@ pub fn parse_multi_xyz(text: &str) -> Result<Vec<TrajectoryFrame>, String> {
         let Some(count_line) = count_line else { break };
 
         let (count_line_no, count_line_text) = count_line;
-        let count = count_line_text
-            .trim()
-            .parse::<usize>()
-            .map_err(|_| {
-                format!(
-                    "Invalid atom count line in trajectory (frame {}, line {}): {}",
-                    frame_idx + 1,
-                    count_line_no,
-                    count_line_text.trim()
-                )
-            })?;
+        let count = count_line_text.trim().parse::<usize>().map_err(|_| {
+            format!(
+                "Invalid atom count line in trajectory (frame {}, line {}): {}",
+                frame_idx + 1,
+                count_line_no,
+                count_line_text.trim()
+            )
+        })?;
         if let Some(expected) = expected_count {
             if count != expected {
                 return Err(format!(
@@ -218,13 +233,16 @@ pub fn apply_current_frame(
     }
 
     let frame = &traj.frames[idx];
-    let old_bond_pairs: Vec<(usize, usize)> = mol.bonds.iter().map(|&(i, j, _)| (i, j)).collect();
     let topology_changed = mol.atoms != frame.atoms || mol.pos.len() != frame.pos.len();
-    mol.atoms = frame.atoms.clone();
-    mol.set_pos(frame.pos.clone());
+    if topology_changed {
+        mol.atoms.clone_from(&frame.atoms);
+    }
+    mol.pos.clone_from(&frame.pos);
 
     let mut bond_topology_changed = false;
     if topology_changed || !traj.fixed_bonds {
+        let old_bond_pairs: Vec<(usize, usize)> =
+            mol.bonds.iter().map(|&(i, j, _)| (i, j)).collect();
         mol.recompute_bonds(settings.bond_thresh_scale, settings.hbond_cutoff);
         bond_topology_changed = old_bond_pairs.len() != mol.bonds.len()
             || old_bond_pairs
@@ -327,6 +345,7 @@ pub fn rebuild_trajectory_overlay(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut traj: ResMut<TrajectoryState>,
+    mut overlay_assets: ResMut<TrajectoryOverlayAssets>,
     settings: Res<MolSettings>,
     q_ghost_atoms: Query<Entity, With<TrajGhostAtom>>,
     q_ghost_bonds: Query<Entity, With<TrajGhostBond>>,
@@ -378,6 +397,7 @@ pub fn rebuild_trajectory_overlay(
                 &mut commands,
                 &mut meshes,
                 &mut materials,
+                &mut overlay_assets,
                 &frame.atoms,
                 &frame.pos,
                 &settings,
@@ -396,6 +416,7 @@ pub fn rebuild_trajectory_overlay(
             &mut commands,
             &mut meshes,
             &mut materials,
+            &mut overlay_assets,
             &traj.frames[last].atoms,
             &traj.frames[last].pos,
             &settings,
@@ -414,6 +435,7 @@ pub fn rebuild_trajectory_overlay(
                 &mut commands,
                 &mut meshes,
                 &mut materials,
+                &mut overlay_assets,
                 &frame.atoms,
                 &frame.pos,
                 &settings,
@@ -432,6 +454,7 @@ fn spawn_overlay_frame(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
+    overlay_assets: &mut TrajectoryOverlayAssets,
     atoms: &[String],
     frame: &[Vec3],
     settings: &MolSettings,
@@ -454,24 +477,32 @@ fn spawn_overlay_frame(
             color = Color::srgba(s.red, s.green, s.blue, alpha);
         }
 
-        let sphere_mesh = Sphere::new(r_cov)
-            .mesh()
-            .ico(settings.atom_resolution)
-            .unwrap();
-
-        let mat = materials.add(StandardMaterial {
-            base_color: color,
+        let sphere_mesh = overlay_assets
+            .atom_meshes
+            .entry((r_cov.to_bits(), settings.atom_resolution))
+            .or_insert_with(|| {
+                meshes.add(
+                    Sphere::new(r_cov)
+                        .mesh()
+                        .ico(settings.atom_resolution)
+                        .unwrap(),
+                )
+            })
+            .clone();
+        let mat = cached_overlay_material(
+            overlay_assets,
+            materials,
+            color,
             metallic,
-            perceptual_roughness: rough,
-            reflectance: refl,
+            rough,
+            refl,
             emissive,
-            alpha_mode: if alpha < 1.0 { AlphaMode::Blend } else { AlphaMode::Opaque },
-            ..default()
-        });
+            alpha < 1.0,
+        );
 
         if is_ghost {
             commands.spawn((
-                Mesh3d(meshes.add(sphere_mesh)),
+                Mesh3d(sphere_mesh),
                 MeshMaterial3d(mat),
                 Transform::from_translation(*pos),
                 TrajGhostAtom,
@@ -479,7 +510,7 @@ fn spawn_overlay_frame(
             ));
         } else {
             commands.spawn((
-                Mesh3d(meshes.add(sphere_mesh)),
+                Mesh3d(sphere_mesh),
                 MeshMaterial3d(mat),
                 Transform::from_translation(*pos),
                 TrajFullAtom,
@@ -504,7 +535,10 @@ fn spawn_overlay_frame(
         let rot = Quat::from_rotation_arc(Vec3::Y, dir_n);
         let center = (p0 + p1) * 0.5;
         let half_length = (len_cc * 0.5 - radius).max(0.0);
-        let cap = Mesh::from(Capsule3d { radius, half_length });
+        let cap = Mesh::from(Capsule3d {
+            radius,
+            half_length,
+        });
 
         let mut color = settings.uniform_bond_color;
         if alpha < 1.0 {
@@ -512,15 +546,16 @@ fn spawn_overlay_frame(
             color = Color::srgba(s.red, s.green, s.blue, alpha);
         }
 
-        let mat = materials.add(StandardMaterial {
-            base_color: color,
+        let mat = cached_overlay_material(
+            overlay_assets,
+            materials,
+            color,
             metallic,
-            perceptual_roughness: rough,
-            reflectance: refl,
+            rough,
+            refl,
             emissive,
-            alpha_mode: if alpha < 1.0 { AlphaMode::Blend } else { AlphaMode::Opaque },
-            ..default()
-        });
+            alpha < 1.0,
+        );
 
         if is_ghost {
             commands.spawn((
@@ -548,6 +583,55 @@ fn spawn_overlay_frame(
             ));
         }
     }
+}
+
+fn cached_overlay_material(
+    cache: &mut TrajectoryOverlayAssets,
+    materials: &mut Assets<StandardMaterial>,
+    color: Color,
+    metallic: f32,
+    roughness: f32,
+    reflectance: f32,
+    emissive: LinearRgba,
+    transparent: bool,
+) -> Handle<StandardMaterial> {
+    let color = color.to_srgba();
+    let key = OverlayMaterialKey {
+        color: [
+            color.red.to_bits(),
+            color.green.to_bits(),
+            color.blue.to_bits(),
+            color.alpha.to_bits(),
+        ],
+        metallic: metallic.to_bits(),
+        roughness: roughness.to_bits(),
+        reflectance: reflectance.to_bits(),
+        emissive: [
+            emissive.red.to_bits(),
+            emissive.green.to_bits(),
+            emissive.blue.to_bits(),
+        ],
+        transparent,
+    };
+    cache
+        .materials
+        .entry(key)
+        .or_insert_with(|| {
+            materials.add(StandardMaterial {
+                base_color: Color::srgba(color.red, color.green, color.blue, color.alpha),
+                metallic,
+                perceptual_roughness: roughness,
+                reflectance,
+                emissive,
+                alpha_mode: if transparent {
+                    AlphaMode::Blend
+                } else {
+                    AlphaMode::Opaque
+                },
+                ..default()
+            })
+        })
+        .clone()
 }
 
 fn compute_bonds(atoms: &[String], pos: &[Vec3], thresh_scale: f32) -> Vec<(usize, usize, f32)> {

@@ -149,18 +149,60 @@ pub const FRAG_CH3: &str = r#"
 "#;
 
 pub const FRAGMENTS: &[FragmentDef] = &[
-    FragmentDef { name: "-CH3", xyz: FRAG_CH3 },
-    FragmentDef { name: "-CH=CH2", xyz: FRAG_CH_CH2 },
-    FragmentDef { name: "-OH", xyz: FRAG_OH },
-    FragmentDef { name: "-NH2", xyz: FRAG_NH2 },
-    FragmentDef { name: "-Phenyl", xyz: FRAG_PHENYL },
-    FragmentDef { name: "-Pyrrole", xyz: FRAG_PYRROLE },
-    FragmentDef { name: "-OCH3", xyz: FRAG_OCH3 },
-    FragmentDef { name: "-CH=O", xyz: FRAG_CH_O },
-    FragmentDef { name: "-COOH", xyz: FRAG_COOH },
-    FragmentDef { name: "-NO2", xyz: FRAG_NO2 },
-    FragmentDef { name: "-OOH", xyz: FRAG_OOH },
-    FragmentDef { name: "-CCH", xyz: FRAG_CCH },
-    FragmentDef { name: "-CycloPentane", xyz: FRAG_CYCLOPENTANE },
-    FragmentDef { name: "-CycloHexane", xyz: FRAG_CYCLOHEXANE },
+    FragmentDef {
+        name: "-CH3",
+        xyz: FRAG_CH3,
+    },
+    FragmentDef {
+        name: "-CH=CH2",
+        xyz: FRAG_CH_CH2,
+    },
+    FragmentDef {
+        name: "-OH",
+        xyz: FRAG_OH,
+    },
+    FragmentDef {
+        name: "-NH2",
+        xyz: FRAG_NH2,
+    },
+    FragmentDef {
+        name: "-Phenyl",
+        xyz: FRAG_PHENYL,
+    },
+    FragmentDef {
+        name: "-Pyrrole",
+        xyz: FRAG_PYRROLE,
+    },
+    FragmentDef {
+        name: "-OCH3",
+        xyz: FRAG_OCH3,
+    },
+    FragmentDef {
+        name: "-CH=O",
+        xyz: FRAG_CH_O,
+    },
+    FragmentDef {
+        name: "-COOH",
+        xyz: FRAG_COOH,
+    },
+    FragmentDef {
+        name: "-NO2",
+        xyz: FRAG_NO2,
+    },
+    FragmentDef {
+        name: "-OOH",
+        xyz: FRAG_OOH,
+    },
+    FragmentDef {
+        name: "-CCH",
+        xyz: FRAG_CCH,
+    },
+    FragmentDef {
+        name: "-CycloPentane",
+        xyz: FRAG_CYCLOPENTANE,
+    },
+    FragmentDef {
+        name: "-CycloHexane",
+        xyz: FRAG_CYCLOHEXANE,
+    },
 ];

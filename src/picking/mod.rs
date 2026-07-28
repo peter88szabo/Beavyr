@@ -1,9 +1,9 @@
 use bevy::prelude::*;
-use bevy_egui::EguiContexts;
+use bevy_egui::input::EguiWantsInput;
 
 use crate::events::{AtomPicked, ToolKind};
-use crate::molecule::Molecule;
 use crate::measurements::Measurements;
+use crate::molecule::Molecule;
 use crate::molecule_builder::builder_ui::{EditorRotateState, ZMatrixBuilderState};
 
 pub mod screen;
@@ -21,7 +21,7 @@ impl Plugin for PickerPlugin {
 /// - Converts window cursor to PHYSICAL px
 /// - Emits AtomPicked for each active tool (Measurements / Builder)
 fn pick_and_emit_atom(
-    mut contexts: EguiContexts,
+    egui_wants_input: Res<EguiWantsInput>,
     buttons: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
     q_cam: Query<(&Camera, &GlobalTransform), (With<Camera3d>, With<crate::scene::MainCamera>)>,
@@ -31,8 +31,12 @@ fn pick_and_emit_atom(
     zmat_builder: Option<Res<ZMatrixBuilderState>>,
     mut ev_pick: MessageWriter<AtomPicked>,
 ) {
-    let Some(mol) = mol else { return; };
-    if mol.pos.is_empty() { return; }
+    let Some(mol) = mol else {
+        return;
+    };
+    if mol.pos.is_empty() {
+        return;
+    }
 
     // Which tools want picking right now?
     let mut want_measure = false;
@@ -46,30 +50,47 @@ fn pick_and_emit_atom(
     if let Some(z) = &zmat_builder {
         want_builder = want_builder || z.pick_active || z.frag_pick_active;
     }
-    if !(want_measure || want_builder) { return; }
+    if !(want_measure || want_builder) {
+        return;
+    }
 
     // Must be a fresh LMB click
-    if !buttons.just_pressed(MouseButton::Left) { return; }
+    if !buttons.just_pressed(MouseButton::Left) {
+        return;
+    }
 
-    // Skip if pointer is over any egui area (panels/overlays)
-    let Ok(ctx) = contexts.ctx_mut() else { return; };
-    if ctx.is_pointer_over_area() { return; }
+    // Skip while egui has captured the pointer or a popup is open
+    if egui_wants_input.is_using_pointer() || egui_wants_input.is_popup_open() {
+        return;
+    }
 
-    let Ok(window) = windows.single() else { return; };
-    let Ok((cam, cam_xf)) = q_cam.single() else { return; };
-    let Some(mouse_logical) = window.cursor_position() else { return; };
+    let Ok(window) = windows.single() else {
+        return;
+    };
+    let Ok((cam, cam_xf)) = q_cam.single() else {
+        return;
+    };
+    let Some(mouse_logical) = window.cursor_position() else {
+        return;
+    };
 
     // Convert logical -> physical px for world_to_viewport
     let mouse_px = mouse_logical * window.scale_factor() as f32;
 
-    if let Some((hit_idx, _)) = screen::find_nearest_atom_screen_space(
-        cam, cam_xf, &mol.pos, mouse_px, 18.0,
-    ) {
+    if let Some((hit_idx, _)) =
+        screen::find_nearest_atom_screen_space(cam, cam_xf, &mol.pos, mouse_px, 18.0)
+    {
         if want_measure {
-            ev_pick.write(AtomPicked { index: hit_idx, tool: ToolKind::Measurements });
+            ev_pick.write(AtomPicked {
+                index: hit_idx,
+                tool: ToolKind::Measurements,
+            });
         }
         if want_builder {
-            ev_pick.write(AtomPicked { index: hit_idx, tool: ToolKind::Builder });
+            ev_pick.write(AtomPicked {
+                index: hit_idx,
+                tool: ToolKind::Builder,
+            });
         }
     }
 }

@@ -239,9 +239,15 @@ pub fn parse_xyz_angstrom(xyz: &str) -> (usize, Vec<String>, Vec<Vec<f64>>) {
             continue;
         }
         let atom = parts[0].to_string();
-        let Ok(x) = parts[1].parse::<f64>() else { continue };
-        let Ok(y) = parts[2].parse::<f64>() else { continue };
-        let Ok(z) = parts[3].parse::<f64>() else { continue };
+        let Ok(x) = parts[1].parse::<f64>() else {
+            continue;
+        };
+        let Ok(y) = parts[2].parse::<f64>() else {
+            continue;
+        };
+        let Ok(z) = parts[3].parse::<f64>() else {
+            continue;
+        };
         atoms.push(atom);
         qxyz.push(vec![x, y, z]);
     }
@@ -282,9 +288,15 @@ pub fn parse_xyz_first_frame_angstrom(xyz: &str) -> (Vec<String>, Vec<Vec<f64>>,
             continue;
         }
         let atom = parts[0].to_string();
-        let Ok(x) = parts[1].parse::<f64>() else { continue };
-        let Ok(y) = parts[2].parse::<f64>() else { continue };
-        let Ok(z) = parts[3].parse::<f64>() else { continue };
+        let Ok(x) = parts[1].parse::<f64>() else {
+            continue;
+        };
+        let Ok(y) = parts[2].parse::<f64>() else {
+            continue;
+        };
+        let Ok(z) = parts[3].parse::<f64>() else {
+            continue;
+        };
         atoms.push(atom);
         qxyz.push(vec![x, y, z]);
         if atoms.len() >= count {
@@ -292,10 +304,7 @@ pub fn parse_xyz_first_frame_angstrom(xyz: &str) -> (Vec<String>, Vec<Vec<f64>>,
         }
     }
 
-    let extra_frames = lines
-        .iter()
-        .skip(consumed)
-        .any(|l| !l.trim().is_empty());
+    let extra_frames = lines.iter().skip(consumed).any(|l| !l.trim().is_empty());
 
     (atoms, qxyz, extra_frames)
 }
@@ -303,29 +312,29 @@ pub fn parse_xyz_first_frame_angstrom(xyz: &str) -> (Vec<String>, Vec<Vec<f64>>,
 /// Covalent radii in Å (no Bohr conversion anymore)
 pub fn covalent_radius_angstrom(sym: &str) -> f32 {
     match sym {
-        "H"  => 0.45,
+        "H" => 0.45,
         "He" => 0.28,
         "Li" => 1.28,
         "Be" => 0.96,
-        "B"  => 0.84,
-        "C"  => 0.75,
-        "N"  => 0.70,
-        "O"  => 0.70,
-        "F"  => 0.57,
+        "B" => 0.84,
+        "C" => 0.75,
+        "N" => 0.70,
+        "O" => 0.70,
+        "F" => 0.57,
         "Ne" => 0.58,
         "Na" => 1.66,
         "Mg" => 1.41,
         "Al" => 1.21,
         "Si" => 1.11,
-        "P"  => 1.07,
-        "S"  => 1.05,
+        "P" => 1.07,
+        "S" => 1.05,
         "Cl" => 1.02,
         "Ar" => 1.06,
-        "K"  => 2.03,
+        "K" => 2.03,
         "Ca" => 1.76,
         "Sc" => 1.70,
         "Ti" => 1.60,
-        "V"  => 1.53,
+        "V" => 1.53,
         "Cr" => 1.39,
         "Mn" => 1.39,
         "Fe" => 1.32,
@@ -341,7 +350,7 @@ pub fn covalent_radius_angstrom(sym: &str) -> f32 {
         "Kr" => 1.16,
         "Rb" => 2.20,
         "Sr" => 1.95,
-        "Y"  => 1.90,
+        "Y" => 1.90,
         "Zr" => 1.75,
         "Nb" => 1.64,
         "Mo" => 1.54,
@@ -355,7 +364,7 @@ pub fn covalent_radius_angstrom(sym: &str) -> f32 {
         "Sn" => 1.39,
         "Sb" => 1.39,
         "Te" => 1.38,
-        "I"  => 1.39,
+        "I" => 1.39,
         "Xe" => 1.40,
         "Cs" => 2.44,
         "Ba" => 2.15,
@@ -376,7 +385,7 @@ pub fn covalent_radius_angstrom(sym: &str) -> f32 {
         "Lu" => 1.87,
         "Hf" => 1.75,
         "Ta" => 1.70,
-        "W"  => 1.62,
+        "W" => 1.62,
         "Re" => 1.51,
         "Os" => 1.44,
         "Ir" => 1.41,
@@ -394,7 +403,7 @@ pub fn covalent_radius_angstrom(sym: &str) -> f32 {
         "Ac" => 2.15,
         "Th" => 2.06,
         "Pa" => 2.00,
-        "U"  => 1.96,
+        "U" => 1.96,
         "Np" => 1.90,
         "Pu" => 1.87,
         "Am" => 1.80,

@@ -19,7 +19,9 @@ pub struct AtomPicked {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MoleculeChangeReason {
     /// Parsed/loaded text XYZ; recenter camera?
-    ParseXyz { recenter: bool },
+    ParseXyz {
+        recenter: bool,
+    },
     /// Programmatic position change via `Molecule::set_pos`.
     SetPos,
     /// Fragment rotation applied in builder.
@@ -37,13 +39,19 @@ pub struct MoleculeChanged {
 
 impl MoleculeChanged {
     pub fn parse_xyz(recenter: bool) -> Self {
-        Self { reason: MoleculeChangeReason::ParseXyz { recenter } }
+        Self {
+            reason: MoleculeChangeReason::ParseXyz { recenter },
+        }
     }
     pub fn set_pos() -> Self {
-        Self { reason: MoleculeChangeReason::SetPos }
+        Self {
+            reason: MoleculeChangeReason::SetPos,
+        }
     }
     #[allow(dead_code)]
     pub fn builder_rotate() -> Self {
-        Self { reason: MoleculeChangeReason::BuilderRotate }
+        Self {
+            reason: MoleculeChangeReason::BuilderRotate,
+        }
     }
 }

@@ -1,14 +1,17 @@
 use bevy::prelude::*;
-use bevy_egui::{egui, EguiContexts};
+use bevy_egui::egui;
 
-use crate::events::{AtomPicked, ToolKind};
-use crate::molecule::{Molecule, covalent_radius_angstrom};
-use crate::settings::MolSettings;
-use crate::color_schemes::color_for;
-use super::rotator::{bend_side, rotate_side, split_sides, translate_side, RotateSide};
-use super::zmat2xyz::{self, ZAtom};
-use crate::molecule::parse_xyz_angstrom;
 use super::fragments;
+use super::rotator::{
+    bend_side_with_bonds, rotate_side_with_bonds, split_sides, split_sides_from_bonds,
+    translate_fragment_containing_atom, RotateSide,
+};
+use super::zmat2xyz::{self, ZAtom};
+use crate::color_schemes::color_for;
+use crate::events::{AtomPicked, ToolKind};
+use crate::molecule::parse_xyz_angstrom;
+use crate::molecule::{covalent_radius_angstrom, Molecule};
+use crate::settings::MolSettings;
 
 const ANGLE_SINGLE_DEG: f64 = 109.47;
 const ANGLE_DOUBLE_DEG: f64 = 120.0;
@@ -110,13 +113,25 @@ fn bond_length_for(
     fallback_a: f32,
     fallback_b: f32,
 ) -> f64 {
-    let (a, b) = if sym_a <= sym_b { (sym_a, sym_b) } else { (sym_b, sym_a) };
+    let (a, b) = if sym_a <= sym_b {
+        (sym_a, sym_b)
+    } else {
+        (sym_b, sym_a)
+    };
     match order {
         BondOrder::Triple => {
-            if a == "C" && b == "C" { return 1.20; }
-            if a == "C" && b == "N" { return 1.16; }
-            if a == "C" && b == "P" { return 1.55; }
-            if a == "N" && b == "P" { return 1.55; }
+            if a == "C" && b == "C" {
+                return 1.20;
+            }
+            if a == "C" && b == "N" {
+                return 1.16;
+            }
+            if a == "C" && b == "P" {
+                return 1.55;
+            }
+            if a == "N" && b == "P" {
+                return 1.55;
+            }
         }
         BondOrder::Double => {}
         BondOrder::Single => {}
@@ -242,9 +257,7 @@ fn fragment_atom_order(symbols: &[String], coords: &[Vec3]) -> Vec<usize> {
     order.push(0);
     visited[0] = true;
 
-    let mut remaining_heavy: Vec<usize> = (0..n)
-        .filter(|&i| symbols[i] != "H" && i != 0)
-        .collect();
+    let mut remaining_heavy: Vec<usize> = (0..n).filter(|&i| symbols[i] != "H" && i != 0).collect();
 
     while !remaining_heavy.is_empty() {
         let mut best: Option<(usize, f32)> = None;
@@ -380,7 +393,9 @@ fn build_fragment_zmat(symbols: &[String], coords: &[Vec3]) -> Vec<ZAtom> {
         }
         let dihedral_deg = dihedral_ref_idx
             .zip(angle_ref_idx)
-            .map(|(d, a)| calc_dihedral_deg(coords[bond_ref_idx], coords[a], coords[d], coords[idx]))
+            .map(|(d, a)| {
+                calc_dihedral_deg(coords[bond_ref_idx], coords[a], coords[d], coords[idx])
+            })
             .unwrap_or(0.0);
 
         zmat.push(ZAtom {
@@ -409,11 +424,8 @@ fn build_bond_adjacency(n: usize, bonds: &[(usize, usize, f32)]) -> Vec<Vec<usiz
 }
 
 fn pick_neighbor(adj: &[Vec<usize>], center: usize, exclude: &[usize]) -> Option<usize> {
-    adj.get(center).and_then(|nei| {
-        nei.iter()
-            .copied()
-            .find(|idx| !exclude.contains(idx))
-    })
+    adj.get(center)
+        .and_then(|nei| nei.iter().copied().find(|idx| !exclude.contains(idx)))
 }
 
 fn pick_any_except(n: usize, exclude: &[usize]) -> Option<usize> {
@@ -507,11 +519,7 @@ fn bend_indices_towards_angle(
     out
 }
 
-fn min_clearance_between(
-    coords: &[Vec3],
-    frag_indices: &[usize],
-    exclude_other: &[usize],
-) -> f32 {
+fn min_clearance_between(coords: &[Vec3], frag_indices: &[usize], exclude_other: &[usize]) -> f32 {
     if coords.is_empty() || frag_indices.is_empty() {
         return 0.0;
     }
@@ -546,21 +554,25 @@ fn min_clearance_between(
 #[derive(Default, Reflect, GizmoConfigGroup)]
 pub struct BuilderGizmos;
 
+#[derive(Default, Reflect, GizmoConfigGroup)]
+pub struct BuilderHighlightGizmos;
+
 #[derive(Resource, Default, Clone)]
 pub struct EditorRotateState {
-    pub active: bool,                     // capture 3D clicks when true
-    pub picks: Vec<usize>,                // [A, B, side-indicator (any atom on that side)]
-    pub chosen_side: Option<RotateSide>,  // inferred from 3rd pick
-    pub angle_deg: f32,                   // degrees
-    pub axis_len_target: f32,             // Å, absolute axis length target
+    pub active: bool,                    // capture 3D clicks when true
+    pub picks: Vec<usize>,               // [A, B, side-indicator (any atom on that side)]
+    pub chosen_side: Option<RotateSide>, // inferred from 3rd pick
+    pub status: Option<String>,          // selection or topology feedback
+    pub angle_deg: f32,                  // degrees
+    pub axis_len_target: f32,            // Å, absolute axis length target
     pub axis_pair: Option<(usize, usize)>,
-    pub bend_angle_deg: f32,              // degrees
+    pub bend_angle_deg: f32, // degrees
     pub bend_ref: Option<(usize, usize, usize)>,
-    pub last_rotate_snapshot: Option<Vec<Vec3>>,    // undo buffer
+    pub last_rotate_snapshot: Option<Vec<Vec3>>, // undo buffer
     pub last_translate_snapshot: Option<Vec<Vec3>>, // undo buffer
-    pub last_bend_snapshot: Option<Vec<Vec3>>,      // undo buffer
-    pub bond_th_hx: f32,                  // Å
-    pub bond_th_xx: f32,                  // Å
+    pub last_bend_snapshot: Option<Vec<Vec3>>,   // undo buffer
+    pub bond_th_hx: f32,                         // Å
+    pub bond_th_xx: f32,                         // Å
 }
 
 #[derive(Resource, Clone)]
@@ -889,9 +901,7 @@ fn apply_zmat_edits(
             return;
         }
 
-        let clamp_ref = |v: usize, max_ref: usize| -> usize {
-            v.max(1).min(max_ref)
-        };
+        let clamp_ref = |v: usize, max_ref: usize| -> usize { v.max(1).min(max_ref) };
 
         let atom = if i == 0 {
             ZAtom {
@@ -906,11 +916,17 @@ fn apply_zmat_edits(
         } else if i == 1 {
             let bond_ref = match parse_usize(&row.bond_ref, "bond", i) {
                 Ok(v) => v,
-                Err(err) => { zmat_state.last_error = Some(err); return; }
+                Err(err) => {
+                    zmat_state.last_error = Some(err);
+                    return;
+                }
             };
             let bond_len = match parse_f64(&row.bond_len, "bond length", i) {
                 Ok(v) => v,
-                Err(err) => { zmat_state.last_error = Some(err); return; }
+                Err(err) => {
+                    zmat_state.last_error = Some(err);
+                    return;
+                }
             };
             let bond_ref = clamp_ref(bond_ref, i);
             ZAtom {
@@ -925,19 +941,31 @@ fn apply_zmat_edits(
         } else if i == 2 {
             let bond_ref = match parse_usize(&row.bond_ref, "bond", i) {
                 Ok(v) => v,
-                Err(err) => { zmat_state.last_error = Some(err); return; }
+                Err(err) => {
+                    zmat_state.last_error = Some(err);
+                    return;
+                }
             };
             let bond_len = match parse_f64(&row.bond_len, "bond length", i) {
                 Ok(v) => v,
-                Err(err) => { zmat_state.last_error = Some(err); return; }
+                Err(err) => {
+                    zmat_state.last_error = Some(err);
+                    return;
+                }
             };
             let angle_ref = match parse_usize(&row.angle_ref, "angle", i) {
                 Ok(v) => v,
-                Err(err) => { zmat_state.last_error = Some(err); return; }
+                Err(err) => {
+                    zmat_state.last_error = Some(err);
+                    return;
+                }
             };
             let angle_deg = match parse_f64(&row.angle_deg, "angle", i) {
                 Ok(v) => v,
-                Err(err) => { zmat_state.last_error = Some(err); return; }
+                Err(err) => {
+                    zmat_state.last_error = Some(err);
+                    return;
+                }
             };
             let bond_ref = clamp_ref(bond_ref, i);
             let angle_ref = clamp_ref(angle_ref, i);
@@ -953,27 +981,45 @@ fn apply_zmat_edits(
         } else {
             let bond_ref = match parse_usize(&row.bond_ref, "bond", i) {
                 Ok(v) => v,
-                Err(err) => { zmat_state.last_error = Some(err); return; }
+                Err(err) => {
+                    zmat_state.last_error = Some(err);
+                    return;
+                }
             };
             let bond_len = match parse_f64(&row.bond_len, "bond length", i) {
                 Ok(v) => v,
-                Err(err) => { zmat_state.last_error = Some(err); return; }
+                Err(err) => {
+                    zmat_state.last_error = Some(err);
+                    return;
+                }
             };
             let angle_ref = match parse_usize(&row.angle_ref, "angle", i) {
                 Ok(v) => v,
-                Err(err) => { zmat_state.last_error = Some(err); return; }
+                Err(err) => {
+                    zmat_state.last_error = Some(err);
+                    return;
+                }
             };
             let angle_deg = match parse_f64(&row.angle_deg, "angle", i) {
                 Ok(v) => v,
-                Err(err) => { zmat_state.last_error = Some(err); return; }
+                Err(err) => {
+                    zmat_state.last_error = Some(err);
+                    return;
+                }
             };
             let dihedral_ref = match parse_usize(&row.dihedral_ref, "dihedral", i) {
                 Ok(v) => v,
-                Err(err) => { zmat_state.last_error = Some(err); return; }
+                Err(err) => {
+                    zmat_state.last_error = Some(err);
+                    return;
+                }
             };
             let dihedral_deg = match parse_f64(&row.dihedral_deg, "dihedral", i) {
                 Ok(v) => v,
-                Err(err) => { zmat_state.last_error = Some(err); return; }
+                Err(err) => {
+                    zmat_state.last_error = Some(err);
+                    return;
+                }
             };
             let bond_ref = clamp_ref(bond_ref, i);
             let angle_ref = clamp_ref(angle_ref, i);
@@ -1001,7 +1047,7 @@ fn apply_zmat_edits(
     mol.pos = coords;
     mol.recompute_bonds(2.0, 3.0);
     settings.geometry_dirty = true;
-                        settings.bond_topology_dirty = true;
+    settings.bond_topology_dirty = true;
     zmat_state.edit_refresh = true;
     zmat_state.last_error = None;
 }
@@ -1060,6 +1106,7 @@ impl EditorRotateState {
             active: false,
             picks: Vec::new(),
             chosen_side: None,
+            status: None,
             angle_deg: 0.0,
             axis_len_target: 0.0,
             axis_pair: None,
@@ -1076,10 +1123,22 @@ impl EditorRotateState {
 
 /// Separate gizmo styling (so we don't conflict with measurements).
 pub fn configure_builder_gizmos(mut cfg_store: ResMut<GizmoConfigStore>) {
-    let (cfg, _) = cfg_store.config_mut::<BuilderGizmos>();
-    cfg.enabled = true;
-    cfg.line.width = 16.0;
-    cfg.line.perspective = true;
+    {
+        let (cfg, _) = cfg_store.config_mut::<BuilderGizmos>();
+        cfg.enabled = true;
+        cfg.line.width = 16.0;
+        cfg.line.perspective = true;
+    }
+    {
+        let (cfg, _) = cfg_store.config_mut::<BuilderHighlightGizmos>();
+        cfg.enabled = true;
+        cfg.line.width = 2.0;
+        cfg.line.perspective = true;
+        cfg.line.style = GizmoLineStyle::Dashed {
+            gap_scale: 2.0,
+            line_scale: 1.25,
+        };
+    }
 }
 
 /// Consume AtomPicked events (from shared picker) for the builder.
@@ -1090,16 +1149,23 @@ pub fn handle_builder_atom_picked(
     mut zmat_state: ResMut<ZMatrixBuilderState>,
     mut settings: ResMut<MolSettings>,
 ) {
-    let Some(mut mol) = mol else { return; };
+    let Some(mut mol) = mol else {
+        return;
+    };
 
     if zmat_state.pick_active {
-        for AtomPicked { index: hit_idx, tool } in ev.read().copied() {
-            if tool != ToolKind::Builder { continue; }
+        for AtomPicked {
+            index: hit_idx,
+            tool,
+        } in ev.read().copied()
+        {
+            if tool != ToolKind::Builder {
+                continue;
+            }
 
             if zmat_state.zmat.len() != mol.atoms.len() {
-                zmat_state.last_error = Some(
-                    "Z-matrix is out of sync with molecule. Sync first.".to_string(),
-                );
+                zmat_state.last_error =
+                    Some("Z-matrix is out of sync with molecule. Sync first.".to_string());
                 zmat_state.pick_active = false;
                 zmat_state.pick_indices.clear();
                 zmat_state.pick_hint = None;
@@ -1107,9 +1173,8 @@ pub fn handle_builder_atom_picked(
                 break;
             }
             if zmat_state.zmat.is_empty() {
-                zmat_state.last_error = Some(
-                    "Add the first atom before using pick-add.".to_string(),
-                );
+                zmat_state.last_error =
+                    Some("Add the first atom before using pick-add.".to_string());
                 zmat_state.pick_active = false;
                 zmat_state.pick_indices.clear();
                 zmat_state.pick_hint = None;
@@ -1183,7 +1248,7 @@ pub fn handle_builder_atom_picked(
                     mol.pos = coords;
                     mol.recompute_bonds(2.0, 3.0);
                     settings.geometry_dirty = true;
-                        settings.bond_topology_dirty = true;
+                    settings.bond_topology_dirty = true;
                     zmat_state.last_error = None;
                 }
 
@@ -1197,13 +1262,18 @@ pub fn handle_builder_atom_picked(
     }
 
     if zmat_state.frag_pick_active {
-        for AtomPicked { index: hit_idx, tool } in ev.read().copied() {
-            if tool != ToolKind::Builder { continue; }
+        for AtomPicked {
+            index: hit_idx,
+            tool,
+        } in ev.read().copied()
+        {
+            if tool != ToolKind::Builder {
+                continue;
+            }
 
             if zmat_state.zmat.len() != mol.atoms.len() {
-                zmat_state.last_error = Some(
-                    "Z-matrix is out of sync with molecule. Sync first.".to_string(),
-                );
+                zmat_state.last_error =
+                    Some("Z-matrix is out of sync with molecule. Sync first.".to_string());
                 zmat_state.frag_pick_active = false;
                 zmat_state.frag_pick_indices.clear();
                 zmat_state.frag_pick_hint = None;
@@ -1211,9 +1281,8 @@ pub fn handle_builder_atom_picked(
                 break;
             }
             if zmat_state.zmat.is_empty() {
-                zmat_state.last_error = Some(
-                    "Add the first atom before using fragment pick-add.".to_string(),
-                );
+                zmat_state.last_error =
+                    Some("Add the first atom before using fragment pick-add.".to_string());
                 zmat_state.frag_pick_active = false;
                 zmat_state.frag_pick_indices.clear();
                 zmat_state.frag_pick_hint = None;
@@ -1243,7 +1312,8 @@ pub fn handle_builder_atom_picked(
                         let dihedral_ref = zmat_state.frag_pick_indices.get(2).copied();
 
                         let (_n, symbols, _coords) = parse_xyz_angstrom(frag.xyz);
-                        let connector_symbol = symbols.get(0).cloned().unwrap_or_else(|| "C".to_string());
+                        let connector_symbol =
+                            symbols.get(0).cloned().unwrap_or_else(|| "C".to_string());
                         let r_new = covalent_radius_angstrom(&connector_symbol);
                         let r_ref = covalent_radius_angstrom(&mol.atoms[bond_ref]);
                         let bond_len = bond_length_for(
@@ -1304,9 +1374,8 @@ pub fn handle_builder_atom_picked(
                         let mut angle_deg = 0.0;
                         let mut dihedral_deg = 0.0;
                         let Some(bond_ref) = target_bond_ref else {
-                            zmat_state.last_error = Some(
-                                "Selected atom has no bond reference to replace.".to_string(),
-                            );
+                            zmat_state.last_error =
+                                Some("Selected atom has no bond reference to replace.".to_string());
                             break;
                         };
                         let ref_idx = bond_ref - 1;
@@ -1347,17 +1416,27 @@ pub fn handle_builder_atom_picked(
                                 if target_angle_ref.is_none() {
                                     target_angle_ref = pick_neighbor(&adj, ref_idx, &[replace_idx])
                                         .map(|v| v + 1)
-                                        .or_else(|| pick_any_except(mol.atoms.len(), &[ref_idx, replace_idx]).map(|v| v + 1));
+                                        .or_else(|| {
+                                            pick_any_except(
+                                                mol.atoms.len(),
+                                                &[ref_idx, replace_idx],
+                                            )
+                                            .map(|v| v + 1)
+                                        });
                                 }
                                 if target_dihedral_ref.is_none() {
                                     let angle_idx = target_angle_ref.map(|v| v - 1);
                                     if let Some(aidx) = angle_idx {
-                                        target_dihedral_ref = pick_neighbor(&adj, aidx, &[ref_idx, replace_idx])
-                                            .map(|v| v + 1)
-                                            .or_else(|| {
-                                                pick_any_except(mol.atoms.len(), &[ref_idx, replace_idx, aidx])
+                                        target_dihedral_ref =
+                                            pick_neighbor(&adj, aidx, &[ref_idx, replace_idx])
+                                                .map(|v| v + 1)
+                                                .or_else(|| {
+                                                    pick_any_except(
+                                                        mol.atoms.len(),
+                                                        &[ref_idx, replace_idx, aidx],
+                                                    )
                                                     .map(|v| v + 1)
-                                            });
+                                                });
                                     }
                                 }
                                 zmat_state.zmat[replace_idx].angle_ref = target_angle_ref;
@@ -1402,8 +1481,10 @@ pub fn handle_builder_atom_picked(
                                 }
                             }
 
-                            let angle_candidates: Vec<f32> = (12..=36).map(|i| i as f32 * 5.0).collect();
-                            let dihedral_candidates: Vec<f32> = (0..36).map(|i| i as f32 * 10.0).collect();
+                            let angle_candidates: Vec<f32> =
+                                (12..=36).map(|i| i as f32 * 5.0).collect();
+                            let dihedral_candidates: Vec<f32> =
+                                (0..36).map(|i| i as f32 * 10.0).collect();
                             let mut best_angle = angle_deg;
                             let mut best_dihedral = dihedral_deg;
                             let mut best_clear = -1.0_f32;
@@ -1469,55 +1550,74 @@ pub fn handle_builder_atom_picked(
         return;
     }
 
-    if !state.active { return; }
+    if !state.active {
+        return;
+    }
 
-    for AtomPicked { index: hit_idx, tool } in ev.read().copied() {
-        if tool != ToolKind::Builder { continue; }
+    for AtomPicked {
+        index: hit_idx,
+        tool,
+    } in ev.read().copied()
+    {
+        if tool != ToolKind::Builder {
+            continue;
+        }
 
-        if state.picks.len() < 2 {
-            if !state.picks.contains(&hit_idx) {
+        match state.picks.len() {
+            0 => {
                 state.picks.push(hit_idx);
+                state.status = None;
             }
-        } else if state.picks.len() == 2 {
-            if hit_idx != state.picks[0] && hit_idx != state.picks[1] {
+            1 => {
+                if hit_idx == state.picks[0] {
+                    continue;
+                }
+                let a = state.picks[0];
+                if split_sides_from_bonds(mol.atoms.len(), &mol.bonds, a, hit_idx).is_some() {
+                    state.picks.push(hit_idx);
+                    state.status = None;
+                } else {
+                    state.status = Some(
+                        "Select a displayed covalent bond that is not part of a ring.".to_string(),
+                    );
+                }
+            }
+            2 => {
                 let (a, b) = (state.picks[0], state.picks[1]);
-                let (side_a, side_b) = split_sides(&mol.atoms, &mol.pos, a, b, state.bond_th_hx, state.bond_th_xx);
+                let Some((side_a, side_b)) =
+                    split_sides_from_bonds(mol.atoms.len(), &mol.bonds, a, b)
+                else {
+                    state.picks.truncate(1);
+                    state.chosen_side = None;
+                    state.status = Some(
+                        "That bond no longer separates two fragments. Pick another bond."
+                            .to_string(),
+                    );
+                    continue;
+                };
 
-                // If the clicked atom is clearly in A or B side, use that.
                 if side_a.contains(&hit_idx) {
                     state.picks.push(hit_idx);
                     state.chosen_side = Some(RotateSide::A);
+                    state.status = None;
                 } else if side_b.contains(&hit_idx) {
                     state.picks.push(hit_idx);
                     state.chosen_side = Some(RotateSide::B);
+                    state.status = None;
                 } else {
-                    // Robust fallback: infer side by reachability from the clicked atom.
-                    // If we can reach A without passing through B → side A; else if we can
-                    // reach B without passing through A → side B.
-                    let reach_a = reaches_without(&mol.atoms, &mol.pos, hit_idx, a, b, state.bond_th_hx, state.bond_th_xx);
-                    let reach_b = reaches_without(&mol.atoms, &mol.pos, hit_idx, b, a, state.bond_th_hx, state.bond_th_xx);
-
-                    if reach_a {
-                        state.picks.push(hit_idx);
-                        state.chosen_side = Some(RotateSide::A);
-                    } else if reach_b {
-                        state.picks.push(hit_idx);
-                        state.chosen_side = Some(RotateSide::B);
-                    } else {
-                        // Final fallback: pick the closer endpoint so the UI never dead-ends.
-                        let da = mol.pos[hit_idx].distance(mol.pos[a]);
-                        let db = mol.pos[hit_idx].distance(mol.pos[b]);
-                        state.picks.push(hit_idx);
-                        state.chosen_side = if da <= db { Some(RotateSide::A) } else { Some(RotateSide::B) };
-                    }
-                    // else: ignore click (not connected to either side by our thresholds)
+                    state.status = Some(
+                        "Pick an atom on one of the two fragments attached to this bond."
+                            .to_string(),
+                    );
                 }
             }
-        } else {
-            // had A,B,side already → restart with new A
-            state.picks.clear();
-            state.chosen_side = None;
-            state.picks.push(hit_idx);
+            _ => {
+                // A completed selection starts over with a new A endpoint.
+                state.picks.clear();
+                state.chosen_side = None;
+                state.status = None;
+                state.picks.push(hit_idx);
+            }
         }
     }
 }
@@ -1525,19 +1625,24 @@ pub fn handle_builder_atom_picked(
 /// Draw pending highlights and axis line using the same color/radius style as measurements.
 pub fn draw_builder_highlights(
     mut gizmos: Gizmos<BuilderGizmos>,
+    mut highlights: Gizmos<BuilderHighlightGizmos>,
     state: Res<EditorRotateState>,
     zmat_state: Res<ZMatrixBuilderState>,
     mol: Option<Res<Molecule>>,
     settings: Res<MolSettings>,
 ) {
-    let Some(mol) = mol else { return; };
-    if mol.pos.is_empty() { return; }
+    let Some(mol) = mol else {
+        return;
+    };
+    if mol.pos.is_empty() {
+        return;
+    }
 
     let magenta = Color::srgba(1.0, 0.0, 0.8, 1.0);
-    let cyan    = Color::srgba(0.0, 0.8, 1.0, 1.0);
-    let green   = Color::srgba(0.2, 1.0, 0.2, 1.0);
+    let cyan = Color::srgba(0.0, 0.8, 1.0, 1.0);
+    let green = Color::srgba(0.2, 1.0, 0.2, 1.0);
 
-    let draw_hl = |gizmos: &mut Gizmos<BuilderGizmos>, idx: usize, color: Color| {
+    let draw_hl = |gizmos: &mut Gizmos<BuilderHighlightGizmos>, idx: usize, color: Color| {
         if idx < mol.pos.len() {
             let base_r = covalent_radius_angstrom(&mol.atoms[idx]) * settings.atom_scale;
             let r = (base_r * 1.25).max(0.15);
@@ -1547,45 +1652,45 @@ pub fn draw_builder_highlights(
 
     if state.active {
         if let Some(&i0) = state.picks.get(0) {
-            draw_hl(&mut gizmos, i0, magenta);
+            draw_hl(&mut highlights, i0, magenta);
         }
         if let Some(&i1) = state.picks.get(1) {
-            draw_hl(&mut gizmos, i1, cyan);
+            draw_hl(&mut highlights, i1, cyan);
             if let Some(&i0) = state.picks.get(0) {
                 gizmos.line(mol.pos[i0], mol.pos[i1], Color::WHITE);
             }
         }
         if let Some(&i2) = state.picks.get(2) {
-            draw_hl(&mut gizmos, i2, green);
+            draw_hl(&mut highlights, i2, green);
         }
     }
 
     if zmat_state.pick_active {
         if let Some(&i0) = zmat_state.pick_indices.get(0) {
-            draw_hl(&mut gizmos, i0, magenta);
+            draw_hl(&mut highlights, i0, magenta);
         }
         if let Some(&i1) = zmat_state.pick_indices.get(1) {
-            draw_hl(&mut gizmos, i1, cyan);
+            draw_hl(&mut highlights, i1, cyan);
             if let Some(&i0) = zmat_state.pick_indices.get(0) {
                 gizmos.line(mol.pos[i0], mol.pos[i1], Color::WHITE);
             }
         }
         if let Some(&i2) = zmat_state.pick_indices.get(2) {
-            draw_hl(&mut gizmos, i2, green);
+            draw_hl(&mut highlights, i2, green);
         }
     }
     if zmat_state.frag_pick_active {
         if let Some(&i0) = zmat_state.frag_pick_indices.get(0) {
-            draw_hl(&mut gizmos, i0, magenta);
+            draw_hl(&mut highlights, i0, magenta);
         }
         if let Some(&i1) = zmat_state.frag_pick_indices.get(1) {
-            draw_hl(&mut gizmos, i1, cyan);
+            draw_hl(&mut highlights, i1, cyan);
             if let Some(&i0) = zmat_state.frag_pick_indices.get(0) {
                 gizmos.line(mol.pos[i0], mol.pos[i1], Color::WHITE);
             }
         }
         if let Some(&i2) = zmat_state.frag_pick_indices.get(2) {
-            draw_hl(&mut gizmos, i2, green);
+            draw_hl(&mut highlights, i2, green);
         }
     }
 
@@ -1594,27 +1699,27 @@ pub fn draw_builder_highlights(
         let colors = [magenta, cyan, green, orange];
         for (i, idx) in zmat_state.edit_preview.iter().copied().enumerate() {
             let color = colors.get(i).copied().unwrap_or(orange);
-            draw_hl(&mut gizmos, idx, color);
+            draw_hl(&mut highlights, idx, color);
         }
     }
 }
 
-/// Left-side, resizable SidePanel with a collapsible “Molecule Editor” section.
+/// Left-side, resizable panel with a collapsible “Molecule Editor” section.
 /// NOTE: We now do a clean jump: no immediate atom transform sync; instead we
 /// update `mol.pos` + `mol.bonds` and flag geometry/topology dirty so the scene
 /// rebuilds atoms & bonds together next frame (no mismatched frame).
 pub fn builder_ui_panel(
-    mut contexts: EguiContexts,
-    mut state: ResMut<EditorRotateState>,
-    mut zmat_state: ResMut<ZMatrixBuilderState>,
-    mut mol: ResMut<Molecule>,
-    mut settings: ResMut<MolSettings>, // mark scene dirty to rebuild
+    ui: &mut egui::Ui,
+    state: &mut EditorRotateState,
+    mut zmat_state: &mut ZMatrixBuilderState,
+    mut mol: &mut Molecule,
+    mut settings: &mut MolSettings,
 ) {
-    let Ok(ctx) = contexts.ctx_mut() else { return; };
+    let ctx = ui.ctx().clone();
 
-    egui::SidePanel::left("molecule_editor_panel")
+    egui::Panel::left("molecule_editor_panel")
         .resizable(true)
-        .show(&ctx, |ui| {
+        .show(ui, |ui| {
             if zmat_state.original_atoms.is_none() && !mol.atoms.is_empty() {
                 zmat_state.original_atoms = Some(mol.atoms.clone());
                 zmat_state.original_pos = Some(mol.pos.clone());
@@ -1653,7 +1758,7 @@ pub fn builder_ui_panel(
                             mol.pos = pos;
                             mol.recompute_bonds(2.0, 3.0);
                             settings.geometry_dirty = true;
-                        settings.bond_topology_dirty = true;
+                            settings.bond_topology_dirty = true;
                             zmat_state.zmat = zmat2xyz::xyz_to_zmat(&mol.atoms, &mol.pos);
                             zmat_state.pick_indices.clear();
                             zmat_state.pick_active = false;
@@ -1661,7 +1766,8 @@ pub fn builder_ui_panel(
                             zmat_state.edit_refresh = true;
                             zmat_state.last_error = None;
                         } else {
-                            zmat_state.last_error = Some("Original structure not captured.".to_string());
+                            zmat_state.last_error =
+                                Some("Original structure not captured.".to_string());
                         }
                     }
                 });
@@ -1721,7 +1827,9 @@ pub fn builder_ui_panel(
                                                 .element_colors
                                                 .get(row.symbol.trim())
                                                 .copied()
-                                                .unwrap_or_else(|| color_for(row.symbol.trim(), settings.scheme))
+                                                .unwrap_or_else(|| {
+                                                    color_for(row.symbol.trim(), settings.scheme)
+                                                })
                                         } else {
                                             Color::WHITE
                                         };
@@ -1735,7 +1843,9 @@ pub fn builder_ui_panel(
                                                 if is_selected { 90 } else { 40 },
                                             ));
                                         } else if is_selected {
-                                            hl_bg = Some(egui::Color32::from_rgba_premultiplied(200, 200, 200, 60));
+                                            hl_bg = Some(egui::Color32::from_rgba_premultiplied(
+                                                200, 200, 200, 60,
+                                            ));
                                         }
                                         let idx_label = format!("{}", i + 1);
                                         let idx_resp = ui.add_sized(
@@ -1801,9 +1911,10 @@ pub fn builder_ui_panel(
                                             pending_select = Some((i, row.symbol.clone()));
                                         }
                                         if i >= 1 {
-                                            let bond_ref_resp = ui
-                                                .add_sized([col_idx[2], 0.0], egui::TextEdit::singleline(&mut row.bond_ref))
-                                                ;
+                                            let bond_ref_resp = ui.add_sized(
+                                                [col_idx[2], 0.0],
+                                                egui::TextEdit::singleline(&mut row.bond_ref),
+                                            );
                                             if bond_ref_resp.changed() {
                                                 row.bond_ref = row.bond_ref.trim().to_string();
                                             }
@@ -1816,9 +1927,10 @@ pub fn builder_ui_panel(
                                                 ));
                                             }
 
-                                            let bond_len_resp = ui
-                                                .add_sized([col_idx[3], 0.0], egui::TextEdit::singleline(&mut row.bond_len))
-                                                ;
+                                            let bond_len_resp = ui.add_sized(
+                                                [col_idx[3], 0.0],
+                                                egui::TextEdit::singleline(&mut row.bond_len),
+                                            );
                                             if bond_len_resp.changed() {
                                                 row.bond_len = row.bond_len.trim().to_string();
                                             }
@@ -1835,9 +1947,10 @@ pub fn builder_ui_panel(
                                             ui.add_sized([col_idx[3], 0.0], egui::Label::new("—"));
                                         }
                                         if i >= 2 {
-                                            let angle_ref_resp = ui
-                                                .add_sized([col_idx[4], 0.0], egui::TextEdit::singleline(&mut row.angle_ref))
-                                                ;
+                                            let angle_ref_resp = ui.add_sized(
+                                                [col_idx[4], 0.0],
+                                                egui::TextEdit::singleline(&mut row.angle_ref),
+                                            );
                                             if angle_ref_resp.changed() {
                                                 row.angle_ref = row.angle_ref.trim().to_string();
                                             }
@@ -1850,9 +1963,10 @@ pub fn builder_ui_panel(
                                                 ));
                                             }
 
-                                            let angle_deg_resp = ui
-                                                .add_sized([col_idx[5], 0.0], egui::TextEdit::singleline(&mut row.angle_deg))
-                                                ;
+                                            let angle_deg_resp = ui.add_sized(
+                                                [col_idx[5], 0.0],
+                                                egui::TextEdit::singleline(&mut row.angle_deg),
+                                            );
                                             if angle_deg_resp.changed() {
                                                 row.angle_deg = row.angle_deg.trim().to_string();
                                             }
@@ -1869,11 +1983,13 @@ pub fn builder_ui_panel(
                                             ui.add_sized([col_idx[5], 0.0], egui::Label::new("—"));
                                         }
                                         if i >= 3 {
-                                            let dihedral_ref_resp = ui
-                                                .add_sized([col_idx[6], 0.0], egui::TextEdit::singleline(&mut row.dihedral_ref))
-                                                ;
+                                            let dihedral_ref_resp = ui.add_sized(
+                                                [col_idx[6], 0.0],
+                                                egui::TextEdit::singleline(&mut row.dihedral_ref),
+                                            );
                                             if dihedral_ref_resp.changed() {
-                                                row.dihedral_ref = row.dihedral_ref.trim().to_string();
+                                                row.dihedral_ref =
+                                                    row.dihedral_ref.trim().to_string();
                                             }
                                             if dihedral_ref_resp.has_focus() {
                                                 preview_indices = Some(build_preview_indices(
@@ -1884,11 +2000,13 @@ pub fn builder_ui_panel(
                                                 ));
                                             }
 
-                                            let dihedral_deg_resp = ui
-                                                .add_sized([col_idx[7], 0.0], egui::TextEdit::singleline(&mut row.dihedral_deg))
-                                                ;
+                                            let dihedral_deg_resp = ui.add_sized(
+                                                [col_idx[7], 0.0],
+                                                egui::TextEdit::singleline(&mut row.dihedral_deg),
+                                            );
                                             if dihedral_deg_resp.changed() {
-                                                row.dihedral_deg = row.dihedral_deg.trim().to_string();
+                                                row.dihedral_deg =
+                                                    row.dihedral_deg.trim().to_string();
                                             }
                                             if dihedral_deg_resp.has_focus() {
                                                 preview_indices = Some(build_preview_indices(
@@ -1954,7 +2072,7 @@ pub fn builder_ui_panel(
                                 mol.pos = coords;
                                 mol.recompute_bonds(2.0, 3.0);
                                 settings.geometry_dirty = true;
-                        settings.bond_topology_dirty = true;
+                                settings.bond_topology_dirty = true;
                                 zmat_state.edit_refresh = true;
                                 zmat_state.selected_index = None;
                                 zmat_state.selected_symbol = None;
@@ -1982,7 +2100,7 @@ pub fn builder_ui_panel(
                                 mol.pos = coords;
                                 mol.recompute_bonds(2.0, 3.0);
                                 settings.geometry_dirty = true;
-                        settings.bond_topology_dirty = true;
+                                settings.bond_topology_dirty = true;
                                 zmat_state.edit_refresh = true;
                             }
                             zmat_state.redo_remove_visible = false;
@@ -2063,7 +2181,8 @@ pub fn builder_ui_panel(
                         if zmat_state.zmat.is_empty() {
                             let symbol = zmat_state.new_symbol.trim().to_string();
                             if symbol.is_empty() {
-                                zmat_state.last_error = Some("Atom symbol cannot be empty.".to_string());
+                                zmat_state.last_error =
+                                    Some("Atom symbol cannot be empty.".to_string());
                             } else {
                                 zmat_state.zmat.push(ZAtom {
                                     symbol,
@@ -2083,7 +2202,7 @@ pub fn builder_ui_panel(
                                 mol.pos = coords;
                                 mol.recompute_bonds(2.0, 3.0);
                                 settings.geometry_dirty = true;
-                        settings.bond_topology_dirty = true;
+                                settings.bond_topology_dirty = true;
                                 zmat_state.edit_refresh = true;
                                 zmat_state.last_error = None;
                             }
@@ -2121,7 +2240,7 @@ pub fn builder_ui_panel(
                             mol.pos = coords;
                             mol.recompute_bonds(2.0, 3.0);
                             settings.geometry_dirty = true;
-                        settings.bond_topology_dirty = true;
+                            settings.bond_topology_dirty = true;
                             zmat_state.edit_refresh = true;
                         }
                     }
@@ -2181,7 +2300,9 @@ pub fn builder_ui_panel(
                         egui::ComboBox::from_id_salt("frag_bond_order")
                             .selected_text(zmat_state.frag_bond_order.label())
                             .show_ui(ui, |ui| {
-                                for &bo in &[BondOrder::Single, BondOrder::Double, BondOrder::Triple] {
+                                for &bo in
+                                    &[BondOrder::Single, BondOrder::Double, BondOrder::Triple]
+                                {
                                     if ui
                                         .selectable_value(
                                             &mut zmat_state.frag_bond_order,
@@ -2210,7 +2331,11 @@ pub fn builder_ui_panel(
                     let sel = ui.visuals().selection.bg_fill;
                     let dim = ui.visuals().widgets.inactive.bg_fill;
                     if ui
-                        .add(egui::Button::new("Add Fragment").fill(if pick_on { sel } else { dim }))
+                        .add(egui::Button::new("Add Fragment").fill(if pick_on {
+                            sel
+                        } else {
+                            dim
+                        }))
                         .clicked()
                     {
                         if zmat_state.zmat.is_empty() {
@@ -2236,7 +2361,7 @@ pub fn builder_ui_panel(
                                 mol.pos = coords;
                                 mol.recompute_bonds(2.0, 3.0);
                                 settings.geometry_dirty = true;
-                        settings.bond_topology_dirty = true;
+                                settings.bond_topology_dirty = true;
                                 zmat_state.edit_refresh = true;
                                 zmat_state.last_error = None;
                             } else {
@@ -2252,7 +2377,11 @@ pub fn builder_ui_panel(
                                 FragmentInsertMode::Replace => 1,
                             };
                             let hint = match required_picks {
-                                1 if matches!(zmat_state.frag_mode, FragmentInsertMode::Replace) => {
+                                1 if matches!(
+                                    zmat_state.frag_mode,
+                                    FragmentInsertMode::Replace
+                                ) =>
+                                {
                                     "Pick 1 atom to replace."
                                 }
                                 1 => "Pick 1 reference atom for the bond.",
@@ -2292,7 +2421,7 @@ pub fn builder_ui_panel(
                             mol.pos = coords;
                             mol.recompute_bonds(2.0, 3.0);
                             settings.geometry_dirty = true;
-                        settings.bond_topology_dirty = true;
+                            settings.bond_topology_dirty = true;
                             zmat_state.edit_refresh = true;
                         }
                         zmat_state.frag_pick_active = false;
@@ -2316,70 +2445,80 @@ pub fn builder_ui_panel(
                     };
                     ui.weak(hint);
                 }
-
             });
 
-    if zmat_state.remove_popup_open {
-        let popup_pos = zmat_state
-            .remove_popup_pos
-            .unwrap_or(egui::pos2(40.0, 40.0));
-        let popup_id = egui::Id::new("zmat_remove_popup");
-        egui::Area::new(popup_id)
-            .fixed_pos(popup_pos)
-            .order(egui::Order::Foreground)
-            .show(&ctx, |ui| {
-                egui::Frame::popup(&ctx.style()).show(ui, |ui| {
-                    ui.label("Remove selected atom?");
-                    let Some(idx) = zmat_state.selected_index else {
-                        if ui.button("Close").clicked() {
-                            zmat_state.remove_popup_open = false;
-                        }
-                        return;
-                    };
+            if zmat_state.remove_popup_open {
+                let popup_pos = zmat_state
+                    .remove_popup_pos
+                    .unwrap_or(egui::pos2(40.0, 40.0));
+                let popup_id = egui::Id::new("zmat_remove_popup");
+                egui::Area::new(popup_id)
+                    .fixed_pos(popup_pos)
+                    .order(egui::Order::Foreground)
+                    .show(&ctx, |ui| {
+                        egui::Frame::popup(ui.style()).show(ui, |ui| {
+                            ui.label("Remove selected atom?");
+                            let Some(idx) = zmat_state.selected_index else {
+                                if ui.button("Close").clicked() {
+                                    zmat_state.remove_popup_open = false;
+                                }
+                                return;
+                            };
 
-                    let can_remove = can_remove_zmat_index(&zmat_state.zmat, idx);
-                    if !can_remove {
-                        ui.colored_label(
-                            egui::Color32::LIGHT_RED,
-                            "Cannot remove: referenced by later rows.",
-                        );
-                    }
-                    if ui.add_enabled(can_remove, egui::Button::new("Remove")).clicked() {
-                        remove_zmat_index(&mut zmat_state.zmat, idx);
-                        let coords = zmat2xyz::zmat_to_xyz(&zmat_state.zmat);
-                        mol.atoms = zmat_state
-                            .zmat
-                            .iter()
-                            .map(|atom| atom.symbol.clone())
-                            .collect();
-                        mol.pos = coords;
-                        mol.recompute_bonds(2.0, 3.0);
-                        settings.geometry_dirty = true;
-                        settings.bond_topology_dirty = true;
-                        zmat_state.edit_refresh = true;
-                        zmat_state.selected_index = None;
-                        zmat_state.selected_symbol = None;
-                        zmat_state.edit_preview.clear();
-                        zmat_state.remove_popup_open = false;
-                        zmat_state.remove_popup_pos = None;
-                    }
-                    if ui.button("Close").clicked() {
-                        zmat_state.remove_popup_open = false;
-                    }
-                });
-            });
-    }
+                            let can_remove = can_remove_zmat_index(&zmat_state.zmat, idx);
+                            if !can_remove {
+                                ui.colored_label(
+                                    egui::Color32::LIGHT_RED,
+                                    "Cannot remove: referenced by later rows.",
+                                );
+                            }
+                            if ui
+                                .add_enabled(can_remove, egui::Button::new("Remove"))
+                                .clicked()
+                            {
+                                remove_zmat_index(&mut zmat_state.zmat, idx);
+                                let coords = zmat2xyz::zmat_to_xyz(&zmat_state.zmat);
+                                mol.atoms = zmat_state
+                                    .zmat
+                                    .iter()
+                                    .map(|atom| atom.symbol.clone())
+                                    .collect();
+                                mol.pos = coords;
+                                mol.recompute_bonds(2.0, 3.0);
+                                settings.geometry_dirty = true;
+                                settings.bond_topology_dirty = true;
+                                zmat_state.edit_refresh = true;
+                                zmat_state.selected_index = None;
+                                zmat_state.selected_symbol = None;
+                                zmat_state.edit_preview.clear();
+                                zmat_state.remove_popup_open = false;
+                                zmat_state.remove_popup_pos = None;
+                            }
+                            if ui.button("Close").clicked() {
+                                zmat_state.remove_popup_open = false;
+                            }
+                        });
+                    });
+            }
 
             ui.add_space(8.0);
             ui.separator();
             ui.add_space(8.0);
             ui.collapsing("Molecule Editor", |ui| {
                 ui.horizontal(|ui| {
-                    if ui.button(if state.active { "Deactivate" } else { "Activate" }).clicked() {
+                    if ui
+                        .button(if state.active {
+                            "Deactivate"
+                        } else {
+                            "Activate"
+                        })
+                        .clicked()
+                    {
                         state.active = !state.active;
                         if !state.active {
                             state.picks.clear();
                             state.chosen_side = None;
+                            state.status = None;
                         }
                     }
                     if ui.button("Reset").clicked() {
@@ -2397,36 +2536,49 @@ pub fn builder_ui_panel(
                     ui.weak("Pick a third atom on the side you want to rotate.");
                 } else {
                     match state.chosen_side {
-                        Some(RotateSide::A) => ui.colored_label(egui::Color32::LIGHT_GREEN, "Chosen side: A"),
-                        Some(RotateSide::B) => ui.colored_label(egui::Color32::LIGHT_GREEN, "Chosen side: B"),
+                        Some(RotateSide::A) => {
+                            ui.colored_label(egui::Color32::LIGHT_GREEN, "Chosen side: A")
+                        }
+                        Some(RotateSide::B) => {
+                            ui.colored_label(egui::Color32::LIGHT_GREEN, "Chosen side: B")
+                        }
                         None => ui.weak("Chosen side: —"),
                     };
+                }
+
+                if let Some(status) = &state.status {
+                    ui.colored_label(egui::Color32::LIGHT_RED, status);
                 }
 
                 ui.add_space(6.0);
                 ui.add(egui::Slider::new(&mut state.angle_deg, -180.0..=180.0).text("Angle (°)"));
                 ui.horizontal(|ui| {
-                    if ui.button("Rotate").clicked() {
-                        if state.picks.len() >= 3 {
-                            let a = state.picks[0];
-                            let b = state.picks[1];
-                            if let Some(side) = state.chosen_side {
-                                // Save undo snapshot
+                    if ui.button("Rotate").clicked() && state.picks.len() >= 3 {
+                        let a = state.picks[0];
+                        let b = state.picks[1];
+                        if let Some(side) = state.chosen_side {
+                            if let Some(new_pos) = rotate_side_with_bonds(
+                                &mol.pos,
+                                &mol.bonds,
+                                a,
+                                b,
+                                side,
+                                state.angle_deg,
+                            ) {
                                 state.last_rotate_snapshot = Some(mol.pos.clone());
-
-                                // Rotate fragment coordinates
-                                mol.pos = rotate_side(
-                                    &mol.atoms, &mol.pos, a, b,
-                                    side, state.angle_deg,
-                                    state.bond_th_hx, state.bond_th_xx,
-                                );
-
+                                mol.pos = new_pos;
                                 settings.coords_dirty = true;
+                                state.status = None;
+                            } else {
+                                state.status = Some(
+                                    "The selected bond no longer separates two fragments."
+                                        .to_string(),
+                                );
                             }
                         }
                     }
                     if ui.button("Undo").clicked() {
-                        if let Some(snapshot) = &mut state.last_rotate_snapshot {
+                        if let Some(snapshot) = &state.last_rotate_snapshot {
                             mol.pos = snapshot.clone();
                             settings.coords_dirty = true;
                         }
@@ -2436,7 +2588,6 @@ pub fn builder_ui_panel(
                 ui.add_space(6.0);
                 ui.separator();
                 ui.add_space(6.0);
-
                 ui.label("Translate along axis");
 
                 let axis_len = if state.picks.len() >= 2 {
@@ -2463,29 +2614,35 @@ pub fn builder_ui_panel(
                     egui::Slider::new(&mut state.axis_len_target, 0.0..=max_len)
                         .text("Axis length (Å)"),
                 );
-
                 ui.horizontal(|ui| {
-                    if ui.button("Set Distance").clicked() {
-                        if state.picks.len() >= 3 {
-                            let a = state.picks[0];
-                            let b = state.picks[1];
-                            if let Some(side) = state.chosen_side {
-                                let current_len = mol.pos[a].distance(mol.pos[b]);
-                                let delta = state.axis_len_target - current_len;
-                                if delta.abs() > 1e-6 {
-                                    state.last_translate_snapshot = Some(mol.pos.clone());
-                                    mol.pos = translate_side(
-                                        &mol.atoms, &mol.pos, a, b,
-                                        side, delta,
-                                        state.bond_th_hx, state.bond_th_xx,
-                                    );
-                                    settings.coords_dirty = true;
-                                }
+                    if ui.button("Set Distance").clicked() && state.picks.len() >= 3 {
+                        let a = state.picks[0];
+                        let b = state.picks[1];
+                        let selected_atom = state.picks[2];
+                        let delta = state.axis_len_target - mol.pos[a].distance(mol.pos[b]);
+                        if delta.abs() > 1.0e-6 {
+                            if let Some(new_pos) = translate_fragment_containing_atom(
+                                &mol.pos,
+                                &mol.bonds,
+                                a,
+                                b,
+                                selected_atom,
+                                delta,
+                            ) {
+                                state.last_translate_snapshot = Some(mol.pos.clone());
+                                mol.pos = new_pos;
+                                settings.coords_dirty = true;
+                                state.status = None;
+                            } else {
+                                state.status = Some(
+                                    "The third-picked atom is not on a movable bond fragment."
+                                        .to_string(),
+                                );
                             }
                         }
                     }
                     if ui.button("Undo").clicked() {
-                        if let Some(snapshot) = &mut state.last_translate_snapshot {
+                        if let Some(snapshot) = &state.last_translate_snapshot {
                             mol.pos = snapshot.clone();
                             settings.coords_dirty = true;
                         }
@@ -2495,7 +2652,6 @@ pub fn builder_ui_panel(
                 ui.add_space(6.0);
                 ui.separator();
                 ui.add_space(6.0);
-
                 ui.label("Bend relative to axis");
 
                 let bend_ready = state.picks.len() >= 3 && state.chosen_side.is_some();
@@ -2510,12 +2666,12 @@ pub fn builder_ui_panel(
                             let axis_vec = mol.pos[b] - mol.pos[a];
                             let axis_len = axis_vec.length();
                             let v = mol.pos[p] - mol.pos[center];
-                            if axis_len > 1e-6 && v.length() > 1e-6 {
-                                let axis = axis_vec / axis_len;
-                                let v_n = v.normalize();
-                                let mut dot = axis.dot(v_n);
-                                dot = dot.clamp(-1.0, 1.0);
-                                state.bend_angle_deg = dot.acos().to_degrees();
+                            if axis_len > 1.0e-6 && v.length() > 1.0e-6 {
+                                state.bend_angle_deg = (axis_vec / axis_len)
+                                    .dot(v.normalize())
+                                    .clamp(-1.0, 1.0)
+                                    .acos()
+                                    .to_degrees();
                             } else {
                                 state.bend_angle_deg = 0.0;
                             }
@@ -2532,26 +2688,35 @@ pub fn builder_ui_panel(
                     egui::Slider::new(&mut state.bend_angle_deg, 0.0..=180.0)
                         .text("Axis angle (°)"),
                 );
-
                 ui.horizontal(|ui| {
-                    if ui.button("Set Angle").clicked() {
-                        if state.picks.len() >= 3 {
-                            let a = state.picks[0];
-                            let b = state.picks[1];
-                            let p = state.picks[2];
-                            if let Some(side) = state.chosen_side {
+                    if ui.button("Set Angle").clicked() && state.picks.len() >= 3 {
+                        let a = state.picks[0];
+                        let b = state.picks[1];
+                        let p = state.picks[2];
+                        if let Some(side) = state.chosen_side {
+                            if let Some(new_pos) = bend_side_with_bonds(
+                                &mol.pos,
+                                &mol.bonds,
+                                a,
+                                b,
+                                side,
+                                p,
+                                state.bend_angle_deg,
+                            ) {
                                 state.last_bend_snapshot = Some(mol.pos.clone());
-                                mol.pos = bend_side(
-                                    &mol.atoms, &mol.pos, a, b,
-                                    side, p, state.bend_angle_deg,
-                                    state.bond_th_hx, state.bond_th_xx,
-                                );
+                                mol.pos = new_pos;
                                 settings.coords_dirty = true;
+                                state.status = None;
+                            } else {
+                                state.status = Some(
+                                    "The selected bond no longer separates two fragments."
+                                        .to_string(),
+                                );
                             }
                         }
                     }
                     if ui.button("Undo").clicked() {
-                        if let Some(snapshot) = &mut state.last_bend_snapshot {
+                        if let Some(snapshot) = &state.last_bend_snapshot {
                             mol.pos = snapshot.clone();
                             settings.coords_dirty = true;
                         }
@@ -2559,6 +2724,7 @@ pub fn builder_ui_panel(
                     if ui.button("Cancel").clicked() {
                         state.picks.clear();
                         state.chosen_side = None;
+                        state.status = None;
                         state.angle_deg = 0.0;
                         state.axis_len_target = 0.0;
                         state.axis_pair = None;
@@ -2577,52 +2743,4 @@ pub fn builder_ui_panel(
                 });
             });
         });
-}
-
-// ---------- local reachability helper ----------
-
-/// True if `start` can reach `target` without passing through `exclude`.
-fn reaches_without(
-    atoms: &[String],
-    coords: &[Vec3],
-    start: usize,
-    target: usize,
-    exclude: usize,
-    hx: f32,
-    xx: f32,
-) -> bool {
-    use std::collections::{HashMap, VecDeque};
-    // Build adjacency with thresholds
-    let n = atoms.len();
-    let mut adj: HashMap<usize, Vec<usize>> = (0..n).map(|i| (i, Vec::new())).collect();
-    for i in 0..n {
-        for j in (i + 1)..n {
-            let hi = atoms[i] == "H";
-            let hj = atoms[j] == "H";
-            if hi && hj { continue; }
-            let thr = if !hi && !hj { xx } else { hx };
-            if coords[i].distance(coords[j]) <= thr {
-                adj.get_mut(&i).unwrap().push(j);
-                adj.get_mut(&j).unwrap().push(i);
-            }
-        }
-    }
-
-    // BFS from start, skipping `exclude`
-    let mut vis = vec![false; n];
-    let mut q = VecDeque::new();
-    q.push_back(start);
-    while let Some(v) = q.pop_front() {
-        if v == exclude || vis[v] { continue; }
-        if v == target { return true; }
-        vis[v] = true;
-        if let Some(nei) = adj.get(&v) {
-            for &u in nei {
-                if !vis[u] && u != exclude {
-                    q.push_back(u);
-                }
-            }
-        }
-    }
-    false
 }

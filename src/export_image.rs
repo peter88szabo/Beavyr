@@ -1,3 +1,4 @@
+use bevy::camera::visibility::RenderLayers;
 use bevy::camera::RenderTarget;
 use bevy::ecs::observer::On;
 use bevy::prelude::*;
@@ -5,7 +6,6 @@ use bevy::render::render_resource::{
     Extent3d, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
 };
 use bevy::render::view::screenshot::{Captured, Screenshot, ScreenshotCaptured};
-use bevy::camera::visibility::RenderLayers;
 use rfd::FileDialog;
 use std::path::{Path, PathBuf};
 
@@ -132,7 +132,7 @@ pub(crate) fn update_export_select_area(
     mut area: ResMut<ExportSelectArea>,
     buttons: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
-    mut contexts: bevy_egui::EguiContexts,
+    egui_wants_input: Res<bevy_egui::input::EguiWantsInput>,
 ) {
     if !area.active {
         return;
@@ -140,11 +140,7 @@ pub(crate) fn update_export_select_area(
     let Ok(window) = windows.single() else {
         return;
     };
-    let pointer_over_ui = contexts
-        .ctx_mut()
-        .ok()
-        .map(|ctx| ctx.is_pointer_over_area())
-        .unwrap_or(false);
+    let pointer_over_ui = egui_wants_input.is_using_pointer() || egui_wants_input.is_popup_open();
 
     if buttons.just_pressed(MouseButton::Left) && !pointer_over_ui {
         if let Some(pos) = window.cursor_position() {
@@ -216,19 +212,23 @@ pub(crate) fn start_export_capture(
     let crop_min = crop_min * render_scale;
     let crop_max = crop_max * render_scale;
 
-    let crop_min_u = UVec2::new(crop_min.x.floor().max(0.0) as u32, crop_min.y.floor().max(0.0) as u32);
-    let crop_max_u = UVec2::new(crop_max.x.ceil().max(0.0) as u32, crop_max.y.ceil().max(0.0) as u32);
+    let crop_min_u = UVec2::new(
+        crop_min.x.floor().max(0.0) as u32,
+        crop_min.y.floor().max(0.0) as u32,
+    );
+    let crop_max_u = UVec2::new(
+        crop_max.x.ceil().max(0.0) as u32,
+        crop_max.y.ceil().max(0.0) as u32,
+    );
     let crop_w = crop_max_u.x.saturating_sub(crop_min_u.x).max(1);
     let crop_h = crop_max_u.y.saturating_sub(crop_min_u.y).max(1);
     let crop_size = UVec2::new(crop_w, crop_h);
 
     let id = export_counter.next_id;
     let format = export_settings.format;
-    let Some(path) = prompt_export_save_path(
-        export_settings,
-        &format!("beavyr-canvas-{id:04}"),
-        format,
-    ) else {
+    let Some(path) =
+        prompt_export_save_path(export_settings, &format!("beavyr-canvas-{id:04}"), format)
+    else {
         return false;
     };
     if let Some(parent) = path.parent() {
@@ -259,8 +259,7 @@ pub(crate) fn start_export_capture(
     image.resize(extent);
     let image_handle = images.add(image);
 
-    let mut cam = Camera::default();
-    cam.target = RenderTarget::Image(image_handle.clone().into());
+    let cam = Camera::default();
     let render_layers = RenderLayers::layer(LAYER_MAIN);
     let transform = Transform::from_matrix(main_cam_xform.compute_transform().to_matrix());
 
@@ -279,6 +278,7 @@ pub(crate) fn start_export_capture(
             Camera3d::default(),
             ExportCamera,
             cam,
+            RenderTarget::Image(image_handle.clone().into()),
             cloned_projection,
             transform,
             GlobalTransform::from(transform),

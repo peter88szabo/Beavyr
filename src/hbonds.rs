@@ -1,22 +1,19 @@
 use bevy::prelude::*;
 
-use crate::molecule::{Molecule, covalent_radius_angstrom};
+use crate::molecule::{covalent_radius_angstrom, Molecule};
 use crate::settings::MolSettings;
 
 #[derive(Default, Reflect, GizmoConfigGroup)]
 pub struct HbondGizmos;
 
 /// Configure dashed H-bond gizmo style (runs every frame; no conflict with drawing)
-pub fn configure_hbond_gizmos(
-    mut cfg_store: ResMut<GizmoConfigStore>,
-    settings: Res<MolSettings>,
-) {
+pub fn configure_hbond_gizmos(mut cfg_store: ResMut<GizmoConfigStore>, settings: Res<MolSettings>) {
     let (cfg, _) = cfg_store.config_mut::<HbondGizmos>();
     cfg.enabled = settings.show_hbonds;
     cfg.line.width = settings.hbond_thickness.max(1.0).min(50.0);
     cfg.line.perspective = true;
     cfg.line.style = GizmoLineStyle::Dashed {
-        gap_scale:  settings.hbond_gap_scale,
+        gap_scale: settings.hbond_gap_scale,
         line_scale: settings.hbond_line_scale,
     };
 }
@@ -33,7 +30,7 @@ pub fn draw_hydrogen_bonds_dashed(
 
     let hb_color = settings.hbond_color;
 
-    let n_pos   = mol.pos.len();
+    let n_pos = mol.pos.len();
     let n_atoms = mol.atoms.len();
 
     for &(i, j, hdist) in &mol.hydrogen_bonds {

@@ -36,6 +36,25 @@ impl DiagnosticsReport {
     }
 }
 
+/// Cached diagnostics, refreshed only after the molecule changes.
+#[derive(Resource, Default)]
+pub struct DiagnosticsCache {
+    pub report: DiagnosticsReport,
+}
+
+/// Keep the expensive diagnostics pass out of the egui frame loop.
+pub fn refresh_diagnostics_cache(
+    mut changes: MessageReader<crate::events::MoleculeChanged>,
+    mol: Res<Molecule>,
+    mut cache: ResMut<DiagnosticsCache>,
+    mut initialized: Local<bool>,
+) {
+    if !*initialized || changes.read().next().is_some() {
+        cache.report = analyze_molecule(&mol);
+        *initialized = true;
+    }
+}
+
 pub fn analyze_molecule(mol: &Molecule) -> DiagnosticsReport {
     let n = mol.atoms.len().min(mol.pos.len());
     let mut report = DiagnosticsReport::default();
@@ -72,13 +91,7 @@ pub fn analyze_molecule(mol: &Molecule) -> DiagnosticsReport {
                 report.items.push(MoleculeDiagnostic {
                     severity: DiagnosticSeverity::Warning,
                     atom: Some(i),
-                    message: format!(
-                        "{}{} has valence {} > {}",
-                        sym,
-                        i + 1,
-                        degree,
-                        max_valence
-                    ),
+                    message: format!("{}{} has valence {} > {}", sym, i + 1, degree, max_valence),
                 });
             }
         }
@@ -156,7 +169,12 @@ fn typical_saturated_valence(sym: &str) -> Option<usize> {
     }
 }
 
-fn should_flag_missing_hydrogen(sym: &str, degree: usize, h_neighbors: usize, target: usize) -> bool {
+fn should_flag_missing_hydrogen(
+    sym: &str,
+    degree: usize,
+    h_neighbors: usize,
+    target: usize,
+) -> bool {
     if degree == 0 || degree >= target {
         return false;
     }

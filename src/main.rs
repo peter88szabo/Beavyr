@@ -1,22 +1,22 @@
 // src/main.rs
 use bevy::prelude::*;
-use bevy_egui::{EguiPlugin, EguiPrimaryContextPass};
+use bevy_egui::{EguiGlobalSettings, EguiPlugin, EguiPrimaryContextPass};
 
 mod camera;
 mod color_schemes;
-mod molecule;
-mod scene;
-mod settings;
-mod ui;
+mod diagnostics;
+mod events;
 mod export_image;
 mod hbonds;
 mod measurements;
-mod diagnostics;
-mod ui_measurements;
+mod molecule;
 mod molecule_builder;
-mod events;
 mod picking;
+mod scene;
+mod settings;
 mod trajectory;
+mod ui;
+mod ui_measurements;
 
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
 enum UpdateSet {
@@ -24,30 +24,23 @@ enum UpdateSet {
     Extras,
 }
 
+use diagnostics::DiagnosticsCache;
+use export_image::{ExportCounter, ExportSelectArea, ExportSettings};
+use hbonds::{draw_hydrogen_bonds_dashed, HbondGizmos};
+use scene::BondLineGizmos;
 use scene::{
-    center_camera_on_startup,
-    draw_bond_lines,
-    GeometryCache,
-    react_to_molecule_changed_mark_dirty,
-    rebuild_if_dirty,
-    setup,
-    sync_coordinates_if_dirty,
-    sync_axis_camera_to_main,
-    update_axis_viewport_on_resize,
-    update_lighting_if_dirty,
-    update_light_positions,
-    update_materials_if_dirty,
+    center_camera_on_startup, draw_bond_lines, react_to_molecule_changed_mark_dirty,
+    rebuild_if_dirty, setup, sync_axis_camera_to_main, sync_coordinates_if_dirty,
+    update_axis_viewport_on_resize, update_light_positions, update_lighting_if_dirty,
+    update_materials_if_dirty, GeometryCache,
 };
 use settings::MolSettings;
+use trajectory::{TrajectoryOverlayAssets, TrajectoryState};
 use ui::XyzBuffer;
-use export_image::{ExportCounter, ExportSelectArea, ExportSettings};
-use hbonds::{HbondGizmos, draw_hydrogen_bonds_dashed};
-use trajectory::TrajectoryState;
-use scene::BondLineGizmos;
 
 use molecule_builder::builder_ui::{
-    builder_ui_panel, configure_builder_gizmos, draw_builder_highlights,
-    EditorRotateState, BuilderGizmos, ZMatrixBuilderState
+    configure_builder_gizmos, draw_builder_highlights, BuilderGizmos, BuilderHighlightGizmos,
+    EditorRotateState, ZMatrixBuilderState,
 };
 
 fn main() {
@@ -58,6 +51,10 @@ fn main() {
                 .disable::<bevy::audio::AudioPlugin>(),
         )
         .add_plugins(EguiPlugin::default())
+        .insert_resource(EguiGlobalSettings {
+            auto_create_primary_context: false,
+            ..default()
+        })
         // picker plugin (now active)
         .add_plugins(picking::PickerPlugin)
         // messages
@@ -72,6 +69,15 @@ fn main() {
             last_dir: None,
             current_file: None,
             warning: None,
+            live_xyz_atoms: Vec::new(),
+            live_xyz_pos: Vec::new(),
+            live_xyz_lines: Vec::new(),
+            label_atoms: Vec::new(),
+            type_label_galleys: Vec::new(),
+            index_label_galleys: Vec::new(),
+            type_index_label_galleys: Vec::new(),
+            element_filter_atoms: Vec::new(),
+            element_filter_extras: Vec::new(),
         })
         // export resources
         .insert_resource(ExportSettings::default())
@@ -79,7 +85,9 @@ fn main() {
         .insert_resource(ExportSelectArea::default())
         // measurements
         .init_resource::<measurements::Measurements>()
+        .init_resource::<DiagnosticsCache>()
         .init_gizmo_group::<measurements::MeasurementGizmos>()
+        .init_gizmo_group::<measurements::MeasurementHighlightGizmos>()
         // hbonds
         .init_gizmo_group::<HbondGizmos>()
         // bond lines
@@ -89,14 +97,18 @@ fn main() {
         .init_resource::<EditorRotateState>()
         .init_resource::<ZMatrixBuilderState>()
         .init_gizmo_group::<BuilderGizmos>()
+        .init_gizmo_group::<BuilderHighlightGizmos>()
         // trajectory
         .init_resource::<TrajectoryState>()
+        .init_resource::<TrajectoryOverlayAssets>()
         // scene
         .add_systems(Startup, (setup, center_camera_on_startup))
         // egui pass
         .add_systems(EguiPrimaryContextPass, ui::ui_panel)
-        .add_systems(EguiPrimaryContextPass, ui_measurements::distance_labels_overlay)
-        .add_systems(EguiPrimaryContextPass, builder_ui_panel)
+        .add_systems(
+            EguiPrimaryContextPass,
+            ui_measurements::distance_labels_overlay,
+        )
         // update
         .configure_sets(Update, UpdateSet::Core.before(UpdateSet::Extras))
         .add_systems(
@@ -105,6 +117,7 @@ fn main() {
                 camera::orbit_camera_system,
                 export_image::update_export_select_area,
                 react_to_molecule_changed_mark_dirty,
+                diagnostics::refresh_diagnostics_cache,
                 sync_coordinates_if_dirty,
                 update_lighting_if_dirty,
                 update_materials_if_dirty,
@@ -124,25 +137,21 @@ fn main() {
                 measurements::handle_measurement_picking, // keep if you haven't migrated to events
                 measurements::update_measurement_distances,
                 measurements::draw_measurement_lines,
-
                 // hbonds
                 draw_hydrogen_bonds_dashed,
                 hbonds::configure_hbond_gizmos,
                 scene::configure_bond_line_gizmos,
                 draw_bond_lines,
-
                 // builder (no more local click handler)
                 configure_builder_gizmos,
                 molecule_builder::builder_ui::handle_builder_atom_picked,
                 draw_builder_highlights,
-
                 // trajectory
                 trajectory::advance_trajectory,
                 trajectory::rebuild_trajectory_overlay,
                 export_image::process_pending_canvas_captures,
                 export_image::cleanup_export_captures,
             )
-                .chain()
                 .in_set(UpdateSet::Extras),
         )
         .run();

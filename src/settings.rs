@@ -52,7 +52,7 @@ pub enum BondColorMode {
 pub struct MolSettings {
     // geometry
     pub atom_scale: f32,        // multiplier on covalent radius for spheres
-    pub atom_resolution: u32,   // atom resolution 
+    pub atom_resolution: u32,   // atom resolution
     pub bond_thresh_scale: f32, // neighbor cutoff factor
     pub hbond_cutoff: f32,      // neighbor cutoff factor
     pub bond_radius_pct: f32,   // fraction (0.05..1.0) of the smaller covalent radius
@@ -171,9 +171,9 @@ impl Default for MolSettings {
             // pleasant blue for H-bonds
             show_hbonds: true,
             hbond_color: Color::srgb(0.20, 0.60, 1.00),
-            hbond_thickness: 30.0,
-            hbond_gap_scale: 1.0,
-            hbond_line_scale: 1.0,
+            hbond_thickness: 3.0,
+            hbond_gap_scale: 1.5,
+            hbond_line_scale: 3.0,
 
             geometry_dirty: true,
             materials_dirty: false,

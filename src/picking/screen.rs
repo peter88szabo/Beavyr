@@ -41,4 +41,3 @@ pub fn find_nearest_atom_screen_space_egui(
     find_nearest_atom_screen_space(cam, cam_xform, atoms, mouse_v, radius_px)
         .map(|(i, v)| (i, egui::pos2(v.x, v.y)))
 }
-

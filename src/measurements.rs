@@ -8,6 +8,9 @@ use crate::settings::MolSettings;
 #[derive(Default, Reflect, GizmoConfigGroup)]
 pub struct MeasurementGizmos;
 
+#[derive(Default, Reflect, GizmoConfigGroup)]
+pub struct MeasurementHighlightGizmos;
+
 #[derive(Debug, Clone)]
 pub struct MeasurePair {
     pub id: u32,
@@ -42,8 +45,8 @@ pub struct DihedralMeasure {
 pub struct Measurements {
     // ---- Distances ----
     pub pairs: Vec<MeasurePair>,
-    pub is_active: bool,           // distance picking active
-    pub pending: Option<usize>,    // first picked atom (distance)
+    pub is_active: bool,        // distance picking active
+    pub pending: Option<usize>, // first picked atom (distance)
 
     // ---- Angles ----
     pub angles: Vec<AngleMeasure>,
@@ -138,7 +141,13 @@ impl Measurements {
         }
         let id = self.next_id;
         self.next_id += 1;
-        self.angles.push(AngleMeasure { id, a, b, c, degrees: deg });
+        self.angles.push(AngleMeasure {
+            id,
+            a,
+            b,
+            c,
+            degrees: deg,
+        });
     }
     pub fn clear_angles(&mut self) {
         self.angles.clear();
@@ -156,7 +165,14 @@ impl Measurements {
         }
         let id = self.next_id;
         self.next_id += 1;
-        self.dihedrals.push(DihedralMeasure { id, a, b, c, d, degrees: deg });
+        self.dihedrals.push(DihedralMeasure {
+            id,
+            a,
+            b,
+            c,
+            d,
+            degrees: deg,
+        });
     }
     pub fn clear_dihedrals(&mut self) {
         self.dihedrals.clear();
@@ -169,14 +185,26 @@ pub fn configure_measurement_gizmos(
     mut cfg_store: ResMut<GizmoConfigStore>,
     measurements: Res<Measurements>,
 ) {
-    let (cfg, _) = cfg_store.config_mut::<MeasurementGizmos>();
-    cfg.enabled = true;
-    cfg.line.width = measurements.line_width.max(1.0).min(50.0);
-    cfg.line.perspective = true;
-    cfg.line.style = GizmoLineStyle::Dashed {
-        gap_scale: measurements.dash_gap_scale.max(0.05),
-        line_scale: measurements.dash_line_scale.max(0.05),
-    };
+    {
+        let (cfg, _) = cfg_store.config_mut::<MeasurementGizmos>();
+        cfg.enabled = true;
+        cfg.line.width = measurements.line_width.max(1.0).min(50.0);
+        cfg.line.perspective = true;
+        cfg.line.style = GizmoLineStyle::Dashed {
+            gap_scale: measurements.dash_gap_scale.max(0.05),
+            line_scale: measurements.dash_line_scale.max(0.05),
+        };
+    }
+    {
+        let (cfg, _) = cfg_store.config_mut::<MeasurementHighlightGizmos>();
+        cfg.enabled = true;
+        cfg.line.width = 2.0;
+        cfg.line.perspective = true;
+        cfg.line.style = GizmoLineStyle::Dashed {
+            gap_scale: 2.0,
+            line_scale: 1.25,
+        };
+    }
 }
 
 /// Consume AtomPicked events when any measurement picking mode is active.
@@ -186,9 +214,14 @@ pub fn handle_measurement_picking(
     mol: Option<Res<Molecule>>,
     mut measurements: ResMut<Measurements>,
 ) {
-    let Some(mol) = mol else { return; };
-    let any_active = measurements.dihedral_active || measurements.angle_active || measurements.is_active;
-    if !any_active { return; }
+    let Some(mol) = mol else {
+        return;
+    };
+    let any_active =
+        measurements.dihedral_active || measurements.angle_active || measurements.is_active;
+    if !any_active {
+        return;
+    }
 
     for ev in ev_picked.read() {
         // Only react to picks emitted for the Measurements tool
@@ -253,7 +286,9 @@ pub fn update_measurement_distances(
     mol: Option<Res<Molecule>>,
     mut measurements: ResMut<Measurements>,
 ) {
-    let Some(mol) = mol else { return; };
+    let Some(mol) = mol else {
+        return;
+    };
     let n = mol.pos.len();
 
     // distances
@@ -273,9 +308,7 @@ pub fn update_measurement_distances(
     // dihedrals
     for d in &mut measurements.dihedrals {
         if d.a < n && d.b < n && d.c < n && d.d < n {
-            d.degrees = dihedral_degrees(
-                mol.pos[d.a], mol.pos[d.b], mol.pos[d.c], mol.pos[d.d]
-            );
+            d.degrees = dihedral_degrees(mol.pos[d.a], mol.pos[d.b], mol.pos[d.c], mol.pos[d.d]);
         }
     }
 }
@@ -283,13 +316,18 @@ pub fn update_measurement_distances(
 /// Draw gizmos (distance lines + pending highlights + preview highlights)
 pub fn draw_measurement_lines(
     mut gizmos: Gizmos<MeasurementGizmos>,
+    mut highlights: Gizmos<MeasurementHighlightGizmos>,
     measurements: Res<Measurements>,
     mol: Option<Res<Molecule>>,
     settings: Res<MolSettings>,
 ) {
-    let Some(mol) = mol else { return; };
+    let Some(mol) = mol else {
+        return;
+    };
     let n = mol.pos.len();
-    if n == 0 { return; }
+    if n == 0 {
+        return;
+    }
 
     // ---------- Pending highlights ----------
     let mut draw_highlight = |idx: usize, color: Color| {
@@ -297,7 +335,7 @@ pub fn draw_measurement_lines(
             let center = mol.pos[idx];
             let base_r = covalent_radius_angstrom(&mol.atoms[idx]) * settings.atom_scale;
             let r = (base_r * 1.25).max(0.15);
-            gizmos.sphere(center, r, color);
+            highlights.sphere(center, r, color);
         }
     };
 
@@ -350,14 +388,18 @@ pub fn draw_measurement_lines(
 
     // ---------- Distance lines ----------
     for pair in measurements.pairs.iter().filter(|p| p.visible) {
-        if pair.a >= n || pair.b >= n { continue; }
+        if pair.a >= n || pair.b >= n {
+            continue;
+        }
 
         let p0 = mol.pos[pair.a];
         let p1 = mol.pos[pair.b];
 
         let d = p1 - p0;
         let len = d.length();
-        if len <= 1e-4 { continue; }
+        if len <= 1e-4 {
+            continue;
+        }
         let dn = d / len;
 
         let ri = covalent_radius_angstrom(&mol.atoms[pair.a]) * settings.atom_scale;
@@ -369,7 +411,9 @@ pub fn draw_measurement_lines(
 
         let a = p0 + dn * (ri - inset_i);
         let b = p1 - dn * (rj - inset_j);
-        if (b - a).length() <= 1e-4 { continue; }
+        if (b - a).length() <= 1e-4 {
+            continue;
+        }
 
         gizmos.line(a, b, measurements.color);
     }
