@@ -15,6 +15,12 @@ bevy = { version = "0.19.1", features = ["jpeg"] }
 bevy_egui = "0.42.0"
 rfd = "0.17"
 
+# Imported frequency-analysis code from the Behemoth project uses these two.
+# Both are pure Rust: `ndarray-linalg` (which would need a system BLAS) is
+# deliberately NOT used -- see docs/superpowers/specs/2026-09-04-frequency-analysis-design.md
+ndarray = "0.15"
+anyhow = "1.0"
+
 # Our own code stays cheap to rebuild, but Bevy/wgpu/glam must be optimised or
 # the viewer is unusably slow in a dev build.
 [profile.dev]

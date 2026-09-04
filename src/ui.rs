@@ -20,6 +20,8 @@ use crate::measurements::Measurements;
 use crate::molecule_builder::builder_ui::{
     builder_ui_panel, EditorRotateState, ZMatrixBuilderState,
 };
+use crate::qchem_interfaces::xtb_freq::xtb_frequency_panel;
+use crate::qchem_interfaces::xtb_optimize::xtb_optimization_panel;
 use crate::trajectory;
 use crate::ui_measurements;
 
@@ -138,6 +140,10 @@ pub fn ui_panel(
         Local<bool>,
         ResMut<crate::orbitals::OrbitalState>,
         ResMut<UiPanelRegions>,
+        ResMut<crate::qchem_interfaces::xtb_optimize::XtbOptimizationTask>,
+        ResMut<crate::qchem_interfaces::xtb_optimize::XtbPanelState>,
+        ResMut<crate::qchem_interfaces::xtb_freq::XtbFrequencyTask>,
+        ResMut<crate::qchem_interfaces::xtb_freq::XtbFreqPanelState>,
     ),
 ) {
     // bevy_egui 0.41: ctx_mut() returns Result; if it fails, skip this frame
@@ -149,6 +155,10 @@ pub fn ui_panel(
         mut style_initialized,
         mut orbital_state,
         mut panel_regions,
+        mut xtb_task,
+        mut xtb_panel_state,
+        mut xtb_freq_task,
+        mut xtb_freq_panel_state,
     ) = builder_resources;
     if !*style_initialized {
         ctx.style_mut_of(ctx.theme(), |style| {
@@ -735,6 +745,27 @@ pub fn ui_panel(
                         }
                     });
                 }
+            });
+            // ===========================
+            // 1b) Geometry Optimization (xTB)
+            // ===========================
+            ui.add_space(8.0);
+            ui.collapsing("Geometry Optimization (xTB)", |ui| {
+                xtb_optimization_panel(ui, &mut xtb_panel_state, &mut xtb_task, &mol);
+            });
+            // ===========================
+            // 1c) Frequency Analysis (xTB Hessian)
+            // ===========================
+            ui.add_space(8.0);
+            ui.collapsing("Frequency Analysis (xTB Hessian)", |ui| {
+                xtb_frequency_panel(
+                    ui,
+                    &mut xtb_freq_panel_state,
+                    &mut xtb_freq_task,
+                    &xtb_panel_state,
+                    &mol,
+                    &mut traj,
+                );
             });
             // ===========================
             // 2) Measurements

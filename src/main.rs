@@ -11,8 +11,10 @@ mod hbonds;
 mod measurements;
 mod molecule;
 mod molecule_builder;
+mod normalmode;
 mod orbitals;
 mod picking;
+mod qchem_interfaces;
 mod scene;
 mod settings;
 mod trajectory;
@@ -111,6 +113,11 @@ fn main() {
         // trajectory
         .init_resource::<TrajectoryState>()
         .init_resource::<TrajectoryOverlayAssets>()
+        // xtb geometry optimization
+        .init_resource::<qchem_interfaces::xtb_optimize::XtbOptimizationTask>()
+        .init_resource::<qchem_interfaces::xtb_optimize::XtbPanelState>()
+        .init_resource::<qchem_interfaces::xtb_freq::XtbFrequencyTask>()
+        .init_resource::<qchem_interfaces::xtb_freq::XtbFreqPanelState>()
         // scene
         .add_systems(Startup, (setup, center_camera_on_startup))
         // egui pass
@@ -163,6 +170,9 @@ fn main() {
                 // trajectory
                 trajectory::advance_trajectory,
                 trajectory::rebuild_trajectory_overlay,
+                // xtb geometry optimization
+                qchem_interfaces::xtb_optimize::poll_xtb_optimization,
+                qchem_interfaces::xtb_freq::poll_xtb_frequencies,
                 export_image::process_pending_canvas_captures,
                 export_image::cleanup_export_captures,
             )

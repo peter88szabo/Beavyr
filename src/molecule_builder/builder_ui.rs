@@ -19,15 +19,10 @@ use crate::settings::MolSettings;
 const ANGLE_SINGLE_DEG: f64 = 109.47;
 const ANGLE_DOUBLE_DEG: f64 = 120.0;
 const ANGLE_TRIPLE_DEG: f64 = 179.95;
-const ANGLE_MOLDEN_SINGLE_DEG: f64 = 109.471;
-const ANGLE_MOLDEN_NO2_DEG: f64 = 117.38;
-const ANGLE_MOLDEN_CHCH_DEG: f64 = 90.0;
 
 const DIHEDRAL_SINGLE_DEG: f64 = 0.0;
 const DIHEDRAL_DOUBLE_DEG: f64 = 120.0;
 const DIHEDRAL_TRIPLE_DEG: f64 = 180.0;
-const DIHEDRAL_MOLDEN_DEG: f64 = 180.0;
-const DIHEDRAL_MOLDEN_CYCLOPENTANE_DEG: f64 = -90.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BondOrder {
@@ -427,26 +422,6 @@ fn build_fragment_zmat(symbols: &[String], coords: &[Vec3]) -> Vec<ZAtom> {
     }
 
     zmat
-}
-
-fn build_bond_adjacency(n: usize, bonds: &[(usize, usize, f32)]) -> Vec<Vec<usize>> {
-    let mut adj = vec![Vec::new(); n];
-    for &(i, j, _) in bonds {
-        if i < n && j < n {
-            adj[i].push(j);
-            adj[j].push(i);
-        }
-    }
-    adj
-}
-
-fn pick_neighbor(adj: &[Vec<usize>], center: usize, exclude: &[usize]) -> Option<usize> {
-    adj.get(center)
-        .and_then(|nei| nei.iter().copied().find(|idx| !exclude.contains(idx)))
-}
-
-fn pick_any_except(n: usize, exclude: &[usize]) -> Option<usize> {
-    (0..n).find(|idx| !exclude.contains(idx))
 }
 
 #[derive(Default, Reflect, GizmoConfigGroup)]
@@ -971,88 +946,6 @@ fn place_and_derive_fragment(
 
 fn find_fragment(name: &str) -> Option<&'static fragments::FragmentDef> {
     fragments::FRAGMENTS.iter().find(|f| f.name == name)
-}
-
-fn fragment_molden_defaults(name: &str) -> (f64, f64) {
-    match name {
-        "-CH3" => (ANGLE_MOLDEN_SINGLE_DEG, DIHEDRAL_MOLDEN_DEG),
-        "-CH=CH2" => (ANGLE_DOUBLE_DEG, DIHEDRAL_MOLDEN_DEG),
-        "-CH=O" => (ANGLE_DOUBLE_DEG, DIHEDRAL_MOLDEN_DEG),
-        "-COOH" => (ANGLE_DOUBLE_DEG, DIHEDRAL_MOLDEN_DEG),
-        "-NH2" => (ANGLE_MOLDEN_SINGLE_DEG, DIHEDRAL_MOLDEN_DEG),
-        "-OH" => (ANGLE_MOLDEN_SINGLE_DEG, DIHEDRAL_MOLDEN_DEG),
-        "-CCH" => (ANGLE_MOLDEN_CHCH_DEG, DIHEDRAL_MOLDEN_DEG),
-        "-Phenyl" => (ANGLE_DOUBLE_DEG, DIHEDRAL_MOLDEN_DEG),
-        "-Pyrrole" => (ANGLE_DOUBLE_DEG, DIHEDRAL_MOLDEN_DEG),
-        "-OCH3" => (ANGLE_MOLDEN_SINGLE_DEG, DIHEDRAL_MOLDEN_DEG),
-        "-NO2" => (ANGLE_MOLDEN_NO2_DEG, DIHEDRAL_MOLDEN_DEG),
-        "-OOH" => (ANGLE_MOLDEN_SINGLE_DEG, DIHEDRAL_MOLDEN_DEG),
-        "-CycloPentane" => (ANGLE_MOLDEN_SINGLE_DEG, DIHEDRAL_MOLDEN_CYCLOPENTANE_DEG),
-        "-CycloHexane" => (ANGLE_MOLDEN_SINGLE_DEG, DIHEDRAL_MOLDEN_DEG),
-        _ => (ANGLE_MOLDEN_SINGLE_DEG, DIHEDRAL_MOLDEN_DEG),
-    }
-}
-
-fn replace_atom_with_fragment_zmat(
-    zmat: &mut Vec<ZAtom>,
-    frag_atoms: Vec<ZAtom>,
-    replace_idx: usize,
-    bond_len: f64,
-    angle_deg: f64,
-    dihedral_deg: f64,
-) -> Vec<usize> {
-    if replace_idx >= zmat.len() || frag_atoms.is_empty() {
-        return Vec::new();
-    }
-    let connector_symbol = frag_atoms[0].symbol.clone();
-    let mut target = zmat[replace_idx].clone();
-    target.symbol = connector_symbol;
-    if target.bond_ref.is_some() {
-        target.bond_len = bond_len;
-        target.angle_deg = angle_deg;
-        target.dihedral_deg = dihedral_deg;
-    }
-    zmat[replace_idx] = target;
-
-    let base_len = zmat.len();
-    let mut map: Vec<usize> = Vec::with_capacity(frag_atoms.len());
-    map.push(replace_idx);
-    for i in 1..frag_atoms.len() {
-        map.push(base_len + (i - 1));
-    }
-
-    // The connector takes over the replaced row, so the host atom it hangs off
-    // is that row's own bond reference.
-    let attach = zmat[replace_idx].bond_ref.map(|r| r - 1);
-    let overrides = (
-        zmat[replace_idx].angle_ref.map(|r| r - 1),
-        zmat[replace_idx].dihedral_ref.map(|r| r - 1),
-    );
-
-    let mut atoms = frag_atoms;
-    if let Some(attach) = attach {
-        // Same defect as the add path: mapping only the references the fragment
-        // already had leaves its first three atoms partly unreferenced.
-        attach::assign_fragment_references(&mut atoms, &map, zmat, attach, overrides);
-    } else {
-        for atom in atoms.iter_mut().skip(1) {
-            if let Some(r) = atom.bond_ref {
-                atom.bond_ref = Some(map[r - 1] + 1);
-            }
-            if let Some(r) = atom.angle_ref {
-                atom.angle_ref = Some(map[r - 1] + 1);
-            }
-            if let Some(r) = atom.dihedral_ref {
-                atom.dihedral_ref = Some(map[r - 1] + 1);
-            }
-        }
-    }
-
-    // Index 0 is the connector, which already lives at `replace_idx`.
-    for atom in atoms.into_iter().skip(1) {
-        zmat.push(atom);
-    }
-    map
 }
 
 fn ensure_zmat_edit_buffers(zmat_state: &mut ZMatrixBuilderState) {
@@ -3371,11 +3264,11 @@ C   0.700  -1.212   0.000
 
         let out = zmat2xyz::zmat_to_xyz(&zmat_state.zmat);
 
-        // The new phenyl ring occupies the atoms that used to be the replaced H
-        // plus everything appended after the pre-replace atom count.
-        let phenyl_indices: Vec<usize> = std::iter::once(replace_idx)
-            .chain(coords_before.len()..zmat_state.zmat.len())
-            .collect();
+        // Replace takes the hydrogen away and appends the fragment, so the new
+        // phenyl ring is the tail of the Z-matrix: everything from the
+        // pre-replace count minus that one removed atom.
+        let phenyl_indices: Vec<usize> =
+            (coords_before.len() - 1..zmat_state.zmat.len()).collect();
 
         let clearance = min_clearance_all(&out, &phenyl_indices);
         assert!(
@@ -3428,6 +3321,7 @@ mod conjugation_tests {
             .expect("C1 has exactly one hydrogen of its own");
 
         let mut zmat_state = ZMatrixBuilderState::default();
+        let atoms_before_replace = zmat.len();
         zmat_state.zmat = zmat;
         zmat_state.frag_name = "-CH=CH2".to_string();
         zmat_state.selected_index = Some(c1_hydrogen);
@@ -3455,11 +3349,12 @@ mod conjugation_tests {
 
         let out = zmat2xyz::zmat_to_xyz(&zmat_state.zmat);
 
-        // The second vinyl's connector (C1') is whatever took over c1_hydrogen's
-        // row; its own double-bond partner (C2') is the other new carbon.
-        let c1_prime = c1_hydrogen;
-        let new_atoms_start = 6; // host(1) + first vinyl(5)
-        let c2_prime = (new_atoms_start..zmat_state.zmat.len())
+        // The replaced hydrogen is gone and the second vinyl is appended, so
+        // its connector (C1\') is the first of the appended rows and its own
+        // double-bond partner (C2\') is the other new carbon.
+        let c1_prime = atoms_before_replace - 1;
+        assert_eq!(zmat_state.zmat[c1_prime].symbol, "C");
+        let c2_prime = (c1_prime + 1..zmat_state.zmat.len())
             .find(|&i| {
                 zmat_state.zmat[i].symbol == "C" && zmat_state.zmat[i].bond_ref == Some(c1_prime + 1)
             })
@@ -3891,12 +3786,26 @@ H   1.090   0.000   0.000
     }
 }
 
+/// Read one of the sample structures in `examples/`.
+///
+/// Resolved against the crate root rather than the working directory, so the
+/// tests do not depend on where cargo happens to be run from -- and not
+/// against anyone's Desktop, which is where these fixtures used to live.
+#[cfg(test)]
+fn read_example(name: &str) -> String {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("examples")
+        .join(name);
+    std::fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("cannot read example {}: {e}", path.display()))
+}
+
 #[cfg(test)]
 mod real_file_replace_tests {
     use super::*;
 
-    fn load(path: &str) -> (Vec<String>, Vec<Vec3>) {
-        let text = std::fs::read_to_string(path).expect("test fixture file");
+    fn load(name: &str) -> (Vec<String>, Vec<Vec3>) {
+        let text = read_example(name);
         let (_n, symbols, coords) = parse_xyz_angstrom(&text);
         (
             symbols,
@@ -3925,7 +3834,7 @@ mod real_file_replace_tests {
     /// The round trip may re-orient the molecule, but it must not deform it.
     #[test]
     fn the_zmat_round_trip_preserves_the_shape() {
-        let (symbols, positions) = load("/home/peter/Desktop/phenyl-OCH3.xyz");
+        let (symbols, positions) = load("phenyl-OCH3.xyz");
         let zmat = crate::molecule_builder::zmat2xyz::xyz_to_zmat(&symbols, &positions);
         let rebuilt = zmat2xyz::zmat_to_xyz(&zmat);
 
@@ -3943,11 +3852,11 @@ mod real_file_replace_tests {
     }
 
     /// The realistic path: load a file, sync the Z-matrix, then replace a ring
-    /// hydrogen with a methyl. Replace swaps the atom in place, so every other
-    /// original atom keeps its index -- and must keep its geometry.
+    /// hydrogen with a methyl. The rest of the molecule must keep its exact
+    /// geometry; only the substituted hydrogen goes away.
     #[test]
     fn replacing_a_ring_hydrogen_keeps_the_rest_of_the_shape() {
-        let (symbols, positions) = load("/home/peter/Desktop/phenyl-OCH3.xyz");
+        let (symbols, positions) = load("phenyl-OCH3.xyz");
         let zmat = crate::molecule_builder::zmat2xyz::xyz_to_zmat(&symbols, &positions);
         let rebuilt = zmat2xyz::zmat_to_xyz(&zmat);
         let mut mol = Molecule {
@@ -3962,7 +3871,7 @@ mod real_file_replace_tests {
         assert_eq!(mol.atoms[replaced], "H");
 
         let mut state = ZMatrixBuilderState::default();
-        state.zmat = zmat.clone();
+        state.zmat = zmat;
         state.frag_name = "-CH3".to_string();
         state.frag_mode = FragmentInsertMode::Replace;
         state.selected_index = Some(replaced);
@@ -3974,36 +3883,42 @@ mod real_file_replace_tests {
             &EditorRotateState::default(),
         );
         assert!(state.last_error.is_none(), "{:?}", state.last_error);
-        assert_eq!(mol.atoms[replaced], "C", "the H should now be the methyl C");
+        assert_eq!(
+            state.zmat.len(),
+            mol.atoms.len(),
+            "the rebuilt Z-matrix must describe the molecule it produced"
+        );
 
-        let keep: Vec<usize> = (0..positions.len()).filter(|&i| i != replaced).collect();
-        let pairs = |pos: &[Vec3]| -> Vec<f32> {
-            let mut out = Vec::new();
-            for (a, &i) in keep.iter().enumerate() {
-                for &j in &keep[a + 1..] {
-                    out.push(pos[i].distance(pos[j]));
-                }
+        // Every surviving original atom, in its new position, must sit exactly
+        // where it did before.
+        let mut worst = (0usize, 0.0f32);
+        for k in 0..positions.len() {
+            if k == replaced {
+                continue;
             }
-            out
-        };
-        let before = pairs(&rebuilt);
-        let after = pairs(&mol.pos);
-        let worst = before
-            .iter()
-            .zip(&after)
-            .map(|(a, b)| (a - b).abs())
-            .fold(0.0f32, f32::max);
+            let now = if k < replaced { k } else { k - 1 };
+            let moved = rebuilt[k].distance(mol.pos[now]);
+            if moved > worst.1 {
+                worst = (k, moved);
+            }
+        }
         assert!(
-            worst < 1.0e-2,
-            "replacing one hydrogen deformed the rest of the molecule by {worst:.4} A"
+            worst.1 < 1.0e-2,
+            "original atom {} ({}) moved {:.4} A; replacing one hydrogen must \
+             not disturb the rest of the structure",
+            worst.0,
+            symbols[worst.0],
+            worst.1
         );
     }
 
     /// The user's exact report: pick atom 8 in the panel's 1-based numbering
-    /// (index 7, an aromatic hydrogen) and replace it with a methyl.
+    /// (index 7, an aromatic hydrogen) and replace it with a methyl. The
+    /// methyl must land on the ring carbon that actually held that hydrogen --
+    /// not on whichever atom happened to precede it in the file.
     #[test]
     fn replacing_ring_hydrogen_number_eight_attaches_to_its_own_carbon() {
-        let (symbols, positions) = load("/home/peter/Desktop/phenyl-OCH3.xyz");
+        let (symbols, positions) = load("phenyl-OCH3.xyz");
         let zmat = crate::molecule_builder::zmat2xyz::xyz_to_zmat(&symbols, &positions);
         let mut mol = Molecule {
             atoms: symbols.clone(),
@@ -4012,31 +3927,20 @@ mod real_file_replace_tests {
             hydrogen_bonds: vec![],
         };
         mol.recompute_bonds(2.0, 3.0);
+        let before = mol.pos.clone();
 
-        let replaced = 7usize;
+        let replaced = 7usize; // atom 8 in the panel
+        let ring_carbon = 2usize;
         assert_eq!(mol.atoms[replaced], "H");
-        // Which atom is this hydrogen really bonded to?
-        let real_host = (0..mol.pos.len())
-            .filter(|&j| j != replaced)
-            .min_by(|&a, &b| {
-                mol.pos[replaced]
-                    .distance(mol.pos[a])
-                    .total_cmp(&mol.pos[replaced].distance(mol.pos[b]))
-            })
-            .unwrap();
-        eprintln!(
-            "DEBUG H{replaced} is bonded to atom {real_host} ({}) at {:.3} A",
-            mol.atoms[real_host],
-            mol.pos[replaced].distance(mol.pos[real_host])
+        assert!(
+            (before[replaced].distance(before[ring_carbon]) - 1.089).abs() < 0.01,
+            "fixture check: atom {replaced} should be the hydrogen on atom {ring_carbon}"
         );
-        eprintln!(
-            "DEBUG but its zmat bond_ref points at atom {:?} ({})",
-            zmat[replaced].bond_ref.map(|r| r - 1),
-            zmat[replaced]
-                .bond_ref
-                .map(|r| mol.atoms[r - 1].clone())
-                .unwrap_or_default()
-        );
+        // The old code used this row's Z-matrix bond reference instead, which
+        // for a file-order Z-matrix is simply the previous line -- another
+        // hydrogen. That is what put the methyl on a hydrogen.
+        assert_eq!(zmat[replaced].bond_ref.map(|r| r - 1), Some(6));
+        assert_eq!(mol.atoms[6], "H");
 
         let mut state = ZMatrixBuilderState::default();
         state.zmat = zmat;
@@ -4052,31 +3956,60 @@ mod real_file_replace_tests {
         );
         assert!(state.last_error.is_none(), "{:?}", state.last_error);
 
-        eprintln!("DEBUG atom count {} (expected 19)", mol.atoms.len());
-        for (i, (sym, p)) in mol.atoms.iter().zip(&mol.pos).enumerate() {
-            eprintln!("  {i:2} {sym:2} {:8.3} {:8.3} {:8.3}", p.x, p.y, p.z);
-        }
-        // The methyl carbon took over the hydrogen's slot; it must be bonded
-        // to the ring carbon that hydrogen belonged to, and nothing else heavy.
-        assert_eq!(mol.atoms[replaced], "C");
-        let d = mol.pos[replaced].distance(mol.pos[real_host]);
-        eprintln!("DEBUG new C to its ring carbon: {d:.3} A");
+        // One atom removed, four added.
+        assert_eq!(mol.atoms.len(), symbols.len() - 1 + 4);
+
+        // The methyl carbon is the first appended row.
+        let methyl_c = symbols.len() - 1;
+        assert_eq!(mol.atoms[methyl_c], "C");
+        let d = mol.pos[methyl_c].distance(mol.pos[ring_carbon]);
         assert!(
             (d - 1.51).abs() < 0.15,
-            "the methyl carbon sits {d:.3} A from the ring carbon it should be \
-             bonded to (atom {real_host})"
+            "the methyl carbon sits {d:.3} A from the ring carbon that held the \
+             hydrogen; it should be a single bond away"
         );
 
-        // Every ring carbon must keep the hydrogen count it had.
-        let count_h = |mol: &Molecule, c: usize| -> usize {
-            (0..mol.pos.len())
+        // It must not be bonded to a hydrogen -- that was the bug.
+        for h in 0..methyl_c {
+            if mol.atoms[h] != "H" {
+                continue;
+            }
+            assert!(
+                mol.pos[methyl_c].distance(mol.pos[h]) > 1.3,
+                "the methyl carbon is {:.3} A from hydrogen {h}: it has been \
+                 bonded to a hydrogen instead of to the ring",
+                mol.pos[methyl_c].distance(mol.pos[h])
+            );
+        }
+
+        // Every other ring carbon keeps its own hydrogen; the substituted one
+        // no longer has one.
+        let hydrogens_on = |mol: &Molecule, c: usize| -> usize {
+            (0..mol.atoms.len())
                 .filter(|&j| mol.atoms[j] == "H" && mol.pos[c].distance(mol.pos[j]) < 1.3)
                 .count()
         };
-        for c in 0..6 {
-            let expected = if c == real_host || c == 0 { 0 } else { 1 };
-            let got = count_h(&mol, c);
-            eprintln!("DEBUG ring carbon {c}: {got} hydrogens (expected {expected})");
+        for c in 1..6 {
+            let expected = usize::from(c != ring_carbon);
+            assert_eq!(
+                hydrogens_on(&mol, c),
+                expected,
+                "ring carbon {c} should have {expected} hydrogen(s)"
+            );
+        }
+
+        // And nothing else moved.
+        for k in 0..positions.len() {
+            if k == replaced {
+                continue;
+            }
+            let now = if k < replaced { k } else { k - 1 };
+            assert!(
+                before[k].distance(mol.pos[now]) < 1.0e-3,
+                "original atom {k} ({}) moved {:.4} A",
+                symbols[k],
+                before[k].distance(mol.pos[now])
+            );
         }
     }
 
@@ -4084,7 +4017,7 @@ mod real_file_replace_tests {
     /// no manual "Sync from Molecule" step.
     #[test]
     fn loading_a_structure_syncs_the_zmat() {
-        let (symbols, positions) = load("/home/peter/Desktop/phenyl-OCH3.xyz");
+        let (symbols, positions) = load("phenyl-OCH3.xyz");
         let mut mol = Molecule {
             atoms: symbols.clone(),
             pos: positions.clone(),
@@ -4116,7 +4049,7 @@ mod real_file_replace_tests {
     /// molecule: it describes something else entirely.
     #[test]
     fn replacing_without_a_synced_zmat_is_refused() {
-        let (symbols, positions) = load("/home/peter/Desktop/phenyl-OCH3.xyz");
+        let (symbols, positions) = load("phenyl-OCH3.xyz");
         let mut mol = Molecule {
             atoms: symbols.clone(),
             pos: positions.clone(),
@@ -4158,7 +4091,7 @@ mod convention_probe {
     /// coordinates silently moves the atom.
     #[test]
     fn derive_internals_agrees_with_zmat_to_xyz() {
-        let text = std::fs::read_to_string("/home/peter/Desktop/phenyl-OCH3.xyz").unwrap();
+        let text = read_example("phenyl-OCH3.xyz");
         let (_n, symbols, coords) = parse_xyz_angstrom(&text);
         let positions: Vec<Vec3> = coords
             .into_iter()

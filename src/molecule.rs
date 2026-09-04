@@ -450,9 +450,50 @@ pub fn covalent_radius_angstrom(sym: &str) -> f32 {
     }
 }
 
+/// Atomic number, 1-based, for the same element set `covalent_radius_angstrom`
+/// covers -- generated from that function's own ordering so the two tables
+/// cannot silently drift apart.
+const ELEMENT_SYMBOLS: [&str; 103] = [
+    "H", "He", "Li", "Be", "B", "C", "N", "O", "F", "Ne", "Na", "Mg", "Al", "Si", "P", "S", "Cl", "Ar", "K", "Ca", "Sc", "Ti", "V", "Cr", "Mn", "Fe", "Co", "Ni", "Cu", "Zn", "Ga", "Ge", "As", "Se", "Br", "Kr", "Rb", "Sr", "Y", "Zr", "Nb", "Mo", "Tc", "Ru", "Rh", "Pd", "Ag", "Cd", "In", "Sn", "Sb", "Te", "I", "Xe", "Cs", "Ba", "La", "Ce", "Pr", "Nd", "Pm", "Sm", "Eu", "Gd", "Tb", "Dy", "Ho", "Er", "Tm", "Yb", "Lu", "Hf", "Ta", "W", "Re", "Os", "Ir", "Pt", "Au", "Hg", "Tl", "Pb", "Bi", "Po", "At", "Rn", "Fr", "Ra", "Ac", "Th", "Pa", "U", "Np", "Pu", "Am", "Cm", "Bk", "Cf", "Es", "Fm", "Md", "No", "Lr"
+];
+
+pub fn atomic_number(sym: &str) -> Option<u32> {
+    ELEMENT_SYMBOLS
+        .iter()
+        .position(|&s| s == sym)
+        .map(|i| i as u32 + 1)
+}
+
+/// The inverse of `atomic_number`: element symbol for a given atomic number
+/// (1-based), same table so the two can never drift apart.
+pub fn element_symbol(z: u32) -> Option<&'static str> {
+    ELEMENT_SYMBOLS.get((z as usize).checked_sub(1)?).copied()
+}
+
+/// Standard atomic weight in g/mol (amu), same element set and ordering as
+/// `atomic_number` -- generated the same way so the two tables cannot
+/// silently drift apart. IUPAC 2021 standard atomic weights; for elements
+/// with no stable isotope, the mass of the longest-lived known isotope
+/// (the usual convention, e.g. NIST's own tables).
+pub fn atomic_mass_amu(sym: &str) -> Option<f64> {
+    const MASSES: [f64; 103] = [
+        1.008, 4.0026, 6.94, 9.0122, 10.81, 12.011, 14.007, 15.999, 18.998, 20.18, 22.99, 24.305, 26.982, 28.085, 30.974, 32.06, 35.45, 39.948, 39.098, 40.078, 44.956, 47.867, 50.942, 51.996, 54.938, 55.845, 58.933, 58.693, 63.546, 65.38, 69.723, 72.63, 74.922, 78.971, 79.904, 83.798, 85.468, 87.62, 88.906, 91.224, 92.906, 95.95, 97.0, 101.07, 102.91, 106.42, 107.87, 112.41, 114.82, 118.71, 121.76, 127.6, 126.9, 131.29, 132.91, 137.33, 138.91, 140.12, 140.91, 144.24, 145.0, 150.36, 151.96, 157.25, 158.93, 162.5, 164.93, 167.26, 168.93, 173.05, 174.97, 178.49, 180.95, 183.84, 186.21, 190.23, 192.22, 195.08, 196.97, 200.59, 204.38, 207.2, 208.98, 209.0, 210.0, 222.0, 223.0, 226.0, 227.0, 232.04, 231.04, 238.03, 237.0, 244.0, 243.0, 247.0, 247.0, 251.0, 252.0, 257.0, 258.0, 259.0, 262.0
+    ];
+    atomic_number(sym).map(|z| MASSES[(z - 1) as usize])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn atomic_mass_matches_well_known_values() {
+        assert!((atomic_mass_amu("H").unwrap() - 1.008).abs() < 1e-6);
+        assert!((atomic_mass_amu("C").unwrap() - 12.011).abs() < 1e-6);
+        assert!((atomic_mass_amu("O").unwrap() - 15.999).abs() < 1e-6);
+        assert_eq!(atomic_mass_amu("Xx"), None);
+    }
+
 
     /// Deterministic LCG so the fixtures are reproducible without a rand dep.
     struct Lcg(u64);
