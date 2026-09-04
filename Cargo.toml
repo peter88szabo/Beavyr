@@ -3,12 +3,26 @@ name = "Beavyr"
 version = "0.1.0"
 edition = "2021"
 
-[dependencies]
-bevy = { version = "0.19.0", features = ["dynamic_linking", "jpeg"] }
-bevy_egui = "0.41.1"
-rfd = "0.14"
-ron = "0.8"
-serde = { version = "1.0", features = ["derive"] }
-slotmap = "1.0"
-arboard = "3.4"
+[features]
+# `dev` keeps Bevy's dynamic linking on for fast incremental builds.
+# It is on by default so plain `cargo run` stays fast.
+# Ship standalone binaries with: cargo build --release --no-default-features
+default = ["dev"]
+dev = ["bevy/dynamic_linking"]
 
+[dependencies]
+bevy = { version = "0.19.1", features = ["jpeg"] }
+bevy_egui = "0.42.0"
+rfd = "0.17"
+
+# Our own code stays cheap to rebuild, but Bevy/wgpu/glam must be optimised or
+# the viewer is unusably slow in a dev build.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

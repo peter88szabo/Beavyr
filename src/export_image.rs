@@ -6,6 +6,7 @@ use bevy::render::render_resource::{
     Extent3d, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
 };
 use bevy::render::view::screenshot::{Captured, Screenshot, ScreenshotCaptured};
+use bevy::tasks::IoTaskPool;
 use rfd::FileDialog;
 use std::path::{Path, PathBuf};
 
@@ -342,26 +343,35 @@ fn save_cropped_to_disk(
 ) -> impl FnMut(On<ScreenshotCaptured>) {
     move |screenshot_captured| {
         let img = screenshot_captured.image.clone();
-        let dyn_img = match img.try_into_dynamic() {
-            Ok(img) => img,
-            Err(err) => {
-                eprintln!("Failed to read screenshot image: {err}");
-                return;
-            }
-        };
-        let img_w = dyn_img.width();
-        let img_h = dyn_img.height();
-        if img_w == 0 || img_h == 0 {
-            eprintln!("Empty screenshot image.");
-            return;
-        }
-        let x = crop_min.x.min(img_w.saturating_sub(1));
-        let y = crop_min.y.min(img_h.saturating_sub(1));
-        let w = crop_size.x.min(img_w.saturating_sub(x)).max(1);
-        let h = crop_size.y.min(img_h.saturating_sub(y)).max(1);
-        let cropped = dyn_img.crop_imm(x, y, w, h);
-        if let Err(err) = cropped.save(&path) {
-            eprintln!("Failed to save screenshot: {err}");
-        }
+        let path = path.clone();
+
+        // Decoding, cropping and encoding a high-DPI export costs hundreds of
+        // milliseconds.  Running it in the observer froze the viewport for the
+        // whole duration, so hand it to the IO pool and let the frame continue.
+        IoTaskPool::get()
+            .spawn(async move {
+                let dyn_img = match img.try_into_dynamic() {
+                    Ok(img) => img,
+                    Err(err) => {
+                        eprintln!("Failed to read screenshot image: {err}");
+                        return;
+                    }
+                };
+                let img_w = dyn_img.width();
+                let img_h = dyn_img.height();
+                if img_w == 0 || img_h == 0 {
+                    eprintln!("Empty screenshot image.");
+                    return;
+                }
+                let x = crop_min.x.min(img_w.saturating_sub(1));
+                let y = crop_min.y.min(img_h.saturating_sub(1));
+                let w = crop_size.x.min(img_w.saturating_sub(x)).max(1);
+                let h = crop_size.y.min(img_h.saturating_sub(y)).max(1);
+                let cropped = dyn_img.crop_imm(x, y, w, h);
+                if let Err(err) = cropped.save(&path) {
+                    eprintln!("Failed to save screenshot: {err}");
+                }
+            })
+            .detach();
     }
 }

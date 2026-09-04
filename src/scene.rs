@@ -130,6 +130,73 @@ fn element_visible(sym: &str, settings: &MolSettings) -> bool {
         .unwrap_or(true)
 }
 
+/// Sphere tessellation level for the current representation.
+fn atom_display_resolution(settings: &MolSettings) -> u32 {
+    match settings.representation {
+        RepresentationMode::BallAndStick => settings.atom_resolution,
+        RepresentationMode::LowResBallsAndLines => settings.low_res_atom_resolution,
+        RepresentationMode::BackboneTrace => settings.low_res_atom_resolution,
+        RepresentationMode::SpaceFilling => settings.cpk_atom_resolution,
+        _ => settings.atom_resolution,
+    }
+}
+
+/// Extra per-representation multiplier applied on top of `atom_scale`.
+fn representation_atom_scale(settings: &MolSettings) -> f32 {
+    match settings.representation {
+        RepresentationMode::LowResBallsAndLines => settings.low_res_atom_scale,
+        RepresentationMode::BackboneTrace => settings.trace_atom_scale,
+        RepresentationMode::SpaceFilling => settings.cpk_atom_scale,
+        _ => 1.0,
+    }
+}
+
+/// Radius of the drawn sphere for an atom.
+fn atom_display_radius(sym: &str, settings: &MolSettings) -> f32 {
+    covalent_radius_angstrom(sym) * settings.atom_scale * representation_atom_scale(settings)
+}
+
+/// Radius the bond geometry treats each atom's sphere as occupying.  Bonds only
+/// exist in representations where `representation_atom_scale` is 1.0, so this
+/// deliberately omits that factor.
+fn bond_endpoint_sphere_radius(sym: &str, settings: &MolSettings) -> f32 {
+    covalent_radius_angstrom(sym) * settings.atom_scale
+}
+
+/// Cylinder radius for the bond between atoms `i` and `j`.
+fn bond_display_radius(mol: &Molecule, settings: &MolSettings, i: usize, j: usize) -> f32 {
+    let ri = bond_endpoint_sphere_radius(&mol.atoms[i], settings);
+    let rj = bond_endpoint_sphere_radius(&mol.atoms[j], settings);
+    let base = ri.min(rj);
+    if matches!(settings.representation, RepresentationMode::SticksRounded) {
+        settings.stick_radius.clamp(0.01, 1.0)
+    } else {
+        (base * settings.bond_radius_pct).clamp(0.01, base)
+    }
+}
+
+/// Fractions along the i->j axis covered by the visible bond cylinder.
+///
+/// In ball-and-stick the cylinder starts inside atom i's sphere and stops inside
+/// atom j's, overlapping slightly so no seam shows.  Rounded sticks span the
+/// full axis and rely on cap spheres instead.
+fn bond_extent_fracs(
+    mol: &Molecule,
+    settings: &MolSettings,
+    i: usize,
+    j: usize,
+    len: f32,
+) -> (f32, f32) {
+    if matches!(settings.representation, RepresentationMode::SticksRounded) || len <= 1.0e-5 {
+        return (0.0, 1.0);
+    }
+    let radius = bond_display_radius(mol, settings, i, j);
+    let overlap = radius * 0.40; // 40% of bond radius
+    let ri = bond_endpoint_sphere_radius(&mol.atoms[i], settings);
+    let rj = bond_endpoint_sphere_radius(&mol.atoms[j], settings);
+    ((ri - overlap) / len, (len - (rj - overlap)) / len)
+}
+
 fn apply_large_molecule_representation(mol: &Molecule, settings: &mut MolSettings) {
     if mol.atoms.len() <= LARGE_MOLECULE_ATOM_THRESHOLD {
         return;
@@ -464,6 +531,10 @@ pub fn react_to_molecule_changed_mark_dirty(
                 if recenter {
                     auto_fit_camera(&mol.pos, &mut cam);
                 }
+                // Suggest a cheap representation once, when the molecule is loaded.
+                // Doing this inside `rebuild_if_dirty` used to silently undo the
+                // user's choice on every subsequent rebuild.
+                apply_large_molecule_representation(&mol, &mut settings);
                 settings.geometry_dirty = true;
                 settings.bond_topology_dirty = true;
             }
@@ -691,6 +762,91 @@ pub fn update_materials_if_dirty(
     }
 }
 
+/// Re-point `Mesh3d` handles when only sizes/tessellation changed.
+///
+/// Atom scale, atom resolution, bond radius and stick thickness all leave the
+/// entity set untouched — every atom and bond still exists, it just wants a
+/// different cached mesh.  Handling that here instead of via `geometry_dirty`
+/// is what keeps those sliders from despawning and respawning the whole scene
+/// on every frame of a drag.
+pub fn update_meshes_if_dirty(
+    mut settings: ResMut<MolSettings>,
+    mut cache: ResMut<GeometryCache>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mol: Res<Molecule>,
+    mut q_atoms: Query<(&AtomMarker, &mut Mesh3d)>,
+    mut q_bonds: Query<(&mut BondMarker, &mut Mesh3d, &mut Transform), Without<AtomMarker>>,
+) {
+    if !settings.meshes_dirty || settings.geometry_dirty || settings.bond_topology_dirty {
+        return;
+    }
+    settings.meshes_dirty = false;
+
+    let atom_resolution = atom_display_resolution(&settings);
+
+    for (marker, mut mesh) in q_atoms.iter_mut() {
+        let Some(sym) = mol.atoms.get(marker.index) else {
+            settings.geometry_dirty = true;
+            return;
+        };
+        let radius = atom_display_radius(sym, &settings);
+        *mesh = Mesh3d(cached_sphere_mesh(
+            &mut cache,
+            &mut meshes,
+            radius,
+            atom_resolution,
+        ));
+    }
+
+    let n_atoms = mol.atoms.len();
+    for (mut marker, mut mesh, mut tf) in q_bonds.iter_mut() {
+        let (Some(&p0), Some(&p1)) = (mol.pos.get(marker.i), mol.pos.get(marker.j)) else {
+            settings.geometry_dirty = true;
+            return;
+        };
+        if marker.i >= n_atoms || marker.j >= n_atoms {
+            settings.geometry_dirty = true;
+            return;
+        }
+
+        let radius = bond_display_radius(&mol, &settings, marker.i, marker.j);
+        let len = (p1 - p0).length();
+
+        match marker.visual {
+            BondVisual::Uniform { .. } => {
+                *mesh = Mesh3d(cached_cylinder_mesh(&mut cache, &mut meshes, radius, 1.0));
+            }
+            BondVisual::Split { color_atom, .. } => {
+                let (start, end) = bond_extent_fracs(&mol, &settings, marker.i, marker.j, len);
+                let mid = (start + end) * 0.5;
+                // The entity for atom i owns the first half of the span, j the second.
+                let (start_frac, end_frac) = if color_atom == marker.i {
+                    (start, mid)
+                } else {
+                    (mid, end)
+                };
+                marker.visual = BondVisual::Split {
+                    start_frac,
+                    end_frac,
+                    base_len: 1.0,
+                    color_atom,
+                };
+                *mesh = Mesh3d(cached_cylinder_mesh(&mut cache, &mut meshes, radius, 1.0));
+            }
+            BondVisual::Cap { .. } => {
+                *mesh = Mesh3d(cached_sphere_mesh(&mut cache, &mut meshes, radius, 2));
+            }
+        }
+
+        if !update_bond_transform(&mut tf, p0, p1, marker.visual) {
+            // The spheres grew until the visible cylinder vanished.  Shrink it away
+            // rather than forcing a full respawn on every frame of the drag.
+            tf.translation = (p0 + p1) * 0.5;
+            tf.scale = Vec3::splat(1.0e-4);
+        }
+    }
+}
+
 pub fn rebuild_if_dirty(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -704,12 +860,12 @@ pub fn rebuild_if_dirty(
     if !settings.geometry_dirty && !settings.bond_topology_dirty {
         return;
     }
+    let topology_dirty = settings.bond_topology_dirty;
     settings.geometry_dirty = false;
     settings.bond_topology_dirty = false;
     settings.materials_dirty = false;
+    settings.meshes_dirty = false;
     settings.coords_dirty = false;
-
-    apply_large_molecule_representation(&mol, &mut settings);
 
     // Despawn old geometry
     for e in q_atoms.iter() {
@@ -718,11 +874,14 @@ pub fn rebuild_if_dirty(
     for e in q_bonds.iter() {
         commands.entity(e).despawn();
     }
-    mol.atom_entities.clear();
-    mol.bond_entities.clear();
 
-    // Recompute bond connectivity with current settings (topology & lengths)
-    mol.recompute_bonds(settings.bond_thresh_scale, settings.hbond_cutoff);
+    // Recomputing connectivity is the expensive half of a rebuild, so only do it
+    // when something that actually affects topology changed.  A representation
+    // switch or an element-visibility toggle respawns entities over the bond
+    // list we already have.
+    if topology_dirty {
+        mol.recompute_bonds(settings.bond_thresh_scale, settings.hbond_cutoff);
+    }
 
     let (metallic, rough, refl, emissive) = material_params(&settings);
 
@@ -735,13 +894,7 @@ pub fn rebuild_if_dirty(
     ) || (matches!(settings.representation, RepresentationMode::BackboneTrace)
         && settings.trace_show_atoms);
     if draw_atoms {
-        let atom_resolution = match settings.representation {
-            RepresentationMode::BallAndStick => settings.atom_resolution,
-            RepresentationMode::LowResBallsAndLines => settings.low_res_atom_resolution,
-            RepresentationMode::BackboneTrace => settings.low_res_atom_resolution,
-            RepresentationMode::SpaceFilling => settings.cpk_atom_resolution,
-            _ => settings.atom_resolution,
-        };
+        let atom_resolution = atom_display_resolution(&settings);
 
         for i in 0..mol.atoms.len() {
             let sym = &mol.atoms[i];
@@ -751,19 +904,7 @@ pub fn rebuild_if_dirty(
             if !element_visible(sym, &settings) {
                 continue;
             }
-            let scale = if matches!(
-                settings.representation,
-                RepresentationMode::LowResBallsAndLines
-            ) {
-                settings.low_res_atom_scale
-            } else if matches!(settings.representation, RepresentationMode::BackboneTrace) {
-                settings.trace_atom_scale
-            } else if matches!(settings.representation, RepresentationMode::SpaceFilling) {
-                settings.cpk_atom_scale
-            } else {
-                1.0
-            };
-            let r_cov = covalent_radius_angstrom(sym) * settings.atom_scale * scale;
+            let r_cov = atom_display_radius(sym, &settings);
 
             let color = settings
                 .element_colors
@@ -783,16 +924,13 @@ pub fn rebuild_if_dirty(
             );
 
             let pos = mol.pos[i];
-            let ent = commands
-                .spawn((
-                    Mesh3d(sphere_mesh),
-                    MeshMaterial3d(mat),
-                    Transform::from_translation(pos),
-                    AtomMarker { index: i },
-                    RenderLayers::layer(LAYER_MAIN),
-                ))
-                .id();
-            mol.atom_entities.push(ent);
+            commands.spawn((
+                Mesh3d(sphere_mesh),
+                MeshMaterial3d(mat),
+                Transform::from_translation(pos),
+                AtomMarker { index: i },
+                RenderLayers::layer(LAYER_MAIN),
+            ));
         }
     }
 
@@ -838,17 +976,8 @@ pub fn rebuild_if_dirty(
         let dir = p1 - p0;
         let dir_n = dir.normalize();
 
-        // Visual sphere radii (atom spheres)
-        let ri_sphere = covalent_radius_angstrom(&mol.atoms[i]) * settings.atom_scale;
-        let rj_sphere = covalent_radius_angstrom(&mol.atoms[j]) * settings.atom_scale;
-
         // Bond cylinder/capsule radius based on smaller atom radius
-        let base = ri_sphere.min(rj_sphere);
-        let radius = if matches!(settings.representation, RepresentationMode::SticksRounded) {
-            settings.stick_radius.clamp(0.01, 1.0)
-        } else {
-            (base * settings.bond_radius_pct).clamp(0.01, base)
-        };
+        let radius = bond_display_radius(&mol, &settings, i, j);
 
         // Common rotation (align local +Y with bond direction)
         let rot = Quat::from_rotation_arc(Vec3::Y, dir_n);
@@ -876,50 +1005,39 @@ pub fn rebuild_if_dirty(
                     emissive,
                 );
 
-                let ent = commands
-                    .spawn((
-                        Mesh3d(bond_mesh),
-                        MeshMaterial3d(mat),
-                        Transform {
-                            translation: center,
-                            rotation: rot,
-                            scale: Vec3::new(1.0, len_cc, 1.0),
-                            ..default()
-                        },
-                        BondMarker {
-                            i,
-                            j,
-                            visual: BondVisual::Uniform { base_len: 1.0 },
-                        },
-                        RenderLayers::layer(LAYER_MAIN),
-                    ))
-                    .id();
-                mol.bond_entities.push(ent);
+                commands.spawn((
+                    Mesh3d(bond_mesh),
+                    MeshMaterial3d(mat),
+                    Transform {
+                        translation: center,
+                        rotation: rot,
+                        scale: Vec3::new(1.0, len_cc, 1.0),
+                        ..default()
+                    },
+                    BondMarker {
+                        i,
+                        j,
+                        visual: BondVisual::Uniform { base_len: 1.0 },
+                    },
+                    RenderLayers::layer(LAYER_MAIN),
+                ));
             }
 
             // AtomSplit: two segments with a clean joint at the midpoint,
             // optionally extended to overlap for rounded-stick mode.
             BondColorMode::AtomSplit => {
-                let (start, end) =
-                    if matches!(settings.representation, RepresentationMode::SticksRounded) {
-                        (p0, p1)
-                    } else {
-                        let overlap = radius * 0.40; // 40% of bond radius
-                        (
-                            p0 + dir_n * (ri_sphere - overlap),
-                            p1 - dir_n * (rj_sphere - overlap),
-                        )
-                    };
+                let (start_frac, end_frac) = bond_extent_fracs(&mol, &settings, i, j, len_cc);
+                let start = p0 + dir_n * (start_frac * len_cc);
+                let end = p0 + dir_n * (end_frac * len_cc);
 
-                let visible_len = (end - start).length();
+                let visible_len = end_frac - start_frac;
                 if visible_len <= 0.0 {
                     continue;
                 }
+                let visible_len = visible_len * len_cc;
 
                 let half_len = visible_len * 0.5;
 
-                let start_frac = (start - p0).dot(dir_n) / len_cc;
-                let end_frac = (end - p0).dot(dir_n) / len_cc;
                 let mid = (start + end) * 0.5;
                 let c0 = mid - dir_n * (visible_len * 0.25);
                 let c1 = mid + dir_n * (visible_len * 0.25);
@@ -956,89 +1074,77 @@ pub fn rebuild_if_dirty(
                     emissive,
                 );
 
-                let e0 = commands
-                    .spawn((
-                        Mesh3d(mesh_i),
-                        MeshMaterial3d(mat_i.clone()),
-                        Transform {
-                            translation: c0,
-                            rotation: rot,
-                            scale: Vec3::new(1.0, half_len, 1.0),
-                            ..default()
+                commands.spawn((
+                    Mesh3d(mesh_i),
+                    MeshMaterial3d(mat_i.clone()),
+                    Transform {
+                        translation: c0,
+                        rotation: rot,
+                        scale: Vec3::new(1.0, half_len, 1.0),
+                        ..default()
+                    },
+                    BondMarker {
+                        i,
+                        j,
+                        visual: BondVisual::Split {
+                            start_frac,
+                            end_frac: (start_frac + end_frac) * 0.5,
+                            base_len: 1.0,
+                            color_atom: i,
                         },
-                        BondMarker {
-                            i,
-                            j,
-                            visual: BondVisual::Split {
-                                start_frac,
-                                end_frac: (start_frac + end_frac) * 0.5,
-                                base_len: 1.0,
-                                color_atom: i,
-                            },
-                        },
-                        RenderLayers::layer(LAYER_MAIN),
-                    ))
-                    .id();
-                mol.bond_entities.push(e0);
+                    },
+                    RenderLayers::layer(LAYER_MAIN),
+                ));
 
-                let e1 = commands
-                    .spawn((
-                        Mesh3d(mesh_j),
-                        MeshMaterial3d(mat_j.clone()),
-                        Transform {
-                            translation: c1,
-                            rotation: rot,
-                            scale: Vec3::new(1.0, half_len, 1.0),
-                            ..default()
+                commands.spawn((
+                    Mesh3d(mesh_j),
+                    MeshMaterial3d(mat_j.clone()),
+                    Transform {
+                        translation: c1,
+                        rotation: rot,
+                        scale: Vec3::new(1.0, half_len, 1.0),
+                        ..default()
+                    },
+                    BondMarker {
+                        i,
+                        j,
+                        visual: BondVisual::Split {
+                            start_frac: (start_frac + end_frac) * 0.5,
+                            end_frac,
+                            base_len: 1.0,
+                            color_atom: j,
                         },
-                        BondMarker {
-                            i,
-                            j,
-                            visual: BondVisual::Split {
-                                start_frac: (start_frac + end_frac) * 0.5,
-                                end_frac,
-                                base_len: 1.0,
-                                color_atom: j,
-                            },
-                        },
-                        RenderLayers::layer(LAYER_MAIN),
-                    ))
-                    .id();
-                mol.bond_entities.push(e1);
+                    },
+                    RenderLayers::layer(LAYER_MAIN),
+                ));
 
                 if matches!(settings.representation, RepresentationMode::SticksRounded) {
                     let cap_mesh = cached_sphere_mesh(&mut cache, &mut meshes, radius, 2);
                     if i < degree.len() {
-                        let cap_i = commands
-                            .spawn((
-                                Mesh3d(cap_mesh.clone()),
-                                MeshMaterial3d(mat_i.clone()),
-                                Transform::from_translation(p0),
-                                BondMarker {
-                                    i,
-                                    j,
-                                    visual: BondVisual::Cap { atom: 0 },
-                                },
-                                RenderLayers::layer(LAYER_MAIN),
-                            ))
-                            .id();
-                        mol.bond_entities.push(cap_i);
+                        commands.spawn((
+                            Mesh3d(cap_mesh.clone()),
+                            MeshMaterial3d(mat_i.clone()),
+                            Transform::from_translation(p0),
+                            BondMarker {
+                                i,
+                                j,
+                                visual: BondVisual::Cap { atom: 0 },
+                            },
+                            RenderLayers::layer(LAYER_MAIN),
+                        ));
                     }
                     if j < degree.len() {
-                        let cap_j = commands
-                            .spawn((
-                                Mesh3d(cap_mesh.clone()),
-                                MeshMaterial3d(mat_j.clone()),
-                                Transform::from_translation(p1),
-                                BondMarker {
-                                    i,
-                                    j,
-                                    visual: BondVisual::Cap { atom: 1 },
-                                },
-                                RenderLayers::layer(LAYER_MAIN),
-                            ))
-                            .id();
-                        mol.bond_entities.push(cap_j);
+                        commands.spawn((
+                            Mesh3d(cap_mesh.clone()),
+                            MeshMaterial3d(mat_j.clone()),
+                            Transform::from_translation(p1),
+                            BondMarker {
+                                i,
+                                j,
+                                visual: BondVisual::Cap { atom: 1 },
+                            },
+                            RenderLayers::layer(LAYER_MAIN),
+                        ));
                     }
                 }
             }
@@ -1188,11 +1294,25 @@ pub fn update_axis_viewport_on_resize(
     let x = AXIS_VP_MARGIN;
     let y = h.saturating_sub(vp_h + AXIS_VP_MARGIN);
 
-    cam.viewport = Some(Viewport {
+    let wanted = Viewport {
         physical_position: UVec2::new(x, y),
         physical_size: UVec2::new(vp_w, vp_h),
         ..default()
+    };
+
+    // This system runs every frame.  Assigning unconditionally would mark the
+    // axis Camera as changed each frame and force it back through render-world
+    // extraction for nothing.
+    let unchanged = cam.viewport.as_ref().is_some_and(|current| {
+        current.physical_position == wanted.physical_position
+            && current.physical_size == wanted.physical_size
+            && current.depth == wanted.depth
     });
+    if unchanged {
+        return;
+    }
+
+    cam.viewport = Some(wanted);
 }
 
 pub fn sync_axis_camera_to_main(

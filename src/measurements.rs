@@ -1,7 +1,7 @@
 // src/measurements.rs
 use bevy::prelude::*;
 
-use crate::events::{AtomPicked, ToolKind};
+use crate::events::{AtomPicked, MoleculeChangeReason, MoleculeChanged, ToolKind};
 use crate::molecule::{covalent_radius_angstrom, Molecule};
 use crate::settings::MolSettings;
 
@@ -177,6 +177,44 @@ impl Measurements {
     pub fn clear_dihedrals(&mut self) {
         self.dihedrals.clear();
         self.pending_dihedral.clear();
+    }
+
+    /// Drop every measurement and cancel any pick in progress.
+    ///
+    /// Measurements are stored as bare atom indices, so they are only meaningful
+    /// against the structure they were taken on.  Anything that replaces that
+    /// structure must call this — a stale index is worse than no measurement,
+    /// because it silently resolves to a different atom and keeps reporting a
+    /// plausible-looking number.
+    ///
+    /// `next_id` deliberately keeps counting up so a recycled id can never
+    /// collide with UI state still keyed to a deleted row.
+    pub fn reset_all(&mut self) {
+        self.clear();
+        self.clear_angles();
+        self.clear_dihedrals();
+        self.is_active = false;
+        self.angle_active = false;
+        self.dihedral_active = false;
+        self.preview_highlight = None;
+    }
+}
+
+/// Discard measurements when a different structure is loaded.
+///
+/// Keyed on `ParseXyz` rather than on any coordinate change: `SetPos` fires on
+/// every trajectory playback frame, and watching a distance evolve across frames
+/// is the main reason to measure a trajectory at all.
+pub fn clear_measurements_on_structure_load(
+    mut evr: MessageReader<MoleculeChanged>,
+    mut measurements: ResMut<Measurements>,
+) {
+    let structure_replaced = evr
+        .read()
+        .any(|ev| matches!(ev.reason, MoleculeChangeReason::ParseXyz { .. }));
+
+    if structure_replaced {
+        measurements.reset_all();
     }
 }
 
@@ -453,4 +491,102 @@ fn dihedral_degrees(p1: Vec3, p2: Vec3, p3: Vec3, p4: Vec3) -> f32 {
     let y = m1.dot(n2) / (n1_len * n2_len);
 
     y.atan2(x).to_degrees()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::events::{MoleculeChangeReason, MoleculeChanged};
+
+    fn harness() -> App {
+        let mut app = App::new();
+        app.add_message::<MoleculeChanged>()
+            .init_resource::<Measurements>()
+            .add_systems(Update, clear_measurements_on_structure_load);
+        app
+    }
+
+    fn populate(app: &mut App) {
+        let mut m = app.world_mut().resource_mut::<Measurements>();
+        m.new_pair(0, 1, 1.5);
+        m.add_angle(0, 1, 2, 104.5);
+        m.add_dihedral(0, 1, 2, 3, 60.0);
+        m.is_active = true;
+        m.pending = Some(7);
+        m.pending_angle.push(3);
+        m.pending_dihedral.push(4);
+        m.preview_highlight = Some(vec![0, 1]);
+    }
+
+    fn counts(app: &App) -> (usize, usize, usize) {
+        let m = app.world().resource::<Measurements>();
+        (m.pairs.len(), m.angles.len(), m.dihedrals.len())
+    }
+
+    #[test]
+    fn loading_a_structure_clears_every_measurement() {
+        let mut app = harness();
+        populate(&mut app);
+        assert_eq!(counts(&app), (1, 1, 1), "fixture did not populate");
+
+        app.world_mut()
+            .write_message(MoleculeChanged::parse_xyz(true));
+        app.update();
+
+        let m = app.world().resource::<Measurements>();
+        assert_eq!(
+            (m.pairs.len(), m.angles.len(), m.dihedrals.len()),
+            (0, 0, 0),
+            "measurements survived a structure load"
+        );
+    }
+
+    #[test]
+    fn loading_a_structure_also_cancels_in_progress_picking() {
+        let mut app = harness();
+        populate(&mut app);
+
+        app.world_mut()
+            .write_message(MoleculeChanged::parse_xyz(true));
+        app.update();
+
+        let m = app.world().resource::<Measurements>();
+        assert!(!m.is_active && !m.angle_active && !m.dihedral_active);
+        assert_eq!(m.pending, None, "a half-finished pick outlived the load");
+        assert!(m.pending_angle.is_empty());
+        assert!(m.pending_dihedral.is_empty());
+        assert_eq!(m.preview_highlight, None);
+    }
+
+    /// The whole point of measuring a trajectory is watching a value change
+    /// across frames, so per-frame coordinate updates must NOT clear anything.
+    #[test]
+    fn advancing_a_trajectory_frame_preserves_measurements() {
+        let mut app = harness();
+        populate(&mut app);
+
+        for _ in 0..5 {
+            app.world_mut().write_message(MoleculeChanged::set_pos());
+            app.update();
+        }
+
+        assert_eq!(
+            counts(&app),
+            (1, 1, 1),
+            "playback wiped measurements it should have kept"
+        );
+    }
+
+    #[test]
+    fn builder_edits_preserve_measurements() {
+        let mut app = harness();
+        populate(&mut app);
+
+        app.world_mut().write_message(MoleculeChanged {
+            reason: MoleculeChangeReason::BuilderRotate,
+        });
+        app.update();
+
+        assert_eq!(counts(&app), (1, 1, 1));
+    }
 }

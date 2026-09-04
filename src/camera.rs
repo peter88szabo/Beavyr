@@ -52,16 +52,25 @@ pub fn orbit_camera_system(
     mut windows: Query<(&mut Window, &mut CursorOptions)>,
     mut settings: ResMut<crate::settings::MolSettings>,
     egui_wants_input: Res<EguiWantsInput>,
+    panel_regions: Res<crate::ui::UiPanelRegions>,
     export_select_area: Res<crate::export_image::ExportSelectArea>,
 ) {
     let Ok((window, mut cursor_options)) = windows.single_mut() else {
         return;
     };
     // A pointer over any egui panel must never start or continue a viewport
-    // interaction.  `is_using_pointer` alone only becomes true once egui is
-    // already dragging a widget, which allowed the initial press on sliders
-    // and controls to leak through to the orbit camera.
-    let pointer_over_ui = egui_wants_input.wants_any_pointer_input();
+    // interaction.
+    //
+    // `EguiWantsInput` alone is not enough here.  The control panels are built
+    // into a hand-made root `Ui`, so egui's own hover test never learns that
+    // the right-hand strip is occupied and reports the pointer as being over
+    // the 3D view.  It only turns true once a widget is actively being dragged,
+    // which is why pressing a slider was handled but hovering and scrolling a
+    // list was not -- the wheel reached the camera and zoomed the molecule.
+    // `UiPanelRegions` carries the geometry egui cannot supply.
+    let cursor = window.cursor_position();
+    let pointer_over_panel = cursor.is_some_and(|p| panel_regions.covers(p));
+    let pointer_over_ui = egui_wants_input.wants_any_pointer_input() || pointer_over_panel;
     if pointer_over_ui {
         cam.rotating = false;
         cam.panning = false;
@@ -98,6 +107,12 @@ pub fn orbit_camera_system(
         cam.panning = false;
     }
     if !buttons.pressed(MouseButton::Left) && !buttons.pressed(MouseButton::Right) {
+        // Derive the idle state from the buttons themselves rather than relying
+        // on a release message.  Egui's input absorbing can clear a release that
+        // happens over a panel, which would otherwise leave the camera stuck in
+        // rotate or pan mode.
+        cam.rotating = false;
+        cam.panning = false;
         cursor_options.grab_mode = CursorGrabMode::None;
         cursor_options.visible = true;
     }
@@ -147,11 +162,19 @@ pub fn orbit_camera_system(
         cam.target += key_delta;
     }
 
-    // zoom
-    if !pointer_over_ui {
-        for ev in scroll_evr.read() {
-            cam.radius = (cam.radius - ev.y * cam.zoom_sensitivity).clamp(2.0, 200.0);
-        }
+    // Zoom.
+    //
+    // Always drain the reader, even when the pointer is over a panel.  Skipping
+    // the read leaves the messages queued, and Bevy keeps them alive for two
+    // frames, so a scroll spent on an egui list would still reach the camera a
+    // frame later.  Egui's input absorbing normally clears these first; draining
+    // here keeps the behaviour correct if that is ever turned off.
+    let mut scroll_delta = 0.0;
+    for ev in scroll_evr.read() {
+        scroll_delta += ev.y;
+    }
+    if !pointer_over_ui && scroll_delta != 0.0 {
+        cam.radius = (cam.radius - scroll_delta * cam.zoom_sensitivity).clamp(2.0, 200.0);
     }
 
     let final_eye = cam.target + (cam.orientation * Vec3::Z) * cam.radius;

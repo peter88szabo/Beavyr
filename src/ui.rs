@@ -42,6 +42,36 @@ const ELEMENT_FILTER_F_BLOCK: [&str; 30] = [
     "Th", "Pa", "U", "Np", "Pu", "Am", "Cm", "Bk", "Cf", "Es", "Fm", "Md", "No", "Lr",
 ];
 
+/// Screen regions covered by the control panels, in egui points.
+///
+/// The panels are drawn into a hand-built root `egui::Ui` rather than through
+/// the `Context`, so `Context::is_pointer_over_egui` cannot see them: for a
+/// background layer it only tests the pointer against `root_ui_available_rect`,
+/// which these panels never shrink.  Everything derived from `EguiWantsInput`
+/// is therefore blind to a pointer hovering the panel, which let scroll wheel
+/// input reach the orbit camera while scrolling a list.  Publishing the
+/// geometry here gives the camera a test that does not depend on egui's
+/// bookkeeping.
+#[derive(Resource, Default, Clone, Copy)]
+pub struct UiPanelRegions {
+    /// The right-hand control panel.
+    pub controls: Option<Rect>,
+    /// Whatever viewport space is left once every panel has been laid out.
+    pub free_viewport: Option<Rect>,
+}
+
+impl UiPanelRegions {
+    /// True when `point` (egui points) is over panel chrome rather than the 3D view.
+    pub fn covers(&self, point: Vec2) -> bool {
+        if self.controls.is_some_and(|r| r.contains(point)) {
+            return true;
+        }
+        // Also treat anything outside the leftover viewport as covered, which
+        // catches panels that do not report a rect of their own.
+        self.free_viewport.is_some_and(|r| !r.contains(point))
+    }
+}
+
 #[derive(Resource, Clone)]
 pub struct XyzBuffer {
     pub text: String,
@@ -97,19 +127,29 @@ pub fn ui_panel(
 
     // measurements panel
     mut measurements: ResMut<Measurements>,
-    diagnostics_cache: Res<diagnostics::DiagnosticsCache>,
+    mut diagnostics_cache: ResMut<diagnostics::DiagnosticsCache>,
     // trajectory
     mut traj: ResMut<trajectory::TrajectoryState>,
+    // `ui_panel` sits at Bevy's 16-parameter system limit, so late additions
+    // ride along in this tuple rather than becoming parameters of their own.
     builder_resources: (
         ResMut<EditorRotateState>,
         ResMut<ZMatrixBuilderState>,
         Local<bool>,
+        ResMut<crate::orbitals::OrbitalState>,
+        ResMut<UiPanelRegions>,
     ),
 ) {
     // bevy_egui 0.41: ctx_mut() returns Result; if it fails, skip this frame
     let ctx = contexts.ctx_mut().expect("missing primary egui context");
     let (mut export_settings, mut export_counter, mut export_select_area) = export_resources;
-    let (mut editor_rotate_state, mut zmat_state, mut style_initialized) = builder_resources;
+    let (
+        mut editor_rotate_state,
+        mut zmat_state,
+        mut style_initialized,
+        mut orbital_state,
+        mut panel_regions,
+    ) = builder_resources;
     if !*style_initialized {
         ctx.style_mut_of(ctx.theme(), |style| {
             style.text_styles = [
@@ -239,7 +279,7 @@ pub fn ui_panel(
             .layer_id(egui::LayerId::background())
             .max_rect(ctx.viewport_rect()),
     );
-    egui::Panel::right("controls")
+    let controls_response = egui::Panel::right("controls")
         .default_size(320.0)
         .min_size(240.0)
         .max_size(520.0)
@@ -456,6 +496,14 @@ pub fn ui_panel(
                                         true,
                                         Some(&mut cam),
                                     );
+                                    // `apply_current_frame` only reports a
+                                    // coordinate update — it runs for every
+                                    // playback frame too.  Loading a file
+                                    // replaces the structure, so say so, or
+                                    // stale measurements carry over.
+                                    // `false`: the call above already centred
+                                    // the camera.
+                                    ev_changed.write(MoleculeChanged::parse_xyz(false));
                                 }
                                 Err(_) => {}
                             }
@@ -703,11 +751,29 @@ pub fn ui_panel(
             });
 
             // ===========================
+            // 2b) Surface tools
+            // ===========================
+            ui.add_space(8.0);
+            ui.separator();
+            ui.collapsing("Surface Tools", |ui| {
+                crate::orbitals::ui::orbital_panel(
+                    ui,
+                    &mut orbital_state,
+                    &mut mol,
+                    &mut settings,
+                    &mut ev_changed,
+                );
+            });
+
+            // ===========================
             // 3) Diagnostics
             // ===========================
             ui.add_space(8.0);
             ui.separator();
-            ui.collapsing("Diagnostics", |ui| {
+            // The analysis behind this report is O(n) with neighbour queries but
+            // still far too heavy to run per frame during playback, so tell the
+            // refresh system whether anyone is actually looking at it.
+            let diagnostics_open = ui.collapsing("Diagnostics", |ui| {
                 let report = &diagnostics_cache.report;
                 let warnings = report.warning_count();
                 let info = report.info_count();
@@ -745,6 +811,7 @@ pub fn ui_panel(
                     ui.weak("Diagnostics use perceived single-bond connectivity; multiple bonds and formal charges may need chemical review.");
                 }
             });
+            diagnostics_cache.wanted = diagnostics_open.openness > 0.0;
 
             // ===========================
             // 4) Appearance
@@ -753,7 +820,11 @@ pub fn ui_panel(
             ui.separator();
             ui.collapsing("Appearance", |ui| {
                 ui.collapsing("Representation", |ui| {
+                    // `changed` = the entity set must be rebuilt (mode switch, atom
+                    // visibility).  `mesh_changed` = same entities, different mesh
+                    // handles, which is dramatically cheaper.
                     let mut changed = false;
+                    let mut mesh_changed = false;
 
                     if mol.atoms.len() > 1000 {
                         ui.weak("Large molecule: heavy mesh representations auto-switch to low-res.");
@@ -812,7 +883,7 @@ pub fn ui_panel(
                             )
                             .changed()
                         {
-                            changed = true;
+                            mesh_changed = true;
                         }
                         if ui
                             .add(
@@ -821,7 +892,7 @@ pub fn ui_panel(
                             )
                             .changed()
                         {
-                            changed = true;
+                            mesh_changed = true;
                         }
                     }
 
@@ -834,7 +905,7 @@ pub fn ui_panel(
                             )
                             .changed()
                         {
-                            changed = true;
+                            mesh_changed = true;
                         }
                         if ui
                             .add(
@@ -843,7 +914,7 @@ pub fn ui_panel(
                             )
                             .changed()
                         {
-                            changed = true;
+                            mesh_changed = true;
                         }
                     }
 
@@ -856,7 +927,7 @@ pub fn ui_panel(
                             )
                             .changed()
                         {
-                            changed = true;
+                            mesh_changed = true;
                         }
                     }
 
@@ -889,7 +960,7 @@ pub fn ui_panel(
                                 )
                                 .changed()
                             {
-                                changed = true;
+                                mesh_changed = true;
                             }
                             if ui
                                 .add(
@@ -898,13 +969,16 @@ pub fn ui_panel(
                                 )
                                 .changed()
                             {
-                                changed = true;
+                                mesh_changed = true;
                             }
                         }
                     }
 
                     if changed {
                         settings.geometry_dirty = true;
+                    }
+                    if mesh_changed {
+                        settings.meshes_dirty = true;
                     }
                 });
 
@@ -1017,14 +1091,16 @@ pub fn ui_panel(
                 ui.add_space(8.0);
 
                 ui.collapsing("Atom & Bond Scaling", |ui| {
-                    let mut geometry_changed = false;
+                    // Sizes only re-point mesh handles; the cutoff sliders are the
+                    // only ones here that change connectivity.
+                    let mut mesh_changed = false;
                     let mut bond_topology_changed = false;
                     let mut hbond_topology_changed = false;
 
-                    geometry_changed |= ui
+                    mesh_changed |= ui
                         .add(egui::Slider::new(&mut settings.atom_scale, 0.1..=3.0).text("Atom scale"))
                         .changed();
-                    geometry_changed |= ui
+                    mesh_changed |= ui
                         .add(egui::Slider::new(&mut settings.atom_resolution, 0..=10).text("Atom resolution"))
                         .changed();
 
@@ -1032,7 +1108,7 @@ pub fn ui_panel(
                     ui.separator();
                     ui.add_space(8.0);
 
-                    geometry_changed |= ui
+                    mesh_changed |= ui
                         .add(
                             egui::Slider::new(&mut settings.bond_radius_pct, 0.05..=1.0)
                                 .text("Bond radius (% of smaller atom)"),
@@ -1071,14 +1147,18 @@ pub fn ui_panel(
                             .text("H-bond dash line scale"),
                     );
 
-                    if bond_topology_changed || hbond_topology_changed {
+                    if bond_topology_changed {
+                        // `rebuild_if_dirty` recomputes connectivity itself; doing it
+                        // here as well meant two full bond passes in the same frame.
+                        settings.geometry_dirty = true;
+                        settings.bond_topology_dirty = true;
+                    } else if hbond_topology_changed {
+                        // H-bonds are drawn straight from `mol.hydrogen_bonds` as
+                        // gizmos, so no entity rebuild is needed — just the data.
                         mol.recompute_bonds(settings.bond_thresh_scale, settings.hbond_cutoff);
                     }
-                    if geometry_changed || bond_topology_changed {
-                        settings.geometry_dirty = true;
-                    }
-                    if bond_topology_changed {
-                        settings.bond_topology_dirty = true;
+                    if mesh_changed {
+                        settings.meshes_dirty = true;
                     }
                 });
 
@@ -1419,6 +1499,12 @@ pub fn ui_panel(
         &mut settings,
     );
 
+    // Record what the panels ended up covering, now that they have all been
+    // laid out, so the camera can tell panel from viewport next frame.
+    let to_rect = |r: egui::Rect| Rect::new(r.min.x, r.min.y, r.max.x, r.max.y);
+    panel_regions.controls = Some(to_rect(controls_response.response.rect));
+    panel_regions.free_viewport = Some(to_rect(viewport_ui.available_rect_before_wrap()));
+
     // -------------------------
     // Overlay: atom labels (type/index)
     // -------------------------
@@ -1442,35 +1528,23 @@ pub fn ui_panel(
                     let painter = ui.painter();
                     let scale = win.scale_factor() as f32;
 
-                    for (i, (&p_world, sym)) in mol.pos.iter().zip(mol.atoms.iter()).enumerate() {
+                    // Pre-laid-out galleys from `refresh_atom_label_cache`.  Laying
+                    // text out per atom per frame here was the actual cost of having
+                    // labels on for a large structure.
+                    let galleys = match (show_type, show_index) {
+                        (true, true) => &xyz_buf.type_index_label_galleys,
+                        (true, false) => &xyz_buf.type_label_galleys,
+                        (false, true) => &xyz_buf.index_label_galleys,
+                        (false, false) => return,
+                    };
+
+                    for (i, &p_world) in mol.pos.iter().enumerate() {
+                        let Some(galley) = galleys.get(i) else {
+                            continue;
+                        };
                         if let Ok(screen_px) = cam_comp.world_to_viewport(cam_xform, p_world) {
                             let pos = egui::pos2(screen_px.x / scale, screen_px.y / scale);
-
-                            let mut text = String::new();
-                            if show_type {
-                                text.push_str(sym);
-                            }
-                            if show_index {
-                                if !text.is_empty() {
-                                    text.push('(');
-                                    text.push_str(&(i + 1).to_string());
-                                    text.push(')');
-                                } else {
-                                    text.push_str(&(i + 1).to_string());
-                                }
-                            }
-                            if text.is_empty() {
-                                continue;
-                            }
-
-                            let galley = ctx.fonts_mut(|f| {
-                                f.layout_no_wrap(
-                                    text.clone(),
-                                    egui::FontId::proportional(13.0),
-                                    egui::Color32::WHITE,
-                                )
-                            });
-                            painter.galley(pos, galley, egui::Color32::WHITE);
+                            painter.galley(pos, galley.clone(), egui::Color32::WHITE);
                         }
                     }
                 });

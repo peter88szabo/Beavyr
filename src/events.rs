@@ -14,6 +14,18 @@ pub struct AtomPicked {
     pub tool: ToolKind,
 }
 
+/// Emitted for every deliberate left-click in the 3D viewport, whether or not
+/// any tool is armed. `hit` is the atom under the cursor, or `None` for a click
+/// on empty background -- which is what clears the current selection.
+///
+/// Unlike `AtomPicked`, this reports a *click*: a press and release with the
+/// pointer essentially stationary. A press that turns into a camera orbit is
+/// never reported, so rotating the view cannot change the selection.
+#[derive(Message, Debug, Clone, Copy)]
+pub struct ViewportClicked {
+    pub hit: Option<usize>,
+}
+
 /// Reasons why the molecule changed (useful for UI/state integration).
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

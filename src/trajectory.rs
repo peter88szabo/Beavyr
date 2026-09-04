@@ -252,8 +252,10 @@ pub fn apply_current_frame(
     }
 
     if topology_changed || bond_topology_changed {
+        // Connectivity was already recomputed above, so ask only for a respawn.
+        // Setting `bond_topology_dirty` here would make `rebuild_if_dirty` run a
+        // second full bond pass in the same frame — once per frame of playback.
         settings.geometry_dirty = true;
-        settings.bond_topology_dirty = true;
     } else {
         settings.coords_dirty = true;
     }

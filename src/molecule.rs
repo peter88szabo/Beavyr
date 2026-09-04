@@ -15,8 +15,6 @@ pub struct Molecule {
     pub pos: Vec<Vec3>,                           // positions in Å
     pub bonds: Vec<(usize, usize, f32)>,          // (i, j, distance in Å)
     pub hydrogen_bonds: Vec<(usize, usize, f32)>, // (i, j, distance in Å)
-    pub atom_entities: Vec<Entity>,
-    pub bond_entities: Vec<Entity>,
 }
 
 impl Molecule {
@@ -33,8 +31,6 @@ impl Molecule {
             pos,
             bonds: vec![],
             hydrogen_bonds: vec![],
-            atom_entities: vec![],
-            bond_entities: vec![],
         };
         mol.recompute_bonds(2.0, 3.0);
         mol
@@ -85,7 +81,25 @@ impl Molecule {
             bonded_to[j].push(i);
         }
 
-        // 2) H-bonds (distance-only), store (H, A, H···A) and SKIP acceptors that are donor-neighbors
+        // 2) H-bonds (distance-only), store (H, A, H···A) and SKIP acceptors that are donor-neighbors.
+        //
+        // Only acceptor-capable heavy atoms can ever match, so the grid is built over
+        // that subset alone.  Querying it per hydrogen turns the old O(n²) sweep into
+        // O(n · neighbours), which is what keeps trajectory playback smooth on large
+        // systems (the whole bond graph is recomputed per frame when `fixed_bonds`
+        // is off).
+        let acceptors: Vec<usize> = (0..n)
+            .filter(|&a| self.atoms[a] != "H" && is_acceptor(&self.atoms[a]))
+            .collect();
+        if acceptors.is_empty() {
+            return;
+        }
+
+        let acceptor_grid = SpatialGrid::build(acceptors.iter().copied(), &self.pos, ha_cut);
+
+        // Reused across hydrogens so the per-atom query allocates nothing.
+        let mut candidates: Vec<usize> = Vec::new();
+
         for h in 0..n {
             if self.atoms[h] != "H" {
                 continue;
@@ -103,14 +117,14 @@ impl Molecule {
                 continue;
             };
 
-            for a in 0..n {
+            let p_h = self.pos[h];
+            let p_d = self.pos[d];
+
+            candidates.clear();
+            acceptor_grid.collect_neighbors(p_h, &mut candidates);
+
+            for &a in &candidates {
                 if a == h || a == d {
-                    continue;
-                }
-                if self.atoms[a] == "H" {
-                    continue;
-                }
-                if !is_acceptor(&self.atoms[a]) {
                     continue;
                 }
 
@@ -120,27 +134,18 @@ impl Molecule {
                 }
 
                 // distance checks
-                let ha = self.pos[h].distance(self.pos[a]); // H···A
+                let ha = p_h.distance(self.pos[a]); // H···A
                 if ha > ha_cut {
                     continue;
                 }
-                let da = self.pos[d].distance(self.pos[a]); // D···A
+                let da = p_d.distance(self.pos[a]); // D···A
                 if da > da_cut {
                     continue;
                 }
 
-                // record H→A (avoid duplicates; keep shortest H···A)
-                if let Some(ex) = self
-                    .hydrogen_bonds
-                    .iter_mut()
-                    .find(|(hi, ai, _)| *hi == h && *ai == a)
-                {
-                    if ha < ex.2 {
-                        ex.2 = ha;
-                    }
-                } else {
-                    self.hydrogen_bonds.push((h, a, ha));
-                }
+                // Each acceptor lives in exactly one cell and the 27 queried cells are
+                // distinct, so a given (h, a) pair is produced at most once.
+                self.hydrogen_bonds.push((h, a, ha));
             }
         }
     }
@@ -165,30 +170,19 @@ impl Molecule {
             .fold(0.0_f32, f32::max);
         let cell_size = (max_radius * 2.0 * thresh_scale).max(0.5);
 
-        let mut cells: HashMap<(i32, i32, i32), Vec<usize>> = HashMap::new();
-        for (i, &p) in self.pos.iter().enumerate() {
-            cells.entry(grid_cell(p, cell_size)).or_default().push(i);
-        }
+        let grid = SpatialGrid::build(0..n, &self.pos, cell_size);
 
-        for (&cell, indices) in &cells {
-            for dx in -1..=1 {
-                for dy in -1..=1 {
-                    for dz in -1..=1 {
-                        let neighbor_cell = (cell.0 + dx, cell.1 + dy, cell.2 + dz);
-                        let Some(other_indices) = cells.get(&neighbor_cell) else {
-                            continue;
-                        };
-
-                        for &i in indices {
-                            for &j in other_indices {
-                                if j <= i {
-                                    continue;
-                                }
-                                self.push_bond_if_close(i, j, thresh_scale);
-                            }
-                        }
-                    }
+        let mut candidates: Vec<usize> = Vec::new();
+        for i in 0..n {
+            let p = self.pos[i];
+            candidates.clear();
+            grid.collect_neighbors(p, &mut candidates);
+            for &j in &candidates {
+                // Visit each unordered pair once.
+                if j <= i {
+                    continue;
                 }
+                self.push_bond_if_close(i, j, thresh_scale);
             }
         }
     }
@@ -200,6 +194,43 @@ impl Molecule {
         let d = self.pos[i].distance(self.pos[j]);
         if d > 0.01 && d <= cutoff {
             self.bonds.push((i, j, d));
+        }
+    }
+}
+
+/// Uniform spatial hash over a subset of atom positions.
+///
+/// `cell_size` must be >= the query radius, so that every point within that
+/// radius of a query position lands in one of the 27 cells around it.
+pub struct SpatialGrid {
+    cell_size: f32,
+    cells: HashMap<(i32, i32, i32), Vec<usize>>,
+}
+
+impl SpatialGrid {
+    pub fn build(indices: impl Iterator<Item = usize>, pos: &[Vec3], cell_size: f32) -> Self {
+        let cell_size = cell_size.max(0.5);
+        let mut cells: HashMap<(i32, i32, i32), Vec<usize>> = HashMap::new();
+        for i in indices {
+            if let Some(&p) = pos.get(i) {
+                cells.entry(grid_cell(p, cell_size)).or_default().push(i);
+            }
+        }
+        Self { cell_size, cells }
+    }
+
+    /// Append every indexed point in the 27 cells surrounding `p` into `out`.
+    /// `out` is caller-owned so the query allocates nothing in a hot loop.
+    pub fn collect_neighbors(&self, p: Vec3, out: &mut Vec<usize>) {
+        let (cx, cy, cz) = grid_cell(p, self.cell_size);
+        for dx in -1..=1 {
+            for dy in -1..=1 {
+                for dz in -1..=1 {
+                    if let Some(bucket) = self.cells.get(&(cx + dx, cy + dy, cz + dz)) {
+                        out.extend_from_slice(bucket);
+                    }
+                }
+            }
         }
     }
 }
@@ -416,5 +447,191 @@ pub fn covalent_radius_angstrom(sym: &str) -> f32 {
         "No" => 1.76,
         "Lr" => 1.61,
         _ => 0.77,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Deterministic LCG so the fixtures are reproducible without a rand dep.
+    struct Lcg(u64);
+    impl Lcg {
+        fn next_f32(&mut self) -> f32 {
+            self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1);
+            ((self.0 >> 33) as f32) / ((1u64 << 31) as f32)
+        }
+    }
+
+    fn fixture(n: usize, box_size: f32, seed: u64) -> (Vec<String>, Vec<Vec3>) {
+        let symbols = ["H", "H", "O", "N", "C", "S", "Cl"];
+        let mut rng = Lcg(seed);
+        let mut atoms = Vec::with_capacity(n);
+        let mut pos = Vec::with_capacity(n);
+        for i in 0..n {
+            atoms.push(symbols[i % symbols.len()].to_string());
+            pos.push(Vec3::new(
+                rng.next_f32() * box_size,
+                rng.next_f32() * box_size,
+                rng.next_f32() * box_size,
+            ));
+        }
+        (atoms, pos)
+    }
+
+    /// Brute-force reference for covalent bonds.
+    fn covalent_reference(
+        atoms: &[String],
+        pos: &[Vec3],
+        thresh_scale: f32,
+    ) -> Vec<(usize, usize)> {
+        let n = atoms.len();
+        let mut out = Vec::new();
+        for i in 0..n {
+            for j in (i + 1)..n {
+                let cutoff = (covalent_radius_angstrom(&atoms[i])
+                    + covalent_radius_angstrom(&atoms[j]))
+                    * thresh_scale;
+                let d = pos[i].distance(pos[j]);
+                if d > 0.01 && d <= cutoff {
+                    out.push((i, j));
+                }
+            }
+        }
+        out.sort_unstable();
+        out
+    }
+
+    /// Brute-force reference for hydrogen bonds, mirroring the pre-grid logic.
+    fn hbond_reference(
+        atoms: &[String],
+        pos: &[Vec3],
+        bonds: &[(usize, usize, f32)],
+        hbond_cutoff: f32,
+    ) -> Vec<(usize, usize)> {
+        let is_donor = |s: &str| matches!(s, "O" | "N" | "S" | "F" | "P");
+        let is_acceptor = |s: &str| matches!(s, "O" | "N" | "S" | "F" | "Cl" | "Br" | "I" | "P");
+        let ha_cut = hbond_cutoff.max(1.2);
+        let da_cut = (hbond_cutoff + 1.0).min(4.0);
+
+        let n = atoms.len();
+        let mut bonded_to: Vec<Vec<usize>> = vec![Vec::new(); n];
+        for &(i, j, _) in bonds {
+            bonded_to[i].push(j);
+            bonded_to[j].push(i);
+        }
+
+        let mut out = Vec::new();
+        for h in 0..n {
+            if atoms[h] != "H" {
+                continue;
+            }
+            let Some(&d) = bonded_to[h]
+                .iter()
+                .find(|&&nb| atoms[nb] != "H" && is_donor(&atoms[nb]))
+            else {
+                continue;
+            };
+            for a in 0..n {
+                if a == h || a == d || atoms[a] == "H" || !is_acceptor(&atoms[a]) {
+                    continue;
+                }
+                if bonded_to[d].contains(&a) {
+                    continue;
+                }
+                if pos[h].distance(pos[a]) > ha_cut {
+                    continue;
+                }
+                if pos[d].distance(pos[a]) > da_cut {
+                    continue;
+                }
+                out.push((h, a));
+            }
+        }
+        out.sort_unstable();
+        out
+    }
+
+    fn build(atoms: Vec<String>, pos: Vec<Vec3>) -> Molecule {
+        Molecule {
+            atoms,
+            pos,
+            bonds: vec![],
+            hydrogen_bonds: vec![],
+        }
+    }
+
+    #[test]
+    fn covalent_grid_matches_brute_force_above_threshold() {
+        // 400 atoms forces the spatial-grid path (threshold is 256).
+        let (atoms, pos) = fixture(400, 14.0, 0x5EED);
+        let thresh = 1.2;
+        let expected = covalent_reference(&atoms, &pos, thresh);
+
+        let mut mol = build(atoms, pos);
+        mol.recompute_bonds(thresh, 2.5);
+
+        let mut got: Vec<(usize, usize)> = mol.bonds.iter().map(|&(i, j, _)| (i, j)).collect();
+        got.sort_unstable();
+
+        assert!(!expected.is_empty(), "fixture produced no bonds to compare");
+        assert_eq!(got, expected);
+    }
+
+    #[test]
+    fn covalent_bonds_are_not_duplicated() {
+        let (atoms, pos) = fixture(400, 14.0, 0xC0FFEE);
+        let mut mol = build(atoms, pos);
+        mol.recompute_bonds(1.2, 2.5);
+
+        let mut pairs: Vec<(usize, usize)> = mol.bonds.iter().map(|&(i, j, _)| (i, j)).collect();
+        let total = pairs.len();
+        pairs.sort_unstable();
+        pairs.dedup();
+        assert_eq!(total, pairs.len(), "grid emitted duplicate bonds");
+    }
+
+    #[test]
+    fn hbond_grid_matches_brute_force() {
+        for &(n, box_size, seed) in &[(120usize, 9.0f32, 1u64), (400, 14.0, 2), (700, 17.0, 3)] {
+            let (atoms, pos) = fixture(n, box_size, seed);
+            let cutoff = 2.5;
+
+            let mut mol = build(atoms.clone(), pos.clone());
+            mol.recompute_bonds(1.2, cutoff);
+
+            let expected = hbond_reference(&atoms, &pos, &mol.bonds, cutoff);
+            let mut got: Vec<(usize, usize)> =
+                mol.hydrogen_bonds.iter().map(|&(h, a, _)| (h, a)).collect();
+            got.sort_unstable();
+
+            assert_eq!(got, expected, "mismatch for n={n}");
+        }
+    }
+
+    #[test]
+    fn hbond_grid_finds_a_known_water_dimer_contact() {
+        let atoms: Vec<String> = ["O", "H", "H", "O", "H", "H"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let pos = vec![
+            // Donor water: one O-H points straight down at the acceptor.
+            Vec3::new(0.000, 0.000, 0.000),
+            Vec3::new(0.000, -0.960, 0.000), // donor H, 1.94 Å from the acceptor O
+            Vec3::new(0.930, 0.240, 0.000),
+            // Acceptor water, 2.90 Å below the donor O.
+            Vec3::new(0.000, -2.900, 0.000),
+            Vec3::new(0.500, -3.400, 0.700),
+            Vec3::new(-0.500, -3.400, -0.700),
+        ];
+        let mut mol = build(atoms, pos);
+        mol.recompute_bonds(1.2, 2.5);
+
+        assert!(
+            mol.hydrogen_bonds.iter().any(|&(h, a, _)| h == 1 && a == 3),
+            "expected an H···O contact into the second water, got {:?}",
+            mol.hydrogen_bonds
+        );
     }
 }

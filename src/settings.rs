@@ -109,8 +109,20 @@ pub struct MolSettings {
     pub hbond_gap_scale: f32,
     pub hbond_line_scale: f32,
 
+    // ---- Refresh tiers, cheapest last-resort first.
+    //
+    // Each flag names the *smallest* amount of work that will make the view
+    // correct again.  Setting a heavier flag than needed is what made slider
+    // drags rebuild the whole scene every frame, so pick the narrowest one:
+    //
+    //   coords_dirty         -> only entity Transforms move
+    //   materials_dirty      -> only MeshMaterial3d handles are re-pointed
+    //   meshes_dirty         -> only Mesh3d handles (and bond extents) change
+    //   geometry_dirty       -> the entity set itself must be respawned
+    //   bond_topology_dirty  -> the bond list must be recomputed, then respawned
     pub geometry_dirty: bool,
     pub materials_dirty: bool,
+    pub meshes_dirty: bool,
     pub lighting_dirty: bool,
     pub bond_topology_dirty: bool,
     pub coords_dirty: bool,
@@ -177,6 +189,7 @@ impl Default for MolSettings {
 
             geometry_dirty: true,
             materials_dirty: false,
+            meshes_dirty: false,
             lighting_dirty: false,
             bond_topology_dirty: true,
             coords_dirty: false,

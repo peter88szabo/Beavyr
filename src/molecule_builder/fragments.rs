@@ -77,10 +77,16 @@ pub const FRAG_CYCLOPENTANE: &str = r#"
 "#;
 
 /// Source: -NH2.xyz
+/// Corrected against Molden's NH2 fragment (src/xwin.c): N-H = 1.010 A
+/// (was 1.030) and H-N-H = 120.0 deg (was 109.47 deg, a tetrahedral angle
+/// that does not match Molden's planar-ish amine model). This fragment has
+/// only three atoms, so there is no dihedral involved -- angle alone fixes
+/// it, with no risk of the dihedral-convention mismatch noted below for
+/// -CH3.
 pub const FRAG_NH2: &str = r#"
  N     0.000000     0.000000     0.000000
- H     0.000000     0.000000     1.030000
- H     0.971095     0.000000    -0.343330
+ H     1.010000     0.000000     0.000000
+ H    -0.505000     0.874686     0.000000
 "#;
 
 /// Source: -NO2.xyz
@@ -141,11 +147,48 @@ pub const FRAG_PYRROLE: &str = r#"
 "#;
 
 /// Source: CH3.xyz
+/// C-H rescaled from 1.070 A to Molden's value (its CH4 fragment uses 1.089 A
+/// for every sp3 C-H bond) by uniformly scaling the existing vectors from the
+/// connector. That preserves the tetrahedral angles exactly, which a fresh
+/// Z-matrix reconstruction from Molden's raw dihedral values does not: doing
+/// that literally (matching Molden's CH4 bond/angle/dihedral numbers through
+/// Beavyr's own zmat_to_xyz) put two hydrogens 56 degrees apart instead of
+/// the required 109.47 degrees, evidently because Molden's own internal
+/// Z-matrix-to-Cartesian conversion uses a different dihedral sign/phase
+/// convention than Beavyr's. Scaling sidesteps that mismatch entirely: it
+/// never touches an angle or a dihedral, only a distance from the origin.
 pub const FRAG_CH3: &str = r#"
  C     0.000000     0.000000     0.000000
- H     0.000000     0.000000     1.070000
- H     1.008807     0.000000    -0.356663
- H    -0.504403    -0.873651    -0.356667
+ H     0.000000     0.000000     1.089000
+ H     1.026719     0.000000    -0.363001
+ H    -0.513360    -0.889168    -0.363003
+"#;
+
+/// Source: Molden's CL fragment (src/xwin.c) -- a single terminal chlorine.
+pub const FRAG_CL: &str = r#"
+ Cl    0.000000     0.000000     0.000000
+"#;
+
+/// Source: Molden's BR fragment (src/xwin.c) -- a single terminal bromine.
+pub const FRAG_BR: &str = r#"
+ Br    0.000000     0.000000     0.000000
+"#;
+
+/// Source: Molden's I fragment (src/xwin.c) -- a single terminal iodine.
+pub const FRAG_I: &str = r#"
+ I     0.000000     0.000000     0.000000
+"#;
+
+/// Source: Molden's SH fragment (src/xwin.c), with one correction.
+/// Molden's own array gives S-H = 0.947 A, which is the O-H bond length
+/// (and physically implausible for S-H: real thiol S-H bonds are close to
+/// 1.34 A; H2S itself is 1.336 A). That value looks like it was copied from
+/// the OH fragment rather than measured for SH, so the standard literature
+/// S-H bond length is used here instead. This fragment has only two atoms,
+/// so -- like -OH -- there is no angle or dihedral to get wrong.
+pub const FRAG_SH: &str = r#"
+ S     0.000000     0.000000     0.000000
+ H     1.336000     0.000000     0.000000
 "#;
 
 pub const FRAGMENTS: &[FragmentDef] = &[
@@ -204,5 +247,21 @@ pub const FRAGMENTS: &[FragmentDef] = &[
     FragmentDef {
         name: "-CycloHexane",
         xyz: FRAG_CYCLOHEXANE,
+    },
+    FragmentDef {
+        name: "-Cl",
+        xyz: FRAG_CL,
+    },
+    FragmentDef {
+        name: "-Br",
+        xyz: FRAG_BR,
+    },
+    FragmentDef {
+        name: "-I",
+        xyz: FRAG_I,
+    },
+    FragmentDef {
+        name: "-SH",
+        xyz: FRAG_SH,
     },
 ];

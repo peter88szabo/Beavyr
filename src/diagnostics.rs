@@ -1,6 +1,7 @@
 use bevy::prelude::*;
+use std::collections::HashSet;
 
-use crate::molecule::{covalent_radius_angstrom, Molecule};
+use crate::molecule::{covalent_radius_angstrom, Molecule, SpatialGrid};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DiagnosticSeverity {
@@ -40,18 +41,32 @@ impl DiagnosticsReport {
 #[derive(Resource, Default)]
 pub struct DiagnosticsCache {
     pub report: DiagnosticsReport,
+    /// Set by the UI while the Diagnostics panel is expanded.  The analysis is
+    /// far too expensive to run per frame during trajectory playback for a
+    /// panel nobody is looking at.
+    pub wanted: bool,
 }
 
 /// Keep the expensive diagnostics pass out of the egui frame loop.
+///
+/// Runs only while the Diagnostics panel is open, and then only when the
+/// molecule actually changed (plus once on the frame the panel is opened, so
+/// it never shows a stale or empty report).
 pub fn refresh_diagnostics_cache(
     mut changes: MessageReader<crate::events::MoleculeChanged>,
     mol: Res<Molecule>,
     mut cache: ResMut<DiagnosticsCache>,
-    mut initialized: Local<bool>,
+    mut was_wanted: Local<bool>,
 ) {
-    if !*initialized || changes.read().next().is_some() {
+    let molecule_changed = changes.read().next().is_some();
+    let just_opened = cache.wanted && !*was_wanted;
+    *was_wanted = cache.wanted;
+
+    if !cache.wanted {
+        return;
+    }
+    if molecule_changed || just_opened {
         cache.report = analyze_molecule(&mol);
-        *initialized = true;
     }
 }
 
@@ -63,10 +78,14 @@ pub fn analyze_molecule(mol: &Molecule) -> DiagnosticsReport {
     }
 
     let mut adjacency = vec![Vec::new(); n];
+    // Membership set for the close-contact pass, which would otherwise do a
+    // linear scan of `adjacency[i]` inside an already quadratic loop.
+    let mut bonded_pairs: HashSet<(usize, usize)> = HashSet::with_capacity(mol.bonds.len() * 2);
     for &(i, j, _) in &mol.bonds {
         if i < n && j < n {
             adjacency[i].push(j);
             adjacency[j].push(i);
+            bonded_pairs.insert((i.min(j), i.max(j)));
         }
     }
 
@@ -130,7 +149,7 @@ pub fn analyze_molecule(mol: &Molecule) -> DiagnosticsReport {
         }
     }
 
-    add_close_contact_diagnostics(mol, n, &adjacency, &mut report);
+    add_close_contact_diagnostics(mol, n, &bonded_pairs, &mut report);
 
     report
 }
@@ -192,15 +211,33 @@ fn should_flag_missing_hydrogen(
 fn add_close_contact_diagnostics(
     mol: &Molecule,
     n: usize,
-    adjacency: &[Vec<usize>],
+    bonded_pairs: &HashSet<(usize, usize)>,
     report: &mut DiagnosticsReport,
 ) {
     const MAX_CLOSE_CONTACTS: usize = 20;
     let mut contacts = Vec::new();
 
+    // A contact can only be flagged when d < (r_i + r_j) * 0.55, so no pair further
+    // apart than `max_limit` matters.  Sizing the grid to that bound turns the
+    // all-pairs sweep into a neighbour query.
+    let max_effective_radius = mol.atoms[..n]
+        .iter()
+        .map(|sym| effective_contact_radius(sym))
+        .fold(0.0_f32, f32::max);
+    let max_limit = (max_effective_radius * 2.0 * 0.55).max(0.5);
+
+    let grid = SpatialGrid::build(0..n, &mol.pos, max_limit);
+    let mut candidates: Vec<usize> = Vec::new();
+
     for i in 0..n {
-        for j in (i + 1)..n {
-            if adjacency[i].contains(&j) {
+        candidates.clear();
+        grid.collect_neighbors(mol.pos[i], &mut candidates);
+        for &j in &candidates {
+            // Each unordered pair once.
+            if j <= i {
+                continue;
+            }
+            if bonded_pairs.contains(&(i, j)) {
                 continue;
             }
             let d = mol.pos[i].distance(mol.pos[j]);
@@ -236,10 +273,12 @@ fn add_close_contact_diagnostics(
     }
 }
 
+fn effective_contact_radius(sym: &str) -> f32 {
+    vdw_radius_angstrom(sym).unwrap_or_else(|| covalent_radius_angstrom(sym) + 0.8)
+}
+
 fn close_contact_limit(a: &str, b: &str) -> f32 {
-    let ri = vdw_radius_angstrom(a).unwrap_or_else(|| covalent_radius_angstrom(a) + 0.8);
-    let rj = vdw_radius_angstrom(b).unwrap_or_else(|| covalent_radius_angstrom(b) + 0.8);
-    (ri + rj) * 0.55
+    (effective_contact_radius(a) + effective_contact_radius(b)) * 0.55
 }
 
 fn vdw_radius_angstrom(sym: &str) -> Option<f32> {

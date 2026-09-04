@@ -181,10 +181,23 @@ pub fn zmat_to_xyz(zmat: &[ZAtom]) -> Vec<Vec3> {
     let mut coords: Vec<Vec3d> = Vec::with_capacity(zmat.len());
 
     for (i, atom) in zmat.iter().enumerate() {
-        let clamp_ref = |value: Option<usize>, max_ref: usize| -> usize {
-            let v = value.unwrap_or(1).max(1).min(max_ref);
+        // A missing reference used to fall back to atom 1.  For any row past
+        // the third that means measuring against an arbitrary distant atom,
+        // which silently rebuilds the row's geometry in an unrelated frame --
+        // the failure that made spliced fragments fold into their host.
+        // Defaulting to the nearest preceding atoms keeps a malformed row
+        // local instead of throwing it across the molecule.
+        let resolve = |value: Option<usize>, fallback: usize, max_ref: usize| -> usize {
+            debug_assert!(
+                value.is_some() || max_ref < 3,
+                "row {i} has an unfilled reference; rows past the third must be \
+                 fully referenced"
+            );
+            let v = value.unwrap_or_else(|| fallback.max(1)).max(1).min(max_ref);
             v - 1
         };
+        let clamp_ref =
+            |value: Option<usize>, max_ref: usize| -> usize { resolve(value, 1, max_ref) };
         let pos = match i {
             0 => Vec3d::new(0.0, 0.0, 0.0),
             1 => {
@@ -209,9 +222,9 @@ pub fn zmat_to_xyz(zmat: &[ZAtom]) -> Vec<Vec3> {
                     .add(e3.scale(bond * theta.sin()))
             }
             _ => {
-                let r1 = clamp_ref(atom.bond_ref, i);
-                let r2 = clamp_ref(atom.angle_ref, i);
-                let r3 = clamp_ref(atom.dihedral_ref, i);
+                let r1 = resolve(atom.bond_ref, i, i);
+                let r2 = resolve(atom.angle_ref, i - 1, i);
+                let r3 = resolve(atom.dihedral_ref, i - 2, i);
                 let bond = atom.bond_len;
                 let theta = atom.angle_deg.to_radians();
                 let phi = atom.dihedral_deg.to_radians();

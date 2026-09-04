@@ -11,6 +11,7 @@ mod hbonds;
 mod measurements;
 mod molecule;
 mod molecule_builder;
+mod orbitals;
 mod picking;
 mod scene;
 mod settings;
@@ -32,7 +33,7 @@ use scene::{
     center_camera_on_startup, draw_bond_lines, react_to_molecule_changed_mark_dirty,
     rebuild_if_dirty, setup, sync_axis_camera_to_main, sync_coordinates_if_dirty,
     update_axis_viewport_on_resize, update_light_positions, update_lighting_if_dirty,
-    update_materials_if_dirty, GeometryCache,
+    update_materials_if_dirty, update_meshes_if_dirty, GeometryCache,
 };
 use settings::MolSettings;
 use trajectory::{TrajectoryOverlayAssets, TrajectoryState};
@@ -53,12 +54,20 @@ fn main() {
         .add_plugins(EguiPlugin::default())
         .insert_resource(EguiGlobalSettings {
             auto_create_primary_context: false,
+            // Let egui consume pointer and keyboard input before anything else
+            // sees it.  `EguiWantsInput` is written in PostUpdate, so a guard
+            // read in Update is always a frame stale; this clears the Bevy
+            // message queues in PreUpdate instead, which is the only way the
+            // viewport can be reliably kept out of input meant for a panel.
+            enable_absorb_bevy_input_system: true,
             ..default()
         })
         // picker plugin (now active)
         .add_plugins(picking::PickerPlugin)
+        .add_plugins(orbitals::OrbitalPlugin)
         // messages
         .add_message::<events::AtomPicked>()
+        .add_message::<events::ViewportClicked>()
         .add_message::<events::MoleculeChanged>()
         // resources
         .insert_resource(MolSettings::default())
@@ -80,6 +89,7 @@ fn main() {
             element_filter_extras: Vec::new(),
         })
         // export resources
+        .init_resource::<ui::UiPanelRegions>()
         .insert_resource(ExportSettings::default())
         .insert_resource(ExportCounter::default())
         .insert_resource(ExportSelectArea::default())
@@ -117,10 +127,12 @@ fn main() {
                 camera::orbit_camera_system,
                 export_image::update_export_select_area,
                 react_to_molecule_changed_mark_dirty,
+                measurements::clear_measurements_on_structure_load,
                 diagnostics::refresh_diagnostics_cache,
                 sync_coordinates_if_dirty,
                 update_lighting_if_dirty,
                 update_materials_if_dirty,
+                update_meshes_if_dirty,
                 rebuild_if_dirty,
                 update_light_positions,
                 update_axis_viewport_on_resize,
@@ -145,6 +157,8 @@ fn main() {
                 // builder (no more local click handler)
                 configure_builder_gizmos,
                 molecule_builder::builder_ui::handle_builder_atom_picked,
+                molecule_builder::builder_ui::handle_viewport_click,
+                molecule_builder::builder_ui::sync_builder_on_structure_load,
                 draw_builder_highlights,
                 // trajectory
                 trajectory::advance_trajectory,
