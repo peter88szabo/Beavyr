@@ -135,7 +135,10 @@ fn state_table(ui: &mut egui::Ui, result: &TddftResult, expanded: &mut Option<us
             egui::Grid::new("uvvis_states")
                 .num_columns(if show_spin { 6 } else { 4 })
                 .striped(true)
-                .spacing([12.0, 4.0])
+                // Wide gutters: the columns are all short numbers, so without
+                // real space between them the table reads as one run of digits.
+                .spacing([26.0, 5.0])
+                .min_col_width(52.0)
                 .show(ui, |ui| {
                     ui.label(egui::RichText::new("#").strong());
                     ui.label(egui::RichText::new("E (eV)").strong());
@@ -166,11 +169,29 @@ fn state_row(
     if row.clicked() {
         *expanded = if is_open { None } else { Some(st.root) };
     }
-    ui.monospace(format!("{:.3}", st.energy_ev));
-    ui.monospace(format!("{:.1}", st.wavelength_nm));
+    // The transition dipole rides along as a tooltip rather than a line in the
+    // expanded block: it is worth keeping, but it is not what the expansion is
+    // for and it crowded out the orbital list.
+    if let Some(d) = st.transition_dipole_au {
+        row.on_hover_text(format!(
+            "\u{3bc} = ({:.5}, {:.5}, {:.5}) au{}\n{:.6} au   {:.1} cm\u{207b}\u{b9}",
+            d[0],
+            d[1],
+            d[2],
+            st.d2_au2
+                .map(|d2| format!("\nD\u{b2} = {d2:.5} au\u{b2}"))
+                .unwrap_or_default(),
+            st.energy_au,
+            st.energy_cm1
+        ));
+    }
+    // Right-aligned in a monospace font, so the decimal points line up down
+    // each column instead of ragging against the left edge.
+    ui.monospace(format!("{:>7.3}", st.energy_ev));
+    ui.monospace(format!("{:>7.1}", st.wavelength_nm));
     match st.oscillator_strength {
         Some(f) => {
-            let text = egui::RichText::new(format!("{f:.6}")).monospace();
+            let text = egui::RichText::new(format!("{f:>9.6}")).monospace();
             // A dark state is worth spotting at a glance in a list of eighty.
             ui.label(if f <= 0.0 { text.weak() } else { text });
         }
@@ -180,11 +201,11 @@ fn state_row(
     }
     if show_spin {
         match st.s2 {
-            Some(s2) => ui.monospace(format!("{s2:.4}")),
+            Some(s2) => ui.monospace(format!("{s2:>8.4}")),
             None => ui.weak("--"),
         };
         match st.multiplicity {
-            Some(m) => ui.monospace(m.to_string()),
+            Some(m) => ui.monospace(format!("{m:>4}")),
             None => ui.weak("--"),
         };
     }
@@ -196,42 +217,30 @@ fn state_row(
     // The detail block spans the table's remaining columns; putting it in the
     // first cell of its own row keeps the grid's alignment intact.
     ui.label("");
-    let detail = |ui: &mut egui::Ui| {
-        if let Some(d) = st.transition_dipole_au {
-            ui.monospace(format!(
-                "\u{3bc} = ({:.5}, {:.5}, {:.5}) au{}",
-                d[0],
-                d[1],
-                d[2],
-                st.d2_au2
-                    .map(|d2| format!("   D\u{b2} = {d2:.5} au\u{b2}"))
-                    .unwrap_or_default()
-            ));
-        }
-        ui.monospace(format!(
-            "{:.6} au   {:.1} cm\u{207b}\u{b9}",
-            st.energy_au, st.energy_cm1
-        ));
+    // egui grids place one widget per cell, so the multi-line detail goes in
+    // a vertical group occupying the cell after the index.
+    ui.vertical(|ui| {
         if st.excitations.is_empty() {
             ui.weak("No excitations printed above the program's threshold.");
             return;
         }
-        for e in st.excitations_by_weight() {
-            let coefficient = e
-                .coefficient
-                .map(|c| format!("   (c = {c:+.5})"))
-                .unwrap_or_default();
-            ui.monospace(format!(
-                "{:>12}   {:.4}{coefficient}",
-                e.label(),
-                e.weight
-            ));
+        for line in excitation_lines(st) {
+            ui.monospace(line);
         }
-    };
-    // egui grids place one widget per cell, so the multi-line detail goes in
-    // a vertical group occupying the cell after the index.
-    ui.vertical(detail);
+    });
     ui.end_row();
+}
+
+/// One line per contribution: the orbital pair and its percentage, nothing
+/// else. Padded to a common width so the arrows and the percentages each form
+/// a column in the monospace font they are drawn in.
+fn excitation_lines(st: &ExcitedState) -> Vec<String> {
+    let ranked = st.excitations_by_weight();
+    let widest = ranked.iter().map(|e| e.label().len()).max().unwrap_or(0);
+    ranked
+        .iter()
+        .map(|e| format!("{:<widest$}   {:>5.1} %", e.label(), e.percent()))
+        .collect()
 }
 
 /// The absorption-spectrum window: the same controls as the IR spectrum, plus
@@ -447,9 +456,51 @@ mod tests {
         assert!(label.contains("640.8 nm"), "{label}");
         assert!(label.contains("1.935 eV"), "{label}");
         assert!(label.contains("0.002236"), "{label}");
-        assert!(label.contains("89b \u{2192} 90b"), "{label}");
+        assert!(label.contains("b89 --> b90"), "{label}");
         assert!(label.contains("99%"), "{label}");
         assert!(label.contains("\u{27e8}S\u{b2}\u{27e9} = 8.871"), "{label}");
+    }
+
+    /// The expanded block is meant to be exactly the orbital pairs and their
+    /// percentages -- no coefficients, energies or dipoles crowding them out.
+    #[test]
+    fn the_expanded_block_lists_only_orbital_pairs_and_percentages() {
+        let result = parsed();
+        let lines = excitation_lines(&result.states[0]);
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].trim(), "b89 --> b90    98.8 %");
+    }
+
+    /// Ranked by weight, and padded so the percentages form a column even when
+    /// the orbital indices differ in width.
+    #[test]
+    fn the_expanded_block_is_ranked_and_column_aligned() {
+        let result = parsed();
+        // Root 10 mixes five contributions with three- and two-digit indices.
+        let lines = excitation_lines(&result.states[9]);
+        assert_eq!(lines.len(), 5);
+        assert!(lines[0].starts_with("b87 --> b92"), "{:?}", lines[0]);
+        assert!(lines[0].contains("53.8 %"), "{:?}", lines[0]);
+        let percent_column = |l: &String| l.rfind('%').unwrap();
+        let first = percent_column(&lines[0]);
+        assert!(
+            lines.iter().all(|l| percent_column(l) == first),
+            "percentages must line up: {lines:?}"
+        );
+        // Descending, so the dominant configuration reads first.
+        let percents: Vec<f64> = result.states[9]
+            .excitations_by_weight()
+            .iter()
+            .map(|e| e.percent())
+            .collect();
+        assert!(percents.windows(2).all(|w| w[0] >= w[1]), "{percents:?}");
+    }
+
+    #[test]
+    fn a_restricted_state_shows_bare_orbital_indices() {
+        let text = "TD-DFT/TDA EXCITED STATES\n\nSTATE  1:  E= 0.1 au 2.721 eV\n    45 ->  47  :  0.9\n\nend\n";
+        let r = crate::uvvis::orca::parse_orca_tddft(text, Path::new("t.out")).unwrap();
+        assert_eq!(excitation_lines(&r.states[0])[0].trim(), "45 --> 47    90.0 %");
     }
 
     /// Peak index must address the same state the plot drew, or every hover

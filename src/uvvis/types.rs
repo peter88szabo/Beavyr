@@ -55,15 +55,22 @@ pub struct Excitation {
 }
 
 impl Excitation {
-    /// The orbital pair as it reads in the output, e.g. `89b → 90b`.
+    /// The orbital pair, spin letter first: `b89 --> b90`, or `89 --> 90` for
+    /// a restricted reference. Leading the index with the spin makes a column
+    /// of these line up by manifold, which is how they are read.
     pub fn label(&self) -> String {
         format!(
-            "{}{} \u{2192} {}{}",
-            self.from_orbital,
+            "{}{} --> {}{}",
             self.from_spin.suffix(),
-            self.to_orbital,
-            self.to_spin.suffix()
+            self.from_orbital,
+            self.to_spin.suffix(),
+            self.to_orbital
         )
+    }
+
+    /// The contribution as a percentage, which is how weights are quoted.
+    pub fn percent(&self) -> f64 {
+        self.weight * 100.0
     }
 }
 
@@ -193,8 +200,13 @@ mod tests {
     }
 
     #[test]
+    fn a_weight_reads_as_a_percentage() {
+        assert!((excitation(89, 90, 0.988112).percent() - 98.8112).abs() < 1e-9);
+    }
+
+    #[test]
     fn an_excitation_reads_the_way_the_output_prints_it() {
-        assert_eq!(excitation(89, 90, 0.99).label(), "89b \u{2192} 90b");
+        assert_eq!(excitation(89, 90, 0.99).label(), "b89 --> b90");
     }
 
     #[test]
@@ -202,7 +214,7 @@ mod tests {
         let mut e = excitation(45, 47, 0.5);
         e.from_spin = Spin::Unspecified;
         e.to_spin = Spin::Unspecified;
-        assert_eq!(e.label(), "45 \u{2192} 47");
+        assert_eq!(e.label(), "45 --> 47");
     }
 
     fn state(root: usize, ev: f64, fosc: Option<f64>) -> ExcitedState {

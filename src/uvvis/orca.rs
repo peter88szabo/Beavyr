@@ -466,7 +466,7 @@ mod tests {
         assert_eq!(e.to_spin, Spin::Beta);
         assert!((e.weight - 0.988112).abs() < 1e-9);
         assert!((e.coefficient.unwrap() + 0.99403830).abs() < 1e-9);
-        assert_eq!(e.label(), "89b \u{2192} 90b");
+        assert_eq!(e.label(), "b89 --> b90");
     }
 
     #[test]
@@ -569,7 +569,7 @@ Storing amplitudes in GBW file ...
         let e = &r.states[0].excitations[0];
         assert_eq!(e.from_spin, Spin::Unspecified);
         assert!(e.coefficient.is_none());
-        assert_eq!(e.label(), "45 \u{2192} 47");
+        assert_eq!(e.label(), "45 --> 47");
     }
 
     /// Roots with no absorption table are still worth listing -- that is the
