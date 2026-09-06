@@ -532,7 +532,7 @@ pub fn ui_panel(
                 xtb_optimization_panel(ui, &mut xtb_panel_state, &mut xtb_task, &mol);
             });
             // ===========================
-            // 1c) Frequency Analysis (xTB Hessian)
+            // 1c) Frequency Analysis
             // ===========================
             ui.add_space(8.0);
             section(
@@ -541,7 +541,7 @@ pub fn ui_panel(
                 &mut open[Tab::Vibrations.index()],
                 rects,
                 Tab::Vibrations.default_size(),
-                "Frequency Analysis (xTB Hessian)",
+                "Frequency Analysis",
                 |ui| {
                 xtb_frequency_panel(
                     ui,

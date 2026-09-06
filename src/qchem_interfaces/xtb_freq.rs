@@ -801,7 +801,7 @@ fn reanalyze_stored_hessian(
     }
 }
 
-/// Draws the "Frequency Analysis (xTB Hessian)" section: Eckart-mode choice,
+/// Draws the "Frequency Analysis" section: Eckart-mode choice,
 /// temperature/cutoff for thermochemistry, the Run/Cancel controls, the mode
 /// list with an animate button per row, and the Show Thermochemistry / Show
 /// IR Spectrum buttons. Called from `ui.rs`, mirroring
