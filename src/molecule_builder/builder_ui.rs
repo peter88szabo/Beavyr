@@ -4134,3 +4134,53 @@ mod convention_probe {
         );
     }
 }
+
+#[cfg(test)]
+mod editor_flow_tests {
+    use super::*;
+
+    fn load(name: &str) -> Molecule {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("examples")
+            .join(name);
+        let mut mol = Molecule::from_xyz(&std::fs::read_to_string(&path).unwrap());
+        mol.recompute_bonds(1.2, 2.5);
+        mol
+    }
+
+    /// The exact sequence the UI performs: load a structure, sync the
+    /// builder, click an atom, press Add Fragment.
+    #[test]
+    fn connecting_a_fragment_to_a_clicked_atom_grows_the_molecule() {
+        let mut mol = load("phenyl-OCH3.xyz");
+        let mut zmat_state = ZMatrixBuilderState::default();
+        let mut settings = MolSettings::default();
+
+        // What `sync_builder_on_structure_load` does.
+        zmat_state.zmat = zmat2xyz::xyz_to_zmat(&mol.atoms, &mol.pos);
+        // What a viewport click does: pick a ring hydrogen.
+        let h = mol
+            .atoms
+            .iter()
+            .position(|s| s == "H")
+            .expect("the ring has hydrogens");
+        set_selected_atom(&mut zmat_state, &mol.atoms, Some(h));
+        assert!(zmat_state.selected_index.is_some(), "the click must select");
+
+        let before = mol.atoms.len();
+        zmat_state.frag_mode = FragmentInsertMode::Connect;
+        zmat_state.frag_name = "-CH3".to_string();
+        commit_fragment_connect(&mut zmat_state, &mut mol, &mut settings);
+
+        assert!(
+            zmat_state.last_error.is_none(),
+            "connect reported: {:?}",
+            zmat_state.last_error
+        );
+        assert!(
+            mol.atoms.len() > before,
+            "the molecule did not grow: {before} -> {}",
+            mol.atoms.len()
+        );
+    }
+}
