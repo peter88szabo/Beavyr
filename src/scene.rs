@@ -16,35 +16,6 @@ use crate::settings::{BondColorMode, LightingMode, MolSettings, RepresentationMo
 use crate::events::MoleculeChangeReason;
 use crate::events::MoleculeChanged;
 
-// default molecule (Å)
-//pub const DEFAULT_WATER: &str = r#"
-//O 0.00000    0.00000    0.12008
-//H 0.00000    0.71604   -0.48061
-//H 0.00000   -0.71604   -0.48061
-//"#;
-
-pub const DEFAULT_WATER: &str = r#"
- C  3.40  -0.28 -0.90
- C  2.32  -0.59  0.09
- C  0.97  -0.78 -0.39
- O  0.04  -1.30  0.19
- C  2.64  -0.82  1.40
- O  1.65  -0.78  2.33
- O  2.11  -1.34  3.55
- C  2.99  -3.12  1.30
- O  2.92  -3.49  2.59
- O  4.01  -2.93  3.31
- H  3.64  -0.67  1.79
- H  0.81  -0.43 -1.43
- H  3.17   0.62 -1.45
- H  4.36  -0.14 -0.41
- H  3.51  -1.08 -1.63
- H  3.98  -3.11  0.85
- H  2.15  -3.50  0.74
- H  3.52  -2.59  4.10
- H  0.37  -1.95  0.79
-"#;
-
 #[derive(Component)]
 pub struct AtomMarker {
     pub index: usize,

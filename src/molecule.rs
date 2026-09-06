@@ -18,6 +18,17 @@ pub struct Molecule {
 }
 
 impl Molecule {
+    /// No atoms at all -- what the program starts with, so it opens on an
+    /// empty viewport rather than a structure nobody asked for.
+    pub fn empty() -> Self {
+        Molecule {
+            atoms: Vec::new(),
+            pos: Vec::new(),
+            bonds: Vec::new(),
+            hydrogen_bonds: Vec::new(),
+        }
+    }
+
     /// Build from simple XYZ text (Å).
     pub fn from_xyz(xyz: &str) -> Self {
         let (_n, atoms, qxyz) = parse_xyz_angstrom(xyz);
@@ -485,6 +496,33 @@ pub fn atomic_mass_amu(sym: &str) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The program opens with no structure at all, so every consumer of the
+    /// molecule has to cope with zero atoms from the first frame onward.
+    #[test]
+    fn an_empty_molecule_has_nothing_in_it() {
+        let mol = Molecule::empty();
+        assert!(mol.atoms.is_empty());
+        assert!(mol.pos.is_empty());
+        assert!(mol.bonds.is_empty());
+        assert!(mol.hydrogen_bonds.is_empty());
+    }
+
+    #[test]
+    fn perceiving_bonds_on_an_empty_molecule_is_a_no_op() {
+        let mut mol = Molecule::empty();
+        mol.recompute_bonds(1.2, 2.5);
+        assert!(mol.bonds.is_empty());
+    }
+
+    /// Loading empty text is the same as starting empty -- the XYZ box begins
+    /// blank, and applying it must not be a special case.
+    #[test]
+    fn empty_xyz_text_parses_to_an_empty_molecule() {
+        let mol = Molecule::from_xyz("");
+        assert!(mol.atoms.is_empty());
+        assert!(mol.pos.is_empty());
+    }
 
     #[test]
     fn atomic_mass_matches_well_known_values() {

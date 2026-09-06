@@ -79,9 +79,9 @@ fn main() {
         // resources
         .insert_resource(MolSettings::default())
         .insert_resource(camera::OrbitCamera::default())
-        .insert_resource(molecule::Molecule::from_xyz(scene::DEFAULT_WATER))
+        .insert_resource(molecule::Molecule::empty())
         .insert_resource(XyzBuffer {
-            text: scene::DEFAULT_WATER.trim().to_string(),
+            text: String::new(),
             last_dir: None,
             current_file: None,
             warning: None,
