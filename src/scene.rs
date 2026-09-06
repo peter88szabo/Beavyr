@@ -27,8 +27,21 @@ pub enum BondVisual {
         base_len: f32,
     },
     Split {
-        start_frac: f32,
-        end_frac: f32,
+        /// How far from atom i's centre the drawn bond starts, in angstrom.
+        ///
+        /// Absolute, not a fraction of the bond length: the inset exists to
+        /// clear the atom's sphere, whose radius does not change when the bond
+        /// stretches. Stored as a fraction, the gap grew in proportion to the
+        /// bond, so a bond that changes length appreciably -- a transition
+        /// state's partial bond, say -- detached from both atoms and floated
+        /// between them.
+        start_inset: f32,
+        /// The same from atom j's centre.
+        end_inset: f32,
+        /// Which part of the visible span this segment covers, as fractions of
+        /// it: the first half for atom i's colour, the second for atom j's.
+        seg_lo: f32,
+        seg_hi: f32,
         base_len: f32,
         color_atom: usize,
     },
@@ -212,21 +225,31 @@ fn bond_display_radius(mol: &Molecule, settings: &MolSettings, i: usize, j: usiz
 /// In ball-and-stick the cylinder starts inside atom i's sphere and stops inside
 /// atom j's, overlapping slightly so no seam shows.  Rounded sticks span the
 /// full axis and rely on cap spheres instead.
-fn bond_extent_fracs(
-    mol: &Molecule,
-    settings: &MolSettings,
-    i: usize,
-    j: usize,
-    len: f32,
-) -> (f32, f32) {
-    if matches!(settings.representation, RepresentationMode::SticksRounded) || len <= 1.0e-5 {
-        return (0.0, 1.0);
+/// How far the drawn bond is inset from each atom's centre, in angstrom, so
+/// that it starts at the sphere's surface rather than its middle.
+///
+/// A length is deliberately not a parameter: the inset depends on the atoms'
+/// radii, which do not change when the bond stretches.
+fn bond_extent_insets(mol: &Molecule, settings: &MolSettings, i: usize, j: usize) -> (f32, f32) {
+    if matches!(settings.representation, RepresentationMode::SticksRounded) {
+        return (0.0, 0.0);
     }
     let radius = bond_display_radius(mol, settings, i, j);
     let overlap = radius * 0.40; // 40% of bond radius
     let ri = bond_endpoint_sphere_radius(&mol.atoms[i], settings);
     let rj = bond_endpoint_sphere_radius(&mol.atoms[j], settings);
-    ((ri - overlap) / len, (len - (rj - overlap)) / len)
+    (ri - overlap, rj - overlap)
+}
+
+/// The drawn span of a bond of length `len`, as distances from atom i.
+///
+/// The insets are capped so that a bond shorter than the two spheres together
+/// still draws something rather than inverting.
+fn split_span(len: f32, start_inset: f32, end_inset: f32) -> (f32, f32) {
+    let max_inset = len * 0.45;
+    let start = start_inset.min(max_inset);
+    let end = len - end_inset.min(max_inset);
+    (start, end.max(start))
 }
 
 fn apply_large_molecule_representation(mol: &Molecule, settings: &mut MolSettings) {
@@ -635,19 +658,28 @@ fn update_bond_transform(tf: &mut Transform, p0: Vec3, p1: Vec3, visual: BondVis
             tf.scale = Vec3::new(1.0, len / base_len, 1.0);
         }
         BondVisual::Split {
-            start_frac,
-            end_frac,
+            start_inset,
+            end_inset,
+            seg_lo,
+            seg_hi,
             base_len,
             ..
         } => {
             if base_len <= 1.0e-5 {
                 return false;
             }
-            let segment_len = len * (end_frac - start_frac).max(0.0);
+            let (start, end) = split_span(len, start_inset, end_inset);
+            let span = end - start;
+            if span <= 1.0e-5 {
+                return false;
+            }
+            let a = start + span * seg_lo;
+            let b = start + span * seg_hi;
+            let segment_len = b - a;
             if segment_len <= 1.0e-5 {
                 return false;
             }
-            tf.translation = p0 + dir_n * (len * (start_frac + end_frac) * 0.5);
+            tf.translation = p0 + dir_n * ((a + b) * 0.5);
             tf.rotation = rot;
             tf.scale = Vec3::new(1.0, segment_len / base_len, 1.0);
         }
@@ -842,24 +874,25 @@ pub fn update_meshes_if_dirty(
         }
 
         let radius = bond_display_radius(&mol, &settings, marker.i, marker.j);
-        let len = (p1 - p0).length();
 
         match marker.visual {
             BondVisual::Uniform { .. } => {
                 *mesh = Mesh3d(cached_cylinder_mesh(&mut cache, &mut meshes, radius, 1.0));
             }
             BondVisual::Split { color_atom, .. } => {
-                let (start, end) = bond_extent_fracs(&mol, &settings, marker.i, marker.j, len);
-                let mid = (start + end) * 0.5;
+                let (start_inset, end_inset) =
+                    bond_extent_insets(&mol, &settings, marker.i, marker.j);
                 // The entity for atom i owns the first half of the span, j the second.
-                let (start_frac, end_frac) = if color_atom == marker.i {
-                    (start, mid)
+                let (seg_lo, seg_hi) = if color_atom == marker.i {
+                    (0.0, 0.5)
                 } else {
-                    (mid, end)
+                    (0.5, 1.0)
                 };
                 marker.visual = BondVisual::Split {
-                    start_frac,
-                    end_frac,
+                    start_inset,
+                    end_inset,
+                    seg_lo,
+                    seg_hi,
                     base_len: 1.0,
                     color_atom,
                 };
@@ -1058,15 +1091,14 @@ pub fn rebuild_if_dirty(
             // AtomSplit: two segments with a clean joint at the midpoint,
             // optionally extended to overlap for rounded-stick mode.
             BondColorMode::AtomSplit => {
-                let (start_frac, end_frac) = bond_extent_fracs(&mol, &settings, i, j, len_cc);
-                let start = p0 + dir_n * (start_frac * len_cc);
-                let end = p0 + dir_n * (end_frac * len_cc);
-
-                let visible_len = end_frac - start_frac;
+                let (start_inset, end_inset) = bond_extent_insets(&mol, &settings, i, j);
+                let (span_start, span_end) = split_span(len_cc, start_inset, end_inset);
+                let visible_len = span_end - span_start;
                 if visible_len <= 0.0 {
                     continue;
                 }
-                let visible_len = visible_len * len_cc;
+                let start = p0 + dir_n * span_start;
+                let end = p0 + dir_n * span_end;
 
                 let half_len = visible_len * 0.5;
 
@@ -1119,8 +1151,10 @@ pub fn rebuild_if_dirty(
                         i,
                         j,
                         visual: BondVisual::Split {
-                            start_frac,
-                            end_frac: (start_frac + end_frac) * 0.5,
+                            start_inset,
+                            end_inset,
+                            seg_lo: 0.0,
+                            seg_hi: 0.5,
                             base_len: 1.0,
                             color_atom: i,
                         },
@@ -1141,8 +1175,10 @@ pub fn rebuild_if_dirty(
                         i,
                         j,
                         visual: BondVisual::Split {
-                            start_frac: (start_frac + end_frac) * 0.5,
-                            end_frac,
+                            start_inset,
+                            end_inset,
+                            seg_lo: 0.5,
+                            seg_hi: 1.0,
                             base_len: 1.0,
                             color_atom: j,
                         },
@@ -1404,6 +1440,70 @@ fn auto_fit_camera(points: &[Vec3], cam: &mut OrbitCamera) {
 }
 
 #[cfg(test)]
+mod bond_span_tests {
+    use super::*;
+
+    /// The reported bug: a bond that changes length appreciably during a
+    /// vibration detached from both atoms and floated between them.
+    ///
+    /// The inset clears the atom's sphere, so it must stay put in angstrom as
+    /// the bond stretches. Held as a fraction of the length it grew with the
+    /// bond, opening a gap at each end.
+    #[test]
+    fn the_inset_does_not_grow_with_the_bond() {
+        let (start_inset, end_inset) = (0.30, 0.25);
+        for len in [0.9_f32, 1.0, 1.2, 1.5, 2.0] {
+            let (start, end) = split_span(len, start_inset, end_inset);
+            assert!(
+                (start - start_inset).abs() < 1.0e-6,
+                "at length {len} the bond starts {start} from the atom, not {start_inset}"
+            );
+            assert!(
+                ((len - end) - end_inset).abs() < 1.0e-6,
+                "at length {len} the bond ends {} from the far atom, not {end_inset}",
+                len - end
+            );
+        }
+    }
+
+    /// The concrete case: an O-H partial bond swinging through a transition
+    /// state's imaginary mode. Its drawn ends must track the atoms.
+    #[test]
+    fn a_stretching_bond_keeps_touching_its_atoms() {
+        let (start_inset, end_inset) = (0.32, 0.22);
+        // The bond swings from well compressed to well stretched.
+        for len in [1.00_f32, 1.15, 1.30, 1.45] {
+            let (start, end) = split_span(len, start_inset, end_inset);
+            let gap_at_i = start - start_inset;
+            let gap_at_j = (len - end) - end_inset;
+            assert!(gap_at_i.abs() < 1.0e-6 && gap_at_j.abs() < 1.0e-6, "len {len}");
+            assert!(end > start, "the span must not invert at length {len}");
+        }
+    }
+
+    /// A bond shorter than the two spheres together must still draw something
+    /// rather than turning inside out.
+    #[test]
+    fn a_very_short_bond_does_not_invert() {
+        let (start, end) = split_span(0.4, 0.5, 0.5);
+        assert!(end >= start, "{start} .. {end}");
+        assert!(start <= 0.4 * 0.45 + 1.0e-6, "the inset is capped");
+    }
+
+    /// The two coloured halves must meet exactly, with no seam and no overlap,
+    /// at every length.
+    #[test]
+    fn the_two_coloured_halves_meet_at_the_midpoint() {
+        for len in [1.0_f32, 1.4, 2.0] {
+            let (start, end) = split_span(len, 0.3, 0.3);
+            let span = end - start;
+            let first_end = start + span * 0.5;
+            let second_start = start + span * 0.5;
+            assert!((first_end - second_start).abs() < 1.0e-9, "len {len}");
+        }
+    }
+}
+
 mod axis_gizmo_tests {
     use super::*;
 
