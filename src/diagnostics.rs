@@ -1,6 +1,8 @@
 use bevy::prelude::*;
 use std::collections::HashSet;
 
+use crate::bond_order::{classify_valence, total_bond_orders, ValenceVerdict};
+
 use crate::molecule::{covalent_radius_angstrom, Molecule, SpatialGrid};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -89,13 +91,17 @@ pub fn analyze_molecule(mol: &Molecule) -> DiagnosticsReport {
         }
     }
 
+    // Bond *orders*, not neighbour counts. A neighbour count calls every sp2
+    // carbon under-coordinated (three neighbours, but one of them a double
+    // bond) and every transferring hydrogen over-coordinated (two neighbours,
+    // but each only half a bond). Summing estimated orders gets both right,
+    // which is what makes a missing hydrogen worth reporting at all.
+    let totals = total_bond_orders(mol);
+
     for i in 0..n {
         let sym = mol.atoms[i].as_str();
         let degree = adjacency[i].len();
-        let h_neighbors = adjacency[i]
-            .iter()
-            .filter(|&&j| mol.atoms.get(j).map(|s| s.as_str()) == Some("H"))
-            .count();
+        let total = totals.get(i).copied().unwrap_or(0.0);
 
         if degree == 0 {
             report.items.push(MoleculeDiagnostic {
@@ -103,46 +109,50 @@ pub fn analyze_molecule(mol: &Molecule) -> DiagnosticsReport {
                 atom: Some(i),
                 message: format!("{}{} is isolated", sym, i + 1),
             });
+            continue;
         }
 
-        if let Some(max_valence) = max_common_valence(sym) {
-            if degree > max_valence {
-                report.items.push(MoleculeDiagnostic {
-                    severity: DiagnosticSeverity::Warning,
-                    atom: Some(i),
-                    message: format!("{}{} has valence {} > {}", sym, i + 1, degree, max_valence),
-                });
-            }
-        }
-
-        if let Some(neutral_valence) = neutral_single_bond_valence(sym) {
-            if degree > neutral_valence {
-                let hint = match sym {
-                    "N" if degree == 4 => "possible formal positive nitrogen",
-                    "O" if degree >= 3 => "possible oxonium or over-coordinated oxygen",
-                    "S" if degree > 2 => "hypervalent sulfur candidate",
-                    "P" if degree > 3 => "hypervalent phosphorus candidate",
-                    _ => "formal-charge or bond-order check recommended",
-                };
-                report.items.push(MoleculeDiagnostic {
-                    severity: DiagnosticSeverity::Info,
-                    atom: Some(i),
-                    message: format!("{}{}: {}", sym, i + 1, hint),
-                });
-            }
-        }
-
-        if let Some(target) = typical_saturated_valence(sym) {
-            if should_flag_missing_hydrogen(sym, degree, h_neighbors, target) {
+        let (verdict, reference) = classify_valence(sym, total);
+        let label = format!("{}{}", sym, i + 1);
+        match verdict {
+            ValenceVerdict::Satisfied => {}
+            ValenceVerdict::Short => {
+                let target = reference.unwrap_or(total);
+                let missing = target - total;
+                // A whole bond short of the usual valence is the case worth
+                // naming: on a closed-shell structure that is a hydrogen
+                // nobody added. Geometry cannot tell that from a radical, so
+                // both readings are offered rather than one asserted.
+                let hydrogens = (missing + 0.25).floor().max(1.0) as usize;
                 report.items.push(MoleculeDiagnostic {
                     severity: DiagnosticSeverity::Info,
                     atom: Some(i),
                     message: format!(
-                        "{}{} may be missing H or an explicit multiple bond (valence {}/{})",
-                        sym,
-                        i + 1,
-                        degree,
-                        target
+                        "{label}: bond order {:.1} of {:.0} \u{2014} {} H may be missing, \
+                         or this is a radical",
+                        total, target, hydrogens
+                    ),
+                });
+            }
+            ValenceVerdict::Excess => {
+                let target = reference.unwrap_or(total);
+                report.items.push(MoleculeDiagnostic {
+                    severity: DiagnosticSeverity::Warning,
+                    atom: Some(i),
+                    message: format!(
+                        "{label}: bond order {:.1} exceeds {:.0}, the highest common \
+                         valence for {sym}",
+                        total, target
+                    ),
+                });
+            }
+            ValenceVerdict::Unusual => {
+                report.items.push(MoleculeDiagnostic {
+                    severity: DiagnosticSeverity::Info,
+                    atom: Some(i),
+                    message: format!(
+                        "{label}: bond order {:.1} sits between {sym}'s common valences",
+                        total
                     ),
                 });
             }
@@ -152,60 +162,6 @@ pub fn analyze_molecule(mol: &Molecule) -> DiagnosticsReport {
     add_close_contact_diagnostics(mol, n, &bonded_pairs, &mut report);
 
     report
-}
-
-fn max_common_valence(sym: &str) -> Option<usize> {
-    match sym {
-        "H" => Some(1),
-        "C" => Some(4),
-        "N" => Some(4),
-        "O" => Some(2),
-        "F" | "Cl" | "Br" | "I" => Some(1),
-        _ => None,
-    }
-}
-
-fn neutral_single_bond_valence(sym: &str) -> Option<usize> {
-    match sym {
-        "C" => Some(4),
-        "N" => Some(3),
-        "O" => Some(2),
-        "F" | "Cl" | "Br" | "I" => Some(1),
-        "P" => Some(3),
-        "S" => Some(2),
-        _ => None,
-    }
-}
-
-fn typical_saturated_valence(sym: &str) -> Option<usize> {
-    match sym {
-        "C" => Some(4),
-        "N" => Some(3),
-        "O" => Some(2),
-        "S" => Some(2),
-        "P" => Some(3),
-        _ => None,
-    }
-}
-
-fn should_flag_missing_hydrogen(
-    sym: &str,
-    degree: usize,
-    h_neighbors: usize,
-    target: usize,
-) -> bool {
-    if degree == 0 || degree >= target {
-        return false;
-    }
-
-    match sym {
-        "C" => degree <= 3,
-        "N" => degree <= 2,
-        "O" => degree == 1 && h_neighbors == 0,
-        "S" => degree == 1 && h_neighbors == 0,
-        "P" => degree <= 2,
-        _ => false,
-    }
 }
 
 fn add_close_contact_diagnostics(
@@ -297,3 +253,133 @@ fn vdw_radius_angstrom(sym: &str) -> Option<f32> {
     }
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::molecule::Molecule;
+    use bevy::prelude::Vec3;
+
+    fn from_xyz_text(text: &str) -> Molecule {
+        let mut mol = Molecule::from_xyz(text);
+        mol.recompute_bonds(1.2, 2.5);
+        mol
+    }
+
+    fn from_example(name: &str) -> Molecule {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("examples")
+            .join(name);
+        from_xyz_text(&std::fs::read_to_string(&path).unwrap())
+    }
+
+    fn messages(mol: &Molecule) -> Vec<String> {
+        analyze_molecule(mol)
+            .items
+            .iter()
+            .map(|d| d.message.clone())
+            .collect()
+    }
+
+    /// The transition state from examples/: its transferring hydrogen sits
+    /// between donor and acceptor and used to be reported as divalent.
+    fn transition_state() -> Molecule {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("examples")
+            .join("c164-ts1-2-1001.log");
+        let text = std::fs::read_to_string(&path).unwrap();
+        let g = crate::qchem_interfaces::gaussian_log::parse_gaussian_log(&text).unwrap();
+        let mut mol = Molecule::empty();
+        mol.atoms = g.atoms.clone();
+        mol.pos = g
+            .coords_angstrom
+            .chunks(3)
+            .map(|c| Vec3::new(c[0] as f32, c[1] as f32, c[2] as f32))
+            .collect();
+        mol.recompute_bonds(1.2, 2.5);
+        mol
+    }
+
+    /// The whole point: a transferring hydrogen has two half bonds, which is
+    /// one bond, not two.
+    #[test]
+    fn a_transferring_hydrogen_is_not_reported_as_divalent() {
+        let found = messages(&transition_state());
+        assert!(
+            !found.iter().any(|m| m.starts_with("H18")),
+            "the transferring H is still flagged: {found:?}"
+        );
+    }
+
+    /// An sp2 carbon has three neighbours but a full valence of four. A real
+    /// aromatic molecule must produce nothing at all.
+    #[test]
+    fn an_aromatic_molecule_is_clean() {
+        let found = messages(&from_example("phenyl-OCH3.xyz"));
+        assert!(found.is_empty(), "a plain aromatic ether should be clean: {found:?}");
+    }
+
+    /// The feature the panel is for: a genuinely absent hydrogen.
+    #[test]
+    fn a_missing_hydrogen_is_reported_with_how_many() {
+        // Methane with one H removed.
+        let ch3 = from_xyz_text(
+            "C  0.000  0.000  0.000\n\
+             H  0.629  0.629  0.629\n\
+             H -0.629 -0.629  0.629\n\
+             H -0.629  0.629 -0.629\n",
+        );
+        let found = messages(&ch3);
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert!(found[0].starts_with("C1:"), "{found:?}");
+        assert!(found[0].contains("1 H may be missing"), "{found:?}");
+        assert!(found[0].contains("radical"), "both readings offered: {found:?}");
+    }
+
+    #[test]
+    fn two_missing_hydrogens_are_counted_as_two() {
+        let ch2 = from_xyz_text(
+            "C  0.000  0.000  0.000\n\
+             H  0.629  0.629  0.629\n\
+             H -0.629 -0.629  0.629\n",
+        );
+        let found = messages(&ch2);
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert!(found[0].contains("2 H may be missing"), "{found:?}");
+    }
+
+    /// Complete small molecules must be silent.
+    #[test]
+    fn complete_molecules_produce_nothing() {
+        let water = from_xyz_text(
+            "O  0.000  0.000  0.119\nH  0.000  0.763 -0.477\nH  0.000 -0.763 -0.477\n",
+        );
+        assert!(messages(&water).is_empty(), "{:?}", messages(&water));
+
+        // Ethylene: each carbon has two H and one C=C, summing to four.
+        let ethylene = from_xyz_text(
+            "C  0.000  0.000  0.667\n\
+             C  0.000  0.000 -0.667\n\
+             H  0.000  0.923  1.238\n\
+             H  0.000 -0.923  1.238\n\
+             H  0.000  0.923 -1.238\n\
+             H  0.000 -0.923 -1.238\n",
+        );
+        assert!(messages(&ethylene).is_empty(), "{:?}", messages(&ethylene));
+    }
+
+    /// An isolated atom is still worth saying, but only once and not as a
+    /// valence complaint.
+    #[test]
+    fn a_lone_atom_is_reported_as_isolated_only() {
+        let lone = from_xyz_text("C  0.000  0.000  0.000\nO 10.0 10.0 10.0\n");
+        let found = messages(&lone);
+        assert_eq!(found.len(), 2, "{found:?}");
+        assert!(found.iter().all(|m| m.contains("isolated")), "{found:?}");
+    }
+
+    #[test]
+    fn an_empty_molecule_produces_nothing() {
+        assert!(messages(&Molecule::empty()).is_empty());
+    }
+}

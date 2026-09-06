@@ -5,7 +5,8 @@
 //! molecule) still exits 0 with "normal termination", silently ignoring the
 //! request rather than erroring. This module is what actually catches that.
 
-use crate::molecule::{atomic_number, covalent_radius_angstrom, Molecule};
+use crate::bond_order::estimate_bond_order;
+use crate::molecule::{atomic_number, Molecule};
 
 /// A physically impossible charge/multiplicity combination. Blocks the run.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -156,28 +157,6 @@ pub fn validate_electronic_state(
     Ok((unpaired as i32, warnings))
 }
 
-/// Estimates a bond's order from how short it is relative to the sum of its
-/// atoms' covalent radii -- the same technique already used for this exact
-/// purpose in `molecule_builder::attach`, whose empirically calibrated ratios
-/// this reuses directly: single ~1.0, aromatic ~0.93, double ~0.89,
-/// triple ~0.80. The boundaries below sit at the midpoints between those
-/// reference values.
-fn estimate_bond_order(symbol_a: &str, symbol_b: &str, distance: f32) -> f64 {
-    let single_bond_length = covalent_radius_angstrom(symbol_a) + covalent_radius_angstrom(symbol_b);
-    if single_bond_length <= 0.0 {
-        return 1.0;
-    }
-    let ratio = distance / single_bond_length;
-    if ratio <= 0.845 {
-        3.0
-    } else if ratio <= 0.91 {
-        2.0
-    } else if ratio <= 0.965 {
-        1.5
-    } else {
-        1.0
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -193,7 +172,10 @@ mod tests {
         let dated_bonds: Vec<(usize, usize, f32)> = bonds
             .iter()
             .map(|&(i, j)| {
-                let d = covalent_radius_angstrom(atoms[i]) + covalent_radius_angstrom(atoms[j]);
+                // A real single bond, by the same definition the estimator
+                // uses -- not the inflated bond-perception radii, which would
+                // make this fixture's "single" bond read as a partial one.
+                let d = crate::bond_order::single_bond_length(atoms[i], atoms[j]);
                 (i, j, d)
             })
             .collect();
@@ -212,7 +194,7 @@ mod tests {
         let dated_bonds: Vec<(usize, usize, f32)> = bonds
             .iter()
             .map(|&(i, j, ratio)| {
-                let single = covalent_radius_angstrom(atoms[i]) + covalent_radius_angstrom(atoms[j]);
+                let single = crate::bond_order::single_bond_length(atoms[i], atoms[j]);
                 (i, j, single * ratio)
             })
             .collect();

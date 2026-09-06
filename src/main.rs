@@ -2,6 +2,7 @@
 use bevy::prelude::*;
 use bevy_egui::{EguiGlobalSettings, EguiPlugin, EguiPrimaryContextPass};
 
+mod bond_order;
 mod camera;
 mod color_schemes;
 mod diagnostics;
