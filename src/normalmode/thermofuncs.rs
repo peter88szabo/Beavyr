@@ -120,6 +120,12 @@ pub fn freqs_au_to_cm1(freqs_au: &[f64]) -> Vec<f64> {
         .collect()
 }
 
+/// `rot_symmetry` is the rotational symmetry number sigma, which divides the
+/// rotational partition function: the number of indistinguishable orientations
+/// the molecule can be rotated into. 1 for an asymmetric molecule, 2 for water,
+/// 12 for benzene or methane. Getting it wrong shifts the rotational entropy by
+/// `R ln(sigma)`, which goes straight into every free energy derived from it.
+#[allow(clippy::too_many_arguments)]
 pub fn eval_thermo(
     freqs_cm1: &[f64],
     brot_cm1: &[f64],
@@ -128,6 +134,7 @@ pub fn eval_thermo(
     temp: f64,
     pressure: f64,
     freq_cutoff: f64,
+    rot_symmetry: f64,
 ) -> ThermoResults {
     let mut thermo = ThermoResults {
         pfelec: 1.0,
@@ -182,7 +189,7 @@ pub fn eval_thermo(
 
     all_electronic(&mut thermo, multiplicity, temp);
     all_translation(&mut thermo, mass_amu_total, pressure, temp);
-    all_rotations(&mut thermo, brot_cm1, temp);
+    all_rotations(&mut thermo, brot_cm1, temp, rot_symmetry);
     all_vibrations(&mut thermo, freqs_cm1, temp, freq_cutoff);
 
     thermo.utherm = thermo.uelec + thermo.utrans + thermo.urot + thermo.uvib;
@@ -206,12 +213,9 @@ pub fn eval_thermo(
     thermo
 }
 
-/// Rotational symmetry number sigma, used in the rotational partition
-/// function. Fixed at 1: no point-group detection is done, so every molecule
-/// is treated as C1. That is exact for an asymmetric molecule and an
-/// over-estimate of the rotational entropy otherwise -- by R*ln(sigma), which
-/// is 1.4 cal/mol/K for water and 4.9 for benzene. Printed with the results
-/// rather than left implicit, so the assumption is visible where it matters.
+/// The symmetry number assumed when the user has not chosen a point group:
+/// C1, which is exact for an asymmetric molecule and an over-estimate of the
+/// rotational entropy for anything else, by `R ln(sigma)`.
 pub const ROT_SYMMETRY_NUMBER: f64 = 1.0;
 /// Chirality factor in the same expression; 1 for an achiral treatment.
 pub const ROT_CHIRALITY: f64 = 1.0;
@@ -230,7 +234,13 @@ const ENERGY_W: usize = LABEL_W + 1 + 4 * COL_W + 3 * GAP;
 /// The same for the three-column entropy/heat-capacity table.
 const SCC_W: usize = LABEL_W + 1 + 3 * COL_W + 2 * GAP;
 
-pub fn format_thermo(thermo: &ThermoResults, temp: f64, freq_cutoff: f64, elec_energy: Option<f64>) -> String {
+pub fn format_thermo(
+    thermo: &ThermoResults,
+    temp: f64,
+    freq_cutoff: f64,
+    elec_energy: Option<f64>,
+    rot_symmetry: f64,
+) -> String {
     use std::fmt::Write as _;
     let mut out = String::new();
     fn print_uhfg(out: &mut String, label: &str, u: f64, h: f64, f: f64, g: f64) {
@@ -259,12 +269,7 @@ pub fn format_thermo(thermo: &ThermoResults, temp: f64, freq_cutoff: f64, elec_e
         thermo.zpe * CM1_TO_KCAL / CM1_TO_HARTREE
     ).unwrap();
     writeln!(out, "qRRHO cutoff: {:.1} cm-1", freq_cutoff).unwrap();
-    writeln!(
-        out,
-        "Rotational symmetry number: {:.0}  (C1 assumed; no point-group detection)",
-        ROT_SYMMETRY_NUMBER
-    )
-    .unwrap();
+    writeln!(out, "Rotational symmetry number: {rot_symmetry:.0}").unwrap();
 
     writeln!(out).unwrap();
     writeln!(out, "{:-^ENERGY_W$}", " Energy Contributions (Eh) ").unwrap();
@@ -352,8 +357,17 @@ pub fn format_thermo(thermo: &ThermoResults, temp: f64, freq_cutoff: f64, elec_e
 
 /// Prints exactly `format_thermo`'s text to stdout, so the printed and
 /// GUI-displayed forms can never drift apart.
-pub fn print_thermo(thermo: &ThermoResults, temp: f64, freq_cutoff: f64, elec_energy: Option<f64>) {
-    print!("{}", format_thermo(thermo, temp, freq_cutoff, elec_energy));
+pub fn print_thermo(
+    thermo: &ThermoResults,
+    temp: f64,
+    freq_cutoff: f64,
+    elec_energy: Option<f64>,
+    rot_symmetry: f64,
+) {
+    print!(
+        "{}",
+        format_thermo(thermo, temp, freq_cutoff, elec_energy, rot_symmetry)
+    );
 }
 
 pub fn brot_from_coords(xyz_bohr: &[[f64; 3]], mass_amu: &[f64]) -> Vec<f64> {
@@ -417,7 +431,7 @@ fn all_translation(thermo: &mut ThermoResults, mass_amu_total: f64, pressure: f6
     thermo.cptrans = 2.5 * RGAS_AU;
 }
 
-fn all_rotations(thermo: &mut ThermoResults, brot: &[f64], temp: f64) {
+fn all_rotations(thermo: &mut ThermoResults, brot: &[f64], temp: f64, rot_symmetry: f64) {
     let RT = RGAS_AU * temp;
 
     if brot.is_empty() {
@@ -432,7 +446,9 @@ fn all_rotations(thermo: &mut ThermoResults, brot: &[f64], temp: f64) {
         return;
     }
 
-    let sigma = ROT_SYMMETRY_NUMBER;
+    // A non-positive sigma would make the partition function nonsense; fall
+    // back to the asymmetric case rather than producing an infinity.
+    let sigma = if rot_symmetry > 0.0 { rot_symmetry } else { 1.0 };
     let chiral = ROT_CHIRALITY;
 
     let eps = 1.0e-12;
@@ -603,7 +619,7 @@ mod tests {
         let freqs_cm1 = [259.56, 1108.86, 1158.96, 1355.45, 3531.45, 3534.68];
         let brot_cm1 = [1.0, 1.0, 1.0]; // rotational constants don't affect ZPE
         let mass_amu_total = 2.0 * 15.999 + 2.0 * 1.008;
-        let thermo = eval_thermo(&freqs_cm1, &brot_cm1, mass_amu_total, 1.0, 298.15, 101_325.0, 100.0);
+        let thermo = eval_thermo(&freqs_cm1, &brot_cm1, mass_amu_total, 1.0, 298.15, 101_325.0, 100.0, 1.0);
 
         let xtb_zpe_eh = 0.024943563139;
         let rel_err = (thermo.zpe - xtb_zpe_eh).abs() / xtb_zpe_eh;
@@ -621,8 +637,8 @@ mod tests {
     fn print_thermo_and_format_thermo_agree() {
         let freqs_cm1 = [259.56, 1108.86, 1158.96, 1355.45, 3531.45, 3534.68];
         let brot_cm1 = [1.0, 1.0, 1.0];
-        let thermo = eval_thermo(&freqs_cm1, &brot_cm1, 34.0, 1.0, 298.15, 101_325.0, 100.0);
-        let text = format_thermo(&thermo, 298.15, 100.0, Some(-9.05));
+        let thermo = eval_thermo(&freqs_cm1, &brot_cm1, 34.0, 1.0, 298.15, 101_325.0, 100.0, 1.0);
+        let text = format_thermo(&thermo, 298.15, 100.0, Some(-9.05), 1.0);
         assert!(text.contains("Thermochemistry"));
         assert!(text.contains("ZPE"));
         assert!(text.contains("Electronic energy"));
@@ -638,17 +654,13 @@ mod rule_width_tests {
     /// the computed one would be worse than not printing it.
     #[test]
     fn the_printed_symmetry_number_is_the_one_used() {
-        let thermo = eval_thermo(&[500.0], &[0.06, 0.038, 0.030], 250.0, 1.0, 298.15, 101_325.0, 100.0);
-        let text = format_thermo(&thermo, 298.15, 100.0, None);
+        let thermo = eval_thermo(&[500.0], &[0.06, 0.038, 0.030], 250.0, 1.0, 298.15, 101_325.0, 100.0, 1.0);
+        let text = format_thermo(&thermo, 298.15, 100.0, None, 1.0);
         let line = text
             .lines()
             .find(|l| l.starts_with("Rotational symmetry number"))
             .expect("the symmetry number must be stated");
-        assert!(line.contains(&format!("{ROT_SYMMETRY_NUMBER:.0}")), "{line}");
-
-        // And it really is 1: doubling it would change the rotational entropy
-        // by R*ln 2, so this is not a cosmetic constant.
-        assert_eq!(ROT_SYMMETRY_NUMBER, 1.0);
+        assert!(line.contains("1"), "{line}");
     }
 
     /// Every rule must span the widest row of its own table -- the complaint
@@ -664,8 +676,9 @@ mod rule_width_tests {
             298.15,
             101_325.0,
             100.0,
+            1.0,
         );
-        let text = format_thermo(&thermo, 298.15, 100.0, None);
+        let text = format_thermo(&thermo, 298.15, 100.0, None, 1.0);
         let width = |prefix: &str| {
             text.lines()
                 .find(|l| l.starts_with(prefix))

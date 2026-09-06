@@ -60,6 +60,8 @@ pub struct FrequencyResult {
     pub thermo: ThermoResults,
     pub thermo_temp_k: f64,
     pub thermo_freq_cutoff_cm1: f64,
+    /// Rotational symmetry number used for this result's thermochemistry.
+    pub rot_symmetry: f64,
     pub eckart_used: EckartMode,
     /// The empirical scaling factor applied to every frequency, when the
     /// source file asked for one. `None` means the frequencies are the raw
@@ -356,6 +358,7 @@ fn analyze(
     thermo_temp_k: f64,
     thermo_freq_cutoff_cm1: f64,
     frequency_scale: f64,
+    rot_symmetry: f64,
 ) -> Result<FrequencyResult, String> {
     let natoms = raw.atoms.len();
     let mass: Vec<f64> = match &raw.masses_amu {
@@ -458,6 +461,7 @@ fn analyze(
         thermo_temp_k,
         ONE_ATM_PASCAL,
         thermo_freq_cutoff_cm1,
+        rot_symmetry,
     );
     let coords_angstrom: Vec<Vec3> = (0..natoms)
         .map(|i| {
@@ -481,6 +485,7 @@ fn analyze(
         thermo,
         thermo_temp_k,
         thermo_freq_cutoff_cm1,
+        rot_symmetry,
         eckart_used,
         frequency_scale: scaled.then_some(frequency_scale),
         reaction_path_fallback_note,
@@ -619,6 +624,7 @@ pub fn poll_xtb_frequencies(
                 panel_state.thermo_temp_k,
                 panel_state.thermo_freq_cutoff_cm1,
                 panel_state.frequency_scale,
+                panel_state.rot_symmetry,
             ) {
                 Ok(analyzed) => {
                     let note = analyzed
@@ -654,6 +660,10 @@ pub struct XtbFreqPanelState {
     pub eckart_mode: EckartMode,
     pub thermo_temp_k: f64,
     pub thermo_freq_cutoff_cm1: f64,
+    /// Rotational symmetry number for the thermochemistry. Supplied by the
+    /// user rather than detected: 1 is right for an asymmetric molecule, and
+    /// anyone running a symmetric one knows its number.
+    pub rot_symmetry: f64,
     /// Charge for an xTB Hessian run. Independent of the optimizer's: a
     /// frequency calculation is often run on a different species than the one
     /// last optimized, and silently inheriting the other panel's value is how
@@ -687,6 +697,7 @@ impl Default for XtbFreqPanelState {
             thermo_temp_k: 298.15,
             thermo_freq_cutoff_cm1: 100.0,
             frequency_scale: 1.0,
+            rot_symmetry: 1.0,
             charge: 0,
             multiplicity: 1,
             show_warnings: false,
@@ -773,6 +784,7 @@ fn reanalyze_stored_hessian(
         freq_panel.thermo_temp_k,
         freq_panel.thermo_freq_cutoff_cm1,
         freq_panel.frequency_scale,
+        freq_panel.rot_symmetry,
     ) {
         Ok(result) => {
             freq_task.result = Some(result);
@@ -830,24 +842,45 @@ pub fn xtb_frequency_panel(
         }
     });
 
-    ui.horizontal(|ui| {
-        ui.label("Temperature (K)");
-        ui.add_enabled(
-            !running,
-            egui::DragValue::new(&mut freq_panel.thermo_temp_k).range(1.0..=2000.0),
-        );
-        ui.label("Cutoff (cm⁻¹)");
-        ui.add_enabled(
-            !running,
-            egui::DragValue::new(&mut freq_panel.thermo_freq_cutoff_cm1).range(0.0..=500.0),
-        );
-    });
-
     // Changing any of these redoes the analysis from the stored Hessian rather
     // than asking for a new one -- a diagonalisation is milliseconds, so there
     // is no reason to make the user re-run a calculation to try 0.97 instead
     // of 1.0, or 273 K instead of 298 K.
     let mut reanalyze = false;
+    ui.horizontal(|ui| {
+        ui.label("Temperature (K)");
+        reanalyze |= ui
+            .add_enabled(
+                !running,
+                egui::DragValue::new(&mut freq_panel.thermo_temp_k).range(1.0..=2000.0),
+            )
+            .changed();
+        ui.label("Cutoff (cm⁻¹)");
+        reanalyze |= ui
+            .add_enabled(
+                !running,
+                egui::DragValue::new(&mut freq_panel.thermo_freq_cutoff_cm1).range(0.0..=500.0),
+            )
+            .changed();
+    });
+
+    ui.horizontal(|ui| {
+        ui.label("Symmetry number \u{3c3}");
+        let response = ui.add_enabled(
+            !running,
+            egui::DragValue::new(&mut freq_panel.rot_symmetry)
+                .range(1.0..=120.0)
+                .speed(1.0)
+                .fixed_decimals(0),
+        );
+        reanalyze |= response.changed();
+        response.on_hover_text(
+            "Rotational symmetry number for the thermochemistry. 1 for an \
+             asymmetric molecule, 2 for water, 3 for ammonia, 6 for BF3, \
+             12 for benzene or methane, 24 for SF6.",
+        );
+    });
+
     ui.horizontal(|ui| {
         ui.label("Frequency scale");
         let response = ui.add_enabled(
@@ -1192,6 +1225,7 @@ fn thermochemistry_window(ctx: &egui::Context, open: &mut bool, result: &Frequen
                 result.thermo_temp_k,
                 result.thermo_freq_cutoff_cm1,
                 None,
+                result.rot_symmetry,
             );
             if ui.button("Export .dat\u{2026}").clicked() {
                 export_thermochemistry(&text);
@@ -1381,6 +1415,7 @@ mod tests {
         assert_eq!(panel.multiplicity, 1);
         assert!(!panel.show_warnings, "warnings wait for an attempted run");
         assert_eq!(panel.frequency_scale, 1.0, "unscaled harmonic by default");
+        assert_eq!(panel.rot_symmetry, 1.0, "C1 unless the user says otherwise");
     }
 
     /// Changing one panel's charge must not move the other's.
@@ -1390,8 +1425,49 @@ mod tests {
         let opt = super::super::xtb_optimize::XtbPanelState::default();
         freq.charge = -1;
         freq.multiplicity = 2;
+        // Both halves matter: the write must stick, and it must not reach the
+        // other panel. Checking only the optimizer would pass even if the
+        // frequency panel silently ignored the assignment.
+        assert_eq!(freq.charge, -1);
+        assert_eq!(freq.multiplicity, 2);
         assert_eq!(opt.charge, 0);
         assert_eq!(opt.multiplicity, 1);
+    }
+
+    /// The symmetry number reaches the thermochemistry: sigma = 2 must lower
+    /// the rotational entropy by exactly R ln 2 relative to sigma = 1.
+    #[test]
+    fn the_symmetry_number_changes_the_rotational_entropy_by_r_ln_sigma() {
+        let (raw, scale) = read_hessian_file(&example_hess_path()).unwrap();
+        let one = analyze(
+            raw.clone(),
+            1,
+            EckartMode::VibRot,
+            298.15,
+            100.0,
+            scale.unwrap_or(1.0),
+            1.0,
+        )
+        .unwrap();
+        let two = analyze(
+            raw,
+            1,
+            EckartMode::VibRot,
+            298.15,
+            100.0,
+            scale.unwrap_or(1.0),
+            2.0,
+        )
+        .unwrap();
+        // R in Eh/K per particle is the Boltzmann constant in atomic units.
+        const R_HARTREE_PER_K: f64 = 3.166_811_563e-6;
+        let drop = one.thermo.srot - two.thermo.srot;
+        let expected = R_HARTREE_PER_K * 2.0f64.ln();
+        assert!(
+            (drop - expected).abs() < 1.0e-10,
+            "S_rot fell by {drop:.3e} Eh/K, expected R ln2 = {expected:.3e}"
+        );
+        assert_eq!(two.rot_symmetry, 2.0);
     }
 
     fn example_hess_path() -> std::path::PathBuf {
@@ -1415,6 +1491,7 @@ mod tests {
             298.15,
             100.0,
             scale.or(file_scale).unwrap_or(1.0),
+            1.0,
         )
     }
 
@@ -1635,7 +1712,7 @@ mod tests {
     /// frequencies and zero-point energy.
     #[test]
     fn analyze_reproduces_xtbs_frequencies_and_zpe() {
-        let result = analyze(h2o2_raw(), 1, EckartMode::VibRot, 298.15, 100.0, 1.0).unwrap();
+        let result = analyze(h2o2_raw(), 1, EckartMode::VibRot, 298.15, 100.0, 1.0, 1.0).unwrap();
 
         assert_eq!(result.zero_indices.len(), 6);
         assert_eq!(result.positive_indices.len(), 6);
@@ -1678,7 +1755,7 @@ mod tests {
     /// one) must also fall back cleanly instead of panicking or erroring.
     #[test]
     fn reaction_path_without_a_gradient_falls_back_to_vibrot() {
-        let result = analyze(h2o2_raw(), 1, EckartMode::ReactionPath, 298.15, 100.0, 1.0).unwrap();
+        let result = analyze(h2o2_raw(), 1, EckartMode::ReactionPath, 298.15, 100.0, 1.0, 1.0).unwrap();
         assert_eq!(result.eckart_used, EckartMode::VibRot);
         assert!(result.reaction_path_fallback_note.is_some());
     }
@@ -1691,7 +1768,7 @@ mod tests {
         // A synthetic, clearly non-zero gradient -- far above the
         // near-stationary-point floor this is meant to distinguish from.
         raw.gradient_bohr = Some(vec![0.05; 12]);
-        let result = analyze(raw, 1, EckartMode::ReactionPath, 298.15, 100.0, 1.0).unwrap();
+        let result = analyze(raw, 1, EckartMode::ReactionPath, 298.15, 100.0, 1.0, 1.0).unwrap();
         assert_eq!(result.eckart_used, EckartMode::ReactionPath);
         assert!(result.reaction_path_fallback_note.is_none());
     }
@@ -1714,7 +1791,7 @@ mod tests {
             .map(|c| c * ANGSTROM_TO_BOHR)
             .collect();
 
-        let result = analyze(raw, 1, EckartMode::VibRot, 298.15, 100.0, 1.0).unwrap();
+        let result = analyze(raw, 1, EckartMode::VibRot, 298.15, 100.0, 1.0, 1.0).unwrap();
         let mut computed: Vec<f64> = result
             .positive_indices
             .iter()
@@ -1774,7 +1851,7 @@ mod tests {
              changed and this test no longer exercises the bug it was written for"
         );
 
-        let result = analyze(raw, 1, EckartMode::VibRot, 298.15, 100.0, 1.0).unwrap();
+        let result = analyze(raw, 1, EckartMode::VibRot, 298.15, 100.0, 1.0, 1.0).unwrap();
         assert_eq!(result.atoms.len(), 16);
         assert!(result.frequencies_cm1.iter().any(|&f| f.abs() > 100.0));
 
@@ -1810,7 +1887,7 @@ mod tests {
         assert_eq!(raw.atoms.len(), 4);
         assert_eq!(raw.hessian.dim(), (12, 12));
 
-        let result = analyze(raw, 1, EckartMode::VibRot, 298.15, 100.0, 1.0).unwrap();
+        let result = analyze(raw, 1, EckartMode::VibRot, 298.15, 100.0, 1.0, 1.0).unwrap();
         // `examples/h2o2.xyz` is a hand-placed, not fully relaxed geometry
         // (unlike the `--ohess`-derived fixture the other test in this file
         // uses), so its six low modes are only approximately zero rather
@@ -1896,6 +1973,7 @@ mod tests {
                                 panel_state.thermo_temp_k,
                                 panel_state.thermo_freq_cutoff_cm1,
                                 panel_state.frequency_scale,
+                                panel_state.rot_symmetry,
                             ) {
                                 Ok(analyzed) => task.result = Some(analyzed),
                                 Err(err) => panic!("analyze failed: {err}"),
