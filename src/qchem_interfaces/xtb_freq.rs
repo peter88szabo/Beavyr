@@ -1016,7 +1016,9 @@ pub fn xtb_frequency_panel(
     }
 
     egui::ScrollArea::vertical()
-        .max_height(180.0)
+        // Enough rows to scan a spectrum without scrolling for every one, while
+        // leaving the thermochemistry and spectrum buttons below it in view.
+        .max_height(340.0)
         .show(ui, |ui| {
             egui::Grid::new("xtb_freq_mode_list")
                 .striped(true)

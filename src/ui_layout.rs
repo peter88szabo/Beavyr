@@ -93,7 +93,9 @@ impl Tab {
             Tab::Structure => [420.0, 520.0],
             Tab::Representation => [420.0, 480.0],
             Tab::Optimize => [430.0, 420.0],
-            Tab::Vibrations => [460.0, 520.0],
+            // Tall: two run blocks, the settings above them and a mode list
+            // that is worth seeing more than a handful of rows of.
+            Tab::Vibrations => [470.0, 780.0],
             Tab::UvVis => [560.0, 560.0],
             Tab::Trajectory => [420.0, 520.0],
             Tab::Compare => [380.0, 360.0],
