@@ -621,8 +621,7 @@ fn analyze_imported(
             "Normal modes, frequencies and IR intensities are {}'s own, read from the \
              file. The thermochemistry below is computed here from those frequencies, \
              at the temperature, cutoff and symmetry number set in this panel -- it is \
-             not {}'s. There is no Hessian in the file, so the Eckart and reaction-path \
-             projections do not apply.",
+             not {}'s.",
             imported.program, imported.program
         )),
         reaction_path_fallback_note: None,
@@ -1738,7 +1737,7 @@ mod tests {
         let note = loaded_gaussian().source_note.expect("a provenance note");
         assert!(note.contains("Gaussian"), "{note}");
         assert!(note.contains("computed here"), "{note}");
-        assert!(note.contains("no Hessian"), "{note}");
+
     }
 
     /// IR intensities come across, so the spectrum is available.
