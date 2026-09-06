@@ -28,6 +28,7 @@ use crate::spectrum::plot::{draw_spectrum, SpectrumAxis};
 use crate::trajectory::{PlaybackMode, TrajectoryFrame, TrajectoryState};
 
 use super::hessian_file::{parse_turbomole_gradient, parse_turbomole_hessian, parse_vibspectrum};
+use super::valence::validate_electronic_state;
 use super::xtb_optimize::{create_xtb_run_dir, discard_xtb_run_dir, xtb_scratch_dir};
 
 const ANGSTROM_TO_BOHR: f64 = 1.0 / 0.529_177_210_903;
@@ -653,6 +654,15 @@ pub struct XtbFreqPanelState {
     pub eckart_mode: EckartMode,
     pub thermo_temp_k: f64,
     pub thermo_freq_cutoff_cm1: f64,
+    /// Charge for an xTB Hessian run. Independent of the optimizer's: a
+    /// frequency calculation is often run on a different species than the one
+    /// last optimized, and silently inheriting the other panel's value is how
+    /// a Hessian gets computed for the wrong electronic state.
+    pub charge: i32,
+    pub multiplicity: i32,
+    /// Valence warnings appear only once a run has actually been attempted,
+    /// matching the optimizer -- see `XtbPanelState::show_warnings`.
+    pub show_warnings: bool,
     /// Empirical scaling applied to every computed frequency. 1.0 leaves the
     /// raw harmonic values alone. Loading a Hessian file that names its own
     /// factor sets this to that value, since the program that wrote the file
@@ -677,6 +687,9 @@ impl Default for XtbFreqPanelState {
             thermo_temp_k: 298.15,
             thermo_freq_cutoff_cm1: 100.0,
             frequency_scale: 1.0,
+            charge: 0,
+            multiplicity: 1,
+            show_warnings: false,
             selected_mode: None,
             mode_amplitude_angstrom: 0.18,
             mode_speed_fps: 60.0,
@@ -858,46 +871,109 @@ pub fn xtb_frequency_panel(
         }
     });
 
-    ui.horizontal(|ui| {
-        let can_run = !running && !mol.atoms.is_empty();
-        let mut button = ui.add_enabled(can_run, egui::Button::new("Run Frequencies"));
-        if mol.atoms.is_empty() {
-            button = button.on_disabled_hover_text("There is no structure on screen to analyze.");
-        }
-        if button.clicked() {
-            match super::xtb_optimize::resolve_xtb_executable(&opt_panel.xtb_path) {
-                Ok(xtb_path) => {
-                    let need_gradient = freq_panel.eckart_mode == EckartMode::ReactionPath;
-                    freq_task.start(
-                        &xtb_path,
-                        &mol.atoms,
-                        &mol.pos,
-                        opt_panel.charge,
-                        (opt_panel.multiplicity - 1).max(0),
-                        opt_panel.multiplicity,
-                        need_gradient,
-                    );
-                }
-                Err(err) => {
-                    freq_task.last_message = Some(err);
-                    freq_task.last_is_error = true;
-                }
+    // Two ways to get a Hessian, kept visually apart because they need
+    // completely different inputs: computing one here needs an electronic
+    // state and an xTB binary, loading one needs neither.
+    ui.add_space(6.0);
+    ui.group(|ui| {
+        ui.strong("Run Freq Calc (with xTB)");
+
+        ui.horizontal(|ui| {
+            ui.label("Charge");
+            ui.add_enabled(
+                !running,
+                egui::DragValue::new(&mut freq_panel.charge).range(-10..=10),
+            );
+            ui.label("Multiplicity");
+            ui.add_enabled(
+                !running,
+                egui::DragValue::new(&mut freq_panel.multiplicity).range(1..=10),
+            );
+            if ui
+                .add_enabled(!running, egui::Button::new("Reset to defaults"))
+                .clicked()
+            {
+                freq_panel.charge = 0;
+                freq_panel.multiplicity = 1;
+                freq_panel.show_warnings = false;
+            }
+        });
+
+        // Same check the optimizer runs: a multiplicity that cannot be made
+        // from this many electrons would have xTB fail (or worse, converge to
+        // something meaningless) several minutes into a Hessian.
+        let validation =
+            validate_electronic_state(mol, freq_panel.charge, freq_panel.multiplicity);
+        let (uhf, warnings) = match &validation {
+            Ok((uhf, warnings)) => (Some(*uhf), warnings.as_slice()),
+            Err(_) => (None, &[][..]),
+        };
+        if let Err(err) = &validation {
+            // A hard error explains why the button is disabled, so it shows
+            // straight away rather than waiting for a click that cannot land.
+            ui.colored_label(egui::Color32::from_rgb(220, 80, 80), err.to_string());
+        } else if freq_panel.show_warnings {
+            for warning in warnings {
+                ui.colored_label(
+                    egui::Color32::from_rgb(210, 160, 40),
+                    format!("Atom {}: {}", warning.atom_index + 1, warning.message),
+                );
             }
         }
-        if running && ui.button("Cancel").clicked() {
-            freq_task.cancel_now();
-        }
+
+        ui.horizontal(|ui| {
+            let can_run = !running && !mol.atoms.is_empty() && uhf.is_some();
+            let mut button =
+                ui.add_enabled(can_run, egui::Button::new("Run Freq Calc (with xTB)"));
+            if mol.atoms.is_empty() {
+                button =
+                    button.on_disabled_hover_text("There is no structure on screen to analyze.");
+            }
+            if button.clicked() {
+                freq_panel.show_warnings = true;
+                match super::xtb_optimize::resolve_xtb_executable(&opt_panel.xtb_path) {
+                    Ok(xtb_path) => {
+                        if let Some(uhf) = uhf {
+                            let need_gradient =
+                                freq_panel.eckart_mode == EckartMode::ReactionPath;
+                            freq_task.start(
+                                &xtb_path,
+                                &mol.atoms,
+                                &mol.pos,
+                                freq_panel.charge,
+                                uhf,
+                                freq_panel.multiplicity,
+                                need_gradient,
+                            );
+                        }
+                    }
+                    Err(err) => {
+                        freq_task.last_message = Some(err);
+                        freq_task.last_is_error = true;
+                    }
+                }
+            }
+            if running && ui.button("Cancel").clicked() {
+                freq_task.cancel_now();
+            }
+        });
+        ui.weak("Uses the xTB executable set in the Geometry Optimization panel.");
+    });
+
+    ui.add_space(6.0);
+    ui.group(|ui| {
+        ui.strong("Load a Hessian computed elsewhere");
         if ui
             .add_enabled(!running, egui::Button::new("Load Hessian…"))
-            .on_hover_text(
-                "Analyze a Hessian computed elsewhere (ORCA .hess): normal modes, \
-                 frequencies, IR spectrum and thermochemistry, exactly as for a run \
-                 done here.",
-            )
             .clicked()
         {
             load_hessian_from_dialog(freq_panel, freq_task);
         }
+        ui.weak(
+            "ORCA .hess: normal modes, frequencies, IR spectrum and thermochemistry, \
+             analyzed exactly as for a run done here. No charge or multiplicity needed \
+             -- the Hessian already encodes them.",
+        );
     });
 
     if reanalyze {
@@ -1262,6 +1338,29 @@ mod tests {
             vib_lines,
             gradient_bohr: None,
         }
+    }
+
+    /// The Hessian block carries its own electronic state rather than reading
+    /// the optimizer's: a frequency calculation is often run on a different
+    /// species than the one last optimized.
+    #[test]
+    fn the_frequency_panel_defaults_to_a_neutral_singlet() {
+        let panel = XtbFreqPanelState::default();
+        assert_eq!(panel.charge, 0);
+        assert_eq!(panel.multiplicity, 1);
+        assert!(!panel.show_warnings, "warnings wait for an attempted run");
+        assert_eq!(panel.frequency_scale, 1.0, "unscaled harmonic by default");
+    }
+
+    /// Changing one panel's charge must not move the other's.
+    #[test]
+    fn the_frequency_and_optimizer_charges_are_independent() {
+        let mut freq = XtbFreqPanelState::default();
+        let opt = super::super::xtb_optimize::XtbPanelState::default();
+        freq.charge = -1;
+        freq.multiplicity = 2;
+        assert_eq!(opt.charge, 0);
+        assert_eq!(opt.multiplicity, 1);
     }
 
     fn example_hess_path() -> std::path::PathBuf {
