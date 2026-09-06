@@ -807,8 +807,9 @@ pub fn xtb_frequency_panel(
     // to toggle for it. (Behemoth's own enum for this is still named
     // `EckartMode::VibRot`, imported as-is.) The one real decision
     // is whether to *additionally* project out the reaction-coordinate
-    // direction too, which only makes sense at a transition state or other
-    // non-minimum extremum, since it needs an actual (non-zero) gradient.
+    // direction too, which needs a non-zero gradient: it applies along a
+    // reaction path, not at a stationary point, where the gradient vanishes
+    // and there is no path direction to remove.
     ui.horizontal(|ui| {
         let mut reaction_path = freq_panel.eckart_mode == EckartMode::ReactionPath;
         if ui
@@ -816,7 +817,7 @@ pub fn xtb_frequency_panel(
                 !running,
                 egui::Checkbox::new(
                     &mut reaction_path,
-                    "Reaction-path projection (transition states / extrema only)",
+                    "Reaction-path projection",
                 ),
             )
             .changed()
