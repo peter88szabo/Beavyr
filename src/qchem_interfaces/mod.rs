@@ -1,4 +1,5 @@
 pub mod config;
+pub mod gaussian_log;
 pub mod hessian_file;
 pub mod orca_hess;
 pub mod xtb_freq;

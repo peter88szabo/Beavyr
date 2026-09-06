@@ -67,6 +67,10 @@ pub struct FrequencyResult {
     /// source file asked for one. `None` means the frequencies are the raw
     /// harmonic ones.
     pub frequency_scale: Option<f64>,
+    /// Where the modes came from, when they were not computed here. Set for
+    /// an imported frequency job, whose modes and intensities are its own and
+    /// whose thermochemistry is ours.
+    pub source_note: Option<String>,
     /// Set when a reaction-path request was silently downgraded to the
     /// ordinary translation/rotation projection
     /// because the gradient was essentially zero.
@@ -107,7 +111,7 @@ pub struct XtbFrequencyTask {
     /// The Hessian and geometry the current result came from, kept so that
     /// changing the scaling factor, the temperature or the cutoff can redo the
     /// analysis in milliseconds instead of recomputing a Hessian.
-    last_raw: Option<RawFrequencyOutput>,
+    last_raw: Option<HessianSource>,
     /// Multiplicity the stored raw data was produced with.
     last_multiplicity: i32,
     /// Geometry a just-loaded Hessian file brought with it, waiting to be put
@@ -488,7 +492,140 @@ fn analyze(
         rot_symmetry,
         eckart_used,
         frequency_scale: scaled.then_some(frequency_scale),
+        source_note: None,
         reaction_path_fallback_note,
+    })
+}
+
+/// Frequencies and modes a program already computed, for a file that reports
+/// its results but not the Hessian behind them -- a Gaussian `.log`, say.
+///
+/// The modes are taken as printed; only the thermochemistry is computed here.
+#[derive(Clone)]
+struct ImportedModes {
+    atoms: Vec<String>,
+    coords_bohr: Vec<f64>,
+    frequencies_cm1: Vec<f64>,
+    ir_intensities_km_mol: Vec<f64>,
+    /// `3N x nmodes`, in our normalisation.
+    modes: Array2<f64>,
+    /// Named in the panel so it is clear what was read and what was computed.
+    program: String,
+}
+
+/// Either a Hessian we can analyse ourselves, or a finished set of modes.
+#[derive(Clone)]
+enum HessianSource {
+    /// A force-constant matrix: we project it and diagonalise it.
+    Computed(Box<RawFrequencyOutput>),
+    /// Modes and frequencies as another program reported them.
+    Imported(Box<ImportedModes>),
+}
+
+/// Builds a result from modes another program computed, calculating only the
+/// thermochemistry.
+///
+/// There is no projection to do -- the source already removed translations and
+/// rotations, which is why it prints `3N - 6` modes -- so the Eckart setting
+/// does not apply and no mode is classified as "low".
+fn analyze_imported(
+    imported: ImportedModes,
+    multiplicity: i32,
+    thermo_temp_k: f64,
+    thermo_freq_cutoff_cm1: f64,
+    frequency_scale: f64,
+    rot_symmetry: f64,
+) -> Result<FrequencyResult, String> {
+    let natoms = imported.atoms.len();
+    let mass: Vec<f64> = imported
+        .atoms
+        .iter()
+        .map(|s| atomic_mass_amu(s).ok_or_else(|| format!("Unknown element {s:?}")))
+        .collect::<Result<_, _>>()?;
+
+    let mut frequencies_cm1 = imported.frequencies_cm1.clone();
+    let scaled = frequency_scale > 0.0 && (frequency_scale - 1.0).abs() > f64::EPSILON;
+    if scaled {
+        for f in &mut frequencies_cm1 {
+            *f *= frequency_scale;
+        }
+    }
+
+    // The source projected out translations and rotations already, so every
+    // listed mode is a vibration: imaginary or real, nothing in between.
+    let negative_indices: Vec<usize> = frequencies_cm1
+        .iter()
+        .enumerate()
+        .filter(|(_, f)| **f < 0.0)
+        .map(|(i, _)| i)
+        .collect();
+    let positive_indices: Vec<usize> = frequencies_cm1
+        .iter()
+        .enumerate()
+        .filter(|(_, f)| **f >= 0.0)
+        .map(|(i, _)| i)
+        .collect();
+
+    let freqs_for_thermo: Vec<f64> = positive_indices
+        .iter()
+        .map(|&i| frequencies_cm1[i])
+        .collect();
+    let coords_for_brot: Vec<[f64; 3]> = (0..natoms)
+        .map(|i| {
+            [
+                imported.coords_bohr[3 * i],
+                imported.coords_bohr[3 * i + 1],
+                imported.coords_bohr[3 * i + 2],
+            ]
+        })
+        .collect();
+    let brot_cm1 = thermofuncs::brot_from_coords(&coords_for_brot, &mass);
+    let mass_total: f64 = mass.iter().sum();
+    const ONE_ATM_PASCAL: f64 = 101_325.0;
+    let thermo = thermofuncs::eval_thermo(
+        &freqs_for_thermo,
+        &brot_cm1,
+        mass_total,
+        multiplicity as f64,
+        thermo_temp_k,
+        ONE_ATM_PASCAL,
+        thermo_freq_cutoff_cm1,
+        rot_symmetry,
+    );
+    let coords_angstrom: Vec<Vec3> = (0..natoms)
+        .map(|i| {
+            Vec3::new(
+                imported.coords_bohr[3 * i] as f32,
+                imported.coords_bohr[3 * i + 1] as f32,
+                imported.coords_bohr[3 * i + 2] as f32,
+            ) * BOHR_TO_ANGSTROM
+        })
+        .collect();
+
+    Ok(FrequencyResult {
+        atoms: imported.atoms,
+        coords_angstrom,
+        modes: imported.modes,
+        frequencies_cm1,
+        ir_intensities_km_mol: imported.ir_intensities_km_mol,
+        negative_indices,
+        zero_indices: Vec::new(),
+        positive_indices,
+        thermo,
+        thermo_temp_k,
+        thermo_freq_cutoff_cm1,
+        rot_symmetry,
+        eckart_used: EckartMode::Off,
+        frequency_scale: scaled.then_some(frequency_scale),
+        source_note: Some(format!(
+            "Normal modes, frequencies and IR intensities are {}'s own, read from the \
+             file. The thermochemistry below is computed here from those frequencies, \
+             at the temperature, cutoff and symmetry number set in this panel -- it is \
+             not {}'s. There is no Hessian in the file, so the Eckart and reaction-path \
+             projections do not apply.",
+            imported.program, imported.program
+        )),
+        reaction_path_fallback_note: None,
     })
 }
 
@@ -499,18 +636,42 @@ fn analyze(
 /// single-atom Cartesian displacement equals 1 -- a predictable, visible
 /// amplitude regardless of the eigenvector's own (physically meaningful but
 /// visually arbitrary) normalization.
-/// Reads a Hessian file into the shape `analyze` wants, along with any
-/// empirical scaling factor the file itself asks for.
+/// Reads a frequency file, along with any empirical scaling factor it asks
+/// for, and says which kind it is.
 ///
-/// ORCA `.hess` is the only format for now. Synchronous: parsing the file and
-/// diagonalising a 3N x 3N matrix takes milliseconds, so this needs none of
-/// the background-task machinery a real xTB run does.
-fn read_hessian_file(path: &Path) -> Result<(RawFrequencyOutput, Option<f64>), String> {
+/// Two kinds are recognised, and they are not the same thing:
+/// * an ORCA `.hess`, which holds the force-constant matrix -- we project and
+///   diagonalise it ourselves;
+/// * a Gaussian `.log`, which holds the finished frequencies, intensities and
+///   normal coordinates but no Hessian -- we take those as given and compute
+///   only the thermochemistry.
+fn read_hessian_file(path: &Path) -> Result<(HessianSource, Option<f64>), String> {
     let text = std::fs::read_to_string(path)
         .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+
+    if super::gaussian_log::is_gaussian_log(&text) {
+        let g = super::gaussian_log::parse_gaussian_log(&text)
+            .map_err(|e| format!("{}: {e}", path.display()))?;
+        let coords_bohr: Vec<f64> = g
+            .coords_angstrom
+            .iter()
+            .map(|c| c * ANGSTROM_TO_BOHR)
+            .collect();
+        let imported = ImportedModes {
+            atoms: g.atoms,
+            coords_bohr,
+            frequencies_cm1: g.frequencies_cm1,
+            ir_intensities_km_mol: g.ir_intensities_km_mol,
+            modes: g.modes,
+            program: "Gaussian".to_string(),
+        };
+        // Gaussian applies any scaling factor itself and prints the scaled
+        // frequencies, so there is nothing here for us to apply.
+        return Ok((HessianSource::Imported(Box::new(imported)), None));
+    }
+
     let hess = super::orca_hess::parse_orca_hess(&text)
         .map_err(|e| format!("{}: {e}", path.display()))?;
-
     let raw = RawFrequencyOutput {
         atoms: hess.atoms.clone(),
         coords_bohr: hess.coords_bohr.clone(),
@@ -526,7 +687,10 @@ fn read_hessian_file(path: &Path) -> Result<(RawFrequencyOutput, Option<f64>), S
             (!ordered.is_empty()).then_some(ordered)
         },
     };
-    Ok((raw, hess.frequency_scale_factor))
+    Ok((
+        HessianSource::Computed(Box::new(raw)),
+        hess.frequency_scale_factor,
+    ))
 }
 
 pub fn animate_mode(
@@ -615,7 +779,7 @@ pub fn poll_xtb_frequencies(
             if let Some(dir) = &run_dir {
                 discard_xtb_run_dir(dir);
             }
-            freq_task.last_raw = Some(raw.clone());
+            freq_task.last_raw = Some(HessianSource::Computed(Box::new(raw.clone())));
             freq_task.last_multiplicity = multiplicity;
             match analyze(
                 raw,
@@ -723,13 +887,13 @@ impl Default for XtbFreqPanelState {
 /// user already has in their output file. They can still change it afterwards.
 fn load_hessian_from_dialog(freq_panel: &mut XtbFreqPanelState, freq_task: &mut XtbFrequencyTask) {
     let Some(path) = rfd::FileDialog::new()
-        .add_filter("ORCA Hessian", &["hess"])
+        .add_filter("Hessian or frequency output", &["hess", "log", "out"])
         .add_filter("All files", &["*"])
         .pick_file()
     else {
         return;
     };
-    let (raw, file_scale) = match read_hessian_file(&path) {
+    let (source, file_scale) = match read_hessian_file(&path) {
         Ok(pair) => pair,
         Err(err) => {
             freq_task.last_message = Some(err);
@@ -740,8 +904,11 @@ fn load_hessian_from_dialog(freq_panel: &mut XtbFreqPanelState, freq_task: &mut 
     if let Some(scale) = file_scale {
         freq_panel.frequency_scale = scale;
     }
-    let natoms = raw.atoms.len();
-    freq_task.last_raw = Some(raw);
+    let natoms = match &source {
+        HessianSource::Computed(raw) => raw.atoms.len(),
+        HessianSource::Imported(imported) => imported.atoms.len(),
+    };
+    freq_task.last_raw = Some(source);
     // A loaded Hessian carries no charge or spin state of its own; the modes
     // and thermochemistry only need the electronic multiplicity for the
     // electronic partition function, and 1 is the sane default.
@@ -777,18 +944,29 @@ fn reanalyze_stored_hessian(
     freq_panel: &XtbFreqPanelState,
     freq_task: &mut XtbFrequencyTask,
 ) -> bool {
-    let Some(raw) = freq_task.last_raw.clone() else {
+    let Some(source) = freq_task.last_raw.clone() else {
         return false;
     };
-    match analyze(
-        raw,
-        freq_task.last_multiplicity,
-        freq_panel.eckart_mode,
-        freq_panel.thermo_temp_k,
-        freq_panel.thermo_freq_cutoff_cm1,
-        freq_panel.frequency_scale,
-        freq_panel.rot_symmetry,
-    ) {
+    let outcome = match source {
+        HessianSource::Computed(raw) => analyze(
+            *raw,
+            freq_task.last_multiplicity,
+            freq_panel.eckart_mode,
+            freq_panel.thermo_temp_k,
+            freq_panel.thermo_freq_cutoff_cm1,
+            freq_panel.frequency_scale,
+            freq_panel.rot_symmetry,
+        ),
+        HessianSource::Imported(imported) => analyze_imported(
+            *imported,
+            freq_task.last_multiplicity,
+            freq_panel.thermo_temp_k,
+            freq_panel.thermo_freq_cutoff_cm1,
+            freq_panel.frequency_scale,
+            freq_panel.rot_symmetry,
+        ),
+    };
+    match outcome {
         Ok(result) => {
             freq_task.result = Some(result);
             true
@@ -1072,6 +1250,12 @@ pub fn xtb_frequency_panel(
     ));
     // Scaled frequencies are not the raw harmonic ones, so say so rather than
     // let the numbers quietly disagree with an unscaled calculation.
+    // Where the numbers came from, when they were not computed here. Stated
+    // rather than left to inference: a mode list looks identical whether we
+    // diagonalised a Hessian or read someone else's answer.
+    if let Some(note) = &result.source_note {
+        ui.colored_label(egui::Color32::from_rgb(150, 175, 210), note);
+    }
     if let Some(scale) = result.frequency_scale {
         ui.weak(format!(
             "Frequencies and thermochemistry scaled by {scale} \u{d7} the harmonic values."
@@ -1297,13 +1481,20 @@ fn thermochemistry_window(ctx: &egui::Context, open: &mut bool, result: &Frequen
         .resizable(true)
         .default_size([620.0, 560.0])
         .show(ctx, |ui| {
-            let text = thermofuncs::format_thermo(
+            let mut text = thermofuncs::format_thermo(
                 &result.thermo,
                 result.thermo_temp_k,
                 result.thermo_freq_cutoff_cm1,
                 None,
                 result.rot_symmetry,
             );
+            if let Some(note) = &result.source_note {
+                text.push_str(&format!("\n{note}\n"));
+            }
+            if let Some(note) = &result.source_note {
+                ui.colored_label(egui::Color32::from_rgb(150, 175, 210), note);
+                ui.add_space(4.0);
+            }
             if ui.button("Export .dat\u{2026}").clicked() {
                 export_thermochemistry(&text);
             }
@@ -1511,11 +1702,100 @@ mod tests {
         assert_eq!(opt.multiplicity, 1);
     }
 
+    fn example_gaussian_path() -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("examples")
+            .join("c164-ts1-2-1001.log")
+    }
+
+    fn loaded_gaussian() -> FrequencyResult {
+        let (source, scale) = read_hessian_file(&example_gaussian_path()).unwrap();
+        let HessianSource::Imported(imported) = source else {
+            panic!("a Gaussian log carries modes, not a Hessian");
+        };
+        assert!(scale.is_none(), "Gaussian scales its own frequencies");
+        analyze_imported(*imported, 1, 298.15, 100.0, 1.0, 1.0).unwrap()
+    }
+
+    /// A Gaussian log is recognised as an imported result rather than being
+    /// fed to the Hessian parser, which would reject it.
+    #[test]
+    fn a_gaussian_log_loads_as_imported_modes() {
+        let result = loaded_gaussian();
+        assert_eq!(result.atoms.len(), 19);
+        assert_eq!(result.frequencies_cm1.len(), 51, "3N - 6, no low modes");
+        assert!(result.zero_indices.is_empty(), "the source projected them out");
+        assert_eq!(result.negative_indices.len(), 1);
+        assert_eq!(result.positive_indices.len(), 50);
+        assert!((result.frequencies_cm1[0] + 2468.9062).abs() < 1e-4);
+        assert_eq!(result.eckart_used, EckartMode::Off);
+    }
+
+    /// The user must be told the modes are Gaussian's and the thermochemistry
+    /// is ours -- the two look identical in the mode list otherwise.
+    #[test]
+    fn an_imported_result_says_what_was_read_and_what_was_computed() {
+        let note = loaded_gaussian().source_note.expect("a provenance note");
+        assert!(note.contains("Gaussian"), "{note}");
+        assert!(note.contains("computed here"), "{note}");
+        assert!(note.contains("no Hessian"), "{note}");
+    }
+
+    /// IR intensities come across, so the spectrum is available.
+    #[test]
+    fn imported_intensities_reach_the_spectrum() {
+        let result = loaded_gaussian();
+        assert!(result.has_ir_intensities());
+        assert!((result.ir_intensities_km_mol[0] - 6843.5507).abs() < 1e-3);
+    }
+
+    /// Our thermochemistry from Gaussian's frequencies should land close to
+    /// Gaussian's own: it reports a zero-point correction of 0.143449 Eh at
+    /// sigma = 1, which the log states explicitly.
+    #[test]
+    fn our_thermochemistry_agrees_with_gaussians_own_zpe() {
+        const GAUSSIAN_ZPE_HARTREE: f64 = 0.143449;
+        let result = loaded_gaussian();
+        let error = (result.thermo.zpe - GAUSSIAN_ZPE_HARTREE).abs();
+        assert!(
+            error < 5.0e-4,
+            "ZPE {:.6} Eh vs Gaussian's {GAUSSIAN_ZPE_HARTREE:.6} (off by {:.3} kcal/mol)",
+            result.thermo.zpe,
+            error * 627.509_474
+        );
+    }
+
+    /// The modes are usable for animation: a real displacement, on the atom
+    /// that actually moves in the imaginary mode.
+    #[test]
+    fn imported_modes_can_be_animated() {
+        let result = loaded_gaussian();
+        let frames = animate_mode(
+            &result.atoms,
+            &result.coords_angstrom,
+            &result.modes,
+            0,
+            0.18,
+            16,
+        );
+        assert_eq!(frames.len(), 16);
+        // Atom 18 is the transferring hydrogen; it must move appreciably while
+        // the frame set as a whole stays a recognisable molecule.
+        let travel = |i: usize| {
+            frames
+                .iter()
+                .map(|f| (f.pos[i] - result.coords_angstrom[i]).length())
+                .fold(0.0f32, f32::max)
+        };
+        assert!(travel(17) > 0.05, "the transferring H barely moves: {}", travel(17));
+        assert!(travel(0) < travel(17), "a carbon should move less than the H");
+    }
+
     /// The symmetry number reaches the thermochemistry: sigma = 2 must lower
     /// the rotational entropy by exactly R ln 2 relative to sigma = 1.
     #[test]
     fn the_symmetry_number_changes_the_rotational_entropy_by_r_ln_sigma() {
-        let (raw, scale) = read_hessian_file(&example_hess_path()).unwrap();
+        let (raw, scale) = computed_hessian(&example_hess_path());
         let one = analyze(
             raw.clone(),
             1,
@@ -1553,6 +1833,18 @@ mod tests {
             .join("TS_Gamma-3-6_ZZ-S_11_Compound_1.hess")
     }
 
+    /// The raw Hessian out of a file that has one, for the tests that need to
+    /// analyse it directly.
+    fn computed_hessian(path: &std::path::Path) -> (RawFrequencyOutput, Option<f64>) {
+        match read_hessian_file(path) {
+            Ok((HessianSource::Computed(raw), scale)) => (*raw, scale),
+            Ok((HessianSource::Imported(_), _)) => {
+                panic!("{} has no Hessian to analyse", path.display())
+            }
+            Err(e) => panic!("{e}"),
+        }
+    }
+
     /// Reads a Hessian file and analyses it the way the panel does: the
     /// file's own scaling factor unless one is given.
     fn analyze_hess(
@@ -1560,7 +1852,12 @@ mod tests {
         eckart: EckartMode,
         scale: Option<f64>,
     ) -> Result<FrequencyResult, String> {
-        let (raw, file_scale) = read_hessian_file(path)?;
+        let (raw, file_scale) = match read_hessian_file(path)? {
+            (HessianSource::Computed(raw), scale) => (*raw, scale),
+            (HessianSource::Imported(_), _) => {
+                return Err(format!("{} carries no Hessian", path.display()))
+            }
+        };
         analyze(
             raw,
             1,
