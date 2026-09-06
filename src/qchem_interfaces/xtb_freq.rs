@@ -1173,6 +1173,11 @@ pub fn xtb_frequency_panel(
     ir_spectrum_window(&ctx, freq_panel, result);
 }
 
+/// Point size of the thermochemistry table. The layout is fixed-width columns
+/// meant to be read as a table, so it wants a size closer to a document than
+/// to the surrounding controls.
+const THERMO_FONT_SIZE: f32 = 16.0;
+
 fn thermochemistry_window(ctx: &egui::Context, open: &mut bool, result: &FrequencyResult) {
     if !*open {
         return;
@@ -1180,20 +1185,44 @@ fn thermochemistry_window(ctx: &egui::Context, open: &mut bool, result: &Frequen
     egui::Window::new("Thermochemistry")
         .open(open)
         .resizable(true)
-        .default_size([460.0, 420.0])
+        .default_size([620.0, 560.0])
         .show(ctx, |ui| {
+            let text = thermofuncs::format_thermo(
+                &result.thermo,
+                result.thermo_temp_k,
+                result.thermo_freq_cutoff_cm1,
+                None,
+            );
+            if ui.button("Export .dat\u{2026}").clicked() {
+                export_thermochemistry(&text);
+            }
+            ui.separator();
             egui::ScrollArea::both().show(ui, |ui| {
-                let text = thermofuncs::format_thermo(
-                    &result.thermo,
-                    result.thermo_temp_k,
-                    result.thermo_freq_cutoff_cm1,
-                    None,
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(&text)
+                            .font(egui::FontId::monospace(THERMO_FONT_SIZE)),
+                    )
+                    // The table's alignment is the whole point; wrapping it to
+                    // the window width would fold the columns into each other.
+                    .wrap_mode(egui::TextWrapMode::Extend),
                 );
-                ui.add(egui::Label::new(
-                    egui::RichText::new(text).font(egui::FontId::monospace(13.0)),
-                ));
             });
         });
+}
+
+/// Saves the thermochemistry table exactly as displayed -- same columns, same
+/// rules -- so the file reads the way the window does.
+fn export_thermochemistry(text: &str) {
+    if let Some(path) = rfd::FileDialog::new()
+        .set_file_name("thermochemistry.dat")
+        .add_filter("Data file", &["dat", "txt"])
+        .save_file()
+    {
+        if let Err(err) = std::fs::write(&path, text) {
+            eprintln!("Failed to write {}: {err}", path.display());
+        }
+    }
 }
 
 fn ir_spectrum_window(

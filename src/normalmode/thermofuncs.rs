@@ -206,23 +206,42 @@ pub fn eval_thermo(
     thermo
 }
 
+/// Width of the row-label column. Wide enough for "Total(kcal/mol)", the
+/// longest label, so no row overhangs the rule drawn above it.
+const LABEL_W: usize = 15;
+/// Width of one number column.
+const COL_W: usize = 12;
+/// Space between number columns.
+const GAP: usize = 2;
+/// Full width of the four-column energy table: label, a space, then the
+/// columns with their gaps. Every rule in that section is drawn to this, so
+/// the rules always span the table exactly rather than falling short of it.
+const ENERGY_W: usize = LABEL_W + 1 + 4 * COL_W + 3 * GAP;
+/// The same for the three-column entropy/heat-capacity table.
+const SCC_W: usize = LABEL_W + 1 + 3 * COL_W + 2 * GAP;
+
 pub fn format_thermo(thermo: &ThermoResults, temp: f64, freq_cutoff: f64, elec_energy: Option<f64>) -> String {
     use std::fmt::Write as _;
     let mut out = String::new();
     fn print_uhfg(out: &mut String, label: &str, u: f64, h: f64, f: f64, g: f64) {
         writeln!(
             out,
-            "{:<14} {:>12.6}  {:>12.6}  {:>12.6}  {:>12.6}",
+            "{:<LABEL_W$} {:>COL_W$.6}  {:>COL_W$.6}  {:>COL_W$.6}  {:>COL_W$.6}",
             label, u, h, f, g
         )
         .unwrap();
     }
     fn print_scc(out: &mut String, label: &str, s: f64, cv: f64, cp: f64) {
-        writeln!(out, "{:<14} {:>12.6}  {:>12.6}  {:>12.6}", label, s, cv, cp).unwrap();
+        writeln!(
+            out,
+            "{:<LABEL_W$} {:>COL_W$.6}  {:>COL_W$.6}  {:>COL_W$.6}",
+            label, s, cv, cp
+        )
+        .unwrap();
     }
 
     writeln!(out).unwrap();
-    writeln!(out, "========================= Thermochemistry =========================").unwrap();
+    writeln!(out, "{:=^ENERGY_W$}", " Thermochemistry ").unwrap();
     writeln!(out, "T = {:.2} K", temp).unwrap();
     writeln!(out, 
         "ZPE: {:>12.6} Eh  ({:>10.3} kcal/mol)",
@@ -232,9 +251,9 @@ pub fn format_thermo(thermo: &ThermoResults, temp: f64, freq_cutoff: f64, elec_e
     writeln!(out, "qRRHO cutoff: {:.1} cm-1", freq_cutoff).unwrap();
 
     writeln!(out).unwrap();
-    writeln!(out, "---- Energy Contributions (Eh) ----").unwrap();
-    writeln!(out, 
-        "{:<14} {:>12}  {:>12}  {:>12}  {:>12}",
+    writeln!(out, "{:-^ENERGY_W$}", " Energy Contributions (Eh) ").unwrap();
+    writeln!(out,
+        "{:<LABEL_W$} {:>COL_W$}  {:>COL_W$}  {:>COL_W$}  {:>COL_W$}",
         "", "U", "H", "F", "G"
     ).unwrap();
     print_uhfg(&mut out, 
@@ -260,7 +279,7 @@ pub fn format_thermo(thermo: &ThermoResults, temp: f64, freq_cutoff: f64, elec_e
         thermo.ftherm,
         thermo.gtherm,
     );
-    writeln!(out, "{:-<66}", "").unwrap();
+    writeln!(out, "{:-<ENERGY_W$}", "").unwrap();
     print_uhfg(&mut out, 
         "Total(Eh)",
         thermo.utot,
@@ -280,8 +299,8 @@ pub fn format_thermo(thermo: &ThermoResults, temp: f64, freq_cutoff: f64, elec_e
     if let Some(e_elec) = elec_energy {
         writeln!(out, "Electronic energy (Eh): {:>12.6}", e_elec).unwrap();
         writeln!(out, "Electronic + ZPE (Eh): {:>12.6}", e_elec + thermo.zpe).unwrap();
-        writeln!(out, 
-            "{:<14} {:>12}  {:>12}  {:>12}  {:>12}",
+        writeln!(out,
+            "{:<LABEL_W$} {:>COL_W$}  {:>COL_W$}  {:>COL_W$}  {:>COL_W$}",
             "Total+E_elec", "U", "H", "F", "G"
         ).unwrap();
         print_uhfg(&mut out, 
@@ -296,14 +315,17 @@ pub fn format_thermo(thermo: &ThermoResults, temp: f64, freq_cutoff: f64, elec_e
     }
 
     writeln!(out).unwrap();
-    writeln!(out, "---- Entropy & Heat Capacities (Eh/K) ----").unwrap();
-    writeln!(out, "{:<14} {:>12}  {:>12}  {:>12}", "", "S", "Cv", "Cp").unwrap();
+    writeln!(out, "{:-^SCC_W$}", " Entropy & Heat Capacities (Eh/K) ").unwrap();
+    writeln!(out,
+        "{:<LABEL_W$} {:>COL_W$}  {:>COL_W$}  {:>COL_W$}",
+        "", "S", "Cv", "Cp"
+    ).unwrap();
     print_scc(&mut out, "Electronic", thermo.selec, thermo.cvelec, thermo.cpelec);
     print_scc(&mut out, "Trans", thermo.strans, thermo.cvtrans, thermo.cptrans);
     print_scc(&mut out, "Rot", thermo.srot, thermo.cvrot, thermo.cprot);
     print_scc(&mut out, "Vib", thermo.svib, thermo.cvvib, thermo.cpvib);
     print_scc(&mut out, "Thermal", thermo.stherm, thermo.cvtherm, thermo.cptherm);
-    writeln!(out, "{:-<49}", "").unwrap();
+    writeln!(out, "{:-<SCC_W$}", "").unwrap();
     print_scc(&mut out, "Total", thermo.stot, thermo.cvtot, thermo.cptot);
     writeln!(out, 
         "S_total*T = {:>10.3} kcal/mol",
@@ -588,5 +610,50 @@ mod tests {
         assert!(text.contains("Thermochemistry"));
         assert!(text.contains("ZPE"));
         assert!(text.contains("Electronic energy"));
+    }
+}
+
+#[cfg(test)]
+mod rule_width_tests {
+    use super::*;
+
+    /// Every rule must span the widest row of its own table -- the complaint
+    /// was rules falling short of the numbers above them.
+    #[test]
+    fn rules_span_their_tables() {
+        // A real evaluation, so the numbers are full width rather than zeros.
+        let thermo = eval_thermo(
+            &[500.0, 1500.0, 3000.0],
+            &[0.06, 0.038, 0.030],
+            250.0,
+            1.0,
+            298.15,
+            101_325.0,
+            100.0,
+        );
+        let text = format_thermo(&thermo, 298.15, 100.0, None);
+        let width = |prefix: &str| {
+            text.lines()
+                .find(|l| l.starts_with(prefix))
+                .unwrap_or_else(|| panic!("no line starting {prefix:?}"))
+                .chars()
+                .count()
+        };
+        let energy_rows = ["Electronic ", "Total(Eh)", "Total(kcal/mol)"];
+        for row in energy_rows {
+            assert!(
+                width(row) <= ENERGY_W,
+                "{row:?} is {} wide, past the {ENERGY_W}-wide rule",
+                width(row)
+            );
+        }
+        // The rules and the banner are exactly the table width.
+        assert_eq!(width("========"), ENERGY_W);
+        assert_eq!(
+            text.lines().filter(|l| l.chars().all(|c| c == '-') && !l.is_empty())
+                .map(|l| l.chars().count())
+                .collect::<Vec<_>>(),
+            vec![ENERGY_W, SCC_W],
+        );
     }
 }
