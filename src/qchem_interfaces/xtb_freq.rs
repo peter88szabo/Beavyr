@@ -1263,11 +1263,11 @@ fn symmetry_number_window(
                         );
                         for (name, sigma) in members {
                             let selected = (*rot_symmetry - sigma).abs() < f64::EPSILON;
-                            let cell = format!("{name} {sigma:.0}");
+                            let cell = format!("{name} = {sigma:.0}");
                             if ui
                                 .add(
                                     egui::Button::new(egui::RichText::new(cell).monospace())
-                                        .min_size(egui::vec2(64.0, 20.0))
+                                        .min_size(egui::vec2(78.0, 20.0))
                                         .selected(selected),
                                 )
                                 .on_hover_text(format!("Use \u{3c3} = {sigma:.0}"))

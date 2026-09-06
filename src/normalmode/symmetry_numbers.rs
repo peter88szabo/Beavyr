@@ -162,7 +162,7 @@ pub fn families() -> Vec<(&'static str, Vec<(&'static str, f64)>)> {
 pub fn reference_table() -> String {
     use std::fmt::Write as _;
     const LABEL_W: usize = 12;
-    const CELL_W: usize = 9;
+    const CELL_W: usize = 11;
 
     let mut out = String::new();
     out.push_str("Rotational symmetry number by point group\n");
@@ -173,7 +173,7 @@ pub fn reference_table() -> String {
         for (name, sigma) in family.members {
             // The infinity sign is one character but several bytes, so pad by
             // character count rather than letting {:<w$} count bytes.
-            let cell = format!("{name} {sigma:.0}");
+            let cell = format!("{name} = {sigma:.0}");
             let pad = CELL_W.saturating_sub(cell.chars().count());
             let _ = write!(out, "{cell}{:pad$}", "");
         }
@@ -282,7 +282,7 @@ mod tests {
     fn the_printed_table_lists_every_group_with_its_value() {
         let text = reference_table();
         for (name, sigma) in FAMILIES.iter().flat_map(|f| f.members) {
-            let cell = format!("{name} {sigma:.0}");
+            let cell = format!("{name} = {sigma:.0}");
             assert!(text.contains(&cell), "{cell:?} missing from the table");
         }
         for family in FAMILIES {
@@ -300,10 +300,10 @@ mod tests {
             .collect();
         assert_eq!(rows.len(), FAMILIES.len());
         for row in rows {
-            // Each cell starts on a 9-character boundary after the 12-wide
-            // label, so a row's character count is always 12 + 9k.
+            // Each cell starts on an 11-character boundary after the 12-wide
+            // label, so a row's character count is always 12 + 11k.
             let width = row.chars().count();
-            assert_eq!((width - 12) % 9, 0, "ragged row: {row:?} ({width} chars)");
+            assert_eq!((width - 12) % 11, 0, "ragged row: {row:?} ({width} chars)");
         }
     }
 }
