@@ -875,9 +875,16 @@ pub fn xtb_frequency_panel(
     // completely different inputs: computing one here needs an electronic
     // state and an xTB binary, loading one needs neither.
     ui.add_space(6.0);
-    ui.group(|ui| {
-        ui.strong("Run Freq Calc (with xTB)");
-
+    // Collapsed by default: computing a Hessian here is the less common route
+    // now that one can be loaded, and its charge/multiplicity controls are
+    // only in the way until someone actually wants them. Forced open while a
+    // run is in flight, so Cancel cannot be hidden behind a closed header.
+    egui::CollapsingHeader::new(
+        egui::RichText::new("Run Freq Calc (with xTB)").strong(),
+    )
+    .default_open(false)
+    .open(running.then_some(true))
+    .show(ui, |ui| {
         ui.horizontal(|ui| {
             ui.label("Charge");
             ui.add_enabled(
