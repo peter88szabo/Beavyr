@@ -660,6 +660,8 @@ pub struct XtbFreqPanelState {
     pub eckart_mode: EckartMode,
     pub thermo_temp_k: f64,
     pub thermo_freq_cutoff_cm1: f64,
+    /// Whether the point-group reference table has its own window open.
+    pub symmetry_table_open: bool,
     /// Rotational symmetry number for the thermochemistry. Supplied by the
     /// user rather than detected: 1 is right for an asymmetric molecule, and
     /// anyone running a symmetric one knows its number.
@@ -698,6 +700,7 @@ impl Default for XtbFreqPanelState {
             thermo_freq_cutoff_cm1: 100.0,
             frequency_scale: 1.0,
             rot_symmetry: 1.0,
+            symmetry_table_open: false,
             charge: 0,
             multiplicity: 1,
             show_warnings: false,
@@ -879,7 +882,26 @@ pub fn xtb_frequency_panel(
              asymmetric molecule, 2 for water, 3 for ammonia, 6 for BF3, \
              12 for benzene or methane, 24 for SF6.",
         );
+        let label = if freq_panel.symmetry_table_open {
+            "Hide SymNum vs PointGroup"
+        } else {
+            "Show SymNum vs PointGroup"
+        };
+        if ui
+            .add(egui::Button::new(egui::RichText::new(label).small()))
+            .clicked()
+        {
+            freq_panel.symmetry_table_open = !freq_panel.symmetry_table_open;
+        }
     });
+    // Drawn here rather than with the result windows: the table is a
+    // reference, useful before any Hessian exists.
+    symmetry_number_window(
+        &ui.ctx().clone(),
+        &mut freq_panel.symmetry_table_open,
+        &mut freq_panel.rot_symmetry,
+        &mut reanalyze,
+    );
 
     ui.horizontal(|ui| {
         ui.label("Frequency scale");
@@ -1204,6 +1226,61 @@ pub fn xtb_frequency_panel(
     let ctx = ui.ctx().clone();
     thermochemistry_window(&ctx, &mut freq_panel.thermo_window_open, result);
     ir_spectrum_window(&ctx, freq_panel, result);
+}
+
+/// The point-group reference table, in a window of its own.
+///
+/// Clicking a group sets the symmetry number, so the table is a chooser as
+/// well as a reference -- no retyping a number one has just read.
+fn symmetry_number_window(
+    ctx: &egui::Context,
+    open: &mut bool,
+    rot_symmetry: &mut f64,
+    reanalyze: &mut bool,
+) {
+    if !*open {
+        return;
+    }
+    egui::Window::new("Symmetry Numbers")
+        .open(open)
+        .resizable(true)
+        .default_size([560.0, 380.0])
+        .show(ctx, |ui| {
+            ui.label(
+                egui::RichText::new("Rotational symmetry number \u{3c3} by point group").strong(),
+            );
+            ui.weak(
+                "\u{3c3} is the order of the proper-rotation subgroup; reflections and \
+                 improper rotations do not count.",
+            );
+            ui.separator();
+            egui::ScrollArea::both().show(ui, |ui| {
+                for (family, members) in crate::normalmode::symmetry_numbers::families() {
+                    ui.horizontal(|ui| {
+                        ui.add_sized(
+                            [58.0, 20.0],
+                            egui::Label::new(egui::RichText::new(family).monospace().strong()),
+                        );
+                        for (name, sigma) in members {
+                            let selected = (*rot_symmetry - sigma).abs() < f64::EPSILON;
+                            let cell = format!("{name} {sigma:.0}");
+                            if ui
+                                .add(
+                                    egui::Button::new(egui::RichText::new(cell).monospace())
+                                        .min_size(egui::vec2(64.0, 20.0))
+                                        .selected(selected),
+                                )
+                                .on_hover_text(format!("Use \u{3c3} = {sigma:.0}"))
+                                .clicked()
+                            {
+                                *rot_symmetry = sigma;
+                                *reanalyze = true;
+                            }
+                        }
+                    });
+                }
+            });
+        });
 }
 
 /// Point size of the thermochemistry table. The layout is fixed-width columns

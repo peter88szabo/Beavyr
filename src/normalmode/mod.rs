@@ -21,6 +21,7 @@ pub mod jacobi_diag;
 pub mod linalg_shim;
 mod print;
 pub mod print_matrix_in_ao;
+pub mod symmetry_numbers;
 pub mod thermofuncs;
 
 pub use print::{coord_labels, format_hessian_title, print_hessian_matrix};
