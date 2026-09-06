@@ -796,12 +796,9 @@ pub fn load_mode_animation(
     traj.accum = 0.0;
     traj.last_applied = None;
     traj.overlay_dirty = true;
-    // Bonds follow the motion. Playback freezes the bond graph by default,
-    // which is right for a long trajectory of a fixed molecule, but a
-    // vibration is exactly the case where connectivity is the point: the
-    // forming and breaking bonds of a transition state's imaginary mode are
-    // invisible if the graph never updates. The Trajectory panel's own toggle
-    // still overrides this afterwards.
+    // Bonds follow the motion, even if the user froze them for a previous
+    // trajectory: the forming and breaking bonds of a transition state's
+    // imaginary mode are invisible if the graph never updates.
     traj.fixed_bonds = false;
 }
 
@@ -1790,7 +1787,9 @@ mod tests {
     fn animating_a_mode_unfreezes_the_bonds() {
         let result = loaded_gaussian();
         let mut traj = TrajectoryState::default();
-        assert!(traj.fixed_bonds, "playback freezes bonds by default");
+        // Even if the user froze bonds for some earlier trajectory, loading a
+        // mode must let them move again.
+        traj.fixed_bonds = true;
         load_mode_animation(
             &mut traj,
             &result.atoms,

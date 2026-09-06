@@ -44,6 +44,12 @@ pub struct TrajectoryState {
     pub overlay_ghost_stride: usize,
     pub overlay_full_last: bool,
     pub ghost_alpha: f32,
+    /// Freeze the bond graph during playback instead of perceiving it per
+    /// frame. Off by default: a reactive trajectory's whole content is bonds
+    /// forming and breaking, and freezing them shows the wrong molecule for
+    /// every frame after the first. It is available for the case where the
+    /// connectivity is known not to change and the per-frame cost is not
+    /// wanted.
     pub fixed_bonds: bool,
     pub fps: f32,
     pub accum: f32,
@@ -83,7 +89,7 @@ impl Default for TrajectoryState {
             overlay_ghost_stride: 1,
             overlay_full_last: false,
             ghost_alpha: 0.2,
-            fixed_bonds: true,
+            fixed_bonds: false,
             fps: 12.0,
             accum: 0.0,
             last_applied: None,
@@ -662,4 +668,18 @@ fn compute_centroid(points: &[Vec3]) -> Option<Vec3> {
         acc += p;
     }
     Some(acc / (points.len() as f32))
+}
+
+#[cfg(test)]
+mod default_tests {
+    use super::*;
+
+    /// A reactive trajectory's content is bonds forming and breaking, so
+    /// playback perceives connectivity per frame unless told otherwise.
+    /// Freezing it would show the starting molecule's bonds over every later
+    /// frame's geometry.
+    #[test]
+    fn playback_follows_bond_changes_by_default() {
+        assert!(!TrajectoryState::default().fixed_bonds);
+    }
 }

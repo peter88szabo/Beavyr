@@ -743,7 +743,11 @@ pub fn ui_panel(
                                 egui::Button::new("Fixed bonds")
                                     .fill(if traj.fixed_bonds { sel } else { dim }),
                             )
-                            .on_hover_text("Keep the current bond topology during trajectory playback")
+                            .on_hover_text(
+                                "Keep the current bond topology during playback instead of \
+                                 perceiving it per frame. Off by default -- a reactive \
+                                 trajectory needs bonds that follow the reaction.",
+                            )
                             .clicked()
                         {
                             traj.fixed_bonds = !traj.fixed_bonds;
