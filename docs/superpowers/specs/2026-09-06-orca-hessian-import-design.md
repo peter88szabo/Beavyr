@@ -165,3 +165,35 @@ plausible but has the wrong relative amplitudes -- heavy atoms moving too far
 or not far enough. It is directly checkable: the `.hess` and the `.out` in
 examples/ describe the same modes, so animating a mode from each must produce
 the same displacements.
+
+### Loading a `.hess` and a `.out` together
+
+The two files are authoritative for different things, so loading both is not
+redundant — it is the best case:
+
+| | from the `.hess` | from the `.out` |
+|---|---|---|
+| Normal modes / animation | our own, recomputed | ORCA's, as printed |
+| Frequencies | ours, at any scale factor | ORCA's, fixed |
+| Thermochemistry | ours, at **any temperature and cutoff** | ORCA's, at the one temperature it ran |
+| IR intensities | only if `$ir_spectrum` is present | always |
+
+So when both are loaded: the Hessian drives the modes, the animation and our
+own thermochemistry — because only it can be re-analysed at a different
+temperature, cutoff or scaling factor — while the output supplies IR
+intensities when the Hessian has none, and its own reported thermochemistry
+shown alongside ours as a labelled reference rather than merged into it.
+Two numbers that disagree should be visibly two numbers.
+
+**The pairing must be verified, not assumed.** Nothing stops a user picking a
+`.hess` and a `.out` from different calculations, and the result would be a
+mode list silently labelled with another molecule's intensities. Before
+combining, check that the atom count and element sequence match and that the
+frequencies agree to within a cm⁻¹ or so; if they do not, keep them separate
+and say why. The example pair in `examples/` is a good regression case in both
+directions — they match, and a deliberately mismatched pair must be rejected.
+
+Note the example `.out` contains **two** frequency calculations (imaginary
+modes at −604.57 and −602.61 cm⁻¹); the `.hess` corresponds to the second. A
+reader must take the last one, or match on frequencies, rather than the first
+it encounters.
