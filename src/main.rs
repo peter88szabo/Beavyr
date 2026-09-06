@@ -12,14 +12,19 @@ mod measurements;
 mod molecule;
 mod molecule_builder;
 mod normalmode;
+mod numerics;
 mod orbitals;
 mod picking;
 mod qchem_interfaces;
+mod rmsd;
 mod scene;
 mod settings;
+mod spectrum;
 mod trajectory;
 mod ui;
+mod ui_layout;
 mod ui_measurements;
+mod uvvis;
 
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
 enum UpdateSet {
@@ -118,6 +123,10 @@ fn main() {
         .init_resource::<qchem_interfaces::xtb_optimize::XtbPanelState>()
         .init_resource::<qchem_interfaces::xtb_freq::XtbFrequencyTask>()
         .init_resource::<qchem_interfaces::xtb_freq::XtbFreqPanelState>()
+        // structure comparison (RMSD / Kabsch)
+        .init_resource::<rmsd::RmsdState>()
+        .init_resource::<uvvis::UvVisState>()
+        .init_resource::<ui_layout::UiLayout>()
         // scene
         .add_systems(Startup, (setup, center_camera_on_startup))
         // egui pass

@@ -23,6 +23,8 @@ use crate::molecule::{atomic_mass_amu, Molecule};
 use crate::molecule::parse_xyz_angstrom;
 use crate::normalmode::thermofuncs::{self, ThermoResults};
 use crate::normalmode::{normal_modes_with_projection, EckartMode};
+use crate::spectrum::broadening::{format_spectrum_dat, format_spectrum_sticks, BroadeningKind};
+use crate::spectrum::plot::{draw_spectrum, SpectrumAxis};
 use crate::trajectory::{PlaybackMode, TrajectoryFrame, TrajectoryState};
 
 use super::hessian_file::{parse_turbomole_gradient, parse_turbomole_hessian, parse_vibspectrum};
@@ -593,120 +595,6 @@ impl Default for XtbFreqPanelState {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BroadeningKind {
-    Gaussian,
-    Lorentzian,
-    Voigt,
-    /// No broadening at all: a vertical line at each predicted frequency,
-    /// height equal to its raw IR intensity -- the theoretical stick
-    /// spectrum, as opposed to a simulated experimental one.
-    Sticks,
-}
-
-impl BroadeningKind {
-    fn is_sticks(self) -> bool {
-        matches!(self, BroadeningKind::Sticks)
-    }
-}
-
-/// A single line-shape value at `x`, centred on `x0`, with intensity
-/// `height` and characteristic `width` (interpreted per shape: Gaussian
-/// uses it as sigma, Lorentzian as the half-width-at-half-maximum gamma,
-/// Voigt as both via the pseudo-Voigt mixing below).
-fn lineshape(kind: BroadeningKind, x: f64, x0: f64, height: f64, width: f64) -> f64 {
-    let width = width.max(1.0e-6);
-    match kind {
-        BroadeningKind::Gaussian => {
-            let z = (x - x0) / width;
-            height * (-0.5 * z * z).exp()
-        }
-        BroadeningKind::Lorentzian => {
-            let z = (x - x0) / width;
-            height / (1.0 + z * z)
-        }
-        BroadeningKind::Voigt => {
-            // Pseudo-Voigt: a linear mix of Gaussian and Lorentzian with the
-            // same width, which is what most spectroscopy software calls a
-            // practical "Voigt" profile without the cost of the true
-            // Voigt convolution integral.
-            0.5 * lineshape(BroadeningKind::Gaussian, x, x0, height, width)
-                + 0.5 * lineshape(BroadeningKind::Lorentzian, x, x0, height, width)
-        }
-        // Sticks have no continuous curve -- callers branch on
-        // `BroadeningKind::is_sticks` before ever reaching this function.
-        BroadeningKind::Sticks => 0.0,
-    }
-}
-
-/// Samples the broadened IR spectrum at `n_points` evenly spaced points
-/// across `[x_min, x_max]`, summing every mode's line shape.
-/// Formats a broadened spectrum as two space-separated columns (frequency,
-/// intensity), one point per line, sampled at a fixed resolution rather than
-/// the display's own point count -- so the exported `.dat` does not depend
-/// on how large the plot window happened to be when exported.
-pub fn format_spectrum_dat(
-    frequencies_cm1: &[f64],
-    intensities_km_mol: &[f64],
-    kind: BroadeningKind,
-    width_cm1: f64,
-    x_min: f64,
-    x_max: f64,
-    resolution_cm1: f64,
-) -> String {
-    let resolution_cm1 = resolution_cm1.max(1.0e-6);
-    let n_points = (((x_max - x_min) / resolution_cm1).round() as usize).max(1) + 1;
-    let curve = sample_spectrum(
-        frequencies_cm1,
-        intensities_km_mol,
-        kind,
-        width_cm1,
-        x_min,
-        x_max,
-        n_points,
-    );
-    let mut out = String::new();
-    for (x, y) in curve {
-        out.push_str(&format!("{x:.4} {y:.8}\n"));
-    }
-    out
-}
-
-/// Exports the theoretical stick spectrum as-is: one line per predicted
-/// mode (frequency, IR intensity), the same pairs the mode list and the
-/// stick plot itself show -- no resampling grid, since there is no
-/// continuous curve to resample.
-pub fn format_spectrum_sticks(frequencies_cm1: &[f64], intensities_km_mol: &[f64]) -> String {
-    let mut out = String::new();
-    for (&f, &i) in frequencies_cm1.iter().zip(intensities_km_mol) {
-        out.push_str(&format!("{f:.4} {i:.8}\n"));
-    }
-    out
-}
-
-pub fn sample_spectrum(
-    frequencies_cm1: &[f64],
-    intensities_km_mol: &[f64],
-    kind: BroadeningKind,
-    width_cm1: f64,
-    x_min: f64,
-    x_max: f64,
-    n_points: usize,
-) -> Vec<(f64, f64)> {
-    let n_points = n_points.max(2);
-    (0..n_points)
-        .map(|i| {
-            let x = x_min + (x_max - x_min) * i as f64 / (n_points - 1) as f64;
-            let y = frequencies_cm1
-                .iter()
-                .zip(intensities_km_mol)
-                .map(|(&f, &inten)| lineshape(kind, x, f, inten, width_cm1))
-                .sum();
-            (x, y)
-        })
-        .collect()
-}
-
 /// Draws the "Frequency Analysis (xTB Hessian)" section: Eckart-mode choice,
 /// temperature/cutoff for thermochemistry, the Run/Cancel controls, the mode
 /// list with an animate button per row, and the Show Thermochemistry / Show
@@ -995,30 +883,13 @@ fn ir_spectrum_window(
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.label("Line shape");
-                ui.selectable_value(
-                    &mut freq_panel.spectrum_broadening,
-                    BroadeningKind::Gaussian,
-                    "Gaussian",
-                );
-                ui.selectable_value(
-                    &mut freq_panel.spectrum_broadening,
-                    BroadeningKind::Lorentzian,
-                    "Lorentzian",
-                );
-                ui.selectable_value(
-                    &mut freq_panel.spectrum_broadening,
-                    BroadeningKind::Voigt,
-                    "Voigt",
-                );
-                ui.selectable_value(
-                    &mut freq_panel.spectrum_broadening,
-                    BroadeningKind::Sticks,
-                    "Sticks",
-                );
+                for kind in BroadeningKind::ALL {
+                    ui.selectable_value(&mut freq_panel.spectrum_broadening, kind, kind.label());
+                }
                 // A stick spectrum has no width to speak of -- it is drawn
                 // (and exported) at the exact predicted frequencies.
                 ui.add_enabled_ui(!freq_panel.spectrum_broadening.is_sticks(), |ui| {
-                    ui.label("Width (cm⁻¹)");
+                    ui.label("Width (cm\u{207b}\u{b9})");
                     ui.add(
                         egui::DragValue::new(&mut freq_panel.spectrum_width_cm1)
                             .range(0.5..=200.0),
@@ -1026,17 +897,15 @@ fn ir_spectrum_window(
                 });
             });
 
-            let vib_freqs: Vec<f64> = result
+            // Only the real vibrations are plotted: the six near-zero
+            // translation/rotation modes and any imaginary mode are not
+            // absorptions.
+            let peaks: Vec<(f64, f64)> = result
                 .positive_indices
                 .iter()
-                .map(|&i| result.frequencies_cm1[i])
+                .map(|&i| (result.frequencies_cm1[i], result.ir_intensities_km_mol[i]))
                 .collect();
-            let vib_intens: Vec<f64> = result
-                .positive_indices
-                .iter()
-                .map(|&i| result.ir_intensities_km_mol[i])
-                .collect();
-            if vib_freqs.is_empty() {
+            if peaks.is_empty() {
                 ui.weak("No vibrational modes to plot.");
                 return;
             }
@@ -1044,21 +913,23 @@ fn ir_spectrum_window(
             // choice: 0 up to the highest predicted frequency plus a fixed
             // 100 cm^-1 margin, rather than a window that tracks the current
             // broadening width and would shift as it is adjusted.
+            const AXIS_MARGIN_CM1: f64 = 100.0;
+            const TICK_STEP_CM1: f64 = 500.0;
             let x_min = 0.0f64;
-            let x_max = vib_freqs.iter().cloned().fold(f64::NEG_INFINITY, f64::max) + 100.0;
+            let x_max = peaks.iter().map(|&(f, _)| f).fold(f64::NEG_INFINITY, f64::max)
+                + AXIS_MARGIN_CM1;
 
-            if ui.button("Export .dat…").clicked() {
+            if ui.button("Export .dat\u{2026}").clicked() {
                 // Sticks export the raw predicted (frequency, intensity)
                 // pairs as-is -- there is no continuous curve to resample,
                 // so the fixed 0.5 cm^-1 grid used for the broadened shapes
                 // does not apply here.
                 let text = if freq_panel.spectrum_broadening.is_sticks() {
-                    format_spectrum_sticks(&vib_freqs, &vib_intens)
+                    format_spectrum_sticks(&peaks)
                 } else {
                     const EXPORT_RESOLUTION_CM1: f64 = 0.5;
                     format_spectrum_dat(
-                        &vib_freqs,
-                        &vib_intens,
+                        &peaks,
                         freq_panel.spectrum_broadening,
                         freq_panel.spectrum_width_cm1,
                         x_min,
@@ -1077,194 +948,25 @@ fn ir_spectrum_window(
                 }
             }
 
-            let is_sticks = freq_panel.spectrum_broadening.is_sticks();
-            // Sticks have no continuous curve to sample; the plot's y-scale
-            // then comes straight from the raw intensities instead of a
-            // broadened curve's peak height.
-            let curve = if is_sticks {
-                Vec::new()
-            } else {
-                sample_spectrum(
-                    &vib_freqs,
-                    &vib_intens,
-                    freq_panel.spectrum_broadening,
-                    freq_panel.spectrum_width_cm1,
-                    x_min,
-                    x_max,
-                    400,
-                )
+            let axis = SpectrumAxis {
+                x_min,
+                x_max,
+                tick_step: Some(TICK_STEP_CM1),
+                tick_decimals: 0,
+                title: "Wavenumber (cm\u{207b}\u{b9})",
             };
-
-            const AXIS_LABEL_SIZE: f32 = 13.0;
-            const AXIS_TITLE_SIZE: f32 = 16.0;
-            let max_y = if is_sticks {
-                vib_intens.iter().cloned().fold(0.0f64, f64::max).max(1.0e-9)
-            } else {
-                curve
-                    .iter()
-                    .map(|&(_, y)| y)
-                    .fold(0.0f64, f64::max)
-                    .max(1.0e-9)
-            };
-
-            let desired_size = egui::vec2(
-                ui.available_width().max(200.0),
-                ui.available_height().max(120.0),
-            );
-            let (rect, response) = ui.allocate_exact_size(desired_size, egui::Sense::hover());
-            let painter = ui.painter_at(rect);
-            // Fixed white background regardless of the app's own theme, with
-            // dark text/gridlines to stay legible against it -- a
-            // consistent look independent of light/dark mode.
-            painter.rect_filled(rect, 0.0, egui::Color32::WHITE);
-            let plot_color = egui::Color32::from_rgb(30, 30, 30);
-            let grid_color = plot_color.gamma_multiply(0.35);
-            let line_color = egui::Color32::from_rgb(40, 100, 170);
-
-            let plot_rect = egui::Rect::from_min_max(
-                rect.min + egui::vec2(50.0, 10.0),
-                rect.max - egui::vec2(10.0, 46.0),
-            );
-
-            let to_screen = |x: f64, y: f64| -> egui::Pos2 {
-                let sx = plot_rect.left()
-                    + ((x - x_min) / (x_max - x_min)) as f32 * plot_rect.width();
-                let sy = plot_rect.bottom() - (y / max_y) as f32 * plot_rect.height();
-                egui::pos2(sx, sy)
-            };
-
-            // Ticks at fixed 500 cm^-1 intervals (500, 1000, 1500, ...) up
-            // to the top of the axis, rather than a fixed count of evenly
-            // spaced but arbitrarily-valued ticks.
-            const TICK_STEP_CM1: f64 = 500.0;
-            let mut tick = TICK_STEP_CM1;
-            while tick <= x_max {
-                let sx = plot_rect.left()
-                    + ((tick - x_min) / (x_max - x_min)) as f32 * plot_rect.width();
-                painter.line_segment(
-                    [egui::pos2(sx, plot_rect.top()), egui::pos2(sx, plot_rect.bottom())],
-                    egui::Stroke::new(1.0, grid_color),
-                );
-                painter.text(
-                    egui::pos2(sx, plot_rect.bottom() + 6.0),
-                    egui::Align2::CENTER_TOP,
-                    format!("{tick:.0}"),
-                    egui::FontId::monospace(AXIS_LABEL_SIZE),
-                    plot_color,
-                );
-                tick += TICK_STEP_CM1;
-            }
-            painter.rect_stroke(
-                plot_rect,
-                0.0,
-                egui::Stroke::new(1.5, plot_color.gamma_multiply(0.6)),
-                egui::StrokeKind::Outside,
-            );
-
-            let peak_points: Vec<egui::Pos2>;
-            if is_sticks {
-                // One vertical bar per predicted mode, from the baseline up
-                // to its own raw intensity -- the theoretical stick
-                // spectrum, not a simulated continuous one.
-                peak_points = vib_freqs
-                    .iter()
-                    .zip(&vib_intens)
-                    .map(|(&f, &i)| to_screen(f, i))
-                    .collect();
-                let baseline_y = plot_rect.bottom();
-                for &p in &peak_points {
-                    painter.line_segment(
-                        [egui::pos2(p.x, baseline_y), p],
-                        egui::Stroke::new(2.0, line_color),
-                    );
-                }
-            } else {
-                let points: Vec<egui::Pos2> =
-                    curve.iter().map(|&(x, y)| to_screen(x, y)).collect();
-                if points.len() >= 2 {
-                    painter.add(egui::Shape::line(points, egui::Stroke::new(2.0, line_color)));
-                }
-
-                // Peak markers, one per vibrational mode, drawn at the
-                // curve's own height at that frequency (not the mode's raw
-                // intensity), so a hover near a peak lands on what is
-                // actually visible.
-                peak_points = vib_freqs
-                    .iter()
-                    .map(|&f| {
-                        let y = vib_freqs
-                            .iter()
-                            .zip(&vib_intens)
-                            .map(|(&f2, &i2)| {
-                                lineshape(
-                                    freq_panel.spectrum_broadening,
-                                    f,
-                                    f2,
-                                    i2,
-                                    freq_panel.spectrum_width_cm1,
-                                )
-                            })
-                            .sum();
-                        to_screen(f, y)
-                    })
-                    .collect();
-                for &p in &peak_points {
-                    painter.circle_filled(p, 2.5, line_color);
-                }
-            }
-
-            if let Some(hover_pos) = response.hover_pos() {
-                if let Some((idx, dist)) = peak_points
-                    .iter()
-                    .enumerate()
-                    .map(|(i, p)| (i, p.distance(hover_pos)))
-                    .min_by(|a, b| a.1.total_cmp(&b.1))
-                {
-                    const HOVER_RADIUS: f32 = 14.0;
-                    if dist <= HOVER_RADIUS {
-                        // Fixed dark colour, matching the plot's own fixed
-                        // white background rather than the app's theme --
-                        // the theme's own "strong text" is often light,
-                        // which would vanish against white in dark mode.
-                        let highlight_color = plot_color;
-                        painter.circle_stroke(
-                            peak_points[idx],
-                            5.0,
-                            egui::Stroke::new(2.0, highlight_color),
-                        );
-                        let label = format!(
-                            "{:.1} cm⁻¹\n{:.2} km/mol",
-                            vib_freqs[idx], vib_intens[idx]
-                        );
-                        let galley = painter.layout_no_wrap(
-                            label,
-                            egui::FontId::proportional(AXIS_LABEL_SIZE),
-                            highlight_color,
-                        );
-                        let padding = egui::vec2(6.0, 4.0);
-                        let box_size = galley.size() + padding * 2.0;
-                        let mut box_pos = peak_points[idx] + egui::vec2(12.0, -box_size.y - 12.0);
-                        box_pos.x = box_pos.x.clamp(rect.left(), rect.right() - box_size.x);
-                        box_pos.y = box_pos.y.clamp(rect.top(), rect.bottom() - box_size.y);
-                        let box_rect = egui::Rect::from_min_size(box_pos, box_size);
-                        painter.rect_filled(box_rect, 4.0, egui::Color32::from_rgb(240, 240, 240));
-                        painter.rect_stroke(
-                            box_rect,
-                            4.0,
-                            egui::Stroke::new(1.0, plot_color.gamma_multiply(0.5)),
-                            egui::StrokeKind::Outside,
-                        );
-                        painter.galley(box_rect.min + padding, galley, highlight_color);
-                    }
-                }
-            }
-
-            painter.text(
-                egui::pos2(plot_rect.center().x, rect.bottom() - 4.0),
-                egui::Align2::CENTER_BOTTOM,
-                "Wavenumber (cm⁻¹)",
-                egui::FontId::proportional(AXIS_TITLE_SIZE),
-                plot_color,
+            draw_spectrum(
+                ui,
+                &peaks,
+                freq_panel.spectrum_broadening,
+                freq_panel.spectrum_width_cm1,
+                &axis,
+                &|i| {
+                    format!(
+                        "{:.1} cm\u{207b}\u{b9}\n{:.2} km/mol",
+                        peaks[i].0, peaks[i].1
+                    )
+                },
             );
         });
 }
@@ -1682,109 +1384,13 @@ mod tests {
         assert!(!traj.frames.is_empty());
     }
 
-    #[test]
-    fn format_spectrum_dat_uses_space_separated_two_columns_at_the_requested_resolution() {
-        let text = format_spectrum_dat(
-            &[500.0],
-            &[10.0],
-            BroadeningKind::Gaussian,
-            5.0,
-            0.0,
-            10.0,
-            0.5,
-        );
-        let lines: Vec<&str> = text.lines().collect();
-        // 0.0..=10.0 at 0.5 resolution: 21 points.
-        assert_eq!(lines.len(), 21);
-        for line in &lines {
-            let cols: Vec<&str> = line.split(' ').collect();
-            assert_eq!(cols.len(), 2, "expected exactly two space-separated columns: {line:?}");
-            assert!(cols[0].parse::<f64>().is_ok());
-            assert!(cols[1].parse::<f64>().is_ok());
-        }
-        // Points land exactly on the 0.5 cm^-1 grid: 0.0, 0.5, 1.0, ...
-        let x0: f64 = lines[0].split(' ').next().unwrap().parse().unwrap();
-        let x1: f64 = lines[1].split(' ').next().unwrap().parse().unwrap();
-        assert!((x0 - 0.0).abs() < 1e-9);
-        assert!((x1 - 0.5).abs() < 1e-9);
-    }
 
-    #[test]
-    fn format_spectrum_dat_reflects_the_chosen_lineshape() {
-        let gaussian = format_spectrum_dat(
-            &[500.0], &[10.0], BroadeningKind::Gaussian, 5.0, 495.0, 505.0, 1.0,
-        );
-        let lorentzian = format_spectrum_dat(
-            &[500.0], &[10.0], BroadeningKind::Lorentzian, 5.0, 495.0, 505.0, 1.0,
-        );
-        assert_ne!(
-            gaussian, lorentzian,
-            "different line shapes must export different curves"
-        );
-    }
 
-    #[test]
-    fn format_spectrum_sticks_prints_the_raw_predicted_pairs_unresampled() {
-        let text = format_spectrum_sticks(&[259.56, 1108.86, 3534.68], &[413.48, 0.00066, 101.16]);
-        let lines: Vec<&str> = text.lines().collect();
-        // One line per mode, not a resampled grid.
-        assert_eq!(lines.len(), 3);
-        for line in &lines {
-            let cols: Vec<&str> = line.split(' ').collect();
-            assert_eq!(cols.len(), 2);
-        }
-        assert!(lines[0].starts_with("259.5"));
-        assert!(lines[2].starts_with("3534.6"));
-    }
 
-    #[test]
-    fn format_spectrum_sticks_of_no_modes_is_empty() {
-        assert_eq!(format_spectrum_sticks(&[], &[]), "");
-    }
 
-    #[test]
-    fn sticks_lineshape_is_never_used_for_a_continuous_curve() {
-        // Sticks are handled by a dedicated code path that never samples a
-        // curve at all; `lineshape` itself just needs to stay exhaustive
-        // and inert for this variant rather than panic.
-        assert_eq!(lineshape(BroadeningKind::Sticks, 500.0, 500.0, 10.0, 5.0), 0.0);
-    }
 
-    #[test]
-    fn is_sticks_identifies_only_the_sticks_variant() {
-        assert!(BroadeningKind::Sticks.is_sticks());
-        assert!(!BroadeningKind::Gaussian.is_sticks());
-        assert!(!BroadeningKind::Lorentzian.is_sticks());
-        assert!(!BroadeningKind::Voigt.is_sticks());
-    }
 
-    #[test]
-    fn gaussian_peak_matches_its_height_at_the_centre() {
-        let y = lineshape(BroadeningKind::Gaussian, 500.0, 500.0, 10.0, 5.0);
-        assert!((y - 10.0).abs() < 1.0e-9);
-    }
 
-    #[test]
-    fn lorentzian_peak_matches_its_height_at_the_centre() {
-        let y = lineshape(BroadeningKind::Lorentzian, 500.0, 500.0, 10.0, 5.0);
-        assert!((y - 10.0).abs() < 1.0e-9);
-    }
 
-    #[test]
-    fn spectrum_sampling_places_a_visible_peak_near_each_mode() {
-        let freqs = [500.0, 1500.0];
-        let intens = [10.0, 20.0];
-        let curve = sample_spectrum(&freqs, &intens, BroadeningKind::Gaussian, 10.0, 0.0, 2000.0, 400);
-        let (peak_x, peak_y) = curve.iter().cloned().fold((0.0, f64::MIN), |acc, p| {
-            if p.1 > acc.1 { p } else { acc }
-        });
-        assert!((peak_x - 1500.0).abs() < 10.0, "peak at {peak_x}, expected near 1500");
-        assert!(peak_y > 15.0);
-    }
 
-    #[test]
-    fn spectrum_of_no_modes_is_flat_zero() {
-        let curve = sample_spectrum(&[], &[], BroadeningKind::Gaussian, 10.0, 0.0, 100.0, 5);
-        assert!(curve.iter().all(|&(_, y)| y == 0.0));
-    }
 }

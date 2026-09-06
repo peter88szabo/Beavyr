@@ -120,6 +120,67 @@ pub const LAYER_AXES: usize = 1;
 
 const AXIS_VP_SIZE: u32 = 140;
 const AXIS_VP_MARGIN: u32 = 12;
+/// Distance from the gizmo's origin to an arrow tip, in its own world units
+/// (`axis_len + head_len` as spawned in `setup`).
+const AXIS_TIP_LEN: f32 = 1.4 + 0.28;
+/// The axis camera's fixed orbit radius (its spawn position's length);
+/// `sync_axis_camera_to_main` rotates it but preserves this distance.
+const AXIS_CAM_RADIUS: f32 = 4.330_127;
+/// Bevy's default perspective field of view.
+const AXIS_CAM_FOV: f32 = std::f32::consts::FRAC_PI_4;
+/// How far past the arrow tip each letter sits, as a multiple of the tip's
+/// own projected distance. Greater than one, so the letter clears the arrow
+/// head instead of overlapping it.
+const AXIS_LABEL_OVERSHOOT: f32 = 1.22;
+/// Keep labels this many physical pixels clear of the window edge.
+const AXIS_LABEL_PADDING: f32 = 12.0;
+
+/// Screen positions, in logical egui points, where the orientation gizmo's
+/// X/Y/Z arrow tips appear for the given camera orientation.
+///
+/// The gizmo camera mirrors the main camera's rotation, so an axis direction
+/// projects onto the little viewport simply by its components along the
+/// camera's right and up vectors -- no separate render-world query needed.
+pub fn axis_gizmo_label_positions(
+    window_physical: UVec2,
+    scale_factor: f32,
+    cam_xform: &GlobalTransform,
+) -> [(&'static str, Vec2, Color); 3] {
+    let half = AXIS_VP_SIZE as f32 * 0.5;
+    let centre_physical = Vec2::new(
+        window_physical.x as f32 - AXIS_VP_MARGIN as f32 - half,
+        window_physical.y as f32 - AXIS_VP_MARGIN as f32 - half,
+    );
+    let centre = centre_physical / scale_factor.max(0.001);
+
+    // How far a fully sideways axis reaches, as a fraction of the half
+    // viewport, under this camera's perspective.
+    let reach = (AXIS_TIP_LEN / AXIS_CAM_RADIUS) / (AXIS_CAM_FOV * 0.5).tan();
+    // Placed *past* the arrow head rather than on it, so the letter reads
+    // clearly instead of sitting on top of the arrow it names.
+    let radius = reach * half * AXIS_LABEL_OVERSHOOT / scale_factor.max(0.001);
+
+    let right = cam_xform.right().as_vec3();
+    let up = cam_xform.up().as_vec3();
+    let project = |dir: Vec3| -> Vec2 {
+        // Screen y grows downward, hence the negated up component.
+        let raw = centre + Vec2::new(dir.dot(right), -dir.dot(up)) * radius;
+        // Overshooting can push a label off the window edge, since the gizmo
+        // sits in the corner -- keep them just inside it. Clamped against the
+        // physical window, like every other dimension of the gizmo, so the
+        // letters do not drift when the display scale changes.
+        let max = (window_physical.as_vec2() - Vec2::splat(AXIS_LABEL_PADDING))
+            / scale_factor.max(0.001);
+        let min = Vec2::splat(AXIS_LABEL_PADDING / scale_factor.max(0.001));
+        raw.clamp(min, max)
+    };
+
+    [
+        ("X", project(Vec3::X), Color::srgb(1.0, 0.1, 0.1)),
+        ("Y", project(Vec3::Y), Color::srgb(0.1, 1.0, 0.1)),
+        ("Z", project(Vec3::Z), Color::srgb(0.1, 0.4, 1.0)),
+    ]
+}
 const LARGE_MOLECULE_ATOM_THRESHOLD: usize = 1000;
 
 fn element_visible(sym: &str, settings: &MolSettings) -> bool {
@@ -1291,7 +1352,9 @@ pub fn update_axis_viewport_on_resize(
 
     let vp_w = AXIS_VP_SIZE;
     let vp_h = AXIS_VP_SIZE;
-    let x = AXIS_VP_MARGIN;
+    // Bottom-right: the left edge belongs to the tool rail in the
+    // floating-window layout, so the orientation gizmo would sit under it.
+    let x = w.saturating_sub(vp_w + AXIS_VP_MARGIN);
     let y = h.saturating_sub(vp_h + AXIS_VP_MARGIN);
 
     let wanted = Viewport {
@@ -1367,4 +1430,127 @@ fn auto_fit_camera(points: &[Vec3], cam: &mut OrbitCamera) {
     // Keep a comfortable framing margin and clamp to usable bounds.
     let desired = (max_r * 3.0).max(2.0);
     cam.radius = desired.clamp(2.0, 200.0);
+}
+
+#[cfg(test)]
+mod axis_gizmo_tests {
+    use super::*;
+
+    /// A camera looking down -Z with +Y up: the classic front view, where X
+    /// runs right, Y runs up the screen, and Z points at the viewer.
+    fn front_view() -> GlobalTransform {
+        GlobalTransform::from(Transform::from_xyz(0.0, 0.0, 10.0).looking_at(Vec3::ZERO, Vec3::Y))
+    }
+
+    fn labels() -> [(&'static str, Vec2, Color); 3] {
+        axis_gizmo_label_positions(UVec2::new(1000, 800), 1.0, &front_view())
+    }
+
+    /// The letters must clear the arrow heads (that was the complaint: they
+    /// overlapped the arrows) while still staying on screen.
+    #[test]
+    fn labels_clear_the_arrow_tips_without_leaving_the_window() {
+        let half = AXIS_VP_SIZE as f32 * 0.5;
+        let centre = Vec2::new(
+            1000.0 - AXIS_VP_MARGIN as f32 - half,
+            800.0 - AXIS_VP_MARGIN as f32 - half,
+        );
+        let tip = (AXIS_TIP_LEN / AXIS_CAM_RADIUS) / (AXIS_CAM_FOV * 0.5).tan() * half;
+        for (name, pos, _) in labels() {
+            // Axes pointing at the viewer project to the centre and have no
+            // tip on screen to clear.
+            let offset = (pos - centre).length();
+            if offset > 1.0 {
+                assert!(
+                    offset > tip,
+                    "{name} label sits at {offset:.1} pt, inside the {tip:.1} pt arrow tip -- it \
+                     would overlap the arrow"
+                );
+            }
+            assert!(pos.x >= 0.0 && pos.x <= 1000.0, "{name} off screen: {pos:?}");
+            assert!(pos.y >= 0.0 && pos.y <= 800.0, "{name} off screen: {pos:?}");
+        }
+    }
+
+    /// A label that would land past the window edge is pulled back inside
+    /// rather than clipped away.
+    #[test]
+    fn overshooting_labels_are_clamped_into_the_window() {
+        // A tiny window makes the corner gizmo's overshoot run off the edge.
+        let labels = axis_gizmo_label_positions(UVec2::new(200, 160), 1.0, &front_view());
+        for (name, pos, _) in labels {
+            assert!(
+                pos.x >= AXIS_LABEL_PADDING - 0.01 && pos.x <= 200.0 - AXIS_LABEL_PADDING + 0.01,
+                "{name} x out of bounds: {pos:?}"
+            );
+            assert!(
+                pos.y >= AXIS_LABEL_PADDING - 0.01 && pos.y <= 160.0 - AXIS_LABEL_PADDING + 0.01,
+                "{name} y out of bounds: {pos:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn x_is_right_and_y_is_up_in_a_front_view() {
+        let half = AXIS_VP_SIZE as f32 * 0.5;
+        let centre = Vec2::new(
+            1000.0 - AXIS_VP_MARGIN as f32 - half,
+            800.0 - AXIS_VP_MARGIN as f32 - half,
+        );
+        let found = labels();
+        let x = found[0].1 - centre;
+        let y = found[1].1 - centre;
+        assert!(x.x > 1.0, "X should project to the right: {x:?}");
+        assert!(x.y.abs() < 1.0, "X should not drift vertically: {x:?}");
+        // Screen y grows downward, so "up" is negative.
+        assert!(y.y < -1.0, "Y should project upward: {y:?}");
+        assert!(y.x.abs() < 1.0, "Y should not drift horizontally: {y:?}");
+    }
+
+    #[test]
+    fn an_axis_pointing_at_the_viewer_collapses_to_the_centre() {
+        let half = AXIS_VP_SIZE as f32 * 0.5;
+        let centre = Vec2::new(
+            1000.0 - AXIS_VP_MARGIN as f32 - half,
+            800.0 - AXIS_VP_MARGIN as f32 - half,
+        );
+        // Z points straight at the camera in a front view, so it has no
+        // sideways component to project.
+        let z = labels()[2].1 - centre;
+        assert!(z.length() < 1.0, "Z should sit on the origin: {z:?}");
+    }
+
+    #[test]
+    fn rotating_the_camera_moves_the_labels() {
+        let side = GlobalTransform::from(
+            Transform::from_xyz(10.0, 0.0, 0.0).looking_at(Vec3::ZERO, Vec3::Y),
+        );
+        let front_x = labels()[0].1;
+        let side_x = axis_gizmo_label_positions(UVec2::new(1000, 800), 1.0, &side)[0].1;
+        assert!(
+            (front_x - side_x).length() > 5.0,
+            "the labels must follow the camera, not stay put"
+        );
+    }
+
+    /// The gizmo's viewport is a fixed size in *physical* pixels, so for one
+    /// and the same physical window the labels must land on the same physical
+    /// pixels whatever the scale factor -- which means their logical
+    /// coordinates scale, rather than staying put.
+    #[test]
+    fn the_scale_factor_only_changes_logical_coordinates_not_physical_ones() {
+        let physical = UVec2::new(2000, 1600);
+        let at_1x = axis_gizmo_label_positions(physical, 1.0, &front_view())[0].1;
+        let at_2x = axis_gizmo_label_positions(physical, 2.0, &front_view())[0].1;
+        assert!(
+            (at_1x - at_2x * 2.0).length() < 0.01,
+            "same physical window should give the same physical position: \
+             {at_1x:?} vs {:?}",
+            at_2x * 2.0
+        );
+        assert!(
+            (at_1x - at_2x).length() > 1.0,
+            "the logical coordinates themselves must differ between scale factors"
+        );
+    }
 }

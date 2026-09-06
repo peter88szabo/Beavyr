@@ -1793,7 +1793,11 @@ pub fn draw_builder_highlights(
 /// NOTE: We now do a clean jump: no immediate atom transform sync; instead we
 /// update `mol.pos` + `mol.bonds` and flag geometry/topology dirty so the scene
 /// rebuilds atoms & bonds together next frame (no mismatched frame).
-pub fn builder_ui_panel(
+/// The molecule editor's contents, independent of the container it is drawn
+/// in: the classic layout docks this in a permanent left panel, while the
+/// tabbed layout puts it in a floating window opened from a small round
+/// button, so it no longer occupies a whole screen edge.
+pub fn builder_ui_contents(
     ui: &mut egui::Ui,
     state: &mut EditorRotateState,
     mut zmat_state: &mut ZMatrixBuilderState,
@@ -1801,10 +1805,6 @@ pub fn builder_ui_panel(
     mut settings: &mut MolSettings,
 ) {
     let ctx = ui.ctx().clone();
-
-    egui::Panel::left("molecule_editor_panel")
-        .resizable(true)
-        .show(ui, |ui| {
             if zmat_state.original_atoms.is_none() && !mol.atoms.is_empty() {
                 zmat_state.original_atoms = Some(mol.atoms.clone());
                 zmat_state.original_pos = Some(mol.pos.clone());
@@ -2770,8 +2770,23 @@ pub fn builder_ui_panel(
                     ui.add(egui::Slider::new(&mut state.bond_th_xx, 1.0..=3.0).text("X–X (Å)"));
                 });
             });
+}
+
+/// The classic docked-left-panel presentation of the molecule editor.
+pub fn builder_ui_panel(
+    ui: &mut egui::Ui,
+    state: &mut EditorRotateState,
+    zmat_state: &mut ZMatrixBuilderState,
+    mol: &mut Molecule,
+    settings: &mut MolSettings,
+) {
+    egui::Panel::left("molecule_editor_panel")
+        .resizable(true)
+        .show(ui, |ui| {
+            builder_ui_contents(ui, state, zmat_state, mol, settings);
         });
 }
+
 
 #[cfg(test)]
 mod fragment_placement_tests {

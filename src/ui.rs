@@ -18,12 +18,19 @@ use crate::export_image::{ExportCounter, ExportFormat, ExportSelectArea, ExportS
 // Measurements UI + resource
 use crate::measurements::Measurements;
 use crate::molecule_builder::builder_ui::{
-    builder_ui_panel, EditorRotateState, ZMatrixBuilderState,
+    builder_ui_contents, builder_ui_panel, EditorRotateState, ZMatrixBuilderState,
 };
 use crate::qchem_interfaces::xtb_freq::xtb_frequency_panel;
+use crate::rmsd::ui::rmsd_panel;
+use crate::ui_layout::{icon_rail, section, Tab, UiLayout};
 use crate::qchem_interfaces::xtb_optimize::xtb_optimization_panel;
 use crate::trajectory;
 use crate::ui_measurements;
+use crate::uvvis::{ui::uvvis_panel, UvVisState};
+
+/// Point size of the X/Y/Z letters on the corner axis gizmo. Big enough to
+/// read at a glance without crowding the little arrows they label.
+const AXIS_LABEL_FONT_SIZE: f32 = 19.0;
 
 // NEW: shared picking helper (egui-friendly shim)
 use crate::picking::screen::find_nearest_atom_screen_space_egui;
@@ -54,18 +61,26 @@ const ELEMENT_FILTER_F_BLOCK: [&str; 30] = [
 /// input reach the orbit camera while scrolling a list.  Publishing the
 /// geometry here gives the camera a test that does not depend on egui's
 /// bookkeeping.
-#[derive(Resource, Default, Clone, Copy)]
+#[derive(Resource, Default, Clone)]
 pub struct UiPanelRegions {
-    /// The right-hand control panel.
+    /// The docked control panel (right in the classic layout, the icon rail
+    /// in the floating-window one).
     pub controls: Option<Rect>,
     /// Whatever viewport space is left once every panel has been laid out.
     pub free_viewport: Option<Rect>,
+    /// Floating tool windows. Unlike docked panels these sit *inside* the
+    /// leftover viewport rect, so without listing them a click on a window
+    /// would fall through and also pick the atom behind it.
+    pub windows: Vec<Rect>,
 }
 
 impl UiPanelRegions {
     /// True when `point` (egui points) is over panel chrome rather than the 3D view.
     pub fn covers(&self, point: Vec2) -> bool {
         if self.controls.is_some_and(|r| r.contains(point)) {
+            return true;
+        }
+        if self.windows.iter().any(|r| r.contains(point)) {
             return true;
         }
         // Also treat anything outside the leftover viewport as covered, which
@@ -144,6 +159,9 @@ pub fn ui_panel(
         ResMut<crate::qchem_interfaces::xtb_optimize::XtbPanelState>,
         ResMut<crate::qchem_interfaces::xtb_freq::XtbFrequencyTask>,
         ResMut<crate::qchem_interfaces::xtb_freq::XtbFreqPanelState>,
+        ResMut<crate::rmsd::RmsdState>,
+        ResMut<UiLayout>,
+        ResMut<UvVisState>,
     ),
 ) {
     // bevy_egui 0.41: ctx_mut() returns Result; if it fails, skip this frame
@@ -159,6 +177,9 @@ pub fn ui_panel(
         mut xtb_panel_state,
         mut xtb_freq_task,
         mut xtb_freq_panel_state,
+        mut rmsd_state,
+        mut ui_layout,
+        mut uvvis_state,
     ) = builder_resources;
     if !*style_initialized {
         ctx.style_mut_of(ctx.theme(), |style| {
@@ -170,6 +191,13 @@ pub fn ui_panel(
                 (egui::TextStyle::Small, egui::FontId::proportional(13.0)),
             ]
             .into();
+
+            // Tooltips carry the tool names on the icon rail, so they have to
+            // appear as soon as the pointer is over an icon. By default egui
+            // waits for the pointer to stop moving and then delays further,
+            // which makes a rail of unlabelled icons feel unresponsive.
+            style.interaction.show_tooltips_only_when_still = false;
+            style.interaction.tooltip_delay = 0.0;
         });
         *style_initialized = true;
     }
@@ -289,17 +317,31 @@ pub fn ui_panel(
             .layer_id(egui::LayerId::background())
             .max_rect(ctx.viewport_rect()),
     );
-    let controls_response = egui::Panel::right("controls")
-        .default_size(320.0)
-        .min_size(240.0)
-        .max_size(520.0)
-        .resizable(true)
-        .show(&mut viewport_ui, |ui| {
+    // Both layouts draw exactly the same sections; only the container
+    // differs, so the bodies live in one closure rather than being copied.
+    let windowed = ui_layout.windowed;
+    let mut open_windows = ui_layout.open;
+    // Rects of everything egui drew as a floating window this frame, so the
+    // 3D picker knows not to select atoms behind them.
+    let mut window_rects: Vec<egui::Rect> = Vec::new();
+
+    let controls_response = {
+        let mut draw_sections = |ui: &mut egui::Ui,
+                                 windowed: bool,
+                                 open: &mut [bool; Tab::COUNT],
+                                 rects: &mut Vec<egui::Rect>| {
             // ===========================
             // 1) Structure (XYZ)
             // ===========================
             ui.add_space(8.0);
-            ui.collapsing("Structure (XYZ)", |ui| {
+            section(
+                ui,
+                windowed,
+                &mut open[Tab::Structure.index()],
+                rects,
+                Tab::Structure.default_size(),
+                "Structure (XYZ)",
+                |ui| {
                 let show_type_id = egui::Id::new("show_atom_type");
                 let show_index_id = egui::Id::new("show_atom_index");
                 let edit_mode_id = egui::Id::new("xyz_edit_mode");
@@ -476,10 +518,67 @@ pub fn ui_panel(
             ui.separator();
 
             // ===========================
-            // 1b) Trajectory
+            // 1b) Geometry Optimization (xTB)
             // ===========================
             ui.add_space(8.0);
-            ui.collapsing("Trajectory", |ui| {
+            section(
+                ui,
+                windowed,
+                &mut open[Tab::Optimize.index()],
+                rects,
+                Tab::Optimize.default_size(),
+                "Geometry Optimization (xTB)",
+                |ui| {
+                xtb_optimization_panel(ui, &mut xtb_panel_state, &mut xtb_task, &mol);
+            });
+            // ===========================
+            // 1c) Frequency Analysis (xTB Hessian)
+            // ===========================
+            ui.add_space(8.0);
+            section(
+                ui,
+                windowed,
+                &mut open[Tab::Vibrations.index()],
+                rects,
+                Tab::Vibrations.default_size(),
+                "Frequency Analysis (xTB Hessian)",
+                |ui| {
+                xtb_frequency_panel(
+                    ui,
+                    &mut xtb_freq_panel_state,
+                    &mut xtb_freq_task,
+                    &xtb_panel_state,
+                    &mol,
+                    &mut traj,
+                );
+            });
+            // ===========================
+            // 1c-bis) UV-Vis / TD-DFT
+            // ===========================
+            ui.add_space(8.0);
+            section(
+                ui,
+                windowed,
+                &mut open[Tab::UvVis.index()],
+                rects,
+                Tab::UvVis.default_size(),
+                Tab::UvVis.title(),
+                |ui| {
+                    uvvis_panel(ui, &mut uvvis_state);
+                },
+            );
+            // ===========================
+            // 1d) Trajectory
+            // ===========================
+            ui.add_space(8.0);
+            section(
+                ui,
+                windowed,
+                &mut open[Tab::Trajectory.index()],
+                rects,
+                Tab::Trajectory.default_size(),
+                "Trajectory",
+                |ui| {
                 if ui.button("Load trajectory XYZ").clicked() {
                     let mut dlg = rfd::FileDialog::new().add_filter("XYZ", &["xyz"]);
                     if let Some(dir) = &traj.last_dir {
@@ -747,32 +846,32 @@ pub fn ui_panel(
                 }
             });
             // ===========================
-            // 1b) Geometry Optimization (xTB)
+            // 1e) Structure Comparison (RMSD / Kabsch)
             // ===========================
             ui.add_space(8.0);
-            ui.collapsing("Geometry Optimization (xTB)", |ui| {
-                xtb_optimization_panel(ui, &mut xtb_panel_state, &mut xtb_task, &mol);
-            });
-            // ===========================
-            // 1c) Frequency Analysis (xTB Hessian)
-            // ===========================
-            ui.add_space(8.0);
-            ui.collapsing("Frequency Analysis (xTB Hessian)", |ui| {
-                xtb_frequency_panel(
-                    ui,
-                    &mut xtb_freq_panel_state,
-                    &mut xtb_freq_task,
-                    &xtb_panel_state,
-                    &mol,
-                    &mut traj,
-                );
+            section(
+                ui,
+                windowed,
+                &mut open[Tab::Compare.index()],
+                rects,
+                Tab::Compare.default_size(),
+                "Structure Comparison (RMSD)",
+                |ui| {
+                rmsd_panel(ui, &mut rmsd_state, &mut traj, &mut mol);
             });
             // ===========================
             // 2) Measurements
             // ===========================
             ui.add_space(8.0);
             ui.separator();
-            ui.collapsing("Measurements", |ui| {
+            section(
+                ui,
+                windowed,
+                &mut open[Tab::Measure.index()],
+                rects,
+                Tab::Measure.default_size(),
+                "Measurements",
+                |ui| {
                 ui_measurements::measurements_panel(
                     ui,
                     &mut measurements,
@@ -786,7 +885,14 @@ pub fn ui_panel(
             // ===========================
             ui.add_space(8.0);
             ui.separator();
-            ui.collapsing("Surface Tools", |ui| {
+            section(
+                ui,
+                windowed,
+                &mut open[Tab::Surface.index()],
+                rects,
+                Tab::Surface.default_size(),
+                "Surface Tools",
+                |ui| {
                 crate::orbitals::ui::orbital_panel(
                     ui,
                     &mut orbital_state,
@@ -804,7 +910,14 @@ pub fn ui_panel(
             // The analysis behind this report is O(n) with neighbour queries but
             // still far too heavy to run per frame during playback, so tell the
             // refresh system whether anyone is actually looking at it.
-            let diagnostics_open = ui.collapsing("Diagnostics", |ui| {
+            let diagnostics_visible = section(
+                ui,
+                windowed,
+                &mut open[Tab::Diagnostics.index()],
+                rects,
+                Tab::Diagnostics.default_size(),
+                "Diagnostics",
+                |ui| {
                 let report = &diagnostics_cache.report;
                 let warnings = report.warning_count();
                 let info = report.info_count();
@@ -842,75 +955,158 @@ pub fn ui_panel(
                     ui.weak("Diagnostics use perceived single-bond connectivity; multiple bonds and formal charges may need chemical review.");
                 }
             });
-            diagnostics_cache.wanted = diagnostics_open.openness > 0.0;
+            diagnostics_cache.wanted = diagnostics_visible;
 
             // ===========================
             // 4) Appearance
             // ===========================
             ui.add_space(8.0);
             ui.separator();
-            ui.collapsing("Appearance", |ui| {
-                ui.collapsing("Representation", |ui| {
-                    // `changed` = the entity set must be rebuilt (mode switch, atom
-                    // visibility).  `mesh_changed` = same entities, different mesh
-                    // handles, which is dramatically cheaper.
-                    let mut changed = false;
-                    let mut mesh_changed = false;
+            section(
+                ui,
+                windowed,
+                &mut open[Tab::Representation.index()],
+                rects,
+                Tab::Representation.default_size(),
+                "Representation",
+                |ui| {
+                // `changed` = the entity set must be rebuilt (mode switch, atom
+                // visibility).  `mesh_changed` = same entities, different mesh
+                // handles, which is dramatically cheaper.
+                let mut changed = false;
+                let mut mesh_changed = false;
 
-                    if mol.atoms.len() > 1000 {
-                        ui.weak("Large molecule: heavy mesh representations auto-switch to low-res.");
-                        ui.add_space(4.0);
+                if mol.atoms.len() > 1000 {
+                    ui.weak("Large molecule: heavy mesh representations auto-switch to low-res.");
+                    ui.add_space(4.0);
+                }
+
+                changed |= ui
+                    .radio_value(
+                        &mut settings.representation,
+                        RepresentationMode::BallAndStick,
+                        "Ball & stick (best <2k atoms)",
+                    )
+                    .clicked();
+                changed |= ui
+                    .radio_value(
+                        &mut settings.representation,
+                        RepresentationMode::SpaceFilling,
+                        "Space-filling (CPK)",
+                    )
+                    .clicked();
+                changed |= ui
+                    .radio_value(
+                        &mut settings.representation,
+                        RepresentationMode::SticksRounded,
+                        "Sticks only (rounded joints)",
+                    )
+                    .clicked();
+                changed |= ui
+                    .radio_value(
+                        &mut settings.representation,
+                        RepresentationMode::LowResBallsAndLines,
+                        "Low-res balls + lines",
+                    )
+                    .clicked();
+                changed |= ui
+                    .radio_value(
+                        &mut settings.representation,
+                        RepresentationMode::LinesOnly,
+                        "Lines only",
+                    )
+                    .clicked();
+                changed |= ui
+                    .radio_value(
+                        &mut settings.representation,
+                        RepresentationMode::BackboneTrace,
+                        "Backbone/trace (non-H lines)",
+                    )
+                    .clicked();
+
+                if matches!(settings.representation, RepresentationMode::LowResBallsAndLines) {
+                    ui.add_space(6.0);
+                    if ui
+                        .add(
+                            egui::Slider::new(&mut settings.low_res_atom_resolution, 0..=6)
+                                .text("Low-res atom resolution"),
+                        )
+                        .changed()
+                    {
+                        mesh_changed = true;
                     }
+                    if ui
+                        .add(
+                            egui::Slider::new(&mut settings.low_res_atom_scale, 0.2..=1.5)
+                                .text("Low-res atom scale"),
+                        )
+                        .changed()
+                    {
+                        mesh_changed = true;
+                    }
+                }
 
-                    changed |= ui
-                        .radio_value(
-                            &mut settings.representation,
-                            RepresentationMode::BallAndStick,
-                            "Ball & stick (best <2k atoms)",
+                if matches!(settings.representation, RepresentationMode::SpaceFilling) {
+                    ui.add_space(6.0);
+                    if ui
+                        .add(
+                            egui::Slider::new(&mut settings.cpk_atom_resolution, 0..=10)
+                                .text("CPK atom resolution"),
                         )
-                        .clicked();
-                    changed |= ui
-                        .radio_value(
-                            &mut settings.representation,
-                            RepresentationMode::SpaceFilling,
-                            "Space-filling (CPK)",
+                        .changed()
+                    {
+                        mesh_changed = true;
+                    }
+                    if ui
+                        .add(
+                            egui::Slider::new(&mut settings.cpk_atom_scale, 0.6..=2.6)
+                                .text("CPK atom scale"),
                         )
-                        .clicked();
-                    changed |= ui
-                        .radio_value(
-                            &mut settings.representation,
-                            RepresentationMode::SticksRounded,
-                            "Sticks only (rounded joints)",
-                        )
-                        .clicked();
-                    changed |= ui
-                        .radio_value(
-                            &mut settings.representation,
-                            RepresentationMode::LowResBallsAndLines,
-                            "Low-res balls + lines",
-                        )
-                        .clicked();
-                    changed |= ui
-                        .radio_value(
-                            &mut settings.representation,
-                            RepresentationMode::LinesOnly,
-                            "Lines only",
-                        )
-                        .clicked();
-                    changed |= ui
-                        .radio_value(
-                            &mut settings.representation,
-                            RepresentationMode::BackboneTrace,
-                            "Backbone/trace (non-H lines)",
-                        )
-                        .clicked();
+                        .changed()
+                    {
+                        mesh_changed = true;
+                    }
+                }
 
-                    if matches!(settings.representation, RepresentationMode::LowResBallsAndLines) {
-                        ui.add_space(6.0);
+                if matches!(settings.representation, RepresentationMode::SticksRounded) {
+                    ui.add_space(6.0);
+                    if ui
+                        .add(
+                            egui::Slider::new(&mut settings.stick_radius, 0.02..=0.40)
+                                .text("Stick thickness"),
+                        )
+                        .changed()
+                    {
+                        mesh_changed = true;
+                    }
+                }
+
+                if matches!(
+                    settings.representation,
+                    RepresentationMode::LowResBallsAndLines
+                        | RepresentationMode::LinesOnly
+                        | RepresentationMode::BackboneTrace
+                ) {
+                    ui.add_space(6.0);
+                    ui.add(
+                        egui::Slider::new(&mut settings.line_bond_thickness, 1.0..=50.0)
+                            .text("Line thickness"),
+                    );
+                }
+
+                if matches!(settings.representation, RepresentationMode::BackboneTrace) {
+                    ui.add_space(4.0);
+                    if ui
+                        .checkbox(&mut settings.trace_show_atoms, "Show trace atoms")
+                        .changed()
+                    {
+                        changed = true;
+                    }
+                    if settings.trace_show_atoms {
                         if ui
                             .add(
                                 egui::Slider::new(&mut settings.low_res_atom_resolution, 0..=6)
-                                    .text("Low-res atom resolution"),
+                                    .text("Trace atom resolution"),
                             )
                             .changed()
                         {
@@ -918,100 +1114,34 @@ pub fn ui_panel(
                         }
                         if ui
                             .add(
-                                egui::Slider::new(&mut settings.low_res_atom_scale, 0.2..=1.5)
-                                    .text("Low-res atom scale"),
+                                egui::Slider::new(&mut settings.trace_atom_scale, 0.2..=1.5)
+                                    .text("Trace atom scale"),
                             )
                             .changed()
                         {
                             mesh_changed = true;
                         }
                     }
+                }
 
-                    if matches!(settings.representation, RepresentationMode::SpaceFilling) {
-                        ui.add_space(6.0);
-                        if ui
-                            .add(
-                                egui::Slider::new(&mut settings.cpk_atom_resolution, 0..=10)
-                                    .text("CPK atom resolution"),
-                            )
-                            .changed()
-                        {
-                            mesh_changed = true;
-                        }
-                        if ui
-                            .add(
-                                egui::Slider::new(&mut settings.cpk_atom_scale, 0.6..=2.6)
-                                    .text("CPK atom scale"),
-                            )
-                            .changed()
-                        {
-                            mesh_changed = true;
-                        }
-                    }
-
-                    if matches!(settings.representation, RepresentationMode::SticksRounded) {
-                        ui.add_space(6.0);
-                        if ui
-                            .add(
-                                egui::Slider::new(&mut settings.stick_radius, 0.02..=0.40)
-                                    .text("Stick thickness"),
-                            )
-                            .changed()
-                        {
-                            mesh_changed = true;
-                        }
-                    }
-
-                    if matches!(
-                        settings.representation,
-                        RepresentationMode::LowResBallsAndLines
-                            | RepresentationMode::LinesOnly
-                            | RepresentationMode::BackboneTrace
-                    ) {
-                        ui.add_space(6.0);
-                        ui.add(
-                            egui::Slider::new(&mut settings.line_bond_thickness, 1.0..=50.0)
-                                .text("Line thickness"),
-                        );
-                    }
-
-                    if matches!(settings.representation, RepresentationMode::BackboneTrace) {
-                        ui.add_space(4.0);
-                        if ui
-                            .checkbox(&mut settings.trace_show_atoms, "Show trace atoms")
-                            .changed()
-                        {
-                            changed = true;
-                        }
-                        if settings.trace_show_atoms {
-                            if ui
-                                .add(
-                                    egui::Slider::new(&mut settings.low_res_atom_resolution, 0..=6)
-                                        .text("Trace atom resolution"),
-                                )
-                                .changed()
-                            {
-                                mesh_changed = true;
-                            }
-                            if ui
-                                .add(
-                                    egui::Slider::new(&mut settings.trace_atom_scale, 0.2..=1.5)
-                                        .text("Trace atom scale"),
-                                )
-                                .changed()
-                            {
-                                mesh_changed = true;
-                            }
-                        }
-                    }
-
-                    if changed {
-                        settings.geometry_dirty = true;
-                    }
-                    if mesh_changed {
-                        settings.meshes_dirty = true;
-                    }
-                });
+                if changed {
+                    settings.geometry_dirty = true;
+                }
+                if mesh_changed {
+                    settings.meshes_dirty = true;
+                }
+                },
+            );
+            ui.add_space(8.0);
+            ui.separator();
+            section(
+                ui,
+                windowed,
+                &mut open[Tab::Appearance.index()],
+                rects,
+                Tab::Appearance.default_size(),
+                "Appearance",
+                |ui| {
 
                 ui.add_space(8.0);
 
@@ -1418,7 +1548,14 @@ pub fn ui_panel(
             // ===========================
             ui.add_space(8.0);
             ui.separator();
-            ui.collapsing("Export Image", |ui| {
+            section(
+                ui,
+                windowed,
+                &mut open[Tab::Export.index()],
+                rects,
+                Tab::Export.default_size(),
+                "Export Image",
+                |ui| {
                 let warn_id = egui::Id::new("export_no_selection_warn");
                 let mut warn = ctx.data_mut(|d| d.get_persisted::<bool>(warn_id).unwrap_or(false));
                 if export_select_area.has_area {
@@ -1520,21 +1657,193 @@ pub fn ui_panel(
                 }
                 ctx.data_mut(|d| d.insert_persisted(warn_id, warn));
             });
-        });
+        };
 
-    builder_ui_panel(
-        &mut viewport_ui,
-        &mut editor_rotate_state,
-        &mut zmat_state,
-        &mut mol,
-        &mut settings,
-    );
+        if windowed {
+            // A permanent, narrow rail on the left; every tool lives in its
+            // own floating window that the rail toggles, so any number can be
+            // open at once and dragged where the user wants them.
+            let mut switch_layout = false;
+            let rail = egui::Panel::left("tool_rail")
+                .exact_size(50.0)
+                .resizable(false)
+                .show(&mut viewport_ui, |ui| {
+                    icon_rail(ui, &mut open_windows);
+                    // The layout switch lives at the foot of the rail, the
+                    // usual home for it, and away from the orientation gizmo
+                    // now in the bottom-right corner.
+                    ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
+                        ui.add_space(8.0);
+                        if ui
+                            .add(
+                                egui::Button::new(egui::RichText::new("▤").size(15.0))
+                                    .min_size(egui::vec2(30.0, 26.0)),
+                            )
+                            .on_hover_text("Switch to the classic panel layout")
+                            .clicked()
+                        {
+                            switch_layout = true;
+                        }
+                    });
+                });
+            // The windows themselves are drawn straight onto the context,
+            // which is what lets them float. The `Ui` handed to
+            // `draw_sections` is therefore only a carrier for the context --
+            // and it is deliberately invisible, because the section bodies
+            // also emit separators and spacing between sections that made
+            // sense inside the old right panel. Drawn into the full-viewport
+            // background those became lines straight across the screen.
+            let mut scratch = egui::Ui::new(
+                ctx.clone(),
+                "windowed_sections".into(),
+                egui::UiBuilder::new()
+                    .layer_id(egui::LayerId::background())
+                    // A finite, empty rect: `Rect::NOTHING` is built from
+                    // infinities and makes egui's layout arithmetic produce
+                    // NaN, which it asserts on.
+                    .max_rect(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::ZERO))
+                    .invisible(),
+            );
+            draw_sections(&mut scratch, true, &mut open_windows, &mut window_rects);
+            if switch_layout {
+                ui_layout.windowed = false;
+            }
+            rail
+        } else {
+            egui::Panel::right("controls")
+                .default_size(320.0)
+                .min_size(240.0)
+                .max_size(520.0)
+                .resizable(true)
+                .show(&mut viewport_ui, |ui| {
+                    draw_sections(ui, false, &mut open_windows, &mut window_rects);
+                })
+        }
+    };
+
+    ui_layout.open = open_windows;
+
+    // In the classic layout the switch floats bottom-left; the
+    // floating-window layout puts it at the foot of its rail instead.
+    if !windowed {
+    egui::Area::new(egui::Id::new("layout_switch"))
+        .anchor(egui::Align2::LEFT_BOTTOM, egui::vec2(12.0, -12.0))
+        .show(&ctx, |ui| {
+            egui::Frame::popup(ui.style())
+                .corner_radius(egui::CornerRadius::same(14))
+                .show(ui, |ui| {
+                    if ui
+                        .add(
+                            egui::Button::new(egui::RichText::new("▦").size(16.0))
+                                .min_size(egui::vec2(26.0, 26.0)),
+                        )
+                        .on_hover_text("Switch to the floating-window layout")
+                        .clicked()
+                    {
+                        ui_layout.windowed = true;
+                    }
+                });
+        });
+    }
+
+    // A small rounded floating button opens the molecule editor as a window
+    // in the tabbed layout, instead of it permanently occupying the left
+    // edge the way the classic layout docks it.
+    if windowed {
+        egui::Area::new(egui::Id::new("builder_launcher"))
+            .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-12.0, 12.0))
+            .show(&ctx, |ui| {
+                egui::Frame::popup(ui.style())
+                    .corner_radius(egui::CornerRadius::same(18))
+                    .show(ui, |ui| {
+                        let label = egui::RichText::new("✏").size(18.0);
+                        let button = egui::Button::new(label)
+                            .min_size(egui::vec2(30.0, 30.0))
+                            .selected(ui_layout.builder_open);
+                        if ui
+                            .add(button)
+                            .on_hover_text("Molecule editor / Z-matrix")
+                            .clicked()
+                        {
+                            ui_layout.builder_open = !ui_layout.builder_open;
+                        }
+                    });
+            });
+
+        let mut builder_open = ui_layout.builder_open;
+        let builder_window = egui::Window::new("Molecule Editor")
+            .open(&mut builder_open)
+            .resizable(true)
+            .default_size([420.0, 560.0])
+            .vscroll(true)
+            .show(&ctx, |ui| {
+                builder_ui_contents(
+                    ui,
+                    &mut editor_rotate_state,
+                    &mut zmat_state,
+                    &mut mol,
+                    &mut settings,
+                );
+            });
+        if let Some(window) = &builder_window {
+            window_rects.push(window.response.rect);
+        }
+        ui_layout.builder_open = builder_open;
+    }
+
+    if !windowed {
+        builder_ui_panel(
+            &mut viewport_ui,
+            &mut editor_rotate_state,
+            &mut zmat_state,
+            &mut mol,
+            &mut settings,
+        );
+    }
 
     // Record what the panels ended up covering, now that they have all been
     // laid out, so the camera can tell panel from viewport next frame.
     let to_rect = |r: egui::Rect| Rect::new(r.min.x, r.min.y, r.max.x, r.max.y);
     panel_regions.controls = Some(to_rect(controls_response.response.rect));
     panel_regions.free_viewport = Some(to_rect(viewport_ui.available_rect_before_wrap()));
+    // Includes the molecule-editor window, which is drawn separately below
+    // the tool windows but covers the viewport just the same.
+    panel_regions.windows = window_rects.iter().map(|r| to_rect(*r)).collect();
+
+    // -------------------------
+    // Overlay: X/Y/Z letters on the orientation gizmo
+    // -------------------------
+    // The gizmo shows which way the *original* axes now point after the
+    // molecule has been rotated, which is only readable if the arrows are
+    // named.
+    if let (Ok((_cam_comp, _proj, cam_xform)), Ok(window)) = (q_cam.single(), windows.single()) {
+        let physical = UVec2::new(window.physical_width(), window.physical_height());
+        if physical.x > 0 && physical.y > 0 {
+            let painter = ctx.layer_painter(egui::LayerId::new(
+                egui::Order::Foreground,
+                egui::Id::new("axis_gizmo_labels"),
+            ));
+            let labels = crate::scene::axis_gizmo_label_positions(
+                physical,
+                window.scale_factor() as f32,
+                cam_xform,
+            );
+            for (name, pos, color) in labels {
+                let rgba = color.to_srgba();
+                painter.text(
+                    egui::pos2(pos.x, pos.y),
+                    egui::Align2::CENTER_CENTER,
+                    name,
+                    egui::FontId::proportional(AXIS_LABEL_FONT_SIZE),
+                    egui::Color32::from_rgb(
+                        (rgba.red * 255.0) as u8,
+                        (rgba.green * 255.0) as u8,
+                        (rgba.blue * 255.0) as u8,
+                    ),
+                );
+            }
+        }
+    }
 
     // -------------------------
     // Overlay: atom labels (type/index)
@@ -1747,4 +2056,48 @@ fn format_xyz_from_molecule(mol: &Molecule) -> String {
         ));
     }
     out
+}
+
+#[cfg(test)]
+mod panel_region_tests {
+    use super::*;
+
+    fn regions() -> UiPanelRegions {
+        UiPanelRegions {
+            // A left rail, as the floating-window layout uses.
+            controls: Some(Rect::new(0.0, 0.0, 50.0, 800.0)),
+            free_viewport: Some(Rect::new(50.0, 0.0, 1200.0, 800.0)),
+            windows: vec![Rect::new(300.0, 200.0, 700.0, 600.0)],
+        }
+    }
+
+    #[test]
+    fn the_docked_rail_counts_as_covered() {
+        assert!(regions().covers(Vec2::new(25.0, 400.0)));
+    }
+
+    #[test]
+    fn empty_viewport_space_is_not_covered() {
+        assert!(!regions().covers(Vec2::new(1000.0, 100.0)));
+    }
+
+    /// The regression this field exists for: a floating window sits *inside*
+    /// the leftover viewport rect, so without listing it a click on the
+    /// window would fall through and also pick the atom behind it.
+    #[test]
+    fn a_floating_window_counts_as_covered() {
+        assert!(regions().covers(Vec2::new(500.0, 400.0)));
+    }
+
+    #[test]
+    fn just_outside_a_window_is_not_covered() {
+        assert!(!regions().covers(Vec2::new(705.0, 400.0)));
+    }
+
+    #[test]
+    fn with_no_windows_open_the_viewport_is_clear() {
+        let mut r = regions();
+        r.windows.clear();
+        assert!(!r.covers(Vec2::new(500.0, 400.0)));
+    }
 }
