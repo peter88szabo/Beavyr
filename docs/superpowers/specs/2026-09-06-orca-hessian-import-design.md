@@ -185,6 +185,23 @@ intensities when the Hessian has none, and its own reported thermochemistry
 shown alongside ours as a labelled reference rather than merged into it.
 Two numbers that disagree should be visibly two numbers.
 
+### Output alone: no animation
+
+**Decided requirement:** a `.out` loaded on its own provides exactly three
+things — the **frequency list**, the **IR intensities**, and the
+**thermochemistry** (only the totals it prints: energies, enthalpies,
+entropies, ZPE). Nothing else. There are no normal modes and therefore no
+animation: the Animate buttons are disabled and the panel says "Animation
+needs the Hessian; load the matching .hess file."
+
+This is a deliberate policy choice, not a limitation discovered in the format:
+the example `.out` does carry a populated `NORMAL MODES` block. But ORCA does
+not always print it (reduced print levels omit it), the vectors' mass-weighting
+convention differs from ours, and treating the Hessian as the one source of
+animatable modes keeps a single well-tested path instead of two that can
+disagree. If we later want animation from an output alone, the block is there
+to read and this warning is where it would be lifted.
+
 **The pairing must be verified, not assumed.** Nothing stops a user picking a
 `.hess` and a `.out` from different calculations, and the result would be a
 mode list silently labelled with another molecule's intensities. Before
