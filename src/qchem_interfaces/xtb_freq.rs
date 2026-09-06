@@ -796,6 +796,13 @@ pub fn load_mode_animation(
     traj.accum = 0.0;
     traj.last_applied = None;
     traj.overlay_dirty = true;
+    // Bonds follow the motion. Playback freezes the bond graph by default,
+    // which is right for a long trajectory of a fixed molecule, but a
+    // vibration is exactly the case where connectivity is the point: the
+    // forming and breaking bonds of a transition state's imaginary mode are
+    // invisible if the graph never updates. The Trajectory panel's own toggle
+    // still overrides this afterwards.
+    traj.fixed_bonds = false;
 }
 
 pub fn poll_xtb_frequencies(
@@ -1775,6 +1782,59 @@ mod tests {
         assert_eq!(result.positive_indices.len(), 50);
         assert!((result.frequencies_cm1[0] + 2468.9062).abs() < 1e-4);
         assert_eq!(result.eckart_used, EckartMode::Off);
+    }
+
+    /// A vibration must let the bond graph follow the motion, or a transition
+    /// state's forming and breaking bonds never appear.
+    #[test]
+    fn animating_a_mode_unfreezes_the_bonds() {
+        let result = loaded_gaussian();
+        let mut traj = TrajectoryState::default();
+        assert!(traj.fixed_bonds, "playback freezes bonds by default");
+        load_mode_animation(
+            &mut traj,
+            &result.atoms,
+            &result.coords_angstrom,
+            &result.modes,
+            0,
+            0.18,
+            60.0,
+        );
+        assert!(
+            !traj.fixed_bonds,
+            "a mode animation must recompute connectivity per frame"
+        );
+    }
+
+    /// The imaginary mode of this transition state is a hydrogen transfer, so
+    /// somewhere in its swing the H is closer to one heavy atom than the
+    /// other -- which is only visible if the bonds are recomputed.
+    #[test]
+    fn a_transition_state_mode_actually_changes_a_bond_length() {
+        let result = loaded_gaussian();
+        let frames = animate_mode(
+            &result.atoms,
+            &result.coords_angstrom,
+            &result.modes,
+            0,
+            0.18,
+            16,
+        );
+        // Atom 18 (index 17) is the transferring hydrogen.
+        let h = 17;
+        let nearest_heavy = |frame: &TrajectoryFrame| -> f32 {
+            (0..result.atoms.len())
+                .filter(|&i| i != h && result.atoms[i] != "H")
+                .map(|i| (frame.pos[i] - frame.pos[h]).length())
+                .fold(f32::INFINITY, f32::min)
+        };
+        let distances: Vec<f32> = frames.iter().map(nearest_heavy).collect();
+        let spread = distances.iter().cloned().fold(f32::MIN, f32::max)
+            - distances.iter().cloned().fold(f32::MAX, f32::min);
+        assert!(
+            spread > 0.1,
+            "the H-heavy distance only varies by {spread:.3} A across the swing"
+        );
     }
 
     /// The residuals belong in the list beside the vibrations, in the same
