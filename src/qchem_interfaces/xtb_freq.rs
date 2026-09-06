@@ -961,20 +961,12 @@ pub fn xtb_frequency_panel(
     });
 
     ui.add_space(6.0);
-    ui.group(|ui| {
-        ui.strong("Load a Hessian computed elsewhere");
-        if ui
-            .add_enabled(!running, egui::Button::new("Load Hessian…"))
-            .clicked()
-        {
-            load_hessian_from_dialog(freq_panel, freq_task);
-        }
-        ui.weak(
-            "ORCA .hess: normal modes, frequencies, IR spectrum and thermochemistry, \
-             analyzed exactly as for a run done here. No charge or multiplicity needed \
-             -- the Hessian already encodes them.",
-        );
-    });
+    if ui
+        .add_enabled(!running, egui::Button::new("Load Hessian…"))
+        .clicked()
+    {
+        load_hessian_from_dialog(freq_panel, freq_task);
+    }
 
     if reanalyze {
         reanalyze_stored_hessian(freq_panel, freq_task);
