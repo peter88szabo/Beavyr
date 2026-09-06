@@ -125,36 +125,64 @@ fn load_from_dialog(state: &mut UvVisState) {
     }
 }
 
-/// The root list. `<S²>` and `Mult` appear only for an unrestricted
-/// reference -- an empty column for a closed-shell run is just noise.
+/// The root list.
+///
+/// Laid out as fixed-width monospace rows rather than an `egui::Grid`: a grid
+/// sizes each column to its own contents and then *wraps* anything wider,
+/// which split every "orbital pair + percentage" line in two. One preformatted
+/// string per row cannot wrap, so a contribution and its percentage always
+/// stay on the same line, and the columns line up by construction.
+///
+/// `<S²>` and `Mult` appear only for an unrestricted reference -- an empty
+/// column for a closed-shell run is just noise.
 fn state_table(ui: &mut egui::Ui, result: &TddftResult, expanded: &mut Option<usize>) {
     let show_spin = result.unrestricted;
-    egui::ScrollArea::vertical()
+    egui::ScrollArea::both()
         .auto_shrink([false, false])
         .show(ui, |ui| {
-            egui::Grid::new("uvvis_states")
-                .num_columns(if show_spin { 6 } else { 4 })
-                .striped(true)
-                // Wide gutters: the columns are all short numbers, so without
-                // real space between them the table reads as one run of digits.
-                .spacing([26.0, 5.0])
-                .min_col_width(52.0)
-                .show(ui, |ui| {
-                    ui.label(egui::RichText::new("#").strong());
-                    ui.label(egui::RichText::new("E (eV)").strong());
-                    ui.label(egui::RichText::new("\u{3bb} (nm)").strong());
-                    ui.label(egui::RichText::new("f").strong());
-                    if show_spin {
-                        ui.label(egui::RichText::new("\u{27e8}S\u{b2}\u{27e9}").strong());
-                        ui.label(egui::RichText::new("Mult").strong());
-                    }
-                    ui.end_row();
-
-                    for st in &result.states {
-                        state_row(ui, st, show_spin, expanded);
-                    }
-                });
+            ui.add(
+                egui::Label::new(egui::RichText::new(header_text(show_spin)).monospace().strong())
+                    .wrap_mode(egui::TextWrapMode::Extend),
+            );
+            ui.separator();
+            for st in &result.states {
+                state_row(ui, st, show_spin, expanded);
+            }
         });
+}
+
+/// Column headings, spaced to match `state_row_text`.
+fn header_text(show_spin: bool) -> String {
+    let mut text = format!("  {:>3}  {:>8}  {:>8}  {:>10}", "#", "E (eV)", "nm", "f");
+    if show_spin {
+        text.push_str(&format!("  {:>8}  {:>4}", "<S^2>", "Mult"));
+    }
+    text
+}
+
+/// One row of the list, preformatted so every column lands at the same
+/// character offset on every row.
+fn state_row_text(st: &ExcitedState, show_spin: bool, is_open: bool) -> String {
+    let marker = if is_open { "\u{25be}" } else { "\u{25b8}" };
+    let fosc = match st.oscillator_strength {
+        Some(f) => format!("{f:>10.6}"),
+        None => format!("{:>10}", "--"),
+    };
+    let mut text = format!(
+        "{marker} {:>3}  {:>8.3}  {:>8.1}  {fosc}",
+        st.root, st.energy_ev, st.wavelength_nm
+    );
+    if show_spin {
+        match st.s2 {
+            Some(s2) => text.push_str(&format!("  {s2:>8.4}")),
+            None => text.push_str(&format!("  {:>8}", "--")),
+        }
+        match st.multiplicity {
+            Some(m) => text.push_str(&format!("  {m:>4}")),
+            None => text.push_str(&format!("  {:>4}", "--")),
+        }
+    }
+    text
 }
 
 fn state_row(
@@ -164,8 +192,12 @@ fn state_row(
     expanded: &mut Option<usize>,
 ) {
     let is_open = *expanded == Some(st.root);
-    let marker = if is_open { "\u{25be}" } else { "\u{25b8}" };
-    let row = ui.selectable_label(is_open, format!("{marker} {}", st.root));
+    let row = ui.add(
+        egui::Button::new(egui::RichText::new(state_row_text(st, show_spin, is_open)).monospace())
+            .frame(false)
+            .selected(is_open)
+            .wrap_mode(egui::TextWrapMode::Extend),
+    );
     if row.clicked() {
         *expanded = if is_open { None } else { Some(st.root) };
     }
@@ -185,61 +217,31 @@ fn state_row(
             st.energy_cm1
         ));
     }
-    // Right-aligned in a monospace font, so the decimal points line up down
-    // each column instead of ragging against the left edge.
-    ui.monospace(format!("{:>7.3}", st.energy_ev));
-    ui.monospace(format!("{:>7.1}", st.wavelength_nm));
-    match st.oscillator_strength {
-        Some(f) => {
-            let text = egui::RichText::new(format!("{f:>9.6}")).monospace();
-            // A dark state is worth spotting at a glance in a list of eighty.
-            ui.label(if f <= 0.0 { text.weak() } else { text });
-        }
-        None => {
-            ui.weak("--");
-        }
-    }
-    if show_spin {
-        match st.s2 {
-            Some(s2) => ui.monospace(format!("{s2:>8.4}")),
-            None => ui.weak("--"),
-        };
-        match st.multiplicity {
-            Some(m) => ui.monospace(format!("{m:>4}")),
-            None => ui.weak("--"),
-        };
-    }
-    ui.end_row();
 
     if !is_open {
         return;
     }
-    // The detail block spans the table's remaining columns; putting it in the
-    // first cell of its own row keeps the grid's alignment intact.
-    ui.label("");
-    // egui grids place one widget per cell, so the multi-line detail goes in
-    // a vertical group occupying the cell after the index.
-    ui.vertical(|ui| {
-        if st.excitations.is_empty() {
-            ui.weak("No excitations printed above the program's threshold.");
-            return;
-        }
-        for line in excitation_lines(st) {
-            ui.monospace(line);
-        }
-    });
-    ui.end_row();
+    if st.excitations.is_empty() {
+        ui.weak("      No excitations printed above the program's threshold.");
+        return;
+    }
+    for line in excitation_lines(st) {
+        ui.add(
+            egui::Label::new(egui::RichText::new(line).monospace())
+                .wrap_mode(egui::TextWrapMode::Extend),
+        );
+    }
 }
 
 /// One line per contribution: the orbital pair and its percentage, nothing
-/// else. Padded to a common width so the arrows and the percentages each form
-/// a column in the monospace font they are drawn in.
+/// else, indented to sit under the root it belongs to. Padded to a common
+/// width so the arrows and the percentages each form a column.
 fn excitation_lines(st: &ExcitedState) -> Vec<String> {
     let ranked = st.excitations_by_weight();
     let widest = ranked.iter().map(|e| e.label().len()).max().unwrap_or(0);
     ranked
         .iter()
-        .map(|e| format!("{:<widest$}   {:>5.1} %", e.label(), e.percent()))
+        .map(|e| format!("      {:<widest$}   {:>5.1} %", e.label(), e.percent()))
         .collect()
 }
 
@@ -461,6 +463,71 @@ mod tests {
         assert!(label.contains("\u{27e8}S\u{b2}\u{27e9} = 8.871"), "{label}");
     }
 
+    /// Every column must land at the same character offset on every row --
+    /// that is the whole reason the rows are preformatted strings.
+    #[test]
+    fn every_row_is_the_same_width() {
+        let result = parsed();
+        let widths: Vec<usize> = result
+            .states
+            .iter()
+            .map(|st| state_row_text(st, true, false).chars().count())
+            .collect();
+        let first = widths[0];
+        assert!(
+            widths.iter().all(|&w| w == first),
+            "ragged rows would misalign every column: {widths:?}"
+        );
+        // ...and the heading lines up with them.
+        assert_eq!(header_text(true).chars().count(), first);
+    }
+
+    #[test]
+    fn a_row_carries_its_root_energy_wavelength_and_intensity() {
+        let result = parsed();
+        let row = state_row_text(&result.states[0], true, false);
+        assert!(row.contains("1.935"), "{row}");
+        assert!(row.contains("640.8"), "{row}");
+        assert!(row.contains("0.002236"), "{row}");
+        assert!(row.contains("8.8709"), "{row}");
+        assert!(row.trim_end().ends_with('6'), "multiplicity 6: {row}");
+    }
+
+    /// A closed-shell run drops the two spin columns from both the heading and
+    /// the rows, so they stay the same width as each other.
+    #[test]
+    fn a_restricted_run_drops_the_spin_columns_from_row_and_heading() {
+        let result = parsed();
+        let row = state_row_text(&result.states[0], false, false);
+        assert!(!row.contains("8.8709"), "{row}");
+        assert_eq!(header_text(false).chars().count(), row.chars().count());
+        assert!(!header_text(false).contains("S^2"));
+    }
+
+    #[test]
+    fn the_expansion_marker_does_not_change_the_row_width() {
+        let result = parsed();
+        let closed = state_row_text(&result.states[0], true, false);
+        let open = state_row_text(&result.states[0], true, true);
+        assert_eq!(closed.chars().count(), open.chars().count());
+        assert_ne!(closed, open, "an expanded row must look expanded");
+    }
+
+    /// The bug this layout replaced: a contribution and its percentage were
+    /// wrapped onto separate lines by the grid cell they sat in. One string
+    /// per contribution cannot be split.
+    #[test]
+    fn each_contribution_and_its_percentage_share_one_line() {
+        let result = parsed();
+        for st in &result.states {
+            for line in excitation_lines(st) {
+                assert!(!line.contains('\n'), "{line:?}");
+                assert!(line.contains("-->"), "{line:?}");
+                assert!(line.trim_end().ends_with('%'), "{line:?}");
+            }
+        }
+    }
+
     /// The expanded block is meant to be exactly the orbital pairs and their
     /// percentages -- no coefficients, energies or dipoles crowding them out.
     #[test]
@@ -479,7 +546,7 @@ mod tests {
         // Root 10 mixes five contributions with three- and two-digit indices.
         let lines = excitation_lines(&result.states[9]);
         assert_eq!(lines.len(), 5);
-        assert!(lines[0].starts_with("b87 --> b92"), "{:?}", lines[0]);
+        assert!(lines[0].trim_start().starts_with("b87 --> b92"), "{:?}", lines[0]);
         assert!(lines[0].contains("53.8 %"), "{:?}", lines[0]);
         let percent_column = |l: &String| l.rfind('%').unwrap();
         let first = percent_column(&lines[0]);
