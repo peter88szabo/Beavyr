@@ -296,3 +296,4 @@ fn vdw_radius_angstrom(sym: &str) -> Option<f32> {
         _ => None,
     }
 }
+
