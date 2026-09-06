@@ -121,6 +121,15 @@ pub struct XtbFrequencyTask {
 }
 
 impl FrequencyResult {
+    /// Whether mode `i` has a displacement vector to animate.
+    ///
+    /// An imported result lists its source's translation/rotation residuals
+    /// by frequency only -- the file prints no vectors for them -- so those
+    /// rows appear in the list but have nothing to move.
+    pub fn is_animatable(&self, i: usize) -> bool {
+        i < self.modes.ncols() && self.modes.column(i).iter().any(|d| *d != 0.0)
+    }
+
     /// Whether there is an IR spectrum to plot at all.
     ///
     /// A Hessian on its own gives frequencies but no intensities: those need
@@ -509,6 +518,10 @@ struct ImportedModes {
     ir_intensities_km_mol: Vec<f64>,
     /// `3N x nmodes`, in our normalisation.
     modes: Array2<f64>,
+    /// Translation/rotation residuals the source reported. They have no
+    /// displacement vectors -- the source printed only their frequencies --
+    /// so they are listed but cannot be animated.
+    low_frequencies_cm1: Vec<f64>,
     /// Named in the panel so it is clear what was read and what was computed.
     program: String,
 }
@@ -551,20 +564,48 @@ fn analyze_imported(
         }
     }
 
-    // The source projected out translations and rotations already, so every
-    // listed mode is a vibration: imaginary or real, nothing in between.
-    let negative_indices: Vec<usize> = frequencies_cm1
+    // The source's translation/rotation residuals are listed alongside the
+    // vibrations, in the same ascending order the computed path uses, so the
+    // two kinds of result read the same way. They carry no displacement
+    // vectors, which is what marks them as un-animatable.
+    let mut rows: Vec<(f64, Option<usize>)> = frequencies_cm1
         .iter()
         .enumerate()
-        .filter(|(_, f)| **f < 0.0)
-        .map(|(i, _)| i)
+        .map(|(i, f)| (*f, Some(i)))
         .collect();
-    let positive_indices: Vec<usize> = frequencies_cm1
-        .iter()
-        .enumerate()
-        .filter(|(_, f)| **f >= 0.0)
-        .map(|(i, _)| i)
-        .collect();
+    rows.extend(imported.low_frequencies_cm1.iter().map(|f| (*f, None)));
+    rows.sort_by(|a, b| a.0.total_cmp(&b.0));
+
+    let nrows = rows.len();
+    let mut ordered_freqs = Vec::with_capacity(nrows);
+    let mut ordered_intensities = Vec::with_capacity(nrows);
+    let mut ordered_modes = Array2::<f64>::zeros((3 * natoms, nrows));
+    let mut negative_indices = Vec::new();
+    let mut zero_indices = Vec::new();
+    let mut positive_indices = Vec::new();
+    for (row, (freq, source)) in rows.iter().enumerate() {
+        ordered_freqs.push(*freq);
+        match source {
+            Some(k) => {
+                ordered_intensities
+                    .push(imported.ir_intensities_km_mol.get(*k).copied().unwrap_or(0.0));
+                for axis in 0..3 * natoms {
+                    ordered_modes[[axis, row]] = imported.modes[[axis, *k]];
+                }
+                if *freq < 0.0 {
+                    negative_indices.push(row);
+                } else {
+                    positive_indices.push(row);
+                }
+            }
+            None => {
+                // A residual: frequency only, no vector, no intensity.
+                ordered_intensities.push(0.0);
+                zero_indices.push(row);
+            }
+        }
+    }
+    let frequencies_cm1 = ordered_freqs;
 
     let freqs_for_thermo: Vec<f64> = positive_indices
         .iter()
@@ -605,11 +646,11 @@ fn analyze_imported(
     Ok(FrequencyResult {
         atoms: imported.atoms,
         coords_angstrom,
-        modes: imported.modes,
+        modes: ordered_modes,
         frequencies_cm1,
-        ir_intensities_km_mol: imported.ir_intensities_km_mol,
+        ir_intensities_km_mol: ordered_intensities,
         negative_indices,
-        zero_indices: Vec::new(),
+        zero_indices,
         positive_indices,
         thermo,
         thermo_temp_k,
@@ -662,6 +703,7 @@ fn read_hessian_file(path: &Path) -> Result<(HessianSource, Option<f64>), String
             frequencies_cm1: g.frequencies_cm1,
             ir_intensities_km_mol: g.ir_intensities_km_mol,
             modes: g.modes,
+            low_frequencies_cm1: g.low_frequencies_cm1,
             program: "Gaussian".to_string(),
         };
         // Gaussian applies any scaling factor itself and prints the scaled
@@ -1309,7 +1351,14 @@ pub fn xtb_frequency_panel(
                         let is_animating_this_row =
                             freq_panel.selected_mode == Some(i) && traj.playing;
                         let toggle_label = if is_animating_this_row { "Stop" } else { "Animate" };
-                        if ui.button(toggle_label).clicked() {
+                        let animatable = result.is_animatable(i);
+                        let button = ui
+                            .add_enabled(animatable, egui::Button::new(toggle_label))
+                            .on_disabled_hover_text(
+                                "The file lists this mode's frequency but no displacement \
+                                 vector, so there is nothing to animate.",
+                            );
+                        if button.clicked() {
                             if is_animating_this_row {
                                 traj.playing = false;
                             } else {
@@ -1722,12 +1771,75 @@ mod tests {
     fn a_gaussian_log_loads_as_imported_modes() {
         let result = loaded_gaussian();
         assert_eq!(result.atoms.len(), 19);
-        assert_eq!(result.frequencies_cm1.len(), 51, "3N - 6, no low modes");
-        assert!(result.zero_indices.is_empty(), "the source projected them out");
         assert_eq!(result.negative_indices.len(), 1);
         assert_eq!(result.positive_indices.len(), 50);
         assert!((result.frequencies_cm1[0] + 2468.9062).abs() < 1e-4);
         assert_eq!(result.eckart_used, EckartMode::Off);
+    }
+
+    /// The residuals belong in the list beside the vibrations, in the same
+    /// ascending order the computed path uses.
+    #[test]
+    fn imported_low_frequencies_are_listed_as_low_modes() {
+        let result = loaded_gaussian();
+        assert_eq!(result.frequencies_cm1.len(), 57, "51 modes + 6 residuals");
+        assert_eq!(result.zero_indices.len(), 6);
+        assert_eq!(result.negative_indices.len(), 1);
+        assert_eq!(result.positive_indices.len(), 50);
+        assert!(
+            result.frequencies_cm1.windows(2).all(|w| w[0] <= w[1]),
+            "the list must read in ascending order"
+        );
+        // The imaginary mode is first, then the residuals, then the
+        // vibrations -- the same shape as a Hessian we analysed ourselves.
+        assert_eq!(result.negative_indices[0], 0);
+        assert_eq!(result.zero_indices, vec![1, 2, 3, 4, 5, 6]);
+        assert!((result.frequencies_cm1[1] + 18.8757).abs() < 1e-3);
+        assert!((result.frequencies_cm1[7] - 78.6012).abs() < 1e-3);
+    }
+
+    /// A residual has a frequency but no vector, so its Animate button is
+    /// disabled rather than silently doing nothing.
+    #[test]
+    fn residual_rows_are_not_animatable_but_real_modes_are() {
+        let result = loaded_gaussian();
+        assert!(result.is_animatable(0), "the imaginary mode");
+        for &i in &result.zero_indices {
+            assert!(!result.is_animatable(i), "residual row {i} has no vector");
+        }
+        for &i in &result.positive_indices {
+            assert!(result.is_animatable(i), "vibration row {i} should animate");
+        }
+    }
+
+    /// Listing the residuals must not let them into the thermochemistry --
+    /// six extra near-zero vibrations would wreck the partition function.
+    #[test]
+    fn residuals_stay_out_of_the_thermochemistry() {
+        const GAUSSIAN_ZPE_HARTREE: f64 = 0.143449;
+        let result = loaded_gaussian();
+        assert!((result.thermo.zpe - GAUSSIAN_ZPE_HARTREE).abs() < 5.0e-4);
+        assert!(
+            result
+                .positive_indices
+                .iter()
+                .all(|&i| result.frequencies_cm1[i] > 50.0),
+            "no residual leaked into the vibrations"
+        );
+    }
+
+    /// Intensities must follow their own modes through the reordering.
+    #[test]
+    fn intensities_stay_with_their_modes_after_reordering() {
+        let result = loaded_gaussian();
+        // Row 0 is the imaginary mode with its huge 6843 km/mol intensity.
+        assert!((result.ir_intensities_km_mol[0] - 6843.5507).abs() < 1e-3);
+        // Residual rows have none.
+        for &i in &result.zero_indices {
+            assert_eq!(result.ir_intensities_km_mol[i], 0.0);
+        }
+        // Row 7 is the 78.60 cm-1 mode at 1.4167 km/mol.
+        assert!((result.ir_intensities_km_mol[7] - 1.4167).abs() < 1e-3);
     }
 
     /// The user must be told the modes are Gaussian's and the thermochemistry

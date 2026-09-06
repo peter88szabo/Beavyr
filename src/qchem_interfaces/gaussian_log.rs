@@ -34,6 +34,11 @@ pub struct GaussianFrequencies {
     pub reduced_masses_amu: Vec<f64>,
     /// `3N x nmodes`, columns in our own normalisation (`sum m|d|^2 = 1`).
     pub modes: Array2<f64>,
+    /// The translation/rotation residuals from Gaussian's `Low frequencies`
+    /// line: what is left of the six zero modes after projection. They should
+    /// be small; tens of cm-1 usually means the geometry is not tightly
+    /// converged, so they are worth showing rather than discarding.
+    pub low_frequencies_cm1: Vec<f64>,
 }
 
 /// Parses a Gaussian frequency output.
@@ -70,6 +75,8 @@ pub fn parse_gaussian_log(text: &str) -> Result<GaussianFrequencies, String> {
         }
     }
 
+    let low_frequencies_cm1 = parse_low_frequencies(&lines, &blocks.frequencies);
+
     Ok(GaussianFrequencies {
         atoms,
         coords_angstrom,
@@ -77,7 +84,71 @@ pub fn parse_gaussian_log(text: &str) -> Result<GaussianFrequencies, String> {
         ir_intensities_km_mol: blocks.intensities,
         reduced_masses_amu: blocks.reduced_masses,
         modes,
+        low_frequencies_cm1,
     })
+}
+
+/// The translation/rotation residuals out of the `Low frequencies ---` lines.
+///
+/// Gaussian prints the lowest handful of frequencies there, mixing the six
+/// residuals with the first real modes (and any imaginary one). Rather than
+/// assume a fixed count -- which changes with imaginary modes and with linear
+/// molecules -- the residuals are found by elimination: a value that matches a
+/// mode in the frequency table is that mode, and whatever is left over is a
+/// residual.
+fn parse_low_frequencies(lines: &[&str], modes: &[f64]) -> Vec<f64> {
+    /// How close a low-frequency value must be to a listed mode to be counted
+    /// as that mode. The two are computed slightly differently, so they agree
+    /// to a few hundredths rather than exactly.
+    const MATCH_TOLERANCE_CM1: f64 = 2.0;
+
+    let mut values = Vec::new();
+    for line in lines {
+        let trimmed = line.trim();
+        let Some(rest) = trimmed.strip_prefix("Low frequencies ---") else {
+            continue;
+        };
+        // A large negative value can run into the dashes ("---2468.9067"), so
+        // split on the marker and re-split on whitespace and minus signs.
+        values.extend(split_signed(rest));
+    }
+    let mut unmatched: Vec<f64> = Vec::new();
+    let mut used = vec![false; modes.len()];
+    for value in values {
+        let hit = modes.iter().enumerate().position(|(i, m)| {
+            !used[i] && (m - value).abs() <= MATCH_TOLERANCE_CM1
+        });
+        match hit {
+            Some(i) => used[i] = true,
+            None => unmatched.push(value),
+        }
+    }
+    unmatched
+}
+
+/// Numbers that may be run together by a minus sign, as Gaussian's fixed-width
+/// output does when a value overflows its field.
+fn split_signed(text: &str) -> Vec<f64> {
+    let mut out = Vec::new();
+    for token in text.split_whitespace() {
+        let mut start = 0;
+        let bytes = token.as_bytes();
+        for i in 1..=bytes.len() {
+            let at_end = i == bytes.len();
+            // A minus sign that is not the first character begins a new number,
+            // unless it is an exponent sign.
+            let boundary = !at_end
+                && bytes[i] == b'-'
+                && !matches!(bytes[i - 1], b'e' | b'E');
+            if at_end || boundary {
+                if let Ok(value) = token[start..i].parse::<f64>() {
+                    out.push(value);
+                }
+                start = i;
+            }
+        }
+    }
+    out
 }
 
 /// Whether this text looks like a Gaussian output at all.
@@ -384,6 +455,50 @@ mod tests {
             .unwrap();
         assert_eq!(g.atoms[mover], "H", "atom {} moves most", mover + 1);
         assert_eq!(mover, 17, "atom 18 in the file's numbering");
+    }
+
+    /// The six translation/rotation residuals, separated from the real modes
+    /// that share the same printed line.
+    #[test]
+    fn the_low_frequency_residuals_are_picked_out() {
+        let g = parsed();
+        let low = &g.low_frequencies_cm1;
+        assert_eq!(low.len(), 6, "six residuals, got {low:?}");
+        // In file order: -18.8757 -14.6542 -4.8042 -0.0011 -0.0008 0.0012.
+        assert!((low[0] + 18.8757).abs() < 1e-4, "{low:?}");
+        assert!((low[2] + 4.8042).abs() < 1e-4, "{low:?}");
+        assert!((low[5] - 0.0012).abs() < 1e-4, "{low:?}");
+        // The imaginary mode and the first real ones are modes, not residuals.
+        assert!(
+            low.iter().all(|f| f.abs() < 50.0),
+            "a real mode leaked into the residuals: {low:?}"
+        );
+    }
+
+    /// The imaginary frequency runs into the dashes as "---2468.9067", so the
+    /// splitter has to break on the minus sign rather than on whitespace.
+    #[test]
+    fn a_value_running_into_the_dashes_is_still_read() {
+        let values = split_signed("-2468.9067  -18.8757  -14.6542");
+        assert_eq!(values.len(), 3);
+        assert!((values[0] + 2468.9067).abs() < 1e-6);
+        assert!((values[1] + 18.8757).abs() < 1e-6);
+    }
+
+    #[test]
+    fn split_signed_handles_run_together_negatives_and_exponents() {
+        assert_eq!(split_signed("1.0-2.0-3.0").len(), 3);
+        assert_eq!(split_signed("1.0e-3").len(), 1, "an exponent is not a boundary");
+        assert!(split_signed("").is_empty());
+    }
+
+    /// A file with no residual line is not an error -- they are diagnostics.
+    #[test]
+    fn a_missing_low_frequency_line_yields_no_residuals() {
+        let text = example().replace("Low frequencies ---", "Xow frequencies ---");
+        let g = parse_gaussian_log(&text).unwrap();
+        assert!(g.low_frequencies_cm1.is_empty());
+        assert_eq!(g.frequencies_cm1.len(), 51, "the modes still parse");
     }
 
     // ---- failure cases ----
