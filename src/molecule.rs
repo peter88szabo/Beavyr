@@ -30,6 +30,11 @@ impl Molecule {
     }
 
     /// Build from simple XYZ text (Å).
+    ///
+    /// Nothing in the running program calls this now that startup begins with
+    /// an empty viewport -- the XYZ panel parses in place -- but it is the
+    /// natural constructor and the tests build molecules with it.
+    #[allow(dead_code)]
     pub fn from_xyz(xyz: &str) -> Self {
         let (_n, atoms, qxyz) = parse_xyz_angstrom(xyz);
         let pos: Vec<Vec3> = qxyz

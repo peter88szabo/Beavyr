@@ -212,6 +212,42 @@ pub fn normal_modes_with_projection(
         }
     }
 
+    // DEVIATION from the imported Behemoth code, deliberate: the absolute
+    // tolerance above corresponds to about 0.01 cm^-1, which holds for small
+    // molecules but not larger ones. On the 19-atom transition state in
+    // examples/, the six projected modes come out at 0.02-0.04 cm^-1 --
+    // ordinary double-precision noise from a 57x57 diagonalisation -- and were
+    // counted as real vibrations, putting six spurious near-zero modes into
+    // the mode list and, worse, into the vibrational partition function.
+    //
+    // When a projection was actually applied we know exactly how many modes it
+    // removed, so identify them by rank rather than by an absolute threshold:
+    // the projected ones are always the smallest in magnitude, by orders of
+    // magnitude, so this cannot swallow a genuine low-frequency torsion.
+    let nprojected = match eckart {
+        EckartMode::Off => 0,
+        EckartMode::VibRot => nlow,
+        // The reaction-path projection also removes the gradient direction.
+        EckartMode::ReactionPath => nlow + 1,
+    };
+    if nprojected > 0 && nprojected <= ncoord && zero_indices.len() != nprojected {
+        let mut by_magnitude: Vec<usize> = (0..ncoord).collect();
+        by_magnitude.sort_by(|&a, &b| evals[a].abs().total_cmp(&evals[b].abs()));
+        let projected = &by_magnitude[..nprojected];
+        negative_indices.clear();
+        zero_indices.clear();
+        positive_indices.clear();
+        for (idx, &eigenvalue) in evals.iter().enumerate() {
+            if projected.contains(&idx) {
+                zero_indices.push(idx);
+            } else if eigenvalue < 0.0 {
+                negative_indices.push(idx);
+            } else {
+                positive_indices.push(idx);
+            }
+        }
+    }
+
     let mut low_frequencies_au = Vec::new();
     if zero_indices.len() == nlow {
         for i in 0..ncoord {

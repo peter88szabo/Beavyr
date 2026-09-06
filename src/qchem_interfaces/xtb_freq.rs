@@ -60,18 +60,31 @@ pub struct FrequencyResult {
     pub thermo_temp_k: f64,
     pub thermo_freq_cutoff_cm1: f64,
     pub eckart_used: EckartMode,
+    /// The empirical scaling factor applied to every frequency, when the
+    /// source file asked for one. `None` means the frequencies are the raw
+    /// harmonic ones.
+    pub frequency_scale: Option<f64>,
     /// Set when a reaction-path request was silently downgraded to the
     /// ordinary translation/rotation projection
     /// because the gradient was essentially zero.
     pub reaction_path_fallback_note: Option<String>,
 }
 
+#[derive(Clone)]
 struct RawFrequencyOutput {
     atoms: Vec<String>,
     coords_bohr: Vec<f64>,
     hessian: Array2<f64>,
     vib_lines: Vec<super::hessian_file::VibSpectrumLine>,
     gradient_bohr: Option<Vec<f64>>,
+    /// Masses the source file stated, when it states them. An ORCA `.hess`
+    /// records one per atom, so an isotope substitution survives instead of
+    /// being overwritten by the standard atomic weight. xTB output carries no
+    /// masses, so that path leaves this `None`.
+    masses_amu: Option<Vec<f64>>,
+    /// IR intensities already ordered to match our eigensolver, for sources
+    /// whose own ordering differs from ours. Overrides `vib_lines` when set.
+    ir_intensities_km_mol: Option<Vec<f64>>,
 }
 
 #[derive(Resource, Default)]
@@ -88,6 +101,29 @@ pub struct XtbFrequencyTask {
     pub last_message: Option<String>,
     pub last_is_error: bool,
     pub result: Option<FrequencyResult>,
+    /// The Hessian and geometry the current result came from, kept so that
+    /// changing the scaling factor, the temperature or the cutoff can redo the
+    /// analysis in milliseconds instead of recomputing a Hessian.
+    last_raw: Option<RawFrequencyOutput>,
+    /// Multiplicity the stored raw data was produced with.
+    last_multiplicity: i32,
+    /// Geometry a just-loaded Hessian file brought with it, waiting to be put
+    /// on screen. A loaded Hessian usually arrives with nothing displayed, and
+    /// its modes are meaningless without the structure they belong to.
+    pub pending_geometry: Option<(Vec<String>, Vec<Vec3>)>,
+}
+
+impl FrequencyResult {
+    /// Whether there is an IR spectrum to plot at all.
+    ///
+    /// A Hessian on its own gives frequencies but no intensities: those need
+    /// dipole derivatives, which are a separate quantity. An imported file may
+    /// or may not carry them, and plotting a row of zero-height peaks would
+    /// look like a computed spectrum that happens to be flat rather than like
+    /// data that was never there.
+    pub fn has_ir_intensities(&self) -> bool {
+        self.ir_intensities_km_mol.iter().any(|&i| i > 0.0)
+    }
 }
 
 impl XtbFrequencyTask {
@@ -275,6 +311,8 @@ fn run_xtb_hess_cancellable(
     };
 
     Ok(RawFrequencyOutput {
+        masses_amu: None,
+        ir_intensities_km_mol: None,
         atoms,
         coords_bohr,
         hessian,
@@ -316,13 +354,17 @@ fn analyze(
     eckart_requested: EckartMode,
     thermo_temp_k: f64,
     thermo_freq_cutoff_cm1: f64,
+    frequency_scale: f64,
 ) -> Result<FrequencyResult, String> {
     let natoms = raw.atoms.len();
-    let mass: Vec<f64> = raw
-        .atoms
-        .iter()
-        .map(|s| atomic_mass_amu(s).ok_or_else(|| format!("Unknown element {s:?}")))
-        .collect::<Result<_, _>>()?;
+    let mass: Vec<f64> = match &raw.masses_amu {
+        Some(masses) if masses.len() == natoms => masses.clone(),
+        _ => raw
+            .atoms
+            .iter()
+            .map(|s| atomic_mass_amu(s).ok_or_else(|| format!("Unknown element {s:?}")))
+            .collect::<Result<_, _>>()?,
+    };
     let linear = is_linear(&raw.coords_bohr, natoms);
 
     let mut eckart_used = eckart_requested;
@@ -368,15 +410,26 @@ fn analyze(
     )
     .map_err(|e| e.to_string())?;
 
-    let frequencies_cm1 = thermofuncs::freqs_au_to_cm1(&result.frequencies_au);
+    let mut frequencies_cm1 = thermofuncs::freqs_au_to_cm1(&result.frequencies_au);
+    // Applied before anything reads the frequencies, so the mode list, the IR
+    // spectrum and the thermochemistry are all consistently scaled -- which is
+    // also what the source program does when it is asked to scale.
+    let scaled = frequency_scale > 0.0 && (frequency_scale - 1.0).abs() > f64::EPSILON;
+    if scaled {
+        for f in &mut frequencies_cm1 {
+            *f *= frequency_scale;
+        }
+    }
 
     // xTB's own `vibspectrum` lists exactly the same 3N modes in the same
     // ascending order our own eigensolver produces (both are "lowest to
     // highest"), so intensities line up by position.
-    let ir_intensities_km_mol: Vec<f64> = if raw.vib_lines.len() == frequencies_cm1.len() {
-        raw.vib_lines.iter().map(|l| l.ir_intensity_km_mol).collect()
-    } else {
-        vec![0.0; frequencies_cm1.len()]
+    let ir_intensities_km_mol: Vec<f64> = match &raw.ir_intensities_km_mol {
+        Some(given) if given.len() == frequencies_cm1.len() => given.clone(),
+        _ if raw.vib_lines.len() == frequencies_cm1.len() => {
+            raw.vib_lines.iter().map(|l| l.ir_intensity_km_mol).collect()
+        }
+        _ => vec![0.0; frequencies_cm1.len()],
     };
 
     let freqs_for_thermo: Vec<f64> = result
@@ -428,6 +481,7 @@ fn analyze(
         thermo_temp_k,
         thermo_freq_cutoff_cm1,
         eckart_used,
+        frequency_scale: scaled.then_some(frequency_scale),
         reaction_path_fallback_note,
     })
 }
@@ -439,6 +493,36 @@ fn analyze(
 /// single-atom Cartesian displacement equals 1 -- a predictable, visible
 /// amplitude regardless of the eigenvector's own (physically meaningful but
 /// visually arbitrary) normalization.
+/// Reads a Hessian file into the shape `analyze` wants, along with any
+/// empirical scaling factor the file itself asks for.
+///
+/// ORCA `.hess` is the only format for now. Synchronous: parsing the file and
+/// diagonalising a 3N x 3N matrix takes milliseconds, so this needs none of
+/// the background-task machinery a real xTB run does.
+fn read_hessian_file(path: &Path) -> Result<(RawFrequencyOutput, Option<f64>), String> {
+    let text = std::fs::read_to_string(path)
+        .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+    let hess = super::orca_hess::parse_orca_hess(&text)
+        .map_err(|e| format!("{}: {e}", path.display()))?;
+
+    let raw = RawFrequencyOutput {
+        atoms: hess.atoms.clone(),
+        coords_bohr: hess.coords_bohr.clone(),
+        hessian: hess.hessian.clone(),
+        vib_lines: Vec::new(),
+        // A `.hess` is written at a stationary point and stores no gradient,
+        // so a reaction-path request falls back to the ordinary Eckart
+        // projection with a note -- `analyze` already handles that.
+        gradient_bohr: None,
+        masses_amu: Some(hess.masses_amu.clone()),
+        ir_intensities_km_mol: {
+            let ordered = hess.ir_intensities_in_eigenvalue_order();
+            (!ordered.is_empty()).then_some(ordered)
+        },
+    };
+    Ok((raw, hess.frequency_scale_factor))
+}
+
 pub fn animate_mode(
     atoms: &[String],
     coords_angstrom: &[Vec3],
@@ -525,12 +609,15 @@ pub fn poll_xtb_frequencies(
             if let Some(dir) = &run_dir {
                 discard_xtb_run_dir(dir);
             }
+            freq_task.last_raw = Some(raw.clone());
+            freq_task.last_multiplicity = multiplicity;
             match analyze(
                 raw,
                 multiplicity,
                 panel_state.eckart_mode,
                 panel_state.thermo_temp_k,
                 panel_state.thermo_freq_cutoff_cm1,
+                panel_state.frequency_scale,
             ) {
                 Ok(analyzed) => {
                     let note = analyzed
@@ -566,6 +653,11 @@ pub struct XtbFreqPanelState {
     pub eckart_mode: EckartMode,
     pub thermo_temp_k: f64,
     pub thermo_freq_cutoff_cm1: f64,
+    /// Empirical scaling applied to every computed frequency. 1.0 leaves the
+    /// raw harmonic values alone. Loading a Hessian file that names its own
+    /// factor sets this to that value, since the program that wrote the file
+    /// already reported its frequencies scaled that way.
+    pub frequency_scale: f64,
     /// The mode currently loaded into the trajectory player, whether it is
     /// actively playing or paused -- this is what a row's Animate/Stop
     /// button and the amplitude/speed controls act on.
@@ -584,6 +676,7 @@ impl Default for XtbFreqPanelState {
             eckart_mode: EckartMode::VibRot,
             thermo_temp_k: 298.15,
             thermo_freq_cutoff_cm1: 100.0,
+            frequency_scale: 1.0,
             selected_mode: None,
             mode_amplitude_angstrom: 0.12,
             mode_speed_fps: 60.0,
@@ -591,6 +684,91 @@ impl Default for XtbFreqPanelState {
             spectrum_window_open: false,
             spectrum_broadening: BroadeningKind::Gaussian,
             spectrum_width_cm1: 20.0,
+        }
+    }
+}
+
+/// Opens a file dialog and analyses the chosen Hessian.
+///
+/// If the file names its own scaling factor -- ORCA writes
+/// `$frequency_scale_factor` and reports its frequencies already scaled by it
+/// -- that becomes the panel's factor, so the numbers shown match the ones the
+/// user already has in their output file. They can still change it afterwards.
+fn load_hessian_from_dialog(freq_panel: &mut XtbFreqPanelState, freq_task: &mut XtbFrequencyTask) {
+    let Some(path) = rfd::FileDialog::new()
+        .add_filter("ORCA Hessian", &["hess"])
+        .add_filter("All files", &["*"])
+        .pick_file()
+    else {
+        return;
+    };
+    let (raw, file_scale) = match read_hessian_file(&path) {
+        Ok(pair) => pair,
+        Err(err) => {
+            freq_task.last_message = Some(err);
+            freq_task.last_is_error = true;
+            return;
+        }
+    };
+    if let Some(scale) = file_scale {
+        freq_panel.frequency_scale = scale;
+    }
+    let natoms = raw.atoms.len();
+    freq_task.last_raw = Some(raw);
+    // A loaded Hessian carries no charge or spin state of its own; the modes
+    // and thermochemistry only need the electronic multiplicity for the
+    // electronic partition function, and 1 is the sane default.
+    freq_task.last_multiplicity = 1;
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.display().to_string());
+
+    match reanalyze_stored_hessian(freq_panel, freq_task) {
+        true => {
+            if let Some(result) = &freq_task.result {
+                freq_task.pending_geometry =
+                    Some((result.atoms.clone(), result.coords_angstrom.clone()));
+            }
+            let scaling = match file_scale {
+                Some(scale) => format!(", frequencies scaled by {scale} as the file asks"),
+                None => String::new(),
+            };
+            freq_task.last_message =
+                Some(format!("Loaded {name}: {natoms} atoms{scaling}."));
+            freq_task.last_is_error = false;
+        }
+        false => {
+            freq_task.last_is_error = true;
+        }
+    }
+}
+
+/// Redoes the analysis from the stored Hessian with the panel's current
+/// scaling, temperature and cutoff. Returns whether it succeeded.
+fn reanalyze_stored_hessian(
+    freq_panel: &XtbFreqPanelState,
+    freq_task: &mut XtbFrequencyTask,
+) -> bool {
+    let Some(raw) = freq_task.last_raw.clone() else {
+        return false;
+    };
+    match analyze(
+        raw,
+        freq_task.last_multiplicity,
+        freq_panel.eckart_mode,
+        freq_panel.thermo_temp_k,
+        freq_panel.thermo_freq_cutoff_cm1,
+        freq_panel.frequency_scale,
+    ) {
+        Ok(result) => {
+            freq_task.result = Some(result);
+            true
+        }
+        Err(err) => {
+            freq_task.last_message = Some(err);
+            freq_task.last_is_error = true;
+            false
         }
     }
 }
@@ -651,6 +829,35 @@ pub fn xtb_frequency_panel(
         );
     });
 
+    // Changing any of these redoes the analysis from the stored Hessian rather
+    // than asking for a new one -- a diagonalisation is milliseconds, so there
+    // is no reason to make the user re-run a calculation to try 0.97 instead
+    // of 1.0, or 273 K instead of 298 K.
+    let mut reanalyze = false;
+    ui.horizontal(|ui| {
+        ui.label("Frequency scale");
+        let response = ui.add_enabled(
+            !running,
+            egui::DragValue::new(&mut freq_panel.frequency_scale)
+                .range(0.5..=1.5)
+                .speed(0.001)
+                .fixed_decimals(4),
+        );
+        reanalyze |= response.changed();
+        response.on_hover_text(
+            "Empirical scaling applied to every frequency, and to the \
+             thermochemistry computed from them. 1.0 = raw harmonic values.",
+        );
+        if freq_panel.frequency_scale != 1.0
+            && ui
+                .add_enabled(!running, egui::Button::new("Reset to 1.0"))
+                .clicked()
+        {
+            freq_panel.frequency_scale = 1.0;
+            reanalyze = true;
+        }
+    });
+
     ui.horizontal(|ui| {
         let can_run = !running && !mol.atoms.is_empty();
         let mut button = ui.add_enabled(can_run, egui::Button::new("Run Frequencies"));
@@ -680,7 +887,22 @@ pub fn xtb_frequency_panel(
         if running && ui.button("Cancel").clicked() {
             freq_task.cancel_now();
         }
+        if ui
+            .add_enabled(!running, egui::Button::new("Load Hessian…"))
+            .on_hover_text(
+                "Analyze a Hessian computed elsewhere (ORCA .hess): normal modes, \
+                 frequencies, IR spectrum and thermochemistry, exactly as for a run \
+                 done here.",
+            )
+            .clicked()
+        {
+            load_hessian_from_dialog(freq_panel, freq_task);
+        }
     });
+
+    if reanalyze {
+        reanalyze_stored_hessian(freq_panel, freq_task);
+    }
 
     if running {
         let elapsed = freq_task.elapsed().unwrap_or_default();
@@ -717,6 +939,13 @@ pub fn xtb_frequency_panel(
         result.zero_indices.len(),
         result.negative_indices.len()
     ));
+    // Scaled frequencies are not the raw harmonic ones, so say so rather than
+    // let the numbers quietly disagree with an unscaled calculation.
+    if let Some(scale) = result.frequency_scale {
+        ui.weak(format!(
+            "Frequencies and thermochemistry scaled by {scale} \u{d7} the harmonic values."
+        ));
+    }
 
     egui::ScrollArea::vertical()
         .max_height(180.0)
@@ -730,6 +959,9 @@ pub fn xtb_frequency_panel(
                     ui.strong("");
                     ui.end_row();
 
+                    // Without intensity data the column reads N/A rather than
+                    // 0.00, which would claim every band is IR-inactive.
+                    let has_ir = result.has_ir_intensities();
                     for i in 0..result.frequencies_cm1.len() {
                         let freq = result.frequencies_cm1[i];
                         let is_imaginary = result.negative_indices.contains(&i);
@@ -748,7 +980,11 @@ pub fn xtb_frequency_panel(
                         };
                         ui.label(format!("{}", i + 1));
                         ui.colored_label(color, label);
-                        ui.label(format!("{:.2}", result.ir_intensities_km_mol[i]));
+                        if has_ir {
+                            ui.label(format!("{:.2}", result.ir_intensities_km_mol[i]));
+                        } else {
+                            ui.weak("N/A");
+                        }
                         // Animate/Stop is a single toggle, not two separate
                         // buttons: at most one mode animates at a time (they
                         // all share the one trajectory player), so the
@@ -835,7 +1071,21 @@ pub fn xtb_frequency_panel(
         } else {
             "Show IR Spectrum"
         };
-        if ui.button(label).clicked() {
+        let has_ir = result.has_ir_intensities();
+        if !has_ir {
+            // Nothing to draw, and a window left open from a previous result
+            // would keep showing that one's axes.
+            freq_panel.spectrum_window_open = false;
+        }
+        let button = ui.add_enabled(has_ir, egui::Button::new(label));
+        if button
+            .on_disabled_hover_text(
+                "No IR intensities in this data. A Hessian gives frequencies but not \
+                 intensities -- those need dipole derivatives, which are computed \
+                 separately and are not part of every Hessian file.",
+            )
+            .clicked()
+        {
             freq_panel.spectrum_window_open = !freq_panel.spectrum_window_open;
         }
     });
@@ -1004,6 +1254,8 @@ mod tests {
             parse_turbomole_hessian(&fixture("h2o2_hessian"), atoms.len()).unwrap();
         let vib_lines = parse_vibspectrum(&fixture("h2o2_vibspectrum")).unwrap();
         RawFrequencyOutput {
+            masses_amu: None,
+            ir_intensities_km_mol: None,
             atoms,
             coords_bohr,
             hessian,
@@ -1012,13 +1264,248 @@ mod tests {
         }
     }
 
+    fn example_hess_path() -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("examples")
+            .join("TS_Gamma-3-6_ZZ-S_11_Compound_1.hess")
+    }
+
+    /// Reads a Hessian file and analyses it the way the panel does: the
+    /// file's own scaling factor unless one is given.
+    fn analyze_hess(
+        path: &std::path::Path,
+        eckart: EckartMode,
+        scale: Option<f64>,
+    ) -> Result<FrequencyResult, String> {
+        let (raw, file_scale) = read_hessian_file(path)?;
+        analyze(
+            raw,
+            1,
+            eckart,
+            298.15,
+            100.0,
+            scale.or(file_scale).unwrap_or(1.0),
+        )
+    }
+
+    fn loaded_ts() -> FrequencyResult {
+        analyze_hess(&example_hess_path(), EckartMode::VibRot, None)
+            .expect("the example .hess must analyse")
+    }
+
+    /// The real cross-validation, mirroring the xTB one: our own projection
+    /// and eigensolver, run on ORCA's Hessian, must reproduce the frequencies
+    /// ORCA independently computed from it.
+    #[test]
+    fn an_orca_hessian_reproduces_orcas_own_frequencies() {
+        let result = loaded_ts();
+        let text = std::fs::read_to_string(example_hess_path()).unwrap();
+        let reference = super::super::orca_hess::parse_orca_hess(&text).unwrap();
+
+        // Compare the modes that are actually vibrations: ORCA zeroed its six
+        // projected ones, and ours are near-zero rather than exactly zero.
+        let mut ours: Vec<f64> = result
+            .negative_indices
+            .iter()
+            .chain(&result.positive_indices)
+            .map(|&i| result.frequencies_cm1[i])
+            .collect();
+        ours.sort_by(f64::total_cmp);
+        let mut theirs: Vec<f64> = reference
+            .frequencies_cm1
+            .iter()
+            .copied()
+            .filter(|f| *f != 0.0)
+            .collect();
+        theirs.sort_by(f64::total_cmp);
+
+        assert_eq!(ours.len(), theirs.len(), "mode counts differ");
+        for (mine, orca) in ours.iter().zip(&theirs) {
+            assert!(
+                (mine - orca).abs() < 1.0,
+                "our {mine:.2} cm^-1 vs ORCA's {orca:.2} cm^-1"
+            );
+        }
+    }
+
+    /// A transition state: exactly one imaginary mode, six projected out, the
+    /// rest real.
+    #[test]
+    fn the_example_is_recognised_as_a_transition_state() {
+        let result = loaded_ts();
+        assert_eq!(result.atoms.len(), 19);
+        assert_eq!(result.negative_indices.len(), 1, "one imaginary mode");
+        assert_eq!(result.zero_indices.len(), 6);
+        assert_eq!(result.positive_indices.len(), 50);
+        let imaginary = result.frequencies_cm1[result.negative_indices[0]];
+        assert!(
+            (imaginary + 602.6).abs() < 1.0,
+            "imaginary mode came out {imaginary:.1}, ORCA says -602.6"
+        );
+    }
+
+    /// The ordering trap: ORCA lists its zeros first and the imaginary mode
+    /// seventh, so a position-based pairing would hang the imaginary mode's
+    /// intensity on a translation.
+    #[test]
+    fn ir_intensities_land_on_the_modes_they_belong_to() {
+        let result = loaded_ts();
+        // The imaginary mode has no listed intensity.
+        assert_eq!(result.ir_intensities_km_mol[result.negative_indices[0]], 0.0);
+        // The highest-frequency mode is the 3781 cm^-1 O-H stretch at
+        // 133.38 km/mol -- by far the strongest band in the file.
+        let &highest = result
+            .positive_indices
+            .iter()
+            .max_by(|&&a, &&b| result.frequencies_cm1[a].total_cmp(&result.frequencies_cm1[b]))
+            .unwrap();
+        assert!((result.frequencies_cm1[highest] - 3781.4).abs() < 1.0);
+        assert!((result.ir_intensities_km_mol[highest] - 133.38).abs() < 0.1);
+    }
+
+    /// The example file carries a `$ir_spectrum`, so it does have intensities
+    /// -- but a Hessian file need not, and then there is nothing to plot.
+    #[test]
+    fn a_hessian_without_an_ir_section_reports_no_intensities() {
+        let text = std::fs::read_to_string(example_hess_path()).unwrap();
+        let stripped = text.replace("$ir_spectrum", "$skipped_ir_spectrum");
+        let dir = std::env::temp_dir().join("beavyr_hess_no_ir_test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("no_ir.hess");
+        std::fs::write(&path, stripped).unwrap();
+
+        let result = analyze_hess(&path, EckartMode::VibRot, None).unwrap();
+        assert!(
+            !result.has_ir_intensities(),
+            "with no $ir_spectrum there is nothing to plot"
+        );
+        assert!(result.ir_intensities_km_mol.iter().all(|&i| i == 0.0));
+        // The frequencies are still there -- that is the point of loading it.
+        assert_eq!(result.positive_indices.len(), 50);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn the_example_hessian_does_carry_ir_intensities() {
+        assert!(loaded_ts().has_ir_intensities());
+    }
+
+    /// ORCA's own thermochemistry, from the matching .out, is the reference:
+    /// a ZPE agreeing to a fraction of a kcal/mol means our frequencies and
+    /// masses are both right.
+    #[test]
+    fn the_zero_point_energy_matches_orcas_own() {
+        const ORCA_ZPE_HARTREE: f64 = 0.14279928;
+        let result = loaded_ts();
+        let error = (result.thermo.zpe - ORCA_ZPE_HARTREE).abs();
+        assert!(
+            error < 1.0e-4,
+            "ZPE {:.8} Eh vs ORCA's {ORCA_ZPE_HARTREE:.8} Eh (off by {:.3} kcal/mol)",
+            result.thermo.zpe,
+            error * 627.509_474
+        );
+    }
+
+    /// The scaling factor multiplies frequencies and carries into the
+    /// thermochemistry computed from them.
+    #[test]
+    fn an_explicit_scale_overrides_the_files_own() {
+        let unscaled = analyze_hess(&example_hess_path(), EckartMode::VibRot, Some(1.0)).unwrap();
+        let scaled = loaded_ts();
+        assert!(unscaled.frequency_scale.is_none());
+        assert_eq!(scaled.frequency_scale, Some(0.974));
+        for (&i, &j) in unscaled
+            .positive_indices
+            .iter()
+            .zip(&scaled.positive_indices)
+        {
+            let ratio = scaled.frequencies_cm1[j] / unscaled.frequencies_cm1[i];
+            assert!((ratio - 0.974).abs() < 1e-9, "ratio {ratio}");
+        }
+        assert!(
+            scaled.thermo.zpe < unscaled.thermo.zpe,
+            "scaling below 1 must lower the zero-point energy"
+        );
+    }
+
+    #[test]
+    fn thermochemistry_runs_on_a_loaded_hessian() {
+        let result = loaded_ts();
+        assert!(
+            result.thermo.zpe > 0.0,
+            "zero-point energy {} Eh should be positive",
+            result.thermo.zpe
+        );
+        assert_eq!(result.thermo_temp_k, 298.15);
+    }
+
+    /// A `.hess` stores no gradient, so the reaction-path projection has
+    /// nothing to project against and must say so rather than fail.
+    #[test]
+    fn a_reaction_path_request_falls_back_with_an_explanation() {
+        let result =
+            analyze_hess(&example_hess_path(), EckartMode::ReactionPath, None).unwrap();
+        assert_eq!(result.eckart_used, EckartMode::VibRot);
+        let note = result
+            .reaction_path_fallback_note
+            .clone()
+            .expect("a fallback note");
+        assert!(note.contains("gradient"), "{note}");
+    }
+
+    #[test]
+    fn a_file_that_is_not_a_hessian_is_reported_with_its_path() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("examples")
+            .join("AbsorptionSpectrum")
+            .join("Exc_TPSSh-D4-def2-TZVP_SCMwater_16.inp");
+        let Err(err) = analyze_hess(&path, EckartMode::VibRot, None) else {
+            panic!("an ORCA input file is not a Hessian and must not analyse");
+        };
+        assert!(err.contains("$hessian"), "{err}");
+        assert!(err.contains(".inp"), "the message should name the file: {err}");
+    }
+
+    /// The masses in `$atoms` are used, not the symbol table -- otherwise an
+    /// isotope substitution recorded in the file would be silently ignored.
+    #[test]
+    fn deuterium_substitution_in_the_file_changes_the_frequencies() {
+        let text = std::fs::read_to_string(example_hess_path()).unwrap();
+        let heavy = text.replace(
+            " H      1.00800     -2.073404472303",
+            " H      2.01410     -2.073404472303",
+        );
+        let dir = std::env::temp_dir().join("beavyr_hess_isotope_test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("heavy.hess");
+        std::fs::write(&path, heavy).unwrap();
+
+        let normal = loaded_ts();
+        let deuterated = analyze_hess(&path, EckartMode::VibRot, None).unwrap();
+        // The highest mode is an O-H stretch, untouched by deuterating a C-H,
+        // so count the X-H stretch region instead: one C-H leaves it and
+        // reappears near 2300 cm^-1 as a C-D.
+        let above_3000 = |r: &FrequencyResult| {
+            r.positive_indices
+                .iter()
+                .filter(|&&i| r.frequencies_cm1[i] > 3000.0)
+                .count()
+        };
+        assert_eq!(
+            above_3000(&normal),
+            above_3000(&deuterated) + 1,
+            "deuterating one C-H must move exactly one mode out of the stretch region"
+        );
+        let _ = std::fs::remove_file(&path);
+    }
+
     /// The full `analyze` pipeline -- normal modes, IR-intensity matching,
     /// and thermochemistry all at once -- against the real captured
     /// fixtures, cross-checked against xTB's own independently-computed
     /// frequencies and zero-point energy.
     #[test]
     fn analyze_reproduces_xtbs_frequencies_and_zpe() {
-        let result = analyze(h2o2_raw(), 1, EckartMode::VibRot, 298.15, 100.0).unwrap();
+        let result = analyze(h2o2_raw(), 1, EckartMode::VibRot, 298.15, 100.0, 1.0).unwrap();
 
         assert_eq!(result.zero_indices.len(), 6);
         assert_eq!(result.positive_indices.len(), 6);
@@ -1061,7 +1548,7 @@ mod tests {
     /// one) must also fall back cleanly instead of panicking or erroring.
     #[test]
     fn reaction_path_without_a_gradient_falls_back_to_vibrot() {
-        let result = analyze(h2o2_raw(), 1, EckartMode::ReactionPath, 298.15, 100.0).unwrap();
+        let result = analyze(h2o2_raw(), 1, EckartMode::ReactionPath, 298.15, 100.0, 1.0).unwrap();
         assert_eq!(result.eckart_used, EckartMode::VibRot);
         assert!(result.reaction_path_fallback_note.is_some());
     }
@@ -1074,7 +1561,7 @@ mod tests {
         // A synthetic, clearly non-zero gradient -- far above the
         // near-stationary-point floor this is meant to distinguish from.
         raw.gradient_bohr = Some(vec![0.05; 12]);
-        let result = analyze(raw, 1, EckartMode::ReactionPath, 298.15, 100.0).unwrap();
+        let result = analyze(raw, 1, EckartMode::ReactionPath, 298.15, 100.0, 1.0).unwrap();
         assert_eq!(result.eckart_used, EckartMode::ReactionPath);
         assert!(result.reaction_path_fallback_note.is_none());
     }
@@ -1097,7 +1584,7 @@ mod tests {
             .map(|c| c * ANGSTROM_TO_BOHR)
             .collect();
 
-        let result = analyze(raw, 1, EckartMode::VibRot, 298.15, 100.0).unwrap();
+        let result = analyze(raw, 1, EckartMode::VibRot, 298.15, 100.0, 1.0).unwrap();
         let mut computed: Vec<f64> = result
             .positive_indices
             .iter()
@@ -1157,7 +1644,7 @@ mod tests {
              changed and this test no longer exercises the bug it was written for"
         );
 
-        let result = analyze(raw, 1, EckartMode::VibRot, 298.15, 100.0).unwrap();
+        let result = analyze(raw, 1, EckartMode::VibRot, 298.15, 100.0, 1.0).unwrap();
         assert_eq!(result.atoms.len(), 16);
         assert!(result.frequencies_cm1.iter().any(|&f| f.abs() > 100.0));
 
@@ -1193,7 +1680,7 @@ mod tests {
         assert_eq!(raw.atoms.len(), 4);
         assert_eq!(raw.hessian.dim(), (12, 12));
 
-        let result = analyze(raw, 1, EckartMode::VibRot, 298.15, 100.0).unwrap();
+        let result = analyze(raw, 1, EckartMode::VibRot, 298.15, 100.0, 1.0).unwrap();
         // `examples/h2o2.xyz` is a hand-placed, not fully relaxed geometry
         // (unlike the `--ohess`-derived fixture the other test in this file
         // uses), so its six low modes are only approximately zero rather
@@ -1278,6 +1765,7 @@ mod tests {
                                 panel_state.eckart_mode,
                                 panel_state.thermo_temp_k,
                                 panel_state.thermo_freq_cutoff_cm1,
+                                panel_state.frequency_scale,
                             ) {
                                 Ok(analyzed) => task.result = Some(analyzed),
                                 Err(err) => panic!("analyze failed: {err}"),
@@ -1394,3 +1882,4 @@ mod tests {
 
 
 }
+

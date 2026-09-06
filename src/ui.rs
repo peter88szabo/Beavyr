@@ -551,6 +551,16 @@ pub fn ui_panel(
                     &mol,
                     &mut traj,
                 );
+                // A Hessian loaded from a file arrives with its own geometry.
+                // Putting it on screen is what makes the mode list mean
+                // anything -- the program starts with an empty viewport, so
+                // otherwise there would be nothing for the modes to move.
+                if let Some((atoms, pos)) = xtb_freq_task.pending_geometry.take() {
+                    mol.atoms = atoms;
+                    mol.pos = pos;
+                    mol.recompute_bonds(settings.bond_thresh_scale, settings.hbond_cutoff);
+                    ev_changed.write(MoleculeChanged::parse_xyz(true));
+                }
             });
             // ===========================
             // 1c-bis) UV-Vis / TD-DFT
