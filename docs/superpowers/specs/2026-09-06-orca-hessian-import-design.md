@@ -150,3 +150,18 @@ produce ourselves, which is only available when we do the analysis.
 That means `FrequencyResult` will need to distinguish "computed here" from
 "read from a report", so the thermochemistry window can show the fuller table
 only when it has one. Requested 2026-09-06; deferred deliberately.
+
+**Animation is possible from a `.out`**, contrary to first impression. The
+output carries a `NORMAL MODES` block with the full 3N x 3N matrix of
+displacement vectors (zeros in the six projected columns, real values from
+column 6 on) as well as `CARTESIAN COORDINATES (ANGSTROEM)`. So a `.out` has
+frequencies, intensities, thermochemistry *and* modes to animate.
+
+The care point is the convention: ORCA says those vectors are "the Cartesian
+displacements weighted by the diagonal matrix M(i,i)=1/sqrt(m[i])... normalized
+but *not* orthogonal", which is not necessarily the normalisation our
+`animate_mode` assumes. Getting it wrong gives an animation that looks
+plausible but has the wrong relative amplitudes -- heavy atoms moving too far
+or not far enough. It is directly checkable: the `.hess` and the `.out` in
+examples/ describe the same modes, so animating a mode from each must produce
+the same displacements.
