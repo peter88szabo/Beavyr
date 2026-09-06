@@ -778,6 +778,33 @@ pub fn animate_mode(
 /// vibration genuinely repeats, unlike an optimization path) and
 /// deliberately overwriting whatever trajectory was already loaded -- the
 /// caller is responsible for having told the user this will happen.
+/// Stops a mode animation and puts the molecule back at its equilibrium
+/// geometry.
+///
+/// Simply clearing `playing` leaves the structure frozen wherever the cycle
+/// happened to stop -- and never at equilibrium, since the frames run
+/// `q_eq + L A cos(theta)` from `theta = 0`, which is maximum displacement.
+/// The trajectory is replaced by the single undistorted frame so that the
+/// molecule on screen is the one the modes belong to.
+pub fn stop_mode_animation(
+    traj: &mut TrajectoryState,
+    atoms: &[String],
+    coords_angstrom: &[Vec3],
+) {
+    traj.playing = false;
+    traj.frames = vec![TrajectoryFrame {
+        atoms: atoms.to_vec(),
+        pos: coords_angstrom.to_vec(),
+    }];
+    traj.current_frame = 0;
+    traj.direction = 1;
+    traj.accum = 0.0;
+    // The frame index has not changed, so without this the applier would
+    // consider the frame already shown and leave the distorted geometry up.
+    traj.last_applied = None;
+    traj.overlay_dirty = true;
+}
+
 pub fn load_mode_animation(
     traj: &mut TrajectoryState,
     atoms: &[String],
@@ -1038,6 +1065,11 @@ pub fn xtb_frequency_panel(
     traj: &mut TrajectoryState,
 ) {
     let running = freq_task.is_running();
+    // A playing trajectory or mode animation puts a distorted frame on
+    // screen. Computing a Hessian for it would use that frame's geometry, and
+    // the valence check would be judging bond lengths that belong to the
+    // animation rather than to the molecule.
+    let animating = traj.playing;
 
     // The Eckart projection -- which removes translations and rotations
     // from the Hessian, leaving vibrations only -- is always applied; that
@@ -1194,7 +1226,9 @@ pub fn xtb_frequency_panel(
             Ok((uhf, warnings)) => (Some(*uhf), warnings.as_slice()),
             Err(_) => (None, &[][..]),
         };
-        if let Err(err) = &validation {
+        if animating {
+            ui.weak("Playback is running \u{2014} stop it to run a calculation.");
+        } else if let Err(err) = &validation {
             // A hard error explains why the button is disabled, so it shows
             // straight away rather than waiting for a click that cannot land.
             ui.colored_label(egui::Color32::from_rgb(220, 80, 80), err.to_string());
@@ -1208,10 +1242,14 @@ pub fn xtb_frequency_panel(
         }
 
         ui.horizontal(|ui| {
-            let can_run = !running && !mol.atoms.is_empty() && uhf.is_some();
+            let can_run = !running && !mol.atoms.is_empty() && uhf.is_some() && !animating;
             let mut button =
                 ui.add_enabled(can_run, egui::Button::new("Run Freq Calc (with xTB)"));
-            if mol.atoms.is_empty() {
+            if animating {
+                button = button.on_disabled_hover_text(
+                    "Stop the animation first: the structure on screen is a frame of it.",
+                );
+            } else if mol.atoms.is_empty() {
                 button =
                     button.on_disabled_hover_text("There is no structure on screen to analyze.");
             }
@@ -1364,7 +1402,11 @@ pub fn xtb_frequency_panel(
                             );
                         if button.clicked() {
                             if is_animating_this_row {
-                                traj.playing = false;
+                                stop_mode_animation(
+                                    traj,
+                                    &result.atoms,
+                                    &result.coords_angstrom,
+                                );
                             } else {
                                 freq_panel.selected_mode = Some(i);
                                 load_mode_animation(
@@ -1779,6 +1821,69 @@ mod tests {
         assert_eq!(result.positive_indices.len(), 50);
         assert!((result.frequencies_cm1[0] + 2468.9062).abs() < 1e-4);
         assert_eq!(result.eckart_used, EckartMode::Off);
+    }
+
+    /// Frame zero is theta = 0, i.e. maximum displacement -- which is why
+    /// stopping cannot simply leave the current frame up.
+    #[test]
+    fn an_animation_starts_at_maximum_displacement_not_equilibrium() {
+        let result = loaded_gaussian();
+        let frames = animate_mode(
+            &result.atoms,
+            &result.coords_angstrom,
+            &result.modes,
+            0,
+            0.18,
+            16,
+        );
+        let drift = |f: &TrajectoryFrame| {
+            f.pos
+                .iter()
+                .zip(&result.coords_angstrom)
+                .map(|(a, b)| (*a - *b).length())
+                .fold(0.0f32, f32::max)
+        };
+        assert!(
+            drift(&frames[0]) > 0.1,
+            "frame 0 should be displaced, not equilibrium: {}",
+            drift(&frames[0])
+        );
+    }
+
+    /// Stopping must put the equilibrium structure back on screen, whatever
+    /// point of the cycle the animation was at.
+    #[test]
+    fn stopping_restores_the_equilibrium_geometry() {
+        let result = loaded_gaussian();
+        let mut traj = TrajectoryState::default();
+        load_mode_animation(
+            &mut traj,
+            &result.atoms,
+            &result.coords_angstrom,
+            &result.modes,
+            0,
+            0.18,
+            60.0,
+        );
+        // Stop from a displaced point mid-cycle.
+        traj.current_frame = 5;
+        traj.last_applied = Some(5);
+        assert!(traj.playing);
+
+        stop_mode_animation(&mut traj, &result.atoms, &result.coords_angstrom);
+
+        assert!(!traj.playing);
+        assert_eq!(traj.frames.len(), 1, "one undistorted frame");
+        assert_eq!(traj.current_frame, 0);
+        assert!(
+            traj.last_applied.is_none(),
+            "the applier must be forced to redraw, or the distorted frame stays up"
+        );
+        let restored = &traj.frames[0];
+        assert_eq!(restored.atoms, result.atoms);
+        for (got, want) in restored.pos.iter().zip(&result.coords_angstrom) {
+            assert!((*got - *want).length() < 1.0e-6, "{got:?} vs {want:?}");
+        }
     }
 
     /// A vibration must let the bond graph follow the motion, or a transition
@@ -2559,7 +2664,7 @@ mod tests {
     }
 
     #[test]
-    fn animate_mode_starts_at_the_equilibrium_geometry() {
+    fn animate_mode_produces_the_requested_frame_count_and_atoms() {
         let atoms = vec!["H".to_string(), "H".to_string()];
         let coords = vec![Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 0.74)];
         let mut modes = Array2::<f64>::zeros((6, 6));

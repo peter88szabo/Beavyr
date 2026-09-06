@@ -332,6 +332,10 @@ pub fn xtb_optimization_panel(
     panel_state: &mut XtbPanelState,
     task: &mut XtbOptimizationTask,
     mol: &Molecule,
+    // Whether a trajectory or mode animation is playing. While one is, the
+    // molecule on screen is a frame of it, not the structure the user means
+    // to optimize.
+    animating: bool,
 ) {
     let running = task.is_running();
 
@@ -393,13 +397,19 @@ pub fn xtb_optimization_panel(
         }
     });
 
+    // A playing frame is a distorted geometry, so its bond lengths -- and
+    // every valence conclusion drawn from them -- are about that frame, not
+    // about the molecule. Checking it would produce warnings that change from
+    // frame to frame and mean nothing.
     let validation = validate_electronic_state(mol, panel_state.charge, panel_state.multiplicity);
     let (uhf, warnings) = match &validation {
         Ok((uhf, warnings)) => (Some(*uhf), warnings.as_slice()),
         Err(_) => (None, &[][..]),
     };
 
-    if let Err(err) = &validation {
+    if animating {
+        ui.weak("Playback is running \u{2014} stop it to optimize this structure.");
+    } else if let Err(err) = &validation {
         // A hard error explains why Optimize is disabled, so it is shown
         // immediately rather than waiting for an attempt that the disabled
         // button cannot register anyway.
@@ -414,9 +424,14 @@ pub fn xtb_optimization_panel(
     }
 
     ui.horizontal(|ui| {
-        let can_optimize = !running && !mol.atoms.is_empty() && uhf.is_some();
+        let can_optimize = !running && !mol.atoms.is_empty() && uhf.is_some() && !animating;
         if ui
             .add_enabled(can_optimize, egui::Button::new("Optimize"))
+            .on_disabled_hover_text(if animating {
+                "Stop the animation first: the structure on screen is a frame of it."
+            } else {
+                "Nothing to optimize with the current structure and electronic state."
+            })
             .clicked()
         {
             panel_state.show_warnings = true;

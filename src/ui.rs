@@ -529,7 +529,13 @@ pub fn ui_panel(
                 Tab::Optimize.default_size(),
                 "Geometry Optimization (xTB)",
                 |ui| {
-                xtb_optimization_panel(ui, &mut xtb_panel_state, &mut xtb_task, &mol);
+                xtb_optimization_panel(
+                    ui,
+                    &mut xtb_panel_state,
+                    &mut xtb_task,
+                    &mol,
+                    traj.playing,
+                );
             });
             // ===========================
             // 1c) Frequency Analysis
