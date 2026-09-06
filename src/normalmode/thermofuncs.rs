@@ -206,6 +206,16 @@ pub fn eval_thermo(
     thermo
 }
 
+/// Rotational symmetry number sigma, used in the rotational partition
+/// function. Fixed at 1: no point-group detection is done, so every molecule
+/// is treated as C1. That is exact for an asymmetric molecule and an
+/// over-estimate of the rotational entropy otherwise -- by R*ln(sigma), which
+/// is 1.4 cal/mol/K for water and 4.9 for benzene. Printed with the results
+/// rather than left implicit, so the assumption is visible where it matters.
+pub const ROT_SYMMETRY_NUMBER: f64 = 1.0;
+/// Chirality factor in the same expression; 1 for an achiral treatment.
+pub const ROT_CHIRALITY: f64 = 1.0;
+
 /// Width of the row-label column. Wide enough for "Total(kcal/mol)", the
 /// longest label, so no row overhangs the rule drawn above it.
 const LABEL_W: usize = 15;
@@ -249,6 +259,12 @@ pub fn format_thermo(thermo: &ThermoResults, temp: f64, freq_cutoff: f64, elec_e
         thermo.zpe * CM1_TO_KCAL / CM1_TO_HARTREE
     ).unwrap();
     writeln!(out, "qRRHO cutoff: {:.1} cm-1", freq_cutoff).unwrap();
+    writeln!(
+        out,
+        "Rotational symmetry number: {:.0}  (C1 assumed; no point-group detection)",
+        ROT_SYMMETRY_NUMBER
+    )
+    .unwrap();
 
     writeln!(out).unwrap();
     writeln!(out, "{:-^ENERGY_W$}", " Energy Contributions (Eh) ").unwrap();
@@ -416,8 +432,8 @@ fn all_rotations(thermo: &mut ThermoResults, brot: &[f64], temp: f64) {
         return;
     }
 
-    let sigma = 1.0;
-    let chiral = 1.0;
+    let sigma = ROT_SYMMETRY_NUMBER;
+    let chiral = ROT_CHIRALITY;
 
     let eps = 1.0e-12;
     let has_zero = brot.iter().any(|b| *b <= eps);
@@ -616,6 +632,24 @@ mod tests {
 #[cfg(test)]
 mod rule_width_tests {
     use super::*;
+
+    /// The symmetry number the rotational partition function actually uses
+    /// must be the one the output claims -- a printed value that drifted from
+    /// the computed one would be worse than not printing it.
+    #[test]
+    fn the_printed_symmetry_number_is_the_one_used() {
+        let thermo = eval_thermo(&[500.0], &[0.06, 0.038, 0.030], 250.0, 1.0, 298.15, 101_325.0, 100.0);
+        let text = format_thermo(&thermo, 298.15, 100.0, None);
+        let line = text
+            .lines()
+            .find(|l| l.starts_with("Rotational symmetry number"))
+            .expect("the symmetry number must be stated");
+        assert!(line.contains(&format!("{ROT_SYMMETRY_NUMBER:.0}")), "{line}");
+
+        // And it really is 1: doubling it would change the rotational entropy
+        // by R*ln 2, so this is not a cosmetic constant.
+        assert_eq!(ROT_SYMMETRY_NUMBER, 1.0);
+    }
 
     /// Every rule must span the widest row of its own table -- the complaint
     /// was rules falling short of the numbers above them.
