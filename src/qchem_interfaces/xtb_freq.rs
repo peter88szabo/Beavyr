@@ -941,7 +941,7 @@ impl Default for XtbFreqPanelState {
             multiplicity: 1,
             show_warnings: false,
             selected_mode: None,
-            mode_amplitude_angstrom: 0.18,
+            mode_amplitude_angstrom: 0.3,
             mode_speed_fps: 60.0,
             thermo_window_open: false,
             spectrum_window_open: false,
