@@ -285,6 +285,96 @@ pub fn fragment_rotation(local: &[Vec3], open: Vec3, direction: Vec3, spin_deg: 
 /// anyway skews the computed direction by tens of degrees -- exactly the
 /// defect that made a vinyl group's own connector land at the wrong angle
 /// from its host, before any second fragment was even attached.
+/// The direction a connector's remaining bond should point, given the bonds it
+/// already has and the angle its element wants between them.
+///
+/// The naive answer -- negate the sum of the existing bond vectors -- is right
+/// for three bonds, and for a planar centre with two, but wrong elsewhere:
+///
+/// * With **one** bond it gives exactly 180 degrees, which is only correct for
+///   a genuine sp centre. On an -OH fragment that put the hydroxyl hydrogen in
+///   a straight line with the atom the oxygen bonds to.
+/// * With **two** bonds it lies in their plane, which is right for sp2 but
+///   flattens a pyramidal centre such as an amine nitrogen.
+///
+/// `ideal_angle_deg` is the angle wanted between the new bond and each
+/// existing one; see `bond_order::ideal_bond_angle_deg`. `max_bond_order` is
+/// the highest estimated order among the bonds the connector already has,
+/// which is what distinguishes a genuinely sp or sp2 centre -- an alkyne
+/// carbon, an aromatic nitrogen -- from a partly-built sp3 one that merely
+/// happens to have few bonds so far.
+pub fn open_valence_direction(
+    neighbor_dirs: &[Vec3],
+    ideal_angle_deg: f32,
+    max_bond_order: f64,
+) -> Option<Vec3> {
+    /// Above this, two existing bonds are taken to mark a planar centre, whose
+    /// third bond belongs in their plane. Below it the centre is pyramidal.
+    const PLANAR_THRESHOLD_DEG: f32 = 115.0;
+    /// A bond at least this strong forces the centre flat: a double bond, or
+    /// the ~1.5 of an aromatic ring.
+    const PLANAR_BOND_ORDER: f64 = 1.25;
+    /// A double or triple bond on a centre with one other bond leaves it
+    /// linear -- an alkyne or a nitrile has no choice about it.
+    const LINEAR_BOND_ORDER: f64 = 2.0;
+
+    let dirs: Vec<Vec3> = neighbor_dirs
+        .iter()
+        .map(|d| d.normalize_or_zero())
+        .filter(|d| d.length() > 0.5)
+        .collect();
+    let theta = ideal_angle_deg.to_radians();
+
+    match dirs.len() {
+        0 => None,
+        1 => {
+            let n = dirs[0];
+            if max_bond_order >= LINEAR_BOND_ORDER {
+                // sp: the remaining bond is straight through.
+                return Some(-n);
+            }
+            // Any perpendicular will do: the fragment is rigid-body rotated
+            // into place afterwards, so only the angle matters, not which way
+            // round the remaining freedom is spent.
+            let p = any_perpendicular(n);
+            (p.length() > 0.5).then(|| (n * theta.cos() + p * theta.sin()).normalize_or_zero())
+        }
+        2 => {
+            let (a, b) = (dirs[0], dirs[1]);
+            let alpha = a.dot(b).clamp(-1.0, 1.0).acos();
+            let bisector = (a + b).normalize_or_zero();
+            if bisector.length() < 0.5 {
+                return None;
+            }
+            if alpha.to_degrees() >= PLANAR_THRESHOLD_DEG
+                || max_bond_order >= PLANAR_BOND_ORDER
+            {
+                // Planar: the remaining bond opposes the other two, in plane.
+                // A narrow angle is not enough to call a centre pyramidal --
+                // pyrrole's nitrogen spans only 107 degrees and is flat -- so
+                // the bond orders get the final say.
+                return Some(-bisector);
+            }
+            let normal = a.cross(b).normalize_or_zero();
+            if normal.length() < 0.5 {
+                return None;
+            }
+            // Out of plane, at `theta` from both. With `s` the bisector and
+            // `m` the normal, a direction `-s cos(phi) + m sin(phi)` makes an
+            // angle with each existing bond whose cosine is
+            // `-cos(phi) cos(alpha/2)`, so solve that for `phi`.
+            let cos_phi = (-theta.cos() / (alpha * 0.5).cos()).clamp(-1.0, 1.0);
+            let sin_phi = (1.0 - cos_phi * cos_phi).max(0.0).sqrt();
+            Some((-bisector * cos_phi + normal * sin_phi).normalize_or_zero())
+        }
+        _ => {
+            // Three or more: their sum already points away from the gap.
+            let sum: Vec3 = dirs.iter().copied().sum();
+            (sum.length() > 1.0e-4).then(|| -sum.normalize())
+        }
+    }
+}
+
 pub fn fragment_open_valence(local: &[Vec3], connector_symbol: &str, local_symbols: &[&str]) -> Vec3 {
     if local.len() < 2 {
         return -Vec3::Z;
@@ -296,17 +386,32 @@ pub fn fragment_open_valence(local: &[Vec3], connector_symbol: &str, local_symbo
         .zip(local_symbols.iter().copied())
         .collect();
     let bonded = geometric_bonded_neighbors(connector, connector_symbol, &others);
+    let dirs: Vec<Vec3> = bonded
+        .iter()
+        .map(|&p| (p - connector).normalize_or_zero())
+        .collect();
 
-    let mut sum = Vec3::ZERO;
-    for p in bonded {
-        sum += (p - connector).normalize_or_zero();
-    }
-    if sum.length() < 1.0e-4 {
-        // A lone atom, or a symmetric arrangement with no distinguished gap.
-        -Vec3::Z
-    } else {
-        -sum.normalize()
-    }
+    // The strongest bond the connector already has, estimated from its length
+    // in the fragment's own geometry. This is what tells an alkyne carbon or
+    // an aromatic nitrogen apart from a merely under-coordinated sp3 centre.
+    let max_order = bonded
+        .iter()
+        .filter_map(|&p| {
+            let symbol = others
+                .iter()
+                .find(|(q, _)| q.distance(p) < 1.0e-4)
+                .map(|(_, s)| *s)?;
+            Some(crate::bond_order::estimate_bond_order(
+                connector_symbol,
+                symbol,
+                connector.distance(p),
+            ))
+        })
+        .fold(0.0f64, f64::max);
+
+    // The angle this element wants once the connector's own bond is made.
+    let ideal = crate::bond_order::ideal_bond_angle_deg(connector_symbol, dirs.len() + 1) as f32;
+    open_valence_direction(&dirs, ideal, max_order).unwrap_or(-Vec3::Z)
 }
 
 pub fn place_fragment(local: &[Vec3], open: Vec3, origin: Vec3, direction: Vec3, spin_deg: f32) -> Vec<Vec3> {

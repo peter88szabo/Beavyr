@@ -5128,6 +5128,162 @@ mod editor_flow_tests {
 mod zmat_edit_tests {
     use super::*;
 
+    /// The angle at a fragment's connector after a real placement, measured
+    /// against the connector's nearest bonded atom inside the fragment --
+    /// `build_fragment_zmat` reorders atoms, so the file's own second atom is
+    /// not reliably a neighbour.
+    fn connector_angle(fragment: &str) -> (String, String, f32) {
+        let mut mol = Molecule::from_xyz(
+            "C  0.000  0.000  0.000\n\
+             H  0.629  0.629  0.629\n\
+             H -0.629 -0.629  0.629\n\
+             H -0.629  0.629 -0.629\n",
+        );
+        mol.recompute_bonds(1.2, 2.5);
+        let mut zmat_state = ZMatrixBuilderState::default();
+        let mut settings = MolSettings::default();
+        zmat_state.zmat = zmat2xyz::xyz_to_zmat(&mol.atoms, &mol.pos);
+        zmat_state.frag_name = fragment.to_string();
+        let host = mol.atoms.len();
+
+        set_selected_atom(&mut zmat_state, &mol.atoms, Some(0));
+        commit_fragment_connect(&mut zmat_state, &mut mol, &mut settings);
+        assert!(zmat_state.last_error.is_none(), "{:?}", zmat_state.last_error);
+        assert!(mol.atoms.len() > host, "{fragment} went on");
+
+        let connector = host;
+        let neighbor = (connector + 1..mol.atoms.len())
+            .min_by(|&a, &b| {
+                mol.pos[connector]
+                    .distance(mol.pos[a])
+                    .total_cmp(&mol.pos[connector].distance(mol.pos[b]))
+            })
+            .expect("a fragment neighbour");
+        let angle = (mol.pos[0] - mol.pos[connector])
+            .normalize()
+            .dot((mol.pos[neighbor] - mol.pos[connector]).normalize())
+            .clamp(-1.0, 1.0)
+            .acos()
+            .to_degrees();
+        (
+            mol.atoms[connector].clone(),
+            mol.atoms[neighbor].clone(),
+            angle,
+        )
+    }
+
+    /// The reported bug: -OH came out as a straight C-O-H line, because the
+    /// open valence was placed exactly opposite the only bond the oxygen had.
+    #[test]
+    fn a_hydroxyl_is_bent_not_linear() {
+        let (_, _, angle) = connector_angle("-OH");
+        assert!(
+            (angle - 104.5).abs() < 6.0,
+            "C-O-H came out {angle:.1} deg; 180 was the old straight line"
+        );
+    }
+
+    /// A thiol has the same one-neighbour connector and was equally straight.
+    #[test]
+    fn a_thiol_is_bent_not_linear() {
+        let (_, _, angle) = connector_angle("-SH");
+        assert!((angle - 104.5).abs() < 8.0, "C-S-H came out {angle:.1} deg");
+    }
+
+    /// And a hydroperoxy at its first oxygen.
+    #[test]
+    fn a_hydroperoxy_is_bent_at_its_first_oxygen() {
+        let (_, _, angle) = connector_angle("-OOH");
+        assert!((angle - 104.5).abs() < 8.0, "C-O-O came out {angle:.1} deg");
+    }
+
+    /// An ether oxygen likewise.
+    #[test]
+    fn a_methoxy_is_bent_at_its_oxygen() {
+        let (_, _, angle) = connector_angle("-OCH3");
+        assert!((angle - 104.5).abs() < 8.0, "C-O-C came out {angle:.1} deg");
+    }
+
+    /// An alkynyl carbon is sp and must stay straight -- bending it was a
+    /// regression from giving every one-neighbour connector an angle.
+    #[test]
+    fn an_alkynyl_stays_linear() {
+        let (_, _, angle) = connector_angle("-CCH");
+        assert!(
+            angle > 170.0,
+            "C-C#C came out {angle:.1} deg; an alkyne is straight"
+        );
+    }
+
+    /// Pyrrole's nitrogen spans only 107 degrees inside the ring but is flat,
+    /// so its substituent belongs in the ring plane, not above it. The narrow
+    /// angle alone would have called it pyramidal; the aromatic bond orders
+    /// are what settle it.
+    #[test]
+    fn an_aromatic_nitrogen_stays_planar() {
+        let (_, _, angle) = connector_angle("-Pyrrole");
+        assert!(
+            angle > 118.0,
+            "C-N-C came out {angle:.1} deg; a flat pyrrole N gives about 126"
+        );
+    }
+
+    /// sp2 carbons keep their 120 degrees.
+    #[test]
+    fn sp2_carbon_connectors_stay_trigonal() {
+        for fragment in ["-CH=CH2", "-Phenyl", "-CH=O", "-COOH"] {
+            let (_, _, angle) = connector_angle(fragment);
+            assert!(
+                (angle - 120.0).abs() < 8.0,
+                "{fragment} came out {angle:.1} deg"
+            );
+        }
+    }
+
+    /// Connectors with three bonds of their own were already right and must
+    /// stay so: the negated sum is the correct fourth vertex there.
+    #[test]
+    fn three_bond_connectors_stay_tetrahedral() {
+        for fragment in ["-CH3", "-CycloPentane", "-CycloHexane"] {
+            let (_, _, angle) = connector_angle(fragment);
+            assert!(
+                (angle - 110.0).abs() < 8.0,
+                "{fragment} came out {angle:.1} deg"
+            );
+        }
+    }
+
+    /// -NH2's own hydrogens are 120 degrees apart in the fragment data, a
+    /// deliberate choice matching Molden and pinned by
+    /// `nh2_fragment_matches_moldens_corrected_geometry`. A planar nitrogen's
+    /// third bond belongs in that plane, so the placement gives 120 too --
+    /// self-consistent with the fragment, though a real amine is nearer 110.
+    /// Changing that means changing the fragment's geometry, not the
+    /// placement code.
+    #[test]
+    fn an_amine_follows_its_fragments_own_planar_geometry() {
+        let (_, _, angle) = connector_angle("-NH2");
+        assert!(
+            (angle - 120.0).abs() < 8.0,
+            "C-N-H came out {angle:.1} deg, expected the fragment's own 120"
+        );
+    }
+
+    /// Every fragment's connector angle after a real placement, for review.
+    #[test]
+    #[ignore]
+    fn survey_every_fragment_connector_angle() {
+        for def in fragments::FRAGMENTS.iter() {
+            let (_n, symbols, _coords) = parse_xyz_angstrom(def.xyz);
+            if symbols.len() < 2 {
+                println!("{:>14}  (single atom, no angle)", def.name);
+                continue;
+            }
+            let (connector, neighbor, angle) = connector_angle(def.name);
+            println!("{:>14}  C-{connector}-{neighbor} = {angle:.1} deg", def.name);
+        }
+    }
+
     /// Editing a bond length in the Z-matrix must slide the attached fragment
     /// along that bond and nothing else: the fragment stays rigid and the host
     /// stays put. Whether the two then overlap is the user's business.
