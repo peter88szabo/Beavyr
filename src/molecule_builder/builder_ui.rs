@@ -2176,6 +2176,7 @@ pub fn builder_ui_contents(
                                     let mut pending_popup_pos: Option<egui::Pos2> = None;
                                     let mut pending_open_popup = false;
                                     let mut pending_action: Option<SelectionAction> = None;
+                                    let mut pending_symbol_sync: Option<String> = None;
 
                                     for (i, row) in zmat_state.edit_rows.iter_mut().enumerate() {
                                         let is_selected = selected_idx == Some(i);
@@ -2226,7 +2227,16 @@ pub fn builder_ui_contents(
                                             pending_open_popup = true;
                                         }
 
+                                        // An explicit Id, because the field is
+                                        // wrapped in a highlight `Frame` only
+                                        // while its row is selected. An
+                                        // auto-generated Id depends on the
+                                        // surrounding Ui, so it would change
+                                        // as the highlight came and went and
+                                        // egui would drop keyboard focus
+                                        // mid-edit.
                                         let sym_edit = egui::TextEdit::singleline(&mut row.symbol)
+                                            .id_salt(("zmat_symbol", i))
                                             .desired_width(col_idx[1] - 4.0);
                                         let mut sym_changed = false;
                                         let sym_resp = if let Some(bg) = hl_bg {
@@ -2246,13 +2256,11 @@ pub fn builder_ui_contents(
                                             }
                                             r
                                         };
-                                        if sym_resp.clicked() {
-                                            if selected_idx == Some(i) {
-                                                pending_action = Some(SelectionAction::Clear);
-                                            } else {
-                                                pending_select = Some((i, row.symbol.clone()));
-                                            }
-                                        }
+                                        // Clicking the symbol edits it. Selection
+                                        // belongs to the index button alone:
+                                        // a click that both focused the field
+                                        // and toggled the highlight made the
+                                        // element impossible to change.
                                         if sym_resp.secondary_clicked() {
                                             pending_select = Some((i, row.symbol.clone()));
                                             pending_popup_pos = Some(sym_resp.rect.right_top());
@@ -2264,12 +2272,14 @@ pub fn builder_ui_contents(
                                                 row.symbol = trimmed.to_string();
                                             }
                                         }
-                                        if selected_idx == Some(i)
-                                            && pending_action.is_none()
-                                            && pending_select.is_none()
-                                            && sym_changed
-                                        {
-                                            pending_select = Some((i, row.symbol.clone()));
+                                        // Keep the highlight's colour in step with
+                                        // a symbol being retyped, without
+                                        // re-selecting: selection sets
+                                        // `edit_refresh`, which rebuilds every
+                                        // row from the Z-matrix and would throw
+                                        // the half-typed symbol away.
+                                        if selected_idx == Some(i) && sym_changed {
+                                            pending_symbol_sync = Some(row.symbol.clone());
                                         }
                                         if i >= 1 {
                                             let bond_ref_resp = ui.add_sized(
@@ -2402,6 +2412,13 @@ pub fn builder_ui_contents(
                                         }
                                         zmat_state.redo_remove_visible = false;
                                         zmat_state.last_error = None;
+                                    } else if let Some(sym) = pending_symbol_sync {
+                                        // Last, so a real selection always wins:
+                                        // this only refreshes the remembered
+                                        // symbol so the highlight keeps the new
+                                        // element's colour. No refresh flag, so
+                                        // no lost focus.
+                                        zmat_state.selected_symbol = Some(sym);
                                     }
                                 });
                             grid_rect = Some(grid_resp.response.rect);
