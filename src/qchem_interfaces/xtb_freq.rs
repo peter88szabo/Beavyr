@@ -76,6 +76,22 @@ pub struct FrequencyResult {
     /// ordinary translation/rotation projection
     /// because the gradient was essentially zero.
     pub reaction_path_fallback_note: Option<String>,
+    /// The same Hessian's frequencies under the ordinary Eckart projection,
+    /// present only when the reaction-path projection was actually applied.
+    ///
+    /// Shown beside the reaction-path frequencies so it is visible *which*
+    /// modes the extra projection moved -- which is the whole reason to look
+    /// at a reaction-path analysis rather than simply trusting it. The two
+    /// lists differ in length by one: removing the path direction leaves
+    /// 3N-7 vibrations where the ordinary projection leaves 3N-6.
+    pub standard_frequencies_cm1: Option<Vec<f64>>,
+    /// Set when IR intensities are shown against reaction-path frequencies.
+    ///
+    /// The intensities in a `.hess` were computed for that file's own
+    /// (unprojected) normal modes. They are still worth showing, but they do
+    /// not belong to the reaction-path modes they are printed beside, and the
+    /// spectrum plotted from them is that approximation.
+    pub ir_provenance_note: Option<String>,
 }
 
 #[derive(Clone)]
@@ -511,6 +527,46 @@ fn analyze(
         _ => vec![0.0; frequencies_cm1.len()],
     };
 
+    // With the reaction-path projection actually applied, run the ordinary one
+    // over the same Hessian as well. It costs a second diagonalisation --
+    // milliseconds -- and it is the only way to see which modes the extra
+    // projection moved, rather than having to take the projected numbers on
+    // trust.
+    let standard_frequencies_cm1 = if eckart_used == EckartMode::ReactionPath {
+        match normal_modes_with_projection(
+            &mass,
+            &raw.hessian,
+            linear,
+            Some(&raw.coords_bohr),
+            EckartMode::VibRot,
+            None,
+        ) {
+            Ok(plain) => {
+                let mut f = thermofuncs::freqs_au_to_cm1(&plain.frequencies_au);
+                if scaled {
+                    for v in &mut f {
+                        *v *= frequency_scale;
+                    }
+                }
+                Some(f)
+            }
+            // The comparison column is a convenience; losing it must not lose
+            // the analysis the user asked for.
+            Err(_) => None,
+        }
+    } else {
+        None
+    };
+
+    let ir_provenance_note = (eckart_used == EckartMode::ReactionPath
+        && ir_intensities_km_mol.iter().any(|v| *v != 0.0))
+    .then(|| {
+        "The IR intensities come from the Hessian file and belong to its own standard \
+         vibrational analysis, not to the reaction-path modes they are listed beside. \
+         The plotted spectrum pairs those intensities with the reaction-path frequencies."
+            .to_string()
+    });
+
     let freqs_for_thermo: Vec<f64> = result
         .positive_indices
         .iter()
@@ -565,6 +621,8 @@ fn analyze(
         frequency_scale: scaled.then_some(frequency_scale),
         source_note: None,
         reaction_path_fallback_note,
+        standard_frequencies_cm1,
+        ir_provenance_note,
     })
 }
 
@@ -728,6 +786,11 @@ fn analyze_imported(
             imported.program, imported.program
         )),
         reaction_path_fallback_note: None,
+        // An imported job brings finished modes, so there is no second
+        // projection of ours to compare against and no intensity of ours to
+        // caveat.
+        standard_frequencies_cm1: None,
+        ir_provenance_note: None,
     })
 }
 
@@ -962,6 +1025,13 @@ pub struct XtbFreqPanelState {
     /// The level of theory the Hessian is computed at. Its own copy, for the
     /// same reason `program` is.
     pub method: MethodConfig,
+    /// The gradient file supplying the reaction-path direction, and its name
+    /// for the panel to show.
+    ///
+    /// Required whenever the reaction-path projection is on: the Hessian file
+    /// does not carry a gradient. ORCA's `.hess` has no gradient section at
+    /// all -- it is a separate `.engrad` written by an EnGrad run.
+    pub gradient_file_name: Option<String>,
     pub eckart_mode: EckartMode,
     pub thermo_temp_k: f64,
     pub thermo_freq_cutoff_cm1: f64,
@@ -1002,6 +1072,7 @@ impl Default for XtbFreqPanelState {
         Self {
             program: QcProgram::default(),
             method: MethodConfig::default(),
+            gradient_file_name: None,
             eckart_mode: EckartMode::VibRot,
             thermo_temp_k: 298.15,
             thermo_freq_cutoff_cm1: 100.0,
@@ -1020,6 +1091,71 @@ impl Default for XtbFreqPanelState {
             spectrum_width_cm1: 20.0,
         }
     }
+}
+
+/// Opens a file dialog and attaches the chosen gradient to the stored Hessian.
+///
+/// The reaction-path projection needs a gradient as well as a Hessian, and no
+/// Hessian file carries one: ORCA's `.hess` has twelve sections and none is a
+/// gradient. It comes from a separate `.engrad`, which is why the user has to
+/// give a second file.
+///
+/// The pair is checked before it is accepted -- same elements, same geometry.
+/// A gradient from a different structure produces frequencies that look
+/// entirely plausible and mean nothing, which is not a mistake to discover
+/// later.
+fn load_gradient_from_dialog(
+    freq_panel: &mut XtbFreqPanelState,
+    freq_task: &mut XtbFrequencyTask,
+) -> bool {
+    let Some(path) = rfd::FileDialog::new()
+        .add_filter("ORCA gradient", &["engrad"])
+        .add_filter("All files", &["*"])
+        .pick_file()
+    else {
+        return false;
+    };
+    let Some(HessianSource::Computed(raw)) = freq_task.last_raw.clone() else {
+        freq_task.last_message = Some(
+            "Load a Hessian first: the gradient has to be checked against it.".to_string(),
+        );
+        freq_task.last_is_error = true;
+        return false;
+    };
+    let text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(err) => {
+            freq_task.last_message = Some(format!("Cannot read {}: {err}", path.display()));
+            freq_task.last_is_error = true;
+            return false;
+        }
+    };
+    let gradient = match super::orca_engrad::parse_orca_engrad(&text) {
+        Ok(g) => g,
+        Err(err) => {
+            freq_task.last_message = Some(format!("{}: {err}", path.display()));
+            freq_task.last_is_error = true;
+            return false;
+        }
+    };
+    if let Err(err) = gradient.check_matches(&raw.atoms, &raw.coords_bohr) {
+        freq_task.last_message = Some(format!("{}: {err}", path.display()));
+        freq_task.last_is_error = true;
+        return false;
+    }
+
+    let norm = gradient.norm();
+    let mut updated = (*raw).clone();
+    updated.gradient_bohr = Some(gradient.gradient_bohr);
+    freq_task.last_raw = Some(HessianSource::Computed(Box::new(updated)));
+    freq_panel.gradient_file_name =
+        path.file_name().map(|n| n.to_string_lossy().into_owned());
+    freq_task.last_message = Some(format!(
+        "Gradient loaded: norm {norm:.3e} Eh/bohr over {} atoms.",
+        gradient.atoms.len()
+    ));
+    freq_task.last_is_error = false;
+    true
 }
 
 /// Opens a file dialog and analyses the chosen Hessian.
@@ -1052,6 +1188,9 @@ fn load_hessian_from_dialog(freq_panel: &mut XtbFreqPanelState, freq_task: &mut 
         HessianSource::Imported(imported) => imported.atoms.len(),
     };
     freq_task.last_raw = Some(source);
+    // The gradient was checked against the previous structure, so it cannot be
+    // carried over to this one.
+    freq_panel.gradient_file_name = None;
     // A loaded Hessian carries no charge or spin state of its own; the modes
     // and thermochemistry only need the electronic multiplicity for the
     // electronic partition function, and 1 is the sane default.
@@ -1151,6 +1290,12 @@ pub fn xtb_frequency_panel(
     // direction too, which needs a non-zero gradient: it applies along a
     // reaction path, not at a stationary point, where the gradient vanishes
     // and there is no path direction to remove.
+    // Changing any of these redoes the analysis from the stored Hessian rather
+    // than asking for a new one -- a diagonalisation is milliseconds, so there
+    // is no reason to make the user re-run a calculation to try 0.97 instead
+    // of 1.0, or 273 K instead of 298 K.
+    let mut reanalyze = false;
+
     ui.horizontal(|ui| {
         let mut reaction_path = freq_panel.eckart_mode == EckartMode::ReactionPath;
         if ui
@@ -1168,14 +1313,41 @@ pub fn xtb_frequency_panel(
             } else {
                 EckartMode::VibRot
             };
+            reanalyze = true;
         }
     });
 
-    // Changing any of these redoes the analysis from the stored Hessian rather
-    // than asking for a new one -- a diagonalisation is milliseconds, so there
-    // is no reason to make the user re-run a calculation to try 0.97 instead
-    // of 1.0, or 273 K instead of 298 K.
-    let mut reanalyze = false;
+    // The projection needs a gradient, and no Hessian file carries one, so the
+    // field appears with the projection and the analysis will not run without
+    // it. Shown only when the projection is on: it is meaningless otherwise.
+    if freq_panel.eckart_mode == EckartMode::ReactionPath {
+        ui.horizontal(|ui| {
+            ui.label("Gradient file");
+            match &freq_panel.gradient_file_name {
+                Some(name) => {
+                    ui.colored_label(egui::Color32::from_rgb(80, 180, 100), format!("\u{2714} {name}"));
+                }
+                None => {
+                    ui.colored_label(
+                        egui::Color32::from_rgb(230, 120, 90),
+                        "\u{26a0} required \u{2014} the Hessian file has no gradient in it",
+                    );
+                }
+            }
+            if ui
+                .add_enabled(!running, egui::Button::new("Load .engrad\u{2026}"))
+                .on_hover_text(
+                    "ORCA writes the gradient to a separate .engrad file. It must be from the \
+                     same geometry as the Hessian, which is checked when it is loaded.",
+                )
+                .clicked()
+                && load_gradient_from_dialog(freq_panel, freq_task)
+            {
+                reanalyze = true;
+            }
+        });
+    }
+
     ui.horizontal(|ui| {
         ui.label("Temperature (K)");
         reanalyze |= ui
@@ -1451,6 +1623,23 @@ pub fn xtb_frequency_panel(
     if let Some(note) = &result.source_note {
         ui.colored_label(egui::Color32::from_rgb(150, 175, 210), note);
     }
+    // The reaction-path projection removed one more direction than the
+    // ordinary one, so the mode count is 3N-7 rather than 3N-6. Said plainly,
+    // because a missing mode otherwise looks like a bug.
+    if result.eckart_used == EckartMode::ReactionPath {
+        ui.colored_label(
+            egui::Color32::from_rgb(150, 175, 210),
+            "Reaction-path projection applied: translations, rotations and the gradient \
+             direction are removed, leaving 3N-7 vibrations. The Standard column is the same \
+             Hessian without the gradient projection, so a highlighted row is one the \
+             projection moved.",
+        );
+    }
+    // The intensities belong to the file's own unprojected modes. Worth
+    // showing, and worth not passing off as the projected ones'.
+    if let Some(note) = &result.ir_provenance_note {
+        ui.colored_label(egui::Color32::from_rgb(210, 160, 40), format!("\u{26a0} {note}"));
+    }
     if let Some(scale) = result.frequency_scale {
         ui.weak(format!(
             "Frequencies and thermochemistry scaled by {scale} \u{d7} the harmonic values."
@@ -1465,8 +1654,18 @@ pub fn xtb_frequency_panel(
             egui::Grid::new("xtb_freq_mode_list")
                 .striped(true)
                 .show(ui, |ui| {
+                    // With a reaction-path projection there are two answers
+                    // worth seeing side by side: the ordinary one and the
+                    // projected one. Which modes moved is the point of running
+                    // the projection at all.
+                    let standard = result.standard_frequencies_cm1.as_deref();
                     ui.strong("Mode");
-                    ui.strong("Frequency (cm⁻¹)");
+                    if standard.is_some() {
+                        ui.strong("Standard (cm⁻¹)");
+                        ui.strong("RP-Proj (cm⁻¹)");
+                    } else {
+                        ui.strong("Frequency (cm⁻¹)");
+                    }
                     ui.strong("IR (km/mol)");
                     ui.strong("");
                     ui.end_row();
@@ -1491,6 +1690,38 @@ pub fn xtb_frequency_panel(
                             ui.visuals().text_color()
                         };
                         ui.label(format!("{}", i + 1));
+                        if let Some(standard) = standard {
+                            // Both lists are 3N long and sorted ascending, so
+                            // a row compares the i-th lowest eigenvalue under
+                            // each projection. Near-degenerate modes can in
+                            // principle swap rank between the two, so a row is
+                            // "the i-th mode of each", not a guaranteed
+                            // one-to-one mode correspondence.
+                            match standard.get(i) {
+                                Some(&plain) => {
+                                    let plain_label = if plain < 0.0 {
+                                        format!("{:.1} i", plain.abs())
+                                    } else {
+                                        format!("{plain:.1}")
+                                    };
+                                    // Highlight the rows the extra projection
+                                    // actually moved; the rest are untouched
+                                    // and should not draw the eye.
+                                    let moved = (plain - freq).abs() > 0.05;
+                                    if moved {
+                                        ui.colored_label(
+                                            egui::Color32::from_rgb(210, 160, 40),
+                                            plain_label,
+                                        );
+                                    } else {
+                                        ui.weak(plain_label);
+                                    }
+                                }
+                                None => {
+                                    ui.weak("--");
+                                }
+                            }
+                        }
                         ui.colored_label(color, label);
                         if has_ir {
                             ui.label(format!("{:.2}", result.ir_intensities_km_mol[i]));
@@ -2321,6 +2552,135 @@ mod tests {
             scale.or(file_scale).unwrap_or(1.0),
             1.0,
         )
+    }
+
+    /// The 43-atom excited-state frequency job run at the ground-state
+    /// geometry: a genuinely non-stationary point, which is the only place a
+    /// reaction-path projection means anything.
+    fn rp_pair() -> FrequencyResult {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("examples");
+        let hess_path = dir.join("Exc_root_OnlyFreq_from_optimized.hess");
+        let (raw, file_scale) = match read_hessian_file(&hess_path).unwrap() {
+            (HessianSource::Computed(raw), scale) => (*raw, scale),
+            _ => panic!("the example carries a Hessian"),
+        };
+        let engrad =
+            std::fs::read_to_string(dir.join("Exc_root_OnlyFreq_from_optimized.engrad")).unwrap();
+        let gradient = super::super::orca_engrad::parse_orca_engrad(&engrad).unwrap();
+        gradient
+            .check_matches(&raw.atoms, &raw.coords_bohr)
+            .expect("the pair is one geometry");
+        let mut raw = raw;
+        raw.gradient_bohr = Some(gradient.gradient_bohr);
+        analyze(
+            raw,
+            1,
+            EckartMode::ReactionPath,
+            298.15,
+            100.0,
+            file_scale.unwrap_or(1.0),
+            1.0,
+        )
+        .unwrap()
+    }
+
+    /// The projection actually runs on the real pair, rather than falling back
+    /// for want of a gradient.
+    #[test]
+    fn the_real_pair_gets_a_reaction_path_projection() {
+        let r = rp_pair();
+        assert_eq!(r.eckart_used, EckartMode::ReactionPath);
+        assert!(
+            r.reaction_path_fallback_note.is_none(),
+            "{:?}",
+            r.reaction_path_fallback_note
+        );
+        assert_eq!(r.atoms.len(), 43);
+        assert_eq!(r.frequencies_cm1.len(), 129, "3N eigenvalues");
+    }
+
+    /// One more direction is removed than by the ordinary projection: the
+    /// gradient's. So 3N-7 vibrations remain where the plain Eckart leaves
+    /// 3N-6.
+    #[test]
+    fn the_reaction_path_projection_removes_one_more_mode() {
+        let rp = rp_pair();
+        let plain = analyze_hess(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("examples")
+                .join("Exc_root_OnlyFreq_from_optimized.hess"),
+            EckartMode::VibRot,
+            None,
+        )
+        .unwrap();
+        assert_eq!(plain.zero_indices.len(), 6, "translations and rotations");
+        assert_eq!(rp.zero_indices.len(), 7, "and the reaction coordinate");
+
+        let rp_vibrations = rp.positive_indices.len() + rp.negative_indices.len();
+        let plain_vibrations = plain.positive_indices.len() + plain.negative_indices.len();
+        assert_eq!(plain_vibrations, 123, "3N-6");
+        assert_eq!(rp_vibrations, 122, "3N-7");
+    }
+
+    /// The comparison column: the same Hessian under the ordinary projection,
+    /// carried alongside so the panel can show which modes moved.
+    #[test]
+    fn the_standard_column_is_present_and_differs() {
+        let rp = rp_pair();
+        let standard = rp
+            .standard_frequencies_cm1
+            .as_ref()
+            .expect("the comparison column");
+        assert_eq!(standard.len(), rp.frequencies_cm1.len());
+
+        // Removing a direction has to change something, or the projection did
+        // nothing.
+        let moved = standard
+            .iter()
+            .zip(&rp.frequencies_cm1)
+            .filter(|(a, b)| (*a - *b).abs() > 0.05)
+            .count();
+        assert!(moved > 0, "the projection moved no mode at all");
+    }
+
+    /// A plain run carries no comparison column -- there is nothing to compare
+    /// against.
+    #[test]
+    fn an_ordinary_projection_has_no_comparison_column() {
+        let plain = analyze_hess(&example_hess_path(), EckartMode::VibRot, None).unwrap();
+        assert!(plain.standard_frequencies_cm1.is_none());
+        assert!(plain.ir_provenance_note.is_none());
+    }
+
+    /// The intensities in the .hess belong to its own unprojected modes, and
+    /// the panel has to say so rather than let them pass as the projected
+    /// ones'.
+    #[test]
+    fn intensities_shown_against_projected_modes_are_caveated() {
+        let rp = rp_pair();
+        assert!(rp.has_ir_intensities(), "the example .hess has an IR spectrum");
+        let note = rp
+            .ir_provenance_note
+            .as_ref()
+            .expect("intensities beside projected frequencies need a caveat");
+        assert!(note.contains("standard"), "{note}");
+    }
+
+    /// Without a gradient the request degrades to the ordinary projection and
+    /// says so, rather than projecting a direction it does not have.
+    #[test]
+    fn the_same_hessian_without_a_gradient_falls_back() {
+        let r = analyze_hess(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("examples")
+                .join("Exc_root_OnlyFreq_from_optimized.hess"),
+            EckartMode::ReactionPath,
+            None,
+        )
+        .unwrap();
+        assert_eq!(r.eckart_used, EckartMode::VibRot);
+        assert!(r.reaction_path_fallback_note.is_some());
+        assert!(r.standard_frequencies_cm1.is_none());
     }
 
     fn loaded_ts() -> FrequencyResult {

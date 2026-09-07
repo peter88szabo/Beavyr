@@ -4,6 +4,7 @@ pub mod gaussian_log;
 pub mod hessian_file;
 pub mod method;
 pub mod method_ui;
+pub mod orca_engrad;
 pub mod orca_hess;
 pub mod program;
 pub mod xtb_freq;
