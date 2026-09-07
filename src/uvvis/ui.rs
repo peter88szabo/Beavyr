@@ -2,14 +2,293 @@
 
 use bevy_egui::egui;
 
+use super::excited_state::{
+    spectrum_functionals, visible_fields, ExcitedStateMethod,
+};
+use super::run::SpectrumTask;
 use super::types::{ExcitedState, TddftResult};
 use super::{SpectrumUnit, UvVisState};
+use crate::molecule::Molecule;
+use crate::qchem_interfaces::method::{
+    basis_label, is_blocked, Severity, BASIS_GROUPS,
+};
+use crate::qchem_interfaces::xtb_optimize::format_elapsed;
 use crate::spectrum::broadening::{format_spectrum_dat, format_spectrum_sticks, BroadeningKind};
 use crate::spectrum::plot::{draw_spectrum, SpectrumAxis};
 
-/// Draws the "UV-Vis (TD-DFT)" section: load a TD-DFT output, list its roots
-/// with the orbital excitations behind each, and open the spectrum plot.
-pub fn uvvis_panel(ui: &mut egui::Ui, state: &mut UvVisState) {
+/// The "Run Calculation" block: pick a method, say how many roots, and run.
+///
+/// Closed by default, matching the frequency panel's own run block -- the tool
+/// is as often used to look at a spectrum already in hand as to compute one --
+/// but forced open while a run is in flight, so Cancel cannot end up hidden
+/// behind a collapsed header.
+fn run_block(
+    ui: &mut egui::Ui,
+    state: &mut UvVisState,
+    task: &mut SpectrumTask,
+    mol: &Molecule,
+    behemoth_path: &str,
+    animating: bool,
+) {
+    let running = task.is_running();
+    egui::CollapsingHeader::new(egui::RichText::new("Run Calculation").strong())
+        .default_open(false)
+        .open(running.then_some(true))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                // A fixed label, not a dropdown: Behemoth is the only program
+                // Beavyr can run an excited-state calculation with, and a
+                // dropdown of one would misrepresent the choice available.
+                ui.label("Program");
+                ui.label(egui::RichText::new("Behemoth").strong());
+                ui.weak("\u{2014} path set in Geometry Optimization");
+            });
+            if behemoth_path.trim().is_empty() {
+                ui.colored_label(
+                    egui::Color32::from_rgb(210, 160, 40),
+                    "No Behemoth path set. Set it in the Geometry Optimization panel.",
+                );
+            }
+
+            ui.horizontal(|ui| {
+                ui.label("Method");
+                ui.add_enabled_ui(!running, |ui| {
+                    egui::ComboBox::from_id_salt("uvvis_method")
+                        .selected_text(state.run_config.method.label())
+                        .show_ui(ui, |ui| {
+                            for method in ExcitedStateMethod::ALL {
+                                ui.selectable_value(
+                                    &mut state.run_config.method,
+                                    method,
+                                    method.label(),
+                                );
+                            }
+                        });
+                });
+            });
+            ui.weak(state.run_config.method.description());
+
+            let fields = visible_fields(&state.run_config);
+
+            if fields.xtb4stda_path {
+                ui.horizontal(|ui| {
+                    ui.label("xtb4stda");
+                    ui.add_enabled(
+                        !running,
+                        egui::TextEdit::singleline(&mut state.run_config.xtb4stda_path)
+                            .desired_width(200.0)
+                            .hint_text("xtb4stda"),
+                    );
+                    if ui.add_enabled(!running, egui::Button::new("Browse\u{2026}")).clicked() {
+                        if let Some(path) = rfd::FileDialog::new().pick_file() {
+                            state.run_config.xtb4stda_path = path.display().to_string();
+                        }
+                    }
+                });
+            }
+
+            if fields.functional {
+                ui.horizontal(|ui| {
+                    ui.label("Functional");
+                    ui.add_enabled_ui(!running, |ui| {
+                        let selected = spectrum_functionals()
+                            .iter()
+                            .find(|f| f.cli.eq_ignore_ascii_case(&state.reference.functional))
+                            .map(|f| f.label.to_string())
+                            .unwrap_or_else(|| state.reference.functional.clone());
+                        egui::ComboBox::from_id_salt("uvvis_functional")
+                            .selected_text(selected)
+                            .show_ui(ui, |ui| {
+                                // Hybrids only: the engine refuses a
+                                // functional with no exact exchange.
+                                for entry in spectrum_functionals() {
+                                    let mut chosen = state.reference.functional.clone();
+                                    if ui
+                                        .selectable_value(
+                                            &mut chosen,
+                                            entry.cli.to_string(),
+                                            entry.label,
+                                        )
+                                        .clicked()
+                                    {
+                                        state.reference.functional = entry.cli.to_string();
+                                    }
+                                }
+                            });
+                    });
+                });
+            }
+
+            if fields.basis {
+                ui.horizontal(|ui| {
+                    ui.label("Basis set");
+                    ui.add_enabled_ui(!running, |ui| {
+                        egui::ComboBox::from_id_salt("uvvis_basis")
+                            .selected_text(basis_label(&state.reference.basis))
+                            .show_ui(ui, |ui| {
+                                for (i, group) in BASIS_GROUPS.iter().enumerate() {
+                                    if i > 0 {
+                                        ui.separator();
+                                    }
+                                    ui.weak(group.name);
+                                    for (label, cli) in group.sets {
+                                        let mut chosen = state.reference.basis.clone();
+                                        if ui
+                                            .selectable_value(
+                                                &mut chosen,
+                                                cli.to_string(),
+                                                *label,
+                                            )
+                                            .clicked()
+                                        {
+                                            state.reference.basis = cli.to_string();
+                                        }
+                                    }
+                                }
+                            });
+                    });
+                });
+            }
+
+            ui.horizontal(|ui| {
+                ui.label("Roots");
+                ui.add_enabled(
+                    !running,
+                    egui::DragValue::new(&mut state.run_config.roots).range(1..=200),
+                );
+                ui.label("Energy window (eV)");
+                ui.add_enabled(
+                    !running,
+                    egui::DragValue::new(&mut state.run_config.emax_ev)
+                        .speed(0.5)
+                        .range(1.0..=100.0),
+                );
+                if fields.tda {
+                    ui.add_enabled(
+                        !running,
+                        egui::Checkbox::new(&mut state.run_config.tda, "Tamm-Dancoff (TDA)"),
+                    );
+                }
+            });
+
+            ui.horizontal(|ui| {
+                ui.label("Charge");
+                ui.add_enabled(
+                    !running,
+                    egui::DragValue::new(&mut state.charge).range(-10..=10),
+                );
+                ui.label("Multiplicity");
+                ui.add_enabled(
+                    !running,
+                    egui::DragValue::new(&mut state.multiplicity).range(1..=10),
+                );
+            });
+
+            ui.horizontal(|ui| {
+                ui.label("Memory (MB)");
+                ui.add_enabled(
+                    !running,
+                    egui::DragValue::new(&mut state.reference.memory_mb)
+                        .speed(64.0)
+                        .range(64..=1_048_576),
+                );
+                ui.label("nproc");
+                ui.add_enabled(
+                    !running,
+                    egui::DragValue::new(&mut state.reference.nproc).range(1..=1024),
+                );
+            });
+
+            let issues = super::excited_state::validate(
+                &state.run_config,
+                &state.reference,
+                state.multiplicity,
+                &mol.atoms,
+            );
+            for issue in &issues {
+                match issue.severity {
+                    Severity::Block => {
+                        ui.colored_label(
+                            egui::Color32::from_rgb(230, 120, 90),
+                            format!("\u{26a0} {}", issue.message),
+                        );
+                    }
+                    Severity::Note => {
+                        ui.weak(&issue.message);
+                    }
+                }
+            }
+            let blocked = is_blocked(&issues);
+
+            if animating {
+                ui.weak("Playback is running \u{2014} stop it to run a calculation.");
+            }
+
+            ui.horizontal(|ui| {
+                let can_run = !running
+                    && !mol.atoms.is_empty()
+                    && !animating
+                    && !blocked
+                    && !behemoth_path.trim().is_empty();
+                let button = ui.add_enabled(can_run, egui::Button::new("Run Spectrum"));
+                if mol.atoms.is_empty() {
+                    button
+                        .clone()
+                        .on_disabled_hover_text("There is no structure on screen.");
+                } else if animating {
+                    button.clone().on_disabled_hover_text(
+                        "Stop the animation first: the structure on screen is a frame of it.",
+                    );
+                } else if blocked {
+                    button
+                        .clone()
+                        .on_disabled_hover_text("See the note above.");
+                }
+                if button.clicked() {
+                    task.start(
+                        std::path::Path::new(behemoth_path.trim()),
+                        &mol.atoms,
+                        &mol.pos,
+                        state.charge,
+                        state.multiplicity,
+                        &state.run_config,
+                        &state.reference,
+                    );
+                }
+                if running {
+                    if ui.button("Cancel").clicked() {
+                        task.cancel();
+                    }
+                    let elapsed = task.elapsed().unwrap_or_default();
+                    ui.weak(format!("Running\u{2026} {}", format_elapsed(elapsed)));
+                }
+            });
+
+            if let Some(message) = &task.last_message {
+                let color = if task.last_is_error {
+                    egui::Color32::from_rgb(220, 80, 80)
+                } else {
+                    egui::Color32::from_rgb(80, 180, 100)
+                };
+                ui.colored_label(color, message);
+            }
+        });
+}
+
+/// Draws the "UV-Vis (TD-DFT)" section: run a spectrum or load one from a
+/// TD-DFT output, list the roots with the orbital excitations behind each, and
+/// open the spectrum plot.
+pub fn uvvis_panel(
+    ui: &mut egui::Ui,
+    state: &mut UvVisState,
+    task: &mut SpectrumTask,
+    mol: &Molecule,
+    behemoth_path: &str,
+    animating: bool,
+) {
+    run_block(ui, state, task, mol, behemoth_path, animating);
+
+    ui.add_space(8.0);
     ui.horizontal(|ui| {
         if ui.button("Load ORCA output\u{2026}").clicked() {
             load_from_dialog(state);
@@ -21,7 +300,7 @@ pub fn uvvis_panel(ui: &mut egui::Ui, state: &mut UvVisState) {
             state.spectrum_window_open = false;
         }
     });
-    ui.weak("Reads an existing TD-DFT output. ORCA only for now.");
+    ui.weak("Or read an existing TD-DFT output. ORCA only for now.");
 
     if let Some(err) = &state.load_error {
         ui.add_space(4.0);
@@ -201,22 +480,31 @@ fn state_row(
     if row.clicked() {
         *expanded = if is_open { None } else { Some(st.root) };
     }
-    // The transition dipole rides along as a tooltip rather than a line in the
-    // expanded block: it is worth keeping, but it is not what the expansion is
-    // for and it crowded out the orbital list.
-    if let Some(d) = st.transition_dipole_au {
-        row.on_hover_text(format!(
-            "\u{3bc} = ({:.5}, {:.5}, {:.5}) au{}\n{:.6} au   {:.1} cm\u{207b}\u{b9}",
-            d[0],
-            d[1],
-            d[2],
-            st.d2_au2
-                .map(|d2| format!("\nD\u{b2} = {d2:.5} au\u{b2}"))
-                .unwrap_or_default(),
-            st.energy_au,
-            st.energy_cm1
-        ));
-    }
+    // The energy in the other two units, and the transition dipole where the
+    // program reported one, ride along as a tooltip rather than as lines in
+    // the expanded block: worth keeping, but not what the expansion is for,
+    // and they crowded out the orbital list.
+    //
+    // The energy is shown unconditionally. It used to hang off the dipole
+    // being present, which meant a program that prints no dipole -- Behemoth
+    // does not -- lost the au and cm-1 figures too.
+    row.on_hover_text(format!(
+        "{:.6} au   {:.1} cm\u{207b}\u{b9}{}",
+        st.energy_au,
+        st.energy_cm1,
+        match st.transition_dipole_au {
+            Some(d) => format!(
+                "\n\u{3bc} = ({:.5}, {:.5}, {:.5}) au{}",
+                d[0],
+                d[1],
+                d[2],
+                st.d2_au2
+                    .map(|d2| format!("\nD\u{b2} = {d2:.5} au\u{b2}"))
+                    .unwrap_or_default()
+            ),
+            None => String::new(),
+        }
+    ));
 
     if !is_open {
         return;
@@ -225,11 +513,24 @@ fn state_row(
         ui.weak("      No excitations printed above the program's threshold.");
         return;
     }
-    for line in excitation_lines(st) {
-        ui.add(
+    // The lines are the same shape whichever program produced them, which is
+    // the point: a spectrum Beavyr ran reads exactly like one it loaded.
+    // Where the program also named the orbitals -- Behemoth gives each a
+    // HOMO/LUMO-relative name and a bracketed character -- the name goes in a
+    // tooltip, so the extra information is kept without the column layout
+    // differing between programs.
+    for (line, excitation) in excitation_lines(st)
+        .into_iter()
+        .zip(st.excitations_by_weight())
+    {
+        let label = ui.add(
             egui::Label::new(egui::RichText::new(line).monospace())
                 .wrap_mode(egui::TextWrapMode::Extend),
         );
+        let described = excitation.described();
+        if described != excitation.label() {
+            label.on_hover_text(described);
+        }
     }
 }
 
@@ -404,6 +705,85 @@ mod tests {
     use super::*;
     use crate::uvvis::types::{ev_to_nm, TddftResult};
     use std::path::Path;
+
+    /// The same spectrum, run by Beavyr rather than loaded from a file.
+    fn behemoth_parsed() -> TddftResult {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("fixtures")
+            .join("behemoth_ch2o_stddft.log");
+        let text = std::fs::read_to_string(&path).unwrap();
+        crate::uvvis::behemoth::parse_behemoth_spectrum(&text, &path, Some(6)).unwrap()
+    }
+
+    /// The requirement: a spectrum Beavyr computed has to read exactly like
+    /// one it loaded from an ORCA output -- same columns, same widths, same
+    /// character offsets -- because it goes through the same renderer with the
+    /// same program-independent structures behind it.
+    #[test]
+    fn a_computed_spectrum_renders_in_the_same_format_as_a_loaded_one() {
+        let orca = parsed();
+        let behemoth = behemoth_parsed();
+
+        // Every column lands at the same offset, for a restricted reference
+        // in both cases (no spin columns).
+        let orca_row = state_row_text(&orca.states[0], false, false);
+        let behemoth_row = state_row_text(&behemoth.states[0], false, false);
+        assert_eq!(
+            orca_row.len(),
+            behemoth_row.len(),
+            "row widths differ:\n{orca_row}\n{behemoth_row}"
+        );
+
+        // And with the spin columns, which an unrestricted ORCA run shows.
+        assert_eq!(
+            state_row_text(&orca.states[0], true, false).len(),
+            state_row_text(&behemoth.states[0], true, false).len()
+        );
+
+        // The contribution lines are the same shape too: an orbital pair and
+        // a percentage, nothing else.
+        for line in excitation_lines(&behemoth.states[0]) {
+            assert!(line.contains("-->"), "{line}");
+            assert!(line.trim_end().ends_with('%'), "{line}");
+        }
+    }
+
+    /// Everything the ORCA reader shows per root, the Behemoth reader fills
+    /// too -- bar the two things Behemoth does not print, which it says so.
+    #[test]
+    fn a_computed_spectrum_carries_the_same_per_root_information() {
+        let behemoth = behemoth_parsed();
+        for state in &behemoth.states {
+            assert!(state.energy_ev > 0.0);
+            assert!(state.energy_au > 0.0, "root {}", state.root);
+            assert!(state.energy_cm1 > 0.0, "root {}", state.root);
+            assert!(state.wavelength_nm > 0.0);
+            assert!(state.oscillator_strength.is_some());
+            assert!(state.multiplicity.is_some(), "root {}", state.root);
+            assert!(!state.excitations.is_empty(), "root {}", state.root);
+        }
+        // The absences are declared rather than silent.
+        assert!(behemoth
+            .notes
+            .iter()
+            .any(|n| n.contains("transition-dipole")));
+    }
+
+    /// The orbital names Behemoth adds must not change the printed line --
+    /// they belong in the tooltip, so the two programs stay column-identical.
+    #[test]
+    fn behemoths_orbital_names_do_not_widen_the_printed_line() {
+        let behemoth = behemoth_parsed();
+        let excitation = &behemoth.states[0].excitations[0];
+        assert!(excitation.from_label.is_some(), "Behemoth names its orbitals");
+        // The line uses the bare pair, as ORCA's does.
+        let line = &excitation_lines(&behemoth.states[0])[0];
+        assert!(line.contains(&excitation.label()), "{line}");
+        assert!(!line.contains("HOMO"), "the name belongs in the tooltip: {line}");
+        // And the tooltip has it.
+        assert!(excitation.described().contains("HOMO"));
+    }
 
     fn parsed() -> TddftResult {
         let path = Path::new(env!("CARGO_MANIFEST_DIR"))

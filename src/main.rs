@@ -128,6 +128,7 @@ fn main() {
         // structure comparison (RMSD / Kabsch)
         .init_resource::<rmsd::RmsdState>()
         .init_resource::<uvvis::UvVisState>()
+        .init_resource::<uvvis::run::SpectrumTask>()
         .init_resource::<ui_layout::UiLayout>()
         // scene
         .add_systems(Startup, (setup, center_camera_on_startup))
@@ -184,6 +185,7 @@ fn main() {
                 // xtb geometry optimization
                 qchem_interfaces::xtb_optimize::poll_xtb_optimization,
                 qchem_interfaces::xtb_freq::poll_xtb_frequencies,
+                uvvis::run::poll_spectrum_run,
                 export_image::process_pending_canvas_captures,
                 export_image::cleanup_export_captures,
             )

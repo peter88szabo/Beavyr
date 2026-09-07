@@ -11,7 +11,10 @@ use bevy::prelude::*;
 use crate::spectrum::broadening::BroadeningKind;
 use types::TddftResult;
 
+pub mod behemoth;
+pub mod excited_state;
 pub mod orca;
+pub mod run;
 pub mod types;
 pub mod ui;
 
@@ -98,6 +101,14 @@ pub struct UvVisState {
     /// Line width in eV, kept separately so switching axes back and forth
     /// does not mangle a width the user set in the other unit.
     pub width_ev: f64,
+    /// What excited-state calculation to run, and the reference it runs on.
+    /// The reference is a `MethodConfig` because that is what already holds a
+    /// functional, a basis set, a memory budget and a thread count -- there is
+    /// no second copy of those here.
+    pub run_config: excited_state::ExcitedStateConfig,
+    pub reference: crate::qchem_interfaces::method::MethodConfig,
+    pub charge: i32,
+    pub multiplicity: i32,
 }
 
 impl Default for UvVisState {
@@ -113,6 +124,16 @@ impl Default for UvVisState {
             // enough that a dense root list reads as bands rather than grass.
             width_nm: 20.0,
             width_ev: 0.3,
+            run_config: excited_state::ExcitedStateConfig::default(),
+            // The spectrum engine takes only global hybrids, so the reference
+            // starts on one rather than on the shared default, which is not.
+            reference: crate::qchem_interfaces::method::MethodConfig {
+                behemoth: crate::qchem_interfaces::method::BehemothMethod::Dft,
+                functional: excited_state::DEFAULT_SPECTRUM_FUNCTIONAL.to_string(),
+                ..Default::default()
+            },
+            charge: 0,
+            multiplicity: 1,
         }
     }
 }

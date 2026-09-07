@@ -259,6 +259,8 @@ fn parse_excitation_line(line: &str) -> Option<Excitation> {
         to_spin,
         weight,
         coefficient,
+        from_label: None,
+        to_label: None,
     })
 }
 

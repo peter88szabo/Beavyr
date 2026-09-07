@@ -162,6 +162,7 @@ pub fn ui_panel(
         ResMut<crate::rmsd::RmsdState>,
         ResMut<UiLayout>,
         ResMut<UvVisState>,
+        ResMut<crate::uvvis::run::SpectrumTask>,
     ),
 ) {
     // bevy_egui 0.41: ctx_mut() returns Result; if it fails, skip this frame
@@ -180,6 +181,7 @@ pub fn ui_panel(
         mut rmsd_state,
         mut ui_layout,
         mut uvvis_state,
+        mut uvvis_task,
     ) = builder_resources;
     if !*style_initialized {
         ctx.style_mut_of(ctx.theme(), |style| {
@@ -580,7 +582,24 @@ pub fn ui_panel(
                 Tab::UvVis.default_size(),
                 Tab::UvVis.title(),
                 |ui| {
-                    uvvis_panel(ui, &mut uvvis_state);
+                    // The Behemoth path is the optimizer panel's, so there
+                    // is one place to set it rather than three.
+                    let behemoth_path = xtb_panel_state
+                        .paths
+                        .iter()
+                        .find(|(p, _)| {
+                            *p == crate::qchem_interfaces::program::QcProgram::Behemoth
+                        })
+                        .map(|(_, path)| path.clone())
+                        .unwrap_or_default();
+                    uvvis_panel(
+                        ui,
+                        &mut uvvis_state,
+                        &mut uvvis_task,
+                        &mol,
+                        &behemoth_path,
+                        traj.playing,
+                    );
                 },
             );
             // ===========================

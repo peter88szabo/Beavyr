@@ -229,6 +229,14 @@ pub struct Functional {
     /// A composite carries its own basis set and dispersion correction, so
     /// choosing one takes both of those fields away.
     pub composite: Option<&'static str>,
+    /// Whether it is a global hybrid, i.e. carries exact exchange.
+    ///
+    /// From the exact-exchange fractions `behemoth --list func` prints beside
+    /// each hybrid. It matters because the sTDA/sTD-DFT engine refuses a pure
+    /// functional outright: "sTDA/sTD-DFT with normal DFT requires a
+    /// global-hybrid functional with nonzero exact exchange". The spectrum
+    /// panel offers only the hybrids for that reason.
+    pub hybrid: bool,
 }
 
 /// The nine common functionals in alphabetical order, then the five
@@ -239,39 +247,47 @@ pub struct Functional {
 /// here was checked to exist in `--list func`, which is where `m06-2x` came
 /// from -- `m062x` is not a name Behemoth knows.
 pub const FUNCTIONALS: [Functional; 14] = [
-    Functional { label: "B3LYP", cli: "b3lyp", composite: None },
-    Functional { label: "B97", cli: "b97", composite: None },
-    Functional { label: "M06-2X", cli: "m06-2x", composite: None },
-    Functional { label: "MN15", cli: "mn15", composite: None },
-    Functional { label: "PBE", cli: "pbe", composite: None },
-    Functional { label: "PBE0", cli: "pbe0", composite: None },
-    Functional { label: "R2SCAN", cli: "r2scan", composite: None },
-    Functional { label: "revB3LYP", cli: "revb3lyp", composite: None },
-    Functional { label: "TPSSh", cli: "tpssh", composite: None },
+    Functional { label: "B3LYP", cli: "b3lyp", composite: None, hybrid: true },
+    Functional { label: "B97", cli: "b97", composite: None, hybrid: true },
+    Functional { label: "M06-2X", cli: "m06-2x", composite: None, hybrid: true },
+    Functional { label: "MN15", cli: "mn15", composite: None, hybrid: true },
+    Functional { label: "PBE", cli: "pbe", composite: None, hybrid: false },
+    Functional { label: "PBE0", cli: "pbe0", composite: None, hybrid: true },
+    Functional { label: "R2SCAN", cli: "r2scan", composite: None, hybrid: false },
+    Functional { label: "revB3LYP", cli: "revb3lyp", composite: None, hybrid: true },
+    Functional { label: "TPSSh", cli: "tpssh", composite: None, hybrid: true },
     Functional {
         label: "B3LYP-3c",
         cli: "b3lyp-3c",
         composite: Some("B3LYP (VWN5) + def2-mSVP + D3(BJ)+ATM + gCP"),
+        hybrid: true,
     },
     Functional {
         label: "B97-3c",
         cli: "b97-3c",
         composite: Some("refitted mB97 GGA + def2-mTZVP + D3(BJ)+ATM + SRB"),
+        // A GGA refit, with no exact exchange.
+        hybrid: false,
     },
     Functional {
         label: "HF-3c",
         cli: "hf-3c",
         composite: Some("plain HF + MINIX + D3(BJ) + combined gCP/SRB"),
+        // Hartree-Fock is all exact exchange.
+        hybrid: true,
     },
     Functional {
         label: "PBEh-3c",
         cli: "pbeh-3c",
         composite: Some("PBE hybrid (42% HF) + def2-mSVP + D3(BJ)+ATM + damped gCP"),
+        hybrid: true,
     },
     Functional {
         label: "r2SCAN-3c",
         cli: "r2scan-3c",
         composite: Some("r2SCAN + def2-mTZVPP + D4(BJ)+ATM + damped gCP"),
+        // Unmodified r2SCAN, which is pure.
+        hybrid: false,
     },
 ];
 
@@ -294,6 +310,29 @@ pub fn functional(cli: &str) -> Option<&'static Functional> {
 /// basis set and dispersion correction.
 pub fn is_composite(cli: &str) -> bool {
     functional(cli).is_some_and(|f| f.composite.is_some())
+}
+
+/// Whether a functional carries exact exchange. Unknown names -- a raw LibXC
+/// specification, say -- are taken to be hybrids, because refusing to run
+/// something on a guess is worse than letting Behemoth give its own verdict.
+pub fn is_hybrid(cli: &str) -> bool {
+    functional(cli).map_or(true, |f| f.hybrid)
+}
+
+/// The elements in `atoms` that need an effective core potential, which
+/// nothing implements. Shared with the excited-state panel, which has the same
+/// rule for the same reason.
+pub fn elements_needing_ecp(atoms: &[String]) -> Vec<String> {
+    offending_elements(atoms, |symbol| {
+        crate::molecule::atomic_number(symbol).is_some_and(|z| z >= FIRST_ECP_ELEMENT)
+    })
+}
+
+/// The elements in `atoms` that TASI has no parameters for.
+pub fn elements_outside_tasi(atoms: &[String]) -> Vec<String> {
+    offending_elements(atoms, |symbol| {
+        !TASI_ELEMENTS.iter().any(|e| e.eq_ignore_ascii_case(symbol))
+    })
 }
 
 /// A group of basis sets, as the picker shows them.
@@ -520,11 +559,11 @@ pub struct MethodIssue {
 }
 
 impl MethodIssue {
-    fn block(message: impl Into<String>) -> Self {
+    pub fn block(message: impl Into<String>) -> Self {
         MethodIssue { severity: Severity::Block, message: message.into() }
     }
 
-    fn note(message: impl Into<String>) -> Self {
+    pub fn note(message: impl Into<String>) -> Self {
         MethodIssue { severity: Severity::Note, message: message.into() }
     }
 }

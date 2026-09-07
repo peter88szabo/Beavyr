@@ -1,0 +1,85 @@
+Run resources
+Compute cores: 1
+Memory limit:  1024 MiB
+
+
+Basis set summary
+Orbital basis: sto-3g (method-internal TASI basis)
+
+============================================================================
+                           TASI SEOEM calculation                           
+============================================================================
+
+Orbital construction: direct generalized diagonalization
+Initial guess:         not applicable (non-SCF method)
+Fermi smearing:        not used
+
+sTDA orbital model: Behemoth TASI SEOEM
+Response model:     generic Grimme-style closed-shell sTDA
+Exact exchange:     a_x = 0.0 (TASI one-electron preset)
+Excited-state gradients: not implemented
+TASI SEOEM energy
+Electronic energy:              -106.1999406823 Hartree
+Pair repulsion:                    0.3240938899 Hartree
+Model energy:                   -105.8758467924 Hartree
+TS dispersion:                    -0.0000000342 Hartree
+------------------------------------------------------
+Total energy (all terms):       -105.8758468266 Hartree
+======================================================
+Electrons:                   16
+Occupied orbitals:           8
+
+sTDA electronic-excitation spectrum
+Orbital source: Behemoth TASI SEOEM (this response model does not replace the orbital Hamiltonian)
+Spin = singlet, Emax = 25.000 eV, ax = 0.000, Gamma^J exponent (yJ) = 4.000, Gamma^K exponent (yK) = 2.000
+Damping parameterization = sTDA-xTB; hardness = global Ghosh-Islam
+Active orbitals: 6 occupied, 4 virtual; CSFs: 24 energy + 0 perturbative = 24
+Charge checks: max|sum_A q_ia| = 1.459e-15, max|sum_A q_pp - 1| = 8.438e-15
+PT2 lowering: average 0.000000 eV, maximum 0.000000 eV; lowest A eigenvalue 1.642532 eV
+
+root       energy(eV)     lambda(nm)            f
+1            1.642532         754.84     0.005320
+2            2.198622         563.92     0.000000
+3            2.389165         518.94     0.000139
+4            2.802418         442.42     0.013515
+5            3.069423         403.93     0.000000
+
+============================================================================
+                  Dominant sTDA root decompositions
+============================================================================
+
+Assignment guide
+----------------
+  Canonical orbital : MO number and HOMO/LUMO-relative name.
+  Chemical label    : bracketed Pipek-Mezey character assigned to the
+                      canonical orbital; it is not a localized-orbital
+                      transition.
+  Caution           : inspect the orbitals before making a definitive
+                      excited-state assignment.
+  Contributions     : up to 3 per root, each >= 1.00% after normalization.
+
+Root summaries and leading configurations
+----------------------------------------------------------------------------
+Root 1   sTDA    =     1.6425 eV      754.84 nm  f = 0.00532
+       8 HOMO       [C-H sigma]  ==>    9 LUMO       [C atomic*]  100.00%
+
+Root 2   sTDA    =     2.1986 eV      563.92 nm  f = 0.00000
+       7 HOMO-1     [O lonepair] ==>    9 LUMO       [C atomic*]  100.00%
+
+Root 3   sTDA    =     2.3892 eV      518.94 nm  f = 0.00014
+       8 HOMO       [C-H sigma]  ==>   10 LUMO+1     [C-O sigma*]  50.96%
+       6 HOMO-2     [O lonepair] ==>    9 LUMO       [C atomic*]   48.64%
+
+Root 4   sTDA    =     2.8024 eV      442.42 nm  f = 0.01352
+       8 HOMO       [C-H sigma]  ==>   10 LUMO+1     [C-O sigma*]  45.57%
+       6 HOMO-2     [O lonepair] ==>    9 LUMO       [C atomic*]   44.75%
+       4 HOMO-4     [O-C sigma]  ==>   10 LUMO+1     [C-O sigma*]   9.46%
+
+Root 5   sTDA    =     3.0694 eV      403.93 nm  f = 0.00000
+       5 HOMO-3     [O lonepair] ==>    9 LUMO       [C atomic*]  100.00%
+
+
+Wrote sTDA spectrum to stda_spectrum.dat
+
+Total run time (s): 0.004
+Total run time (days:hours:minutes:s): 0:00:00:00.004

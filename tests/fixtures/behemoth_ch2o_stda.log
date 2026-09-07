@@ -1,0 +1,204 @@
+Run resources
+Compute cores: 1
+Memory limit:  1024 MiB
+
+
+Basis set summary
+Orbital basis: def2-svp (all 4 atoms; elements C,H,O)
+
+============================================================================
+                       Molecular integrals completed                        
+============================================================================
+  Overlap matrix                             0.000377 s
+  Kinetic-energy matrix                      0.002848 s
+  Nuclear-attraction matrix                  0.008503 s
+  AO representation transformation           0.000189 s
+  Four-center AO ERI build                   0.063010 s
+  ----------------------------------------------------------------------
+  Complete molecular-integral setup           0.074927 s
+============================================================================
+
+
+============================================================================
+                 RKS PBE0 self-consistent-field calculation                 
+============================================================================
+
+Functional:                 PBE0
+Basis representation:       real spherical Gaussian
+ERI algorithm:              Hybrid explicit low-L / Obara-Saika
+Electrons:                  16
+Doubly occupied orbitals:   8
+Atomic orbitals:            38
+Fock matrix dimension:      38 x 38
+Radial grid:                75 points, Treutler-Ahlrichs M4
+Angular grid:               302 Lebedev points
+Molecular grid points:      42404
+Becke radius adjustment:    Bragg-Slater
+Grid weight cutoff:         0.000e0
+Initial guess:              extended Huckel
+Fermi smearing:             disabled (integer occupations)
+SCF accelerator:            adaptive Pulay DIIS
+AO values cached:           yes
+Energy tolerance:           1.000e-10 Hartree
+Density RMS tolerance:      1.000e-8
+
+---------------------------------------------------------------------------------------------------------------
+ Iter     Total Energy (Eh)      Delta E (Eh)       RMS Delta P      RMS Commutator      Grid Electrons
+---------------------------------------------------------------------------------------------------------------
+    1     -107.185838063059                 -       5.997125e-1         1.485707e-1       16.0000664254
+    2     -113.947929713141        6.762092e0       5.984089e-1         4.428921e-2       16.0000700449
+    3     -114.239846076553       2.919164e-1       4.513945e-2         1.500351e-2       16.0000894619
+    4     -114.278971834419       3.912576e-2       2.262652e-2         5.370615e-3       16.0000821422
+    5     -114.283630858918       4.659024e-3       4.831239e-3         2.628498e-4       16.0000846008
+    6     -114.283641340194       1.048128e-5       3.228189e-4         3.809090e-5       16.0000844680
+    7     -114.283641544458       2.042631e-7       5.393270e-5         2.487362e-5       16.0000844793
+    8     -114.283641629053       8.459560e-8       1.885463e-5         5.996352e-6       16.0000844741
+    9     -114.283641634152       5.099338e-9       5.462862e-6         2.214630e-7       16.0000844726
+   10     -114.283641634161      8.014922e-12       3.041604e-7         1.112488e-7       16.0000844726
+   11     -114.283641634162      1.875833e-12       9.871437e-8         1.957829e-9       16.0000844726
+   12     -114.283641634162      5.400125e-13       2.803952e-9        1.125556e-10       16.0000844726
+---------------------------------------------------------------------------------------------------------------
+
+                         SCF successfully converged                         
+                       RKS completed in 12 iterations                       
+
+Electronic energy:           -145.6130601153 Hartree
+Nuclear repulsion energy:      31.3294184812 Hartree
+Coulomb energy:                86.3738226506 Hartree
+Exact exchange ( 25.0%):      -3.5126469748 Hartree
+Exchange-correlation:         -11.0520892514 Hartree
+SCF energy:                  -114.2836416342 Hartree
+------------------------------------------------------
+Total energy (all terms):    -114.2836416342 Hartree
+======================================================
+Grid electron count:           16.0000844726
+
+Orbital energies
+------------------------------------------------------
+   MO    Occupation      Energy (Hartree)
+------------------------------------------------------
+    1             2        -19.2269270532
+    2             2        -10.3315654605
+    3             2         -1.0780246744
+    4             2         -0.6464006644
+    5             2         -0.5118948582
+    6             2         -0.4647000400
+    7             2         -0.4165620730
+    8             2         -0.2806317827
+    9             0         -0.0372533935
+   10             0          0.0838619372
+   11             0          0.1481782630
+   12             0          0.2093589113
+   13             0          0.4540321483
+   14             0          0.4747001646
+   15             0          0.5656433795
+   16             0          0.6120360864
+   17             0          0.6364322553
+   18             0          0.6798635321
+   19             0          0.9054122866
+   20             0          1.0118434237
+   21             0          1.1212509142
+   22             0          1.1666003039
+   23             0          1.3048091888
+   24             0          1.4419692017
+   25             0          1.5571951283
+   26             0          1.6295160221
+   27             0          1.8323219160
+   28             0          1.8683770527
+   29             0          1.9218633308
+   30             0          2.0888769867
+   31             0          2.5147072055
+   32             0          2.5868278901
+   33             0          2.6249772183
+   34             0          2.7030789013
+   35             0          2.9356763927
+   36             0          3.1385433612
+   37             0          3.4224166162
+   38             0          3.5811203565
+------------------------------------------------------
+
+Timings
+One-electron integrals:            0.012 s
+AO ERI build:                      0.063 s
+Molecular grid:                    0.035 s
+AO grid preparation:               0.127 s
+Initial guess:                     0.001 s
+Coulomb construction:              0.002 s
+Hybrid J/K construction:           0.013 s
+AO evaluation on grid:             0.000 s
+Density integration:               0.155 s
+Functional evaluation:             0.271 s
+XC matrix construction:            0.139 s
+Fock diagonalization:              0.003 s
+Complete SCF phase:                0.587 s
+Whole RKS:                         0.828 s
+
+
+Electric dipole moment
+Atomic units:  x= -0.00000000  y= -0.00000000  z= -0.87537079
+Debye:         x=   -0.000000  y=   -0.000000  z=   -2.224970
+Magnitude:         2.224970 Debye
+Total TS polarizability: 27.649528 a0^3   4.097237 Ang^3
+TS atomic polarizabilities and C6 coefficients
+ Atom  Element      alpha (a0^3)      C6 (Eh*a0^6)
+     1 C      10.869085      38.230451
+     2 O       5.492402      16.138449
+     3 H       5.644020      10.225050
+     4 H       5.644020      10.225050
+
+sTDA electronic-excitation spectrum
+Orbital source: Behemoth RKS PBE0 (this response model does not replace the orbital Hamiltonian)
+Spin = singlet, Emax = 25.000 eV, ax = 0.250, Gamma^J exponent (yJ) = 0.657, Gamma^K exponent (yK) = 1.540
+Damping parameterization = global-hybrid DFT; hardness = global Ghosh-Islam
+Active orbitals: 6 occupied, 21 virtual; CSFs: 33 energy + 41 perturbative = 74
+Charge checks: max|sum_A q_ia| = 6.937e-15, max|sum_A q_pp - 1| = 1.021e-14
+PT2 lowering: average 0.001200 eV, maximum 0.004396 eV; lowest A eigenvalue 4.113967 eV
+
+root       energy(eV)     lambda(nm)            f
+1            4.113967         301.37     0.000000
+2            8.333784         148.77     0.171667
+3            9.031082         137.29     0.006579
+4            9.728964         127.44     0.012272
+5           10.556802         117.44     0.000000
+6           11.104551         111.65     0.006811
+
+============================================================================
+                  Dominant sTDA root decompositions
+============================================================================
+
+Assignment guide
+----------------
+  Canonical orbital : MO number and HOMO/LUMO-relative name.
+  Chemical label    : bracketed Pipek-Mezey character assigned to the
+                      canonical orbital; it is not a localized-orbital
+                      transition.
+  Caution           : inspect the orbitals before making a definitive
+                      excited-state assignment.
+  Contributions     : up to 3 per root, each >= 1.00% after normalization.
+
+Root summaries and leading configurations
+----------------------------------------------------------------------------
+Root 1   sTDA    =     4.1140 eV      301.37 nm  f = 0.00000
+       8 HOMO       [O lonepair] ==>    9 LUMO       [C-O antibond]  99.89%
+
+Root 2   sTDA    =     8.3338 eV      148.77 nm  f = 0.17167
+       8 HOMO       [O lonepair] ==>   10 LUMO+1     [H atomic*]     99.76%
+
+Root 3   sTDA    =     9.0311 eV      137.29 nm  f = 0.00658
+       6 HOMO-2     [O lonepair] ==>    9 LUMO       [C-O antibond]  99.91%
+
+Root 4   sTDA    =     9.7290 eV      127.44 nm  f = 0.01227
+       8 HOMO       [O lonepair] ==>   11 LUMO+2     [H atomic*]     73.45%
+       7 HOMO-1     [O-C bond]   ==>    9 LUMO       [C-O antibond]  25.78%
+
+Root 5   sTDA    =    10.5568 eV      117.44 nm  f = 0.00000
+       5 HOMO-3     [C-H bond]   ==>    9 LUMO       [C-O antibond]  99.89%
+
+Root 6   sTDA    =    11.1046 eV      111.65 nm  f = 0.00681
+       8 HOMO       [O lonepair] ==>   12 LUMO+3     [C atomic*]     99.96%
+
+
+Wrote sTDA spectrum to stda_spectrum.dat
+
+Total run time (s): 1.001
+Total run time (days:hours:minutes:s): 0:00:00:01.001

@@ -1075,7 +1075,7 @@ fn energy_history_window(
 
 /// `mm:ss`, or `h:mm:ss` past an hour -- plain enough to read at a glance
 /// while deciding whether a long run is still alive.
-pub(super) fn format_elapsed(elapsed: Duration) -> String {
+pub fn format_elapsed(elapsed: Duration) -> String {
     let total_secs = elapsed.as_secs();
     let (hours, rem) = (total_secs / 3600, total_secs % 3600);
     let (minutes, seconds) = (rem / 60, rem % 60);
@@ -1086,7 +1086,7 @@ pub(super) fn format_elapsed(elapsed: Duration) -> String {
     }
 }
 
-pub(super) fn write_xyz_string(atoms: &[String], pos: &[Vec3]) -> String {
+pub fn write_xyz_string(atoms: &[String], pos: &[Vec3]) -> String {
     let mut out = format!("{}\n\n", atoms.len());
     for (symbol, p) in atoms.iter().zip(pos) {
         out.push_str(&format!(
@@ -1137,17 +1137,17 @@ pub fn resolve_program_executable(
 /// Directory that holds xTB working directories. Deliberately not derived
 /// from `CARGO_MANIFEST_DIR` (a compile-time, machine-specific path) --
 /// `std::env::temp_dir()` works for any installed build, on any machine.
-pub(super) fn xtb_scratch_dir() -> PathBuf {
+pub fn xtb_scratch_dir() -> PathBuf {
     std::env::temp_dir().join("beavyr_xtb")
 }
 
 /// Deletes a finished run directory. Failures are ignored: leaving scratch
 /// files behind is untidy but never a reason to fail the user's operation.
-pub(super) fn discard_xtb_run_dir(dir: &Path) {
+pub fn discard_xtb_run_dir(dir: &Path) {
     let _ = fs::remove_dir_all(dir);
 }
 
-pub(super) fn create_xtb_run_dir(base_dir: &Path) -> Result<PathBuf, String> {
+pub fn create_xtb_run_dir(base_dir: &Path) -> Result<PathBuf, String> {
     fs::create_dir_all(base_dir).map_err(|e| format!("Failed to create xTB directory: {e}"))?;
     for _ in 0..128 {
         let stamp = SystemTime::now()

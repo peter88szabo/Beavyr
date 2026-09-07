@@ -52,6 +52,12 @@ pub struct Excitation {
     pub weight: f64,
     /// The signed CI coefficient, when the output prints one.
     pub coefficient: Option<f64>,
+    /// The orbital's own name, when the program prints one: Behemoth gives
+    /// each MO its HOMO/LUMO-relative name and a bracketed Pipek-Mezey
+    /// character, as `HOMO-1 [O-C bond]`. ORCA prints neither, so these stay
+    /// `None` there.
+    pub from_label: Option<String>,
+    pub to_label: Option<String>,
 }
 
 impl Excitation {
@@ -71,6 +77,23 @@ impl Excitation {
     /// The contribution as a percentage, which is how weights are quoted.
     pub fn percent(&self) -> f64 {
         self.weight * 100.0
+    }
+
+    /// The orbital pair with whatever names the program gave them, falling
+    /// back to `label()` when it gave none. This is the form worth reading:
+    /// `8 HOMO [O lonepair] --> 9 LUMO [C-O antibond]` says what the
+    /// transition is, where `8 --> 9` only says where it is.
+    pub fn described(&self) -> String {
+        match (&self.from_label, &self.to_label) {
+            (Some(from), Some(to)) => format!(
+                "{}{} {from} --> {}{} {to}",
+                self.from_spin.suffix(),
+                self.from_orbital,
+                self.to_spin.suffix(),
+                self.to_orbital
+            ),
+            _ => self.label(),
+        }
     }
 }
 
@@ -196,6 +219,8 @@ mod tests {
             to_spin: Spin::Beta,
             weight,
             coefficient: None,
+            from_label: None,
+            to_label: None,
         }
     }
 
@@ -207,6 +232,27 @@ mod tests {
     #[test]
     fn an_excitation_reads_the_way_the_output_prints_it() {
         assert_eq!(excitation(89, 90, 0.99).label(), "b89 --> b90");
+    }
+
+    /// With orbital names the description carries them; without, it falls
+    /// back to the bare indices rather than printing an empty bracket.
+    #[test]
+    fn a_named_orbital_pair_describes_itself_and_a_bare_one_does_not() {
+        let mut e = excitation(8, 9, 0.9987);
+        e.from_spin = Spin::Unspecified;
+        e.to_spin = Spin::Unspecified;
+        assert_eq!(e.described(), "8 --> 9");
+
+        e.from_label = Some("HOMO [O lonepair]".to_string());
+        e.to_label = Some("LUMO [C-O antibond]".to_string());
+        assert_eq!(
+            e.described(),
+            "8 HOMO [O lonepair] --> 9 LUMO [C-O antibond]"
+        );
+
+        // One name without the other is not half a description.
+        e.to_label = None;
+        assert_eq!(e.described(), "8 --> 9");
     }
 
     #[test]
