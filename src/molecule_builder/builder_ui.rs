@@ -462,6 +462,10 @@ pub struct ZMatrixBuilderState {
     /// the dihedral reference. An angle without a stated reference is
     /// meaningless, which is why the references are picked rather than guessed.
     pub add_atom_active: bool,
+    /// When true the tool needs only the atom to bond to: Beavyr works out the
+    /// distance, angle and dihedral from the host's own geometry and what its
+    /// valence still has room for.
+    pub add_atom_auto: bool,
     /// The references collected so far, in order.
     pub add_atom_picks: Vec<usize>,
     /// What the tool wants next, or why a pick was refused.
@@ -552,6 +556,7 @@ impl Default for ZMatrixBuilderState {
             zmat: Vec::new(),
             last_click: None,
             add_atom_active: false,
+            add_atom_auto: false,
             add_atom_picks: Vec::new(),
             add_atom_status: None,
             new_symbol: "H".to_string(),
@@ -1308,6 +1313,162 @@ pub fn add_atom_picks_required(existing_atoms: usize) -> usize {
     existing_atoms.min(3)
 }
 
+/// Chemistry-aware placement: where a new `symbol` should go on `host`, as
+/// internal coordinates relative to the Z-matrix's own reference chain.
+///
+/// Two regimes, and the split matters. With two or more neighbours already
+/// present, their arrangement determines the remaining direction exactly --
+/// the fourth vertex of a tetrahedron, the third of a trigonal centre -- so
+/// the geometry is measured, not assumed. With one neighbour or none there is
+/// nothing to measure, and the angle comes from VSEPR applied to what the
+/// host's valence still has room for.
+///
+/// Returns `(bond_len, angle_deg, dihedral_deg)`.
+fn auto_placement(
+    zmat: &[ZAtom],
+    coords: &[Vec3],
+    host: usize,
+    symbol: &str,
+    bond_order: BondOrder,
+    angle_ref: Option<usize>,
+    dihedral_ref: Option<usize>,
+) -> (f64, f64, f64) {
+    let host_symbol = zmat[host].symbol.as_str();
+    let bond_len = bond_length_for(
+        symbol,
+        host_symbol,
+        bond_order,
+        covalent_radius_angstrom(symbol),
+        covalent_radius_angstrom(host_symbol),
+    );
+
+    let neighbors = attach::host_bonded_neighbors(zmat, coords, host, &[]);
+    let neighbor_positions: Vec<Vec3> = neighbors
+        .iter()
+        .filter_map(|&i| coords.get(i).copied())
+        .collect();
+    let center = coords[host];
+
+    // The direction that completes the geometry already there, when there is
+    // enough of it to be definite.
+    let measured = attach::ideal_direction_from_neighbors(center, &neighbor_positions).or_else(|| {
+        // A single neighbour is only definite when the bond is short enough to
+        // be a genuine multiple bond, which forces the centre linear.
+        let (&only, &only_index) = match (neighbor_positions.first(), neighbors.first()) {
+            (Some(p), Some(i)) => (p, i),
+            _ => return None,
+        };
+        let single = covalent_radius_angstrom(host_symbol)
+            + covalent_radius_angstrom(&zmat.get(only_index)?.symbol);
+        (neighbor_positions.len() == 1)
+            .then(|| attach::linear_direction_for_multiple_bond(center, only, single))
+            .flatten()
+    });
+
+    if let (Some(direction), Some(a), Some(d)) = (measured, angle_ref, dihedral_ref) {
+        if let (Some(&pa), Some(&pd)) = (coords.get(a), coords.get(d)) {
+            let (angle, dihedral) = attach::internal_from_direction(center, pa, pd, direction);
+            return (bond_len, angle, dihedral);
+        }
+    }
+
+    // Nothing to measure: VSEPR on the sigma-bond count this atom will have
+    // once the new bond is made.
+    let sigma_after = neighbors.len() + 1;
+    let angle = crate::bond_order::ideal_bond_angle_deg(host_symbol, sigma_after);
+    // Anti to the reference chain, which is the staggered arrangement and the
+    // one least likely to collide with what is already there.
+    (bond_len, angle, 180.0)
+}
+
+/// Adds an atom to `host`, choosing the distance, angle and dihedral from the
+/// host's geometry and remaining valence.
+fn commit_add_atom_auto(
+    zmat_state: &mut ZMatrixBuilderState,
+    mol: &mut Molecule,
+    settings: &mut MolSettings,
+) {
+    let Some(&host) = zmat_state.add_atom_picks.first() else {
+        zmat_state.add_atom_status = Some("Pick the atom to bond to.".to_string());
+        return;
+    };
+    if !zmat_matches_molecule(zmat_state, mol) {
+        return;
+    }
+    let symbol = zmat_state.new_symbol.trim().to_string();
+    if symbol.is_empty() {
+        zmat_state.last_error = Some("Atom symbol cannot be empty.".to_string());
+        return;
+    }
+    if host >= mol.atoms.len() {
+        zmat_state.add_atom_status = Some("That atom no longer exists.".to_string());
+        return;
+    }
+
+    // Refuse a bond the host has no valence for: that is the "chemically
+    // aware" part doing its job, and it is more useful said than silently
+    // ignored.
+    let totals = crate::bond_order::total_bond_orders(mol);
+    let current = totals.get(host).copied().unwrap_or(0.0);
+    if crate::bond_order::room_for_another_bond(&mol.atoms[host], current).is_none()
+        && crate::bond_order::common_valences(&mol.atoms[host]).is_some()
+    {
+        zmat_state.add_atom_status = Some(format!(
+            "{}{} already has a full valence ({current:.1}). Remove something first, \
+             or use the reference-picking Add Atom.",
+            mol.atoms[host],
+            host + 1
+        ));
+        return;
+    }
+
+    let (angle_ref, dihedral_ref) = attach::host_reference_chain(&zmat_state.zmat, host);
+    let coords = zmat2xyz::zmat_to_xyz(&zmat_state.zmat);
+    let (bond_len, angle_deg, dihedral_deg) = auto_placement(
+        &zmat_state.zmat,
+        &coords,
+        host,
+        &symbol,
+        zmat_state.new_bond_order,
+        angle_ref,
+        dihedral_ref,
+    );
+
+    zmat_state.zmat.push(ZAtom {
+        symbol,
+        bond_ref: Some(host + 1),
+        bond_len,
+        angle_ref: angle_ref.map(|v| v + 1),
+        angle_deg,
+        dihedral_ref: dihedral_ref.map(|v| v + 1),
+        dihedral_deg,
+    });
+
+    let coords = zmat2xyz::zmat_to_xyz(&zmat_state.zmat);
+    if coords.iter().any(|p| !p.is_finite()) {
+        zmat_state.zmat.pop();
+        zmat_state.add_atom_status =
+            Some("That placement gave a non-finite coordinate and was discarded.".to_string());
+        return;
+    }
+
+    mol.atoms = zmat_state
+        .zmat
+        .iter()
+        .map(|atom| atom.symbol.clone())
+        .collect();
+    mol.pos = coords;
+    mol.recompute_bonds(2.0, 3.0);
+    settings.geometry_dirty = true;
+    settings.bond_topology_dirty = true;
+    zmat_state.edit_refresh = true;
+    zmat_state.last_error = None;
+    zmat_state.add_atom_active = false;
+    zmat_state.add_atom_auto = false;
+    zmat_state.add_atom_picks.clear();
+    zmat_state.add_atom_status = None;
+}
+
 /// Adds one click to the armed Add Atom tool's reference list.
 ///
 /// Background clicks and repeats are refused rather than accepted, because a
@@ -1317,7 +1478,11 @@ pub fn collect_add_atom_pick(
     atoms: &[String],
     hit: Option<usize>,
 ) {
-    let needed = add_atom_picks_required(atoms.len());
+    let needed = if zmat_state.add_atom_auto {
+        1
+    } else {
+        add_atom_picks_required(atoms.len())
+    };
     let Some(index) = hit.filter(|&i| i < atoms.len()) else {
         zmat_state.add_atom_status =
             Some("That click missed every atom. Pick an atom.".to_string());
@@ -2370,13 +2535,39 @@ pub fn builder_ui_contents(
                         // whatever happened to be selected. An angle and a
                         // dihedral only mean something against stated
                         // reference atoms, so those are picked, not guessed.
-                        let label = if zmat_state.add_atom_active {
-                            "Cancel picking"
-                        } else {
-                            "Add Atom"
-                        };
-                        if ui.button(label).clicked() {
-                            zmat_state.add_atom_active = !zmat_state.add_atom_active;
+                        let explicit_armed =
+                            zmat_state.add_atom_active && !zmat_state.add_atom_auto;
+                        let auto_armed = zmat_state.add_atom_active && zmat_state.add_atom_auto;
+
+                        let label = if explicit_armed { "Cancel" } else { "Add Atom" };
+                        if ui
+                            .button(label)
+                            .on_hover_text(
+                                "Pick the bond, angle and dihedral reference atoms yourself; \
+                                 the values set above are used exactly as given.",
+                            )
+                            .clicked()
+                        {
+                            zmat_state.add_atom_active = !explicit_armed;
+                            zmat_state.add_atom_auto = false;
+                            zmat_state.add_atom_picks.clear();
+                            zmat_state.add_atom_status = None;
+                        }
+
+                        let label = if auto_armed { "Cancel" } else { "Add Atom (auto)" };
+                        if ui
+                            .button(label)
+                            .on_hover_text(
+                                "Pick only the atom to bond to. Beavyr sets the distance from \
+                                 the covalent radii and the angle from the host's own geometry \
+                                 -- completing a tetrahedron or a trigonal centre where one is \
+                                 there to complete, and from VSEPR on the remaining valence \
+                                 where it is not.",
+                            )
+                            .clicked()
+                        {
+                            zmat_state.add_atom_active = !auto_armed;
+                            zmat_state.add_atom_auto = !auto_armed;
                             zmat_state.add_atom_picks.clear();
                             zmat_state.add_atom_status = None;
                         }
@@ -2399,9 +2590,19 @@ pub fn builder_ui_contents(
                 });
 
                 if zmat_state.add_atom_active {
-                    let needed = add_atom_picks_required(zmat_state.zmat.len());
+                    // The automatic mode needs one reference only; that is the
+                    // whole difference between the two buttons.
+                    let needed = if zmat_state.add_atom_auto {
+                        1
+                    } else {
+                        add_atom_picks_required(zmat_state.zmat.len())
+                    };
                     let picked = zmat_state.add_atom_picks.len();
-                    ui.weak(add_atom_prompt(picked, needed));
+                    if zmat_state.add_atom_auto {
+                        ui.weak("Pick the atom to bond to \u{2014} the rest is worked out.");
+                    } else {
+                        ui.weak(add_atom_prompt(picked, needed));
+                    }
                     let roles = ["bond", "angle", "dihedral"];
                     ui.monospace(
                         zmat_state
@@ -2424,7 +2625,11 @@ pub fn builder_ui_contents(
                     // The last pick is the last thing the user has to do: the
                     // atom appears as soon as its placement is fully stated.
                     if picked >= needed && needed > 0 {
-                        commit_add_atom_with_refs(&mut zmat_state, &mut mol, &mut settings);
+                        if zmat_state.add_atom_auto {
+                            commit_add_atom_auto(&mut zmat_state, &mut mol, &mut settings);
+                        } else {
+                            commit_add_atom_with_refs(&mut zmat_state, &mut mol, &mut settings);
+                        }
                     }
                 }
 
@@ -4176,6 +4381,130 @@ mod convention_probe {
 #[cfg(test)]
 mod editor_flow_tests {
     use super::*;
+
+    /// Auto mode completes the geometry that is already there: a methyl's
+    /// carbon has three neighbours, so the fourth bond goes to the remaining
+    /// tetrahedral vertex -- roughly 109.5 degrees from each of them.
+    #[test]
+    fn auto_completes_a_tetrahedral_centre() {
+        let (mut mol, mut zmat_state) = methyl_host();
+        let mut settings = MolSettings::default();
+        zmat_state.new_symbol = "H".to_string();
+        zmat_state.add_atom_active = true;
+        zmat_state.add_atom_auto = true;
+        collect_add_atom_pick(&mut zmat_state, &mol.atoms, Some(0));
+        commit_add_atom_auto(&mut zmat_state, &mut mol, &mut settings);
+
+        assert!(
+            zmat_state.add_atom_status.is_none(),
+            "refused: {:?}",
+            zmat_state.add_atom_status
+        );
+        assert_eq!(mol.atoms.len(), 5, "methane");
+        let carbon = mol.pos[0];
+        let added = *mol.pos.last().unwrap();
+        for h in 1..4 {
+            let angle = (mol.pos[h] - carbon)
+                .normalize()
+                .dot((added - carbon).normalize())
+                .clamp(-1.0, 1.0)
+                .acos()
+                .to_degrees();
+            assert!(
+                (angle - 109.47).abs() < 2.0,
+                "H{h} to the new atom is {angle:.1} deg, expected tetrahedral"
+            );
+        }
+    }
+
+    /// Auto mode needs one pick, not three.
+    #[test]
+    fn auto_mode_commits_from_a_single_pick() {
+        let (mol, mut zmat_state) = methyl_host();
+        zmat_state.add_atom_active = true;
+        zmat_state.add_atom_auto = true;
+        collect_add_atom_pick(&mut zmat_state, &mol.atoms, Some(0));
+        collect_add_atom_pick(&mut zmat_state, &mol.atoms, Some(1));
+        assert_eq!(
+            zmat_state.add_atom_picks,
+            vec![0],
+            "auto mode takes one reference only"
+        );
+    }
+
+    /// The chemistry-aware part: a carbon that already has four bonds has no
+    /// room, and saying so is more useful than placing a fifth.
+    #[test]
+    fn auto_refuses_an_atom_with_no_valence_left() {
+        let (mut mol, mut zmat_state) = methyl_host();
+        let mut settings = MolSettings::default();
+        // Complete the methane first.
+        zmat_state.new_symbol = "H".to_string();
+        zmat_state.add_atom_active = true;
+        zmat_state.add_atom_auto = true;
+        collect_add_atom_pick(&mut zmat_state, &mol.atoms, Some(0));
+        commit_add_atom_auto(&mut zmat_state, &mut mol, &mut settings);
+        assert_eq!(mol.atoms.len(), 5);
+
+        // Now the carbon is full.
+        zmat_state.add_atom_active = true;
+        zmat_state.add_atom_auto = true;
+        collect_add_atom_pick(&mut zmat_state, &mol.atoms, Some(0));
+        commit_add_atom_auto(&mut zmat_state, &mut mol, &mut settings);
+
+        assert_eq!(mol.atoms.len(), 5, "no fifth bond was made");
+        let status = zmat_state.add_atom_status.expect("a refusal message");
+        assert!(status.contains("full valence"), "{status}");
+    }
+
+    /// A hydrogen already bonded once is monovalent and must be refused too.
+    #[test]
+    fn auto_refuses_a_bonded_hydrogen() {
+        let (mut mol, mut zmat_state) = methyl_host();
+        let mut settings = MolSettings::default();
+        zmat_state.new_symbol = "C".to_string();
+        zmat_state.add_atom_active = true;
+        zmat_state.add_atom_auto = true;
+        // Atom 1 is one of the methyl hydrogens.
+        collect_add_atom_pick(&mut zmat_state, &mol.atoms, Some(1));
+        commit_add_atom_auto(&mut zmat_state, &mut mol, &mut settings);
+        assert_eq!(mol.atoms.len(), 4, "nothing was added to a full hydrogen");
+        assert!(zmat_state.add_atom_status.is_some());
+    }
+
+    /// The bond length comes from the covalent radii, not from the panel.
+    #[test]
+    fn auto_sets_the_bond_length_from_the_covalent_radii() {
+        let (mut mol, mut zmat_state) = methyl_host();
+        let mut settings = MolSettings::default();
+        zmat_state.new_symbol = "Cl".to_string();
+        zmat_state.add_atom_active = true;
+        zmat_state.add_atom_auto = true;
+        collect_add_atom_pick(&mut zmat_state, &mol.atoms, Some(0));
+        commit_add_atom_auto(&mut zmat_state, &mut mol, &mut settings);
+
+        let expected = (covalent_radius_angstrom("Cl") + covalent_radius_angstrom("C")) as f64;
+        let placed = zmat_state.zmat.last().unwrap().bond_len;
+        assert!(
+            (placed - expected).abs() < 0.2,
+            "C-Cl came out {placed:.3} A against a radius sum of {expected:.3}"
+        );
+    }
+
+    /// Committing in auto mode disarms both flags, so the next press starts
+    /// from a known state.
+    #[test]
+    fn auto_mode_disarms_itself() {
+        let (mut mol, mut zmat_state) = methyl_host();
+        let mut settings = MolSettings::default();
+        zmat_state.add_atom_active = true;
+        zmat_state.add_atom_auto = true;
+        collect_add_atom_pick(&mut zmat_state, &mol.atoms, Some(0));
+        commit_add_atom_auto(&mut zmat_state, &mut mol, &mut settings);
+        assert!(!zmat_state.add_atom_active);
+        assert!(!zmat_state.add_atom_auto);
+        assert!(zmat_state.add_atom_picks.is_empty());
+    }
 
     /// Three atoms means three references; fewer atoms cannot support them.
     #[test]

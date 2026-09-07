@@ -134,6 +134,56 @@ pub fn common_valences(symbol: &str) -> Option<&'static [f64]> {
     })
 }
 
+/// The bond angle an atom of this element adopts once it has `sigma_bonds`
+/// sigma bonds in total, in degrees.
+///
+/// VSEPR, reduced to the cases that arise when completing a partly-built
+/// centre: the steric number is the sigma-bond count plus the lone pairs the
+/// element carries, and the angle follows from that. Used only when geometry
+/// cannot settle the direction on its own -- with two or more neighbours
+/// already present, the existing arrangement determines where the next bond
+/// goes far more reliably than a table does.
+pub fn ideal_bond_angle_deg(symbol: &str, sigma_bonds: usize) -> f64 {
+    const LINEAR: f64 = 180.0;
+    const TRIGONAL: f64 = 120.0;
+    const TETRAHEDRAL: f64 = 109.471;
+
+    match symbol {
+        // No lone pairs: the sigma bonds alone set the geometry.
+        "C" | "Si" | "B" | "Al" => match sigma_bonds {
+            0 | 1 | 2 => LINEAR,
+            3 => TRIGONAL,
+            _ => TETRAHEDRAL,
+        },
+        // One lone pair on a trivalent centre: pyramidal, slightly tighter
+        // than tetrahedral.
+        "N" | "P" => match sigma_bonds {
+            0 | 1 | 2 => TRIGONAL,
+            3 => 107.0,
+            _ => TETRAHEDRAL,
+        },
+        // Two lone pairs: the familiar bent geometry of water and ethers.
+        "O" | "S" | "Se" => match sigma_bonds {
+            0 | 1 | 2 => 104.5,
+            _ => TETRAHEDRAL,
+        },
+        // Everything else, including a hydrogen or halogen that should not be
+        // gaining a second bond at all: tetrahedral is the least surprising.
+        _ => TETRAHEDRAL,
+    }
+}
+
+/// Whether this element has room for another bond, given what it already has.
+///
+/// `Some(deficit)` when it does, rounded to whole bonds; `None` when the
+/// element has no rule or is already at its highest common valence.
+pub fn room_for_another_bond(symbol: &str, current_total: f64) -> Option<f64> {
+    let targets = common_valences(symbol)?;
+    let highest = targets[targets.len() - 1];
+    let deficit = highest - current_total;
+    (deficit >= 1.0 - VALENCE_TOLERANCE).then_some(deficit)
+}
+
 /// How far a summed bond order may sit from a common valence and still count
 /// as that valence.
 ///
@@ -323,6 +373,39 @@ mod tests {
     #[test]
     fn an_isolated_atom_is_not_reported() {
         assert_eq!(classify_valence("C", 0.0).0, ValenceVerdict::Satisfied);
+    }
+
+    /// The angles a chemist would draw: methane tetrahedral, ethylene
+    /// trigonal, acetylene linear, water bent, ammonia pyramidal.
+    #[test]
+    fn the_ideal_angles_follow_vsepr() {
+        assert!((ideal_bond_angle_deg("C", 4) - 109.471).abs() < 1e-3, "methane");
+        assert_eq!(ideal_bond_angle_deg("C", 3), 120.0, "ethylene");
+        assert_eq!(ideal_bond_angle_deg("C", 2), 180.0, "acetylene");
+        assert_eq!(ideal_bond_angle_deg("O", 2), 104.5, "water");
+        assert_eq!(ideal_bond_angle_deg("N", 3), 107.0, "ammonia");
+        assert_eq!(ideal_bond_angle_deg("B", 3), 120.0, "borane, trigonal planar");
+    }
+
+    /// A completed centre has no room; a partly built one does.
+    #[test]
+    fn room_is_reported_only_where_a_bond_can_go() {
+        assert!(room_for_another_bond("C", 4.0).is_none(), "methane carbon is full");
+        assert!(room_for_another_bond("C", 3.0).is_some(), "a methyl radical has room");
+        assert!(room_for_another_bond("H", 1.0).is_none(), "hydrogen is monovalent");
+        assert!(room_for_another_bond("H", 0.0).is_some(), "a bare H can bond once");
+        assert!(room_for_another_bond("O", 2.0).is_none(), "water oxygen is full");
+        // Hypervalent elements are judged against their highest state.
+        assert!(room_for_another_bond("S", 2.0).is_some(), "sulfide can reach 6");
+        assert!(room_for_another_bond("S", 6.0).is_none(), "a sulfone is full");
+        assert!(room_for_another_bond("Fe", 3.0).is_none(), "no rule, no claim");
+    }
+
+    /// Half a bond short is within tolerance, so not "room" for a whole one.
+    #[test]
+    fn a_fraction_of_a_bond_is_not_room_for_another() {
+        assert!(room_for_another_bond("C", 3.6).is_none());
+        assert!(room_for_another_bond("C", 3.4).is_some());
     }
 
     /// The tolerance must absorb one bond misread as aromatic rather than
