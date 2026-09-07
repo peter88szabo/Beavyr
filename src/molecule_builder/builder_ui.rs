@@ -2177,6 +2177,13 @@ pub fn builder_ui_contents(
                                     let mut pending_open_popup = false;
                                     let mut pending_action: Option<SelectionAction> = None;
                                     let mut pending_symbol_sync: Option<String> = None;
+                                    // Edits apply as soon as a field is left,
+                                    // rather than waiting for a button. Not on
+                                    // every keystroke: "1" on the way to "12",
+                                    // or an empty field on the way to a
+                                    // retyped number, is not a Z-matrix worth
+                                    // rebuilding the molecule from.
+                                    let mut apply_now = false;
 
                                     for (i, row) in zmat_state.edit_rows.iter_mut().enumerate() {
                                         let is_selected = selected_idx == Some(i);
@@ -2261,6 +2268,9 @@ pub fn builder_ui_contents(
                                         // a click that both focused the field
                                         // and toggled the highlight made the
                                         // element impossible to change.
+                                        if sym_resp.lost_focus() {
+                                            apply_now = true;
+                                        }
                                         if sym_resp.secondary_clicked() {
                                             pending_select = Some((i, row.symbol.clone()));
                                             pending_popup_pos = Some(sym_resp.rect.right_top());
@@ -2289,6 +2299,9 @@ pub fn builder_ui_contents(
                                             if bond_ref_resp.changed() {
                                                 row.bond_ref = row.bond_ref.trim().to_string();
                                             }
+                                            if bond_ref_resp.lost_focus() {
+                                                apply_now = true;
+                                            }
                                             if bond_ref_resp.has_focus() {
                                                 preview_indices = Some(build_preview_indices(
                                                     i,
@@ -2304,6 +2317,9 @@ pub fn builder_ui_contents(
                                             );
                                             if bond_len_resp.changed() {
                                                 row.bond_len = row.bond_len.trim().to_string();
+                                            }
+                                            if bond_len_resp.lost_focus() {
+                                                apply_now = true;
                                             }
                                             if bond_len_resp.has_focus() {
                                                 preview_indices = Some(build_preview_indices(
@@ -2325,6 +2341,9 @@ pub fn builder_ui_contents(
                                             if angle_ref_resp.changed() {
                                                 row.angle_ref = row.angle_ref.trim().to_string();
                                             }
+                                            if angle_ref_resp.lost_focus() {
+                                                apply_now = true;
+                                            }
                                             if angle_ref_resp.has_focus() {
                                                 preview_indices = Some(build_preview_indices(
                                                     i,
@@ -2340,6 +2359,9 @@ pub fn builder_ui_contents(
                                             );
                                             if angle_deg_resp.changed() {
                                                 row.angle_deg = row.angle_deg.trim().to_string();
+                                            }
+                                            if angle_deg_resp.lost_focus() {
+                                                apply_now = true;
                                             }
                                             if angle_deg_resp.has_focus() {
                                                 preview_indices = Some(build_preview_indices(
@@ -2362,6 +2384,9 @@ pub fn builder_ui_contents(
                                                 row.dihedral_ref =
                                                     row.dihedral_ref.trim().to_string();
                                             }
+                                            if dihedral_ref_resp.lost_focus() {
+                                                apply_now = true;
+                                            }
                                             if dihedral_ref_resp.has_focus() {
                                                 preview_indices = Some(build_preview_indices(
                                                     i,
@@ -2378,6 +2403,9 @@ pub fn builder_ui_contents(
                                             if dihedral_deg_resp.changed() {
                                                 row.dihedral_deg =
                                                     row.dihedral_deg.trim().to_string();
+                                            }
+                                            if dihedral_deg_resp.lost_focus() {
+                                                apply_now = true;
                                             }
                                             if dihedral_deg_resp.has_focus() {
                                                 preview_indices = Some(build_preview_indices(
@@ -2420,18 +2448,19 @@ pub fn builder_ui_contents(
                                         // no lost focus.
                                         zmat_state.selected_symbol = Some(sym);
                                     }
+                                    apply_now
                                 });
                             grid_rect = Some(grid_resp.response.rect);
+                            // Applied out here, where `zmat_state` is no longer
+                            // borrowed by the row iteration.
+                            if grid_resp.inner {
+                                apply_zmat_edits(&mut zmat_state, &mut mol, &mut settings);
+                            }
                         });
                     if let Some(preview) = preview_indices {
                         zmat_state.edit_preview = preview;
                     } else if let Some(sel) = zmat_state.selected_index {
                         zmat_state.edit_preview = vec![sel];
-                    }
-                    if ui.button("Apply Changes").clicked() {
-                        apply_zmat_edits(&mut zmat_state, &mut mol, &mut settings);
-                        zmat_state.last_error = None;
-                        suppress_clear = true;
                     }
                     if let Some(idx) = zmat_state.selected_index {
                         if can_remove_zmat_index(&zmat_state.zmat, idx) {
@@ -4431,6 +4460,53 @@ mod convention_probe {
 #[cfg(test)]
 mod editor_flow_tests {
     use super::*;
+
+    /// Editing the element in a Z-matrix row and leaving the field must reach
+    /// the molecule, with no Apply button in between.
+    #[test]
+    fn an_edited_element_reaches_the_molecule_on_apply() {
+        let (mut mol, mut zmat_state) = methyl_host();
+        let mut settings = MolSettings::default();
+        // The rows the table edits are built from the Z-matrix.
+        ensure_zmat_edit_buffers(&mut zmat_state);
+        assert_eq!(zmat_state.edit_rows.len(), mol.atoms.len());
+
+        // Retype the first hydrogen as fluorine, as the table's text field
+        // would.
+        let hydrogen = mol.atoms.iter().position(|s| s == "H").unwrap();
+        zmat_state.edit_rows[hydrogen].symbol = "F".to_string();
+        apply_zmat_edits(&mut zmat_state, &mut mol, &mut settings);
+
+        assert!(
+            zmat_state.last_error.is_none(),
+            "apply reported: {:?}",
+            zmat_state.last_error
+        );
+        assert_eq!(mol.atoms[hydrogen], "F", "the molecule took the new element");
+        assert_eq!(zmat_state.zmat[hydrogen].symbol, "F");
+        assert!(mol.pos.iter().all(|p| p.is_finite()));
+    }
+
+    /// A nonsense value must not corrupt the structure: the edit is rejected
+    /// and the molecule left as it was.
+    #[test]
+    fn an_unparsable_field_is_rejected_without_corrupting_the_molecule() {
+        let (mut mol, mut zmat_state) = methyl_host();
+        let mut settings = MolSettings::default();
+        ensure_zmat_edit_buffers(&mut zmat_state);
+        let before = mol.pos.clone();
+
+        zmat_state.edit_rows[1].bond_len = "not a number".to_string();
+        apply_zmat_edits(&mut zmat_state, &mut mol, &mut settings);
+
+        assert!(
+            zmat_state.last_error.is_some(),
+            "an unparsable length should be reported"
+        );
+        for (got, want) in mol.pos.iter().zip(&before) {
+            assert!((*got - *want).length() < 1.0e-6, "the geometry is unchanged");
+        }
+    }
 
     /// Auto mode completes the geometry that is already there: a methyl's
     /// carbon has three neighbours, so the fourth bond goes to the remaining
