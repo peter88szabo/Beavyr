@@ -1288,16 +1288,7 @@ fn undo_last_fragment(
 /// it in the same frame -- which is why picking an atom stopped working as
 /// soon as the Z-matrix section was open, since the grid rect only exists
 /// while that section is drawn.
-fn click_clears_table_selection(
-    clicked: bool,
-    pointer_over_egui: bool,
-    pointer_pos: Option<egui::Pos2>,
-    grid: egui::Rect,
-) -> bool {
-    clicked
-        && pointer_over_egui
-        && pointer_pos.is_some_and(|p| !grid.contains(p))
-}
+
 
 /// Select an atom, or clear the selection with `None`.
 ///
@@ -2145,7 +2136,6 @@ pub fn builder_ui_contents(
                     zmat_state.edit_preview.clear();
                     let mut preview_indices: Option<Vec<usize>> = None;
                     let mut grid_rect: Option<egui::Rect> = None;
-                    let mut suppress_clear = false;
                     let col_idx = [20.0, 28.0, 28.0, 68.0, 28.0, 60.0, 28.0, 60.0];
                     let row_height = 22.0;
                     let max_height = row_height * 15.0;
@@ -2465,7 +2455,6 @@ pub fn builder_ui_contents(
                     if let Some(idx) = zmat_state.selected_index {
                         if can_remove_zmat_index(&zmat_state.zmat, idx) {
                             if ui.button("Remove Atom").clicked() {
-                                suppress_clear = true;
                                 zmat_state.last_remove_snapshot = Some(zmat_state.zmat.clone());
                                 remove_zmat_index(&mut zmat_state.zmat, idx);
                                 let coords = zmat2xyz::zmat_to_xyz(&zmat_state.zmat);
@@ -2493,7 +2482,6 @@ pub fn builder_ui_contents(
                     }
                     if zmat_state.redo_remove_visible {
                         if ui.button("Undo Remove Atom").clicked() {
-                            suppress_clear = true;
                             if let Some(prev) = zmat_state.last_remove_snapshot.take() {
                                 zmat_state.zmat = prev;
                                 let coords = zmat2xyz::zmat_to_xyz(&zmat_state.zmat);
@@ -2516,21 +2504,14 @@ pub fn builder_ui_contents(
                         ui.colored_label(egui::Color32::LIGHT_RED, err);
                     }
 
-                    if let Some(rect) = grid_rect {
-                        let over_egui = ctx.is_pointer_over_egui();
-                        let (clicked, pointer_pos) =
-                            ctx.input(|i| (i.pointer.any_click(), i.pointer.latest_pos()));
-                        if !zmat_state.remove_popup_open
-                            && !suppress_clear
-                            && click_clears_table_selection(clicked, over_egui, pointer_pos, rect)
-                        {
-                            zmat_state.selected_index = None;
-                            zmat_state.selected_symbol = None;
-                            zmat_state.edit_preview.clear();
-                            zmat_state.redo_remove_visible = false;
-                            zmat_state.last_error = None;
-                        }
-                    }
+                    // No "clicking outside the table clears the selection"
+                    // here any more. It fired for *every* click over the panel
+                    // that was not inside the grid -- including the click on
+                    // Add Fragment, Replace Atom or Add Atom -- and it runs
+                    // earlier in the frame than those buttons, so it destroyed
+                    // the selection the button was about to use. Deselecting
+                    // is the 3D background click's job, which the picker
+                    // already delivers as `ViewportClicked { hit: None }`.
                 }
 
                 ui.add_space(6.0);
@@ -4007,64 +3988,6 @@ mod selection_tests {
     
 }
 
-#[cfg(test)]
-mod table_selection_tests {
-    use super::*;
-
-    fn grid() -> egui::Rect {
-        egui::Rect::from_min_max(egui::pos2(100.0, 100.0), egui::pos2(400.0, 300.0))
-    }
-
-    /// The regression that broke picking: with the Z-matrix section open, a
-    /// click in the 3D view sits outside the grid rect, and the old rule
-    /// cleared the selection the viewport click had just made.
-    #[test]
-    fn a_click_in_the_3d_view_does_not_clear_the_selection() {
-        assert!(!click_clears_table_selection(
-            true,
-            false, // not over egui: this is the 3D view
-            Some(egui::pos2(700.0, 500.0)),
-            grid(),
-        ));
-    }
-
-    /// Clicking the panel away from the grid still deselects, which is what
-    /// makes the table behave like a list.
-    #[test]
-    fn a_click_on_the_panel_away_from_the_grid_clears() {
-        assert!(click_clears_table_selection(
-            true,
-            true,
-            Some(egui::pos2(420.0, 500.0)),
-            grid(),
-        ));
-    }
-
-    #[test]
-    fn a_click_inside_the_grid_is_left_to_the_rows_themselves() {
-        assert!(!click_clears_table_selection(
-            true,
-            true,
-            Some(egui::pos2(200.0, 200.0)),
-            grid(),
-        ));
-    }
-
-    #[test]
-    fn merely_hovering_clears_nothing() {
-        assert!(!click_clears_table_selection(
-            false,
-            true,
-            Some(egui::pos2(420.0, 500.0)),
-            grid(),
-        ));
-    }
-
-    #[test]
-    fn a_click_with_no_known_position_clears_nothing() {
-        assert!(!click_clears_table_selection(true, true, None, grid()));
-    }
-}
 
 #[cfg(test)]
 mod fragment_undo_tests {
@@ -4481,6 +4404,50 @@ mod convention_probe {
 #[cfg(test)]
 mod editor_flow_tests {
     use super::*;
+
+    /// The bug behind several rounds of "the button does nothing": a rule that
+    /// cleared the row selection on any click over the panel outside the
+    /// Z-matrix grid. It ran earlier in the frame than the Add Fragment,
+    /// Replace Atom and Add Atom buttons, so the click that pressed one of
+    /// them destroyed the selection it was about to use.
+    ///
+    /// Deselecting is the 3D background click's job and nothing else's.
+    #[test]
+    fn only_a_background_click_clears_the_selection() {
+        let atoms: Vec<String> = ["C", "H", "H", "H"].iter().map(|s| s.to_string()).collect();
+        let mut zmat_state = ZMatrixBuilderState::default();
+
+        set_selected_atom(&mut zmat_state, &atoms, Some(2));
+        assert_eq!(zmat_state.selected_index, Some(2));
+
+        // A click on an atom moves it; a click on nothing clears it.
+        set_selected_atom(&mut zmat_state, &atoms, Some(0));
+        assert_eq!(zmat_state.selected_index, Some(0));
+        set_selected_atom(&mut zmat_state, &atoms, None);
+        assert_eq!(zmat_state.selected_index, None);
+    }
+
+    /// A selection has to survive the panel work that happens between
+    /// choosing an atom and pressing a button on it -- an edit being applied
+    /// rebuilds every row, and used to be a chance to lose it.
+    #[test]
+    fn a_selection_survives_applying_an_edit() {
+        let (mut mol, mut zmat_state) = methyl_host();
+        let mut settings = MolSettings::default();
+        ensure_zmat_edit_buffers(&mut zmat_state);
+        set_selected_atom(&mut zmat_state, &mol.atoms, Some(0));
+
+        // Retype a bond length, as the table would, and let it apply.
+        zmat_state.edit_rows[1].bond_len = "1.10".to_string();
+        apply_zmat_edits(&mut zmat_state, &mut mol, &mut settings);
+        ensure_zmat_edit_buffers(&mut zmat_state);
+
+        assert_eq!(
+            zmat_state.selected_index,
+            Some(0),
+            "the selection must still be there for the next button press"
+        );
+    }
 
     /// The sequence the UI performs: an atom is selected by a left-click,
     /// then the button commits on it at once.
