@@ -83,8 +83,37 @@ pub fn eckart_reactionpath_transform(
     }
     let rmat = get_eckart_projector(mass_au, q_bohr, la)?;
 
+    // Page and McIver define the path tangent as the normalised mass-weighted
+    // gradient, Eq. (2), and the projector as P = R + v v^t, Eq. (D1). That
+    // second form is a projector only if v is orthogonal to the
+    // translation/rotation subspace R spans. The paper says it is: "the path
+    // tangent v is proportional to the energy gradient and therefore has no
+    // component corresponding to translation and rotation in the absence of
+    // external forces".
+    //
+    // That holds for an exact gradient. It does not hold for a computed one.
+    // ORCA's gradient for the 43-atom example in `examples/` carries a net
+    // force of 8.9% of its own norm and a substantial net torque -- ordinary
+    // residuals of a finite DFT integration grid -- which leaves the raw unit
+    // gradient with a 3.5% component inside R. Building P from it gives
+    // max|P^2 - P| = 4.2e-3: not a projector, and the seven modes it is meant
+    // to annihilate come out at 0.3-1.0 cm^-1 instead of zero.
+    //
+    // So the gradient is projected into the internal subspace before it is
+    // used as the tangent. This is the paper's own intent rather than a
+    // departure from it -- v is meant to be the path direction, and a net
+    // force or torque is not part of the path -- and it makes P idempotent by
+    // construction for any input.
+    let mut g_internal = vec![0.0_f64; ndim];
+    for i in 0..ndim {
+        let mut acc = grad_mw[i];
+        for j in 0..ndim {
+            acc -= rmat[(i, j)] * grad_mw[j];
+        }
+        g_internal[i] = acc;
+    }
     let mut proj_grad = Array2::<f64>::zeros((ndim, ndim));
-    let norm = grad_mw.iter().map(|v| v * v).sum::<f64>().sqrt();
+    let norm = g_internal.iter().map(|v| v * v).sum::<f64>().sqrt();
     if norm <= 0.0 {
         return Err(anyhow!(
             "gradient norm is zero; cannot project reaction path"
@@ -92,7 +121,7 @@ pub fn eckart_reactionpath_transform(
     }
     let mut g = vec![0.0_f64; ndim];
     for i in 0..ndim {
-        g[i] = grad_mw[i] / norm;
+        g[i] = g_internal[i] / norm;
     }
     for i in 0..ndim {
         for j in 0..ndim {

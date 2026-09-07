@@ -2683,6 +2683,52 @@ mod tests {
         assert!(r.standard_frequencies_cm1.is_none());
     }
 
+    /// The paper's requirement, made a test: Page and McIver state that the
+    /// six translations and rotations *and the path tangent* -- "all seven of
+    /// which have corresponding eigenvalues equal to zero" -- are annihilated
+    /// by K = (I-P)F(I-P), Eq. (35).
+    ///
+    /// So the seventh must vanish as cleanly as the six. It did not before the
+    /// tangent was orthogonalised against the translation/rotation subspace:
+    /// the seven came out at 0.3-1.0 cm^-1 against the six at 0.02-0.17,
+    /// because ORCA's gradient for this molecule carries a net force of 8.9%
+    /// of its own norm, leaving P non-idempotent by 4.2e-3.
+    #[test]
+    fn all_seven_projected_modes_annihilate_as_cleanly_as_six() {
+        let rp = rp_pair();
+        let plain = analyze_hess(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("examples")
+                .join("Exc_root_OnlyFreq_from_optimized.hess"),
+            EckartMode::VibRot,
+            None,
+        )
+        .unwrap();
+
+        let worst = |r: &FrequencyResult| {
+            r.zero_indices
+                .iter()
+                .map(|&i| r.frequencies_cm1[i].abs())
+                .fold(0.0_f64, f64::max)
+        };
+        let rp_worst = worst(&rp);
+        let plain_worst = worst(&plain);
+        assert_eq!(rp.zero_indices.len(), 7);
+        assert_eq!(plain.zero_indices.len(), 6);
+
+        // Diagonalisation noise on a 129x129 matrix, not a residual direction.
+        assert!(
+            rp_worst < 1.0,
+            "the reaction-path projection left {rp_worst:.3} cm^-1 behind"
+        );
+        // And no worse than the projection whose correctness is not in doubt.
+        assert!(
+            rp_worst < 4.0 * plain_worst.max(0.05),
+            "seven modes ({rp_worst:.3} cm^-1) should vanish as cleanly as six \
+             ({plain_worst:.3} cm^-1)"
+        );
+    }
+
     fn loaded_ts() -> FrequencyResult {
         analyze_hess(&example_hess_path(), EckartMode::VibRot, None)
             .expect("the example .hess must analyse")
