@@ -110,14 +110,17 @@ pub struct OptimizationSummary {
     pub converged: bool,
     pub cycles: Option<usize>,
     pub final_energy_hartree: Option<f64>,
+    /// The RMS gradient it finished at, in Eh/bohr.
+    pub rms_gradient: Option<f64>,
 }
 
 /// Reads the summary block Behemoth prints at the end of an optimization:
 ///
 /// ```text
 ///   converged : true
-///   cycles    : 3
-///   E(final)  :      -5.7687749333 Eh
+///   cycles    : 5
+///   E(final)  :      -5.7687748782 Eh
+///   RMS(g)    :       0.0000601941 Eh/bohr
 /// ```
 pub fn parse_summary(stdout: &str) -> OptimizationSummary {
     let field = |name: &str| -> Option<String> {
@@ -128,12 +131,143 @@ pub fn parse_summary(stdout: &str) -> OptimizationSummary {
             Some(value.trim().to_string())
         })
     };
+    let number = |name: &str| -> Option<f64> {
+        field(name).and_then(|v| v.split_whitespace().next()?.parse().ok())
+    };
     OptimizationSummary {
         converged: field("converged").as_deref() == Some("true"),
         cycles: field("cycles").and_then(|v| v.parse().ok()),
-        final_energy_hartree: field("E(final)")
-            .and_then(|v| v.split_whitespace().next()?.parse().ok()),
+        final_energy_hartree: number("E(final)"),
+        rms_gradient: number("RMS(g)"),
     }
+}
+
+/// One row of Behemoth's optimization convergence table.
+///
+/// The five convergence measures are exactly the ones it tests against its
+/// thresholds, in the order it prints them, so a row can be compared straight
+/// against `ConvergenceThresholds` column by column.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct OptimizationStep {
+    pub step: usize,
+    pub energy_hartree: f64,
+    /// Energy change from the previous step, in kJ/mol as Behemoth prints it.
+    pub de_kj_mol: f64,
+    pub max_step: f64,
+    pub rms_step: f64,
+    pub max_grad: f64,
+    pub rms_grad: f64,
+}
+
+/// The convergence criteria the run was held to, in the same column order as
+/// an `OptimizationStep`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ConvergenceThresholds {
+    pub de_kj_mol: f64,
+    pub max_step: f64,
+    pub rms_step: f64,
+    pub max_grad: f64,
+    pub rms_grad: f64,
+}
+
+impl ConvergenceThresholds {
+    /// Whether each of a step's five measures is inside its threshold, in
+    /// column order. `dE` is compared on magnitude, since it is signed and a
+    /// descent prints it negative.
+    pub fn met_by(&self, step: &OptimizationStep) -> [bool; 5] {
+        [
+            step.de_kj_mol.abs() <= self.de_kj_mol,
+            step.max_step <= self.max_step,
+            step.rms_step <= self.rms_step,
+            step.max_grad <= self.max_grad,
+            step.rms_grad <= self.rms_grad,
+        ]
+    }
+}
+
+/// The column headings, for a table that wants to label itself without
+/// repeating the order in two places.
+pub const STEP_COLUMNS: [&str; 5] =
+    ["dE [kJ/mol]", "max step", "rms step", "max |g|", "rms |g|"];
+
+/// Reads the per-cycle convergence table:
+///
+/// ```text
+/// step               E[Eh]         dE[kJ/mol]    max_step    rms_step    max_grad    rms_grad
+///     1        -5.76633308          -9.521052    2.70e-02    1.68e-02    4.07e-02    1.98e-02
+///     2        -5.76858971          -5.924783    5.86e-02    3.30e-02    9.65e-03    5.59e-03
+/// ```
+///
+/// Rows are recognised by shape -- seven numbers, the first a bare integer --
+/// rather than by counting lines after the header, so the surrounding banner
+/// text can change without silently reading the wrong lines. A partial table
+/// from a cancelled run yields the rows it did print.
+pub fn parse_optimization_steps(stdout: &str) -> Vec<OptimizationStep> {
+    let mut steps = Vec::new();
+    for line in stdout.lines() {
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        if fields.len() != 7 {
+            continue;
+        }
+        // The step number is a bare integer; the header's "step" is not, which
+        // is what keeps the header itself out of the table.
+        let Ok(step) = fields[0].parse::<usize>() else {
+            continue;
+        };
+        let mut values = [0.0f64; 6];
+        let mut parsed = true;
+        for (slot, text) in values.iter_mut().zip(&fields[1..]) {
+            match text.parse::<f64>() {
+                Ok(value) => *slot = value,
+                Err(_) => {
+                    parsed = false;
+                    break;
+                }
+            }
+        }
+        if !parsed {
+            continue;
+        }
+        steps.push(OptimizationStep {
+            step,
+            energy_hartree: values[0],
+            de_kj_mol: values[1],
+            max_step: values[2],
+            rms_step: values[3],
+            max_grad: values[4],
+            rms_grad: values[5],
+        });
+    }
+    steps
+}
+
+/// Reads the thresholds line that sits above the table:
+///
+/// ```text
+/// Threshold Values:                 1.31e-02     4.00e-03    2.00e-03    3.00e-04    1.00e-04
+/// ```
+///
+/// Its five numbers are in the table's own column order -- dE, max step, rms
+/// step, max gradient, rms gradient -- so they line up with a row directly.
+pub fn parse_convergence_thresholds(stdout: &str) -> Option<ConvergenceThresholds> {
+    let line = stdout
+        .lines()
+        .find(|line| line.trim_start().starts_with("Threshold Values"))?;
+    let after_colon = line.split(':').nth(1)?;
+    let values: Vec<f64> = after_colon
+        .split_whitespace()
+        .filter_map(|token| token.parse().ok())
+        .collect();
+    if values.len() != 5 {
+        return None;
+    }
+    Some(ConvergenceThresholds {
+        de_kj_mol: values[0],
+        max_step: values[1],
+        rms_step: values[2],
+        max_grad: values[3],
+        rms_grad: values[4],
+    })
 }
 
 /// The per-cycle energies of an optimization, from the trajectory's comment
@@ -450,6 +584,119 @@ mod tests {
             &method,
         ));
         assert!(!args.iter().any(|a| a == "--dispersion"), "{args:?}");
+    }
+
+    /// The convergence table, from the captured log of a real run.
+    #[test]
+    fn the_convergence_table_is_read_row_by_row() {
+        let log = include_str!("../../tests/fixtures/behemoth_water_opt.log");
+        let steps = parse_optimization_steps(log);
+        assert_eq!(steps.len(), 3, "three cycles in the fixture");
+
+        assert_eq!(steps[0].step, 1);
+        assert!((steps[0].energy_hartree - -5.76866785).abs() < 1e-8);
+        assert!((steps[0].de_kj_mol - -0.573303).abs() < 1e-6);
+        assert!((steps[0].max_step - 1.49e-02).abs() < 1e-10);
+        assert!((steps[0].rms_step - 6.88e-03).abs() < 1e-10);
+        assert!((steps[0].max_grad - 8.81e-03).abs() < 1e-10);
+        assert!((steps[0].rms_grad - 3.83e-03).abs() < 1e-10);
+
+        // The last row is the converged one, and the summary's own numbers
+        // have to agree with it.
+        let last = steps.last().unwrap();
+        assert_eq!(last.step, 3);
+        assert!((last.rms_grad - 5.69e-06).abs() < 1e-10);
+        let summary = parse_summary(log);
+        assert_eq!(summary.cycles, Some(steps.len()));
+        assert!((summary.rms_gradient.unwrap() - 0.0000056858).abs() < 1e-10);
+    }
+
+    /// The header line contains the word "step", not a number, which is what
+    /// keeps it from being read as a row.
+    #[test]
+    fn the_table_header_is_not_read_as_a_step() {
+        let steps = parse_optimization_steps(
+            "step               E[Eh]         dE[kJ/mol]    max_step    rms_step    max_grad    rms_grad\n                 1        -5.76866785          -0.573303    1.49e-02    6.88e-03    8.81e-03    3.83e-03\n",
+        );
+        assert_eq!(steps.len(), 1);
+        assert_eq!(steps[0].step, 1);
+    }
+
+    /// A run that was cancelled or died mid-table still yields the cycles it
+    /// managed, so the summary can show how far it got.
+    #[test]
+    fn a_partial_table_yields_the_rows_it_printed() {
+        let steps = parse_optimization_steps(
+            "step               E[Eh]         dE[kJ/mol]    max_step    rms_step    max_grad    rms_grad\n                 1        -5.76866785          -0.573303    1.49e-02    6.88e-03    8.81e-03    3.83e-03\n                 2        -5.76877493   \n",
+        );
+        assert_eq!(steps.len(), 1, "the truncated row is not half-read");
+    }
+
+    #[test]
+    fn a_log_with_no_table_yields_no_steps() {
+        assert!(parse_optimization_steps("nothing here\n").is_empty());
+        assert!(parse_optimization_steps("").is_empty());
+    }
+
+    #[test]
+    fn the_thresholds_are_read_in_the_tables_column_order() {
+        let log = include_str!("../../tests/fixtures/behemoth_water_opt.log");
+        let t = parse_convergence_thresholds(log).expect("a thresholds line");
+        assert!((t.de_kj_mol - 1.31e-02).abs() < 1e-10);
+        assert!((t.max_step - 4.00e-03).abs() < 1e-10);
+        assert!((t.rms_step - 2.00e-03).abs() < 1e-10);
+        assert!((t.max_grad - 3.00e-04).abs() < 1e-10);
+        assert!((t.rms_grad - 1.00e-04).abs() < 1e-10);
+    }
+
+    #[test]
+    fn a_log_with_no_thresholds_line_reports_none() {
+        assert!(parse_convergence_thresholds("no thresholds here").is_none());
+        // Five numbers are expected; a truncated line is not guessed at.
+        assert!(parse_convergence_thresholds("Threshold Values:  1.0  2.0").is_none());
+    }
+
+    /// The converged final step must satisfy every criterion, and an early one
+    /// must not -- otherwise the per-column marks in the summary window would
+    /// be meaningless.
+    #[test]
+    fn the_final_step_meets_every_threshold_and_the_first_does_not() {
+        let log = include_str!("../../tests/fixtures/behemoth_water_opt.log");
+        let steps = parse_optimization_steps(log);
+        let thresholds = parse_convergence_thresholds(log).unwrap();
+
+        assert_eq!(
+            thresholds.met_by(steps.last().unwrap()),
+            [true; 5],
+            "the run converged, so its last cycle is inside every threshold"
+        );
+        assert!(
+            thresholds.met_by(&steps[0]).iter().any(|met| !met),
+            "the first cycle cannot already be converged"
+        );
+    }
+
+    /// dE is signed -- a descent prints it negative -- so it is the magnitude
+    /// that is compared, not the value.
+    #[test]
+    fn a_large_energy_drop_is_not_counted_as_converged() {
+        let thresholds = ConvergenceThresholds {
+            de_kj_mol: 1.31e-02,
+            max_step: 4.00e-03,
+            rms_step: 2.00e-03,
+            max_grad: 3.00e-04,
+            rms_grad: 1.00e-04,
+        };
+        let step = OptimizationStep {
+            step: 1,
+            energy_hartree: -5.0,
+            de_kj_mol: -9.52,
+            max_step: 1.0e-03,
+            rms_step: 1.0e-03,
+            max_grad: 1.0e-04,
+            rms_grad: 1.0e-05,
+        };
+        assert_eq!(thresholds.met_by(&step)[0], false, "a 9.5 kJ/mol drop is not converged");
     }
 
     fn args_of(command: Command) -> Vec<String> {

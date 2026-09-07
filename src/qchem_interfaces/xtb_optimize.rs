@@ -48,6 +48,9 @@ pub struct XtbPanelState {
     /// than in `XtbOptimizationTask` because it is purely a UI toggle, not
     /// part of the run itself.
     pub energy_plot_open: bool,
+    /// Whether the optimization summary window is open. Like the plot flag,
+    /// a UI toggle rather than part of the run.
+    pub summary_open: bool,
     /// Valence warnings are only shown once the user has actually tried to
     /// optimize with the current charge/multiplicity -- not the instant the
     /// panel is drawn for whatever structure happens to be on screen, which
@@ -105,6 +108,7 @@ impl Default for XtbPanelState {
             charge: 0,
             multiplicity: 1,
             energy_plot_open: false,
+            summary_open: false,
             show_warnings: false,
         }
     }
@@ -125,6 +129,10 @@ pub struct XtbOptimizationOutput {
     pub trajectory_text: String,
     pub final_energy_hartree: Option<f64>,
     pub energy_history: Vec<EnergyHistoryPoint>,
+    /// The program's own stdout, read here rather than left on disk because a
+    /// successful run's scratch directory is discarded moments later. It is
+    /// what the summary window reads its convergence table from.
+    pub log: String,
 }
 
 /// A run that did not finish successfully. It still carries whatever energy
@@ -147,6 +155,12 @@ pub struct XtbOptimizationTask {
     /// Set once the task finishes, success or failure, for the panel to show.
     pub last_message: Option<String>,
     pub last_is_error: bool,
+    /// The finished run's stdout, its wall-clock duration and which program
+    /// produced it -- everything the summary window needs after the scratch
+    /// directory is gone.
+    pub last_log: Option<String>,
+    pub last_duration: Option<Duration>,
+    pub last_program: Option<QcProgram>,
     /// The finished run's per-iteration energies, success or failure alike,
     /// kept until the next run starts so the plot button stays available.
     pub last_energy_history: Vec<EnergyHistoryPoint>,
@@ -204,6 +218,11 @@ impl XtbOptimizationTask {
         let input_xyz = write_xyz_string(atoms, pos);
         // Owned, because the task outlives the caller's borrow.
         let method = method.clone();
+        // A new run invalidates the previous one's summary; leaving it would
+        // show a table belonging to a different structure.
+        self.last_program = Some(program);
+        self.last_log = None;
+        self.last_duration = None;
         let binary = binary.to_path_buf();
         let cancel = Arc::new(AtomicBool::new(false));
         let child_slot = Arc::new(Mutex::new(None));
@@ -269,6 +288,9 @@ pub fn poll_xtb_optimization(
     xtb_task.task = None;
     xtb_task.cancel = None;
     xtb_task.child = None;
+    // Read before `started_at` is cleared: this is the run's wall-clock time,
+    // which the summary reports.
+    xtb_task.last_duration = xtb_task.started_at.map(|t| t.elapsed());
     xtb_task.started_at = None;
     let run_dir = xtb_task.run_dir.take();
 
@@ -308,8 +330,28 @@ pub fn poll_xtb_optimization(
                         .final_energy_hartree
                         .map(|e| format!(", final energy {e:.6} Eh"))
                         .unwrap_or_default();
+                    // How many cycles it took and how long it ran, which is
+                    // the first thing asked of a finished optimization.
+                    let cycles = super::behemoth::parse_optimization_steps(&output.log).len();
+                    let cycle_text = if cycles > 0 {
+                        format!(
+                            ", {cycles} iteration{}",
+                            if cycles == 1 { "" } else { "s" }
+                        )
+                    } else {
+                        String::new()
+                    };
+                    let time_text = xtb_task
+                        .last_duration
+                        .map(|d| format!(", {} wall clock", format_elapsed(d)))
+                        .unwrap_or_default();
+                    let program = xtb_task
+                        .last_program
+                        .map(|p| p.label())
+                        .unwrap_or("The optimizer");
                     xtb_task.last_message = Some(format!(
-                        "xTB optimization succeeded ({frame_count} frames{energy_text}). \
+                        "{program} optimization succeeded ({frame_count} frames\
+                         {cycle_text}{energy_text}{time_text}). \
                          Open the Trajectory tool to watch or replay it."
                     ));
                     xtb_task.last_is_error = false;
@@ -321,6 +363,7 @@ pub fn poll_xtb_optimization(
                 }
             }
             xtb_task.last_energy_history = output.energy_history;
+            xtb_task.last_log = Some(output.log);
         }
         Err(failure) => {
             // A failed run's scratch directory is kept (not discarded) so
@@ -333,6 +376,12 @@ pub fn poll_xtb_optimization(
             // user can scrub to any attempted step and use it as a new
             // starting geometry for another try, exactly as they would with
             // a successful run's trajectory.
+            // A failed or cancelled run still printed however much of the
+            // convergence table it got through, and that is exactly what is
+            // worth looking at, so the summary gets it too.
+            if let Some(dir) = &run_dir {
+                xtb_task.last_log = fs::read_to_string(dir.join("xtb.stdout")).ok();
+            }
             let mut partial_note = String::new();
             if let Some(dir) = &run_dir {
                 if let Ok(text) = fs::read_to_string(dir.join("xtbopt.log")) {
@@ -557,23 +606,43 @@ pub fn xtb_optimization_panel(
         ui.horizontal(|ui| {
             let elapsed = task.elapsed().unwrap_or_default();
             ui.weak(format!("Running… {}", format_elapsed(elapsed)));
-            let progress = task
+            let log = task
                 .run_dir()
-                .and_then(|dir| std::fs::read_to_string(dir.join("xtb.stdout")).ok())
-                .and_then(|text| parse_xtb_progress(&text));
-            if let Some(progress) = progress {
-                let energy = progress
-                    .energy_hartree
-                    .map(|e| format!(", energy {e:.6} Eh"))
-                    .unwrap_or_default();
-                let gnorm = progress
-                    .gradient_norm
-                    .map(|g| format!(", gradient norm {g:.5} Eh/\u{03b1}"))
-                    .unwrap_or_default();
-                ui.weak(format!("— iteration {}{energy}{gnorm}", progress.iteration));
-            } else {
-                ui.weak("— starting…");
-            }
+                .and_then(|dir| std::fs::read_to_string(dir.join("xtb.stdout")).ok());
+            // Each program reports its progress in its own format, so each is
+            // read in its own way. Behemoth's is the convergence table it is
+            // part way through printing, which carries more than xTB's running
+            // line does: the energy change and both gradient measures.
+            let line = match (panel_state.program, log.as_deref()) {
+                (QcProgram::Behemoth, Some(log)) => {
+                    super::behemoth::parse_optimization_steps(log).last().map(|step| {
+                        format!(
+                            "\u{2014} iteration {}, energy {:.6} Eh, dE {:+.4} kJ/mol,                              gradient {:.2e} max / {:.2e} rms Eh/bohr",
+                            step.step,
+                            step.energy_hartree,
+                            step.de_kj_mol,
+                            step.max_grad,
+                            step.rms_grad
+                        )
+                    })
+                }
+                (QcProgram::Xtb, Some(log)) => parse_xtb_progress(log).map(|progress| {
+                    let energy = progress
+                        .energy_hartree
+                        .map(|e| format!(", energy {e:.6} Eh"))
+                        .unwrap_or_default();
+                    let gnorm = progress
+                        .gradient_norm
+                        .map(|g| format!(", gradient norm {g:.5} Eh/\u{03b1}"))
+                        .unwrap_or_default();
+                    format!("\u{2014} iteration {}{energy}{gnorm}", progress.iteration)
+                }),
+                _ => None,
+            };
+            match line {
+                Some(line) => ui.weak(line),
+                None => ui.weak("\u{2014} starting…"),
+            };
         });
     }
 
@@ -586,16 +655,36 @@ pub fn xtb_optimization_panel(
         ui.colored_label(color, message);
     }
 
-    if !task.last_energy_history.is_empty() {
-        let label = if panel_state.energy_plot_open {
-            "Hide Energy Plot"
-        } else {
-            "Show Energy Plot"
-        };
-        if ui.button(label).clicked() {
-            panel_state.energy_plot_open = !panel_state.energy_plot_open;
+    // The convergence table is Behemoth's: it prints one, and xTB does not,
+    // so the button only appears for a run that has one to show.
+    let summary = task
+        .last_log
+        .as_deref()
+        .filter(|_| task.last_program == Some(QcProgram::Behemoth))
+        .map(|log| OptimizationReport::from_log(log, task.last_duration));
+
+    ui.horizontal(|ui| {
+        if !task.last_energy_history.is_empty() {
+            let label = if panel_state.energy_plot_open {
+                "Hide Energy Plot"
+            } else {
+                "Show Energy Plot"
+            };
+            if ui.button(label).clicked() {
+                panel_state.energy_plot_open = !panel_state.energy_plot_open;
+            }
         }
-    }
+        if summary.as_ref().is_some_and(|r| r.has_content()) {
+            let label = if panel_state.summary_open {
+                "Hide Optimization Summary"
+            } else {
+                "Show Optimization Summary"
+            };
+            if ui.button(label).clicked() {
+                panel_state.summary_open = !panel_state.summary_open;
+            }
+        }
+    });
 
     let ctx = ui.ctx().clone();
     energy_history_window(
@@ -604,6 +693,176 @@ pub fn xtb_optimization_panel(
         &task.last_energy_history,
         task.last_is_error,
     );
+    if let Some(report) = &summary {
+        optimization_summary_window(&ctx, &mut panel_state.summary_open, report);
+    }
+}
+
+/// Hartree to kcal/mol, the same CODATA 2018-derived value as
+/// `normalmode::thermofuncs::AU_TO_KCAL`, which is private to that module.
+const HARTREE_TO_KCAL: f64 = 627.509_474_062_897_4;
+
+/// Everything the summary window shows, read out of one program log.
+///
+/// Gathered into a struct so the window is only drawing and the reading is
+/// testable: what converged, how many cycles it took, how long it ran, and the
+/// cycle-by-cycle energy, energy change and gradient behind that.
+pub struct OptimizationReport {
+    pub summary: super::behemoth::OptimizationSummary,
+    pub steps: Vec<super::behemoth::OptimizationStep>,
+    pub thresholds: Option<super::behemoth::ConvergenceThresholds>,
+    pub duration: Option<Duration>,
+}
+
+impl OptimizationReport {
+    pub fn from_log(log: &str, duration: Option<Duration>) -> Self {
+        OptimizationReport {
+            summary: super::behemoth::parse_summary(log),
+            steps: super::behemoth::parse_optimization_steps(log),
+            thresholds: super::behemoth::parse_convergence_thresholds(log),
+            duration,
+        }
+    }
+
+    /// Whether there is anything to show. A log with no cycles and no final
+    /// energy -- a run that died before it started optimizing -- would open an
+    /// empty window, so the button is not offered for one.
+    pub fn has_content(&self) -> bool {
+        !self.steps.is_empty() || self.summary.final_energy_hartree.is_some()
+    }
+
+    /// How many cycles it took, preferring the count in the table over the
+    /// summary's own figure: a cancelled run has rows but no summary.
+    pub fn cycles(&self) -> Option<usize> {
+        if !self.steps.is_empty() {
+            return Some(self.steps.len());
+        }
+        self.summary.cycles
+    }
+}
+
+/// The optimization summary: what it converged to, how long it took, and the
+/// cycle-by-cycle convergence table Behemoth prints -- energy, energy change
+/// and both gradient measures -- with each of the final cycle's five criteria
+/// marked against the threshold it had to meet.
+fn optimization_summary_window(
+    ctx: &egui::Context,
+    open: &mut bool,
+    report: &OptimizationReport,
+) {
+    if !*open {
+        return;
+    }
+    egui::Window::new("Optimization Summary")
+        .open(open)
+        .resizable(true)
+        .default_size([620.0, 420.0])
+        .show(ctx, |ui| {
+            let summary = &report.summary;
+            ui.horizontal(|ui| {
+                if summary.converged {
+                    ui.colored_label(egui::Color32::from_rgb(80, 180, 100), "\u{2714} Converged");
+                } else {
+                    ui.colored_label(
+                        egui::Color32::from_rgb(210, 160, 40),
+                        "\u{26a0} Did not converge",
+                    );
+                }
+                if let Some(cycles) = report.cycles() {
+                    ui.label(format!(
+                        "in {cycles} iteration{}",
+                        if cycles == 1 { "" } else { "s" }
+                    ));
+                }
+                if let Some(duration) = report.duration {
+                    ui.label(format!("\u{2014} {} wall clock", format_elapsed(duration)));
+                }
+            });
+
+            ui.add_space(4.0);
+            egui::Grid::new("opt_summary_totals")
+                .num_columns(2)
+                .spacing([16.0, 2.0])
+                .show(ui, |ui| {
+                    if let Some(energy) = summary.final_energy_hartree {
+                        ui.label("Final energy");
+                        ui.monospace(format!("{energy:.10} Eh"));
+                        ui.end_row();
+                    }
+                    if let Some(rms) = summary.rms_gradient {
+                        ui.label("Final RMS gradient");
+                        ui.monospace(format!("{rms:.3e} Eh/bohr"));
+                        ui.end_row();
+                    }
+                    // The total energy released over the whole optimization is
+                    // the number that says whether the starting geometry was
+                    // anywhere near the minimum.
+                    if let (Some(first), Some(last)) = (report.steps.first(), report.steps.last()) {
+                        let drop = (last.energy_hartree - first.energy_hartree) * HARTREE_TO_KCAL;
+                        ui.label("Energy change over the run");
+                        ui.monospace(format!("{drop:+.3} kcal/mol"));
+                        ui.end_row();
+                    }
+                });
+
+            if report.steps.is_empty() {
+                ui.add_space(6.0);
+                ui.weak("The run printed no convergence table.");
+                return;
+            }
+
+            ui.add_space(8.0);
+            ui.label(egui::RichText::new("Convergence per iteration").strong());
+            if let Some(t) = &report.thresholds {
+                ui.weak(format!(
+                    "thresholds: dE {:.2e} kJ/mol, step {:.2e}/{:.2e} bohr,                      gradient {:.2e}/{:.2e} Eh/bohr (max/rms)",
+                    t.de_kj_mol, t.max_step, t.rms_step, t.max_grad, t.rms_grad
+                ));
+            }
+            ui.add_space(4.0);
+
+            // Fixed-width rows rather than a Grid: the columns are numeric and
+            // want to line up on their digits, and a Grid would wrap them.
+            egui::ScrollArea::both().max_height(240.0).show(ui, |ui| {
+                let header = format!(
+                    "{:>4}  {:>16}  {:>12}  {:>10}  {:>10}  {:>10}  {:>10}",
+                    "iter", "E [Eh]", "dE [kJ/mol]", "max step", "rms step", "max |g|", "rms |g|"
+                );
+                ui.monospace(header);
+                for step in &report.steps {
+                    ui.monospace(format!(
+                        "{:>4}  {:>16.8}  {:>12.6}  {:>10.2e}  {:>10.2e}  {:>10.2e}  {:>10.2e}",
+                        step.step,
+                        step.energy_hartree,
+                        step.de_kj_mol,
+                        step.max_step,
+                        step.rms_step,
+                        step.max_grad,
+                        step.rms_grad
+                    ));
+                }
+            });
+
+            // Which criteria the last cycle actually satisfied. A run that
+            // stopped short shows exactly which one was still outstanding,
+            // which the single "did not converge" line cannot.
+            if let (Some(t), Some(last)) = (&report.thresholds, report.steps.last()) {
+                ui.add_space(8.0);
+                ui.label(egui::RichText::new("Final iteration against each criterion").strong());
+                ui.horizontal_wrapped(|ui| {
+                    for (name, met) in
+                        super::behemoth::STEP_COLUMNS.iter().zip(t.met_by(last))
+                    {
+                        let (mark, color) = if met {
+                            ("\u{2714}", egui::Color32::from_rgb(80, 180, 100))
+                        } else {
+                            ("\u{2718}", egui::Color32::from_rgb(210, 120, 90))
+                        };
+                        ui.colored_label(color, format!("{mark} {name}"));
+                    }
+                });
+            }
+        });
 }
 
 /// A simple line plot of energy vs. iteration, in its own window -- similar
@@ -1179,12 +1438,79 @@ fn run_optimize_cancellable(
         }
     };
     let energy_history = energy_history_for(program, workdir);
+    let log = fs::read_to_string(workdir.join("xtb.stdout")).unwrap_or_default();
 
     Ok(XtbOptimizationOutput {
         trajectory_text,
         final_energy_hartree,
         energy_history,
+        log,
     })
+}
+
+#[cfg(test)]
+mod summary_tests {
+    use super::*;
+
+    const REAL_LOG: &str = include_str!("../../tests/fixtures/behemoth_water_opt.log");
+
+    #[test]
+    fn the_report_reads_everything_the_window_shows() {
+        let report = OptimizationReport::from_log(REAL_LOG, Some(Duration::from_millis(2500)));
+        assert!(report.summary.converged);
+        assert_eq!(report.cycles(), Some(3));
+        assert!(report.summary.final_energy_hartree.is_some());
+        assert!(report.summary.rms_gradient.is_some());
+        assert!(report.thresholds.is_some());
+        assert_eq!(report.steps.len(), 3);
+        assert!(report.has_content());
+    }
+
+    /// The cycle count comes from the table rather than the summary, so a run
+    /// that was cancelled part way -- which prints rows but never a summary --
+    /// still reports how far it got.
+    #[test]
+    fn a_cancelled_run_still_reports_its_iteration_count() {
+        let partial = "step               E[Eh]         dE[kJ/mol]    max_step    rms_step    max_grad    rms_grad\n                           1        -5.76866785          -0.573303    1.49e-02    6.88e-03    8.81e-03    3.83e-03\n                           2        -5.76877493          -0.281130    1.95e-02    8.75e-03    2.75e-05    1.51e-05\n";
+        let report = OptimizationReport::from_log(partial, None);
+        assert!(!report.summary.converged, "there is no summary block");
+        assert_eq!(report.cycles(), Some(2), "two cycles were printed");
+        assert!(report.has_content(), "there is a table worth showing");
+    }
+
+    /// A log from a run that died before it optimized anything must not offer
+    /// a button that opens an empty window.
+    #[test]
+    fn a_log_with_nothing_in_it_has_no_content() {
+        let report = OptimizationReport::from_log("behemoth: could not read input\n", None);
+        assert!(!report.has_content());
+        assert_eq!(report.cycles(), None);
+    }
+
+    /// The window reports the wall-clock time it is given, and copes with not
+    /// having one (a run whose start time was already cleared).
+    #[test]
+    fn the_duration_is_carried_through_and_optional() {
+        let with = OptimizationReport::from_log(REAL_LOG, Some(Duration::from_secs(75)));
+        assert_eq!(with.duration, Some(Duration::from_secs(75)));
+        assert_eq!(format_elapsed(Duration::from_secs(75)), format_elapsed(with.duration.unwrap()));
+
+        let without = OptimizationReport::from_log(REAL_LOG, None);
+        assert!(without.duration.is_none());
+    }
+
+    /// The energy released over the whole run, which is what the window's
+    /// "energy change over the run" line reports.
+    #[test]
+    fn the_total_energy_change_is_the_first_step_to_the_last() {
+        let report = OptimizationReport::from_log(REAL_LOG, None);
+        let first = report.steps.first().unwrap().energy_hartree;
+        let last = report.steps.last().unwrap().energy_hartree;
+        let drop_kcal = (last - first) * HARTREE_TO_KCAL;
+        // Downhill, and small: this fixture starts close to the minimum.
+        assert!(drop_kcal < 0.0, "an optimization goes downhill: {drop_kcal}");
+        assert!(drop_kcal > -1.0, "{drop_kcal} kcal/mol is more than this run moved");
+    }
 }
 
 #[cfg(test)]
