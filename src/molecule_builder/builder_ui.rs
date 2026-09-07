@@ -466,14 +466,6 @@ pub struct ZMatrixBuilderState {
     /// distance, angle and dihedral from the host's own geometry and what its
     /// valence still has room for.
     pub add_atom_auto: bool,
-    /// Armed fragment tool: the mode it will commit in, or `None` when not
-    /// armed. Like the atom tool, this makes the host an explicit click rather
-    /// than "whatever happened to be selected".
-    pub frag_pick: Option<FragmentInsertMode>,
-    /// The atom the armed fragment tool was clicked on, waiting to be
-    /// committed by the panel -- which, unlike the click handler, has the
-    /// molecule and the settings to commit with.
-    pub frag_pick_hit: Option<usize>,
     /// The references collected so far, in order.
     pub add_atom_picks: Vec<usize>,
     /// What the tool wants next, or why a pick was refused.
@@ -565,8 +557,6 @@ impl Default for ZMatrixBuilderState {
             last_click: None,
             add_atom_active: false,
             add_atom_auto: false,
-            frag_pick: None,
-            frag_pick_hit: None,
             add_atom_picks: Vec::new(),
             add_atom_status: None,
             new_symbol: "H".to_string(),
@@ -1843,22 +1833,6 @@ pub fn handle_viewport_click(
             collect_add_atom_pick(&mut zmat_state, &mol.atoms, hit);
             continue;
         }
-        if zmat_state.frag_pick.is_some() {
-            // Record it and let the panel commit: this system has no molecule
-            // to write into. The selection follows too, so the atom is
-            // highlighted while the fragment lands on it.
-            match hit.filter(|&i| i < mol.atoms.len()) {
-                Some(index) => {
-                    zmat_state.frag_pick_hit = Some(index);
-                    set_selected_atom(&mut zmat_state, &mol.atoms, Some(index));
-                }
-                None => {
-                    zmat_state.last_error =
-                        Some("That click missed every atom. Pick an atom.".to_string());
-                }
-            }
-            continue;
-        }
         set_selected_atom(&mut zmat_state, &mol.atoms, hit);
     }
 }
@@ -2857,37 +2831,46 @@ pub fn builder_ui_contents(
                         return;
                     }
 
-                    // An armed tool, like Add Atom: press the button, then
-                    // click the host atom. Depending on a selection made
-                    // earlier meant the press did nothing whenever that
-                    // selection was not there, with no way to tell from
-                    // looking. The placement itself is unchanged -- the
-                    // search derives the angle/dihedral references and the
-                    // valence-aware direction from the host's geometry.
-                    let armed = zmat_state.frag_pick == Some(zmat_state.frag_mode);
-                    let label = if armed {
-                        "Cancel"
-                    } else {
-                        match zmat_state.frag_mode {
-                            FragmentInsertMode::Connect => "Add Fragment",
-                            FragmentInsertMode::Replace => "Replace Atom",
-                        }
+                    // Acts at once on the selected atom -- left-clicking an
+                    // atom already selects and highlights it, so a second
+                    // picking step would be asking for the same click twice.
+                    //
+                    // The button stays enabled with nothing selected, and says
+                    // so when pressed. Disabling it instead is what made this
+                    // look broken: a press that cannot register is
+                    // indistinguishable from one that did nothing.
+                    let label = match zmat_state.frag_mode {
+                        FragmentInsertMode::Connect => "Add Fragment",
+                        FragmentInsertMode::Replace => "Replace Atom",
                     };
                     if ui
                         .button(label)
                         .on_hover_text(match zmat_state.frag_mode {
                             FragmentInsertMode::Connect => {
-                                "Then click the atom to attach the fragment to."
+                                "Attaches the fragment to the selected atom."
                             }
                             FragmentInsertMode::Replace => {
-                                "Then click the atom to replace with the fragment."
+                                "Replaces the selected atom with the fragment."
                             }
                         })
                         .clicked()
                     {
-                        zmat_state.frag_pick = (!armed).then_some(zmat_state.frag_mode);
-                        zmat_state.frag_pick_hit = None;
-                        zmat_state.last_error = None;
+                        if zmat_state.selected_index.is_none() {
+                            zmat_state.last_error = Some(
+                                "No atom selected. Left-click an atom in the 3D view, or a \
+                                 row index in the Z-matrix, then press this again."
+                                    .to_string(),
+                            );
+                        } else {
+                            match zmat_state.frag_mode {
+                                FragmentInsertMode::Connect => {
+                                    commit_fragment_connect(zmat_state, mol, settings)
+                                }
+                                FragmentInsertMode::Replace => {
+                                    commit_fragment_replace(zmat_state, mol, settings, state)
+                                }
+                            }
+                        }
                     }
 
                     // Right next to "Add Fragment", so the way out of a
@@ -2901,34 +2884,6 @@ pub fn builder_ui_contents(
                         undo_last_fragment(zmat_state, mol, settings);
                     }
                 });
-
-                if let Some(mode) = zmat_state.frag_pick {
-                    match zmat_state.frag_pick_hit.take() {
-                        Some(host) => {
-                            // The click has arrived: place the fragment on it.
-                            set_selected_atom(zmat_state, &mol.atoms, Some(host));
-                            match mode {
-                                FragmentInsertMode::Connect => {
-                                    commit_fragment_connect(zmat_state, mol, settings)
-                                }
-                                FragmentInsertMode::Replace => {
-                                    commit_fragment_replace(zmat_state, mol, settings, state)
-                                }
-                            }
-                            zmat_state.frag_pick = None;
-                        }
-                        None => {
-                            ui.weak(match mode {
-                                FragmentInsertMode::Connect => {
-                                    "Click the atom to attach the fragment to."
-                                }
-                                FragmentInsertMode::Replace => {
-                                    "Click the atom to replace with the fragment."
-                                }
-                            });
-                        }
-                    }
-                }
 
                 // Why a press did nothing, said where the press happened. The
                 // panel's other error line sits above the Z-matrix table,
@@ -4527,10 +4482,9 @@ mod convention_probe {
 mod editor_flow_tests {
     use super::*;
 
-    /// The armed fragment tool as the UI drives it: arm, click an atom, and
-    /// the panel commits on the pick. No prior selection involved, which is
-    /// what used to make the press do nothing.
-    fn run_armed_fragment(
+    /// The sequence the UI performs: an atom is selected by a left-click,
+    /// then the button commits on it at once.
+    fn commit_fragment_on_selection(
         mol: &mut Molecule,
         zmat_state: &mut ZMatrixBuilderState,
         settings: &mut MolSettings,
@@ -4539,26 +4493,18 @@ mod editor_flow_tests {
         host: usize,
     ) {
         zmat_state.frag_mode = mode;
-        zmat_state.frag_pick = Some(mode);
-        zmat_state.frag_pick_hit = None;
-        // What handle_viewport_click does on a hit while armed.
-        zmat_state.frag_pick_hit = Some(host);
+        // What a left-click in the 3D view does.
         set_selected_atom(zmat_state, &mol.atoms, Some(host));
-        // What the panel does next frame.
-        if let (Some(mode), Some(host)) = (zmat_state.frag_pick, zmat_state.frag_pick_hit.take()) {
-            set_selected_atom(zmat_state, &mol.atoms, Some(host));
-            match mode {
-                FragmentInsertMode::Connect => commit_fragment_connect(zmat_state, mol, settings),
-                FragmentInsertMode::Replace => {
-                    commit_fragment_replace(zmat_state, mol, settings, rotate)
-                }
+        match mode {
+            FragmentInsertMode::Connect => commit_fragment_connect(zmat_state, mol, settings),
+            FragmentInsertMode::Replace => {
+                commit_fragment_replace(zmat_state, mol, settings, rotate)
             }
-            zmat_state.frag_pick = None;
         }
     }
 
     #[test]
-    fn arming_and_clicking_connects_a_fragment() {
+    fn the_button_connects_a_fragment_to_the_selected_atom() {
         let (mut mol, mut zmat_state) = methyl_host();
         let mut settings = MolSettings::default();
         let mut rotate = EditorRotateState::default();
@@ -4566,8 +4512,7 @@ mod editor_flow_tests {
         zmat_state.frag_name = "-CH3".to_string();
         let before = mol.atoms.len();
 
-        // Attach to one of the methyl hydrogens' carbon.
-        run_armed_fragment(
+        commit_fragment_on_selection(
             &mut mol,
             &mut zmat_state,
             &mut settings,
@@ -4586,12 +4531,11 @@ mod editor_flow_tests {
             "the molecule did not grow: {before} -> {}",
             mol.atoms.len()
         );
-        assert!(zmat_state.frag_pick.is_none(), "the tool disarms itself");
         assert!(mol.pos.iter().all(|p| p.is_finite()));
     }
 
     #[test]
-    fn arming_and_clicking_replaces_an_atom() {
+    fn the_button_replaces_the_selected_atom() {
         let mut mol = load("phenyl-OCH3.xyz");
         let mut zmat_state = ZMatrixBuilderState::default();
         let mut settings = MolSettings::default();
@@ -4602,7 +4546,7 @@ mod editor_flow_tests {
 
         let hydrogen = mol.atoms.iter().position(|s| s == "H").unwrap();
         let before = mol.atoms.len();
-        run_armed_fragment(
+        commit_fragment_on_selection(
             &mut mol,
             &mut zmat_state,
             &mut settings,
@@ -4617,21 +4561,28 @@ mod editor_flow_tests {
             zmat_state.last_error
         );
         // A hydrogen out, a methyl (C + 3H) in.
-        assert_eq!(mol.atoms.len(), before + 3, "{:?}", mol.atoms.len());
-        assert!(zmat_state.frag_pick.is_none());
+        assert_eq!(mol.atoms.len(), before + 3);
         assert!(mol.pos.iter().all(|p| p.is_finite()));
     }
 
-    /// While a fragment tool is armed, a click must not fall through to the
-    /// plain selection path and leave the tool waiting forever.
+    /// With nothing selected the commit refuses and says why, rather than
+    /// leaving the user to wonder whether the press registered.
     #[test]
-    fn an_armed_fragment_tool_captures_the_click() {
-        let mut zmat_state = ZMatrixBuilderState::default();
-        zmat_state.frag_pick = Some(FragmentInsertMode::Connect);
-        assert!(zmat_state.frag_pick.is_some());
-        // The click handler records the hit rather than only selecting.
-        zmat_state.frag_pick_hit = Some(3);
-        assert_eq!(zmat_state.frag_pick_hit, Some(3));
+    fn connecting_with_nothing_selected_reports_it() {
+        let (mut mol, mut zmat_state) = methyl_host();
+        let mut settings = MolSettings::default();
+        ensure_zmat_edit_buffers(&mut zmat_state);
+        zmat_state.frag_name = "-CH3".to_string();
+        set_selected_atom(&mut zmat_state, &mol.atoms, None);
+        let before = mol.atoms.len();
+
+        commit_fragment_connect(&mut zmat_state, &mut mol, &mut settings);
+
+        assert_eq!(mol.atoms.len(), before, "nothing was added");
+        assert!(
+            zmat_state.last_error.is_some(),
+            "a refusal must be reported, not silent"
+        );
     }
 
     /// Editing the element in a Z-matrix row and leaving the field must reach
