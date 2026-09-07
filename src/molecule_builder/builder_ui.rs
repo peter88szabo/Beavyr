@@ -451,6 +451,11 @@ pub struct EditorRotateState {
 #[derive(Resource, Clone)]
 pub struct ZMatrixBuilderState {
     pub zmat: Vec<ZAtom>,
+    /// What the most recent deliberate viewport click delivered: `Some(Some(i))`
+    /// for an atom, `Some(None)` for background, `None` if no click has
+    /// arrived at all. Shown in the panel, because "the button does nothing"
+    /// and "the click never got here" look identical from outside.
+    pub last_click: Option<Option<usize>>,
     pub new_symbol: String,
     pub new_bond_order: BondOrder,
     pub new_angle_deg: f64,
@@ -535,6 +540,7 @@ impl Default for ZMatrixBuilderState {
     fn default() -> Self {
         Self {
             zmat: Vec::new(),
+            last_click: None,
             new_symbol: "H".to_string(),
             new_bond_order: BondOrder::Single,
             new_angle_deg: ANGLE_SINGLE_DEG,
@@ -1589,6 +1595,7 @@ pub fn handle_viewport_click(
         return;
     };
     for ViewportClicked { hit } in ev.read().copied() {
+        zmat_state.last_click = Some(hit);
         set_selected_atom(&mut zmat_state, &mol.atoms, hit);
     }
 }
@@ -2478,12 +2485,18 @@ pub fn builder_ui_contents(
                     ui.colored_label(egui::Color32::LIGHT_RED, err);
                 }
                 ui.weak(format!(
-                    "Z-matrix {} rows \u{2022} molecule {} atoms \u{2022} selected {}",
+                    "Z-matrix {} rows \u{2022} molecule {} atoms \u{2022} selected {} \u{2022} \
+                     last 3D click: {}",
                     zmat_state.zmat.len(),
                     mol.atoms.len(),
                     match (zmat_state.selected_index, &zmat_state.selected_symbol) {
                         (Some(i), Some(sym)) => format!("{sym}{}", i + 1),
                         _ => "nothing".to_string(),
+                    },
+                    match zmat_state.last_click {
+                        Some(Some(i)) => format!("atom {}", i + 1),
+                        Some(None) => "background".to_string(),
+                        None => "none received".to_string(),
                     }
                 ));
 
@@ -4163,6 +4176,56 @@ mod editor_flow_tests {
         let mut mol = Molecule::from_xyz(&std::fs::read_to_string(&path).unwrap());
         mol.recompute_bonds(1.2, 2.5);
         mol
+    }
+
+    /// The user's exact reported sequence: on an empty screen, add -CH3, then
+    /// click that fragment's carbon and add a second -CH3 to it.
+    #[test]
+    fn a_second_fragment_attaches_to_the_first_ones_carbon() {
+        let mut mol = Molecule::empty();
+        let mut zmat_state = ZMatrixBuilderState::default();
+        let mut settings = MolSettings::default();
+        zmat_state.frag_name = "-CH3".to_string();
+
+        // Step 1: the empty-editor branch drops the fragment straight in.
+        let frag = find_fragment(&zmat_state.frag_name).unwrap();
+        add_fragment_to_zmat(
+            &mut zmat_state.zmat,
+            frag.xyz,
+            None,
+            0.0,
+            zmat_state.frag_angle_deg,
+            zmat_state.frag_dihedral_deg,
+        );
+        mol.pos = zmat2xyz::zmat_to_xyz(&zmat_state.zmat);
+        mol.atoms = zmat_state.zmat.iter().map(|a| a.symbol.clone()).collect();
+        mol.recompute_bonds(2.0, 3.0);
+        assert_eq!(mol.atoms.len(), 4, "C + 3H");
+        assert!(
+            mol.pos.iter().all(|p| p.is_finite()),
+            "the first fragment already has non-finite coordinates: {:?}",
+            mol.pos
+        );
+
+        // Step 2: click the carbon.
+        let carbon = mol.atoms.iter().position(|s| s == "C").unwrap();
+        set_selected_atom(&mut zmat_state, &mol.atoms, Some(carbon));
+
+        // Step 3: add a second -CH3 to it.
+        zmat_state.frag_mode = FragmentInsertMode::Connect;
+        commit_fragment_connect(&mut zmat_state, &mut mol, &mut settings);
+
+        assert!(
+            zmat_state.last_error.is_none(),
+            "connect refused: {:?}",
+            zmat_state.last_error
+        );
+        assert_eq!(mol.atoms.len(), 8, "two methyls: {:?}", mol.atoms);
+        assert!(
+            mol.pos.iter().all(|p| p.is_finite()),
+            "non-finite coordinates after the second fragment: {:?}",
+            mol.pos
+        );
     }
 
     /// The exact sequence the UI performs: load a structure, sync the
