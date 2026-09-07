@@ -144,7 +144,6 @@ pub fn common_valences(symbol: &str) -> Option<&'static [f64]> {
 /// already present, the existing arrangement determines where the next bond
 /// goes far more reliably than a table does.
 pub fn ideal_bond_angle_deg(symbol: &str, sigma_bonds: usize) -> f64 {
-    const LINEAR: f64 = 180.0;
     const TRIGONAL: f64 = 120.0;
     const TETRAHEDRAL: f64 = 109.471;
 
