@@ -5123,3 +5123,71 @@ mod editor_flow_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod zmat_edit_tests {
+    use super::*;
+
+    /// Editing a bond length in the Z-matrix must slide the attached fragment
+    /// along that bond and nothing else: the fragment stays rigid and the host
+    /// stays put. Whether the two then overlap is the user's business.
+    #[test]
+    fn a_bond_length_edit_slides_the_fragment_without_reorienting_it() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("examples")
+            .join("phenyl-OCH3.xyz");
+        let mut mol = Molecule::from_xyz(&std::fs::read_to_string(&path).unwrap());
+        mol.recompute_bonds(1.2, 2.5);
+        let mut zmat_state = ZMatrixBuilderState::default();
+        let mut settings = MolSettings::default();
+        zmat_state.zmat = zmat2xyz::xyz_to_zmat(&mol.atoms, &mol.pos);
+        zmat_state.frag_name = "-CH3".to_string();
+        let host_atoms = mol.atoms.len();
+
+        set_selected_atom(&mut zmat_state, &mol.atoms, Some(0));
+        commit_fragment_connect(&mut zmat_state, &mut mol, &mut settings);
+        let fragment: Vec<usize> = (host_atoms..mol.atoms.len()).collect();
+        assert_eq!(fragment.len(), 4, "a methyl went on");
+
+        let before = mol.pos.clone();
+        ensure_zmat_edit_buffers(&mut zmat_state);
+        let connector = fragment[0];
+        let old_len: f64 = zmat_state.edit_rows[connector].bond_len.parse().unwrap();
+        zmat_state.edit_rows[connector].bond_len = format!("{:.4}", old_len - 0.3);
+        apply_zmat_edits(&mut zmat_state, &mut mol, &mut settings);
+        assert!(zmat_state.last_error.is_none(), "{:?}", zmat_state.last_error);
+
+        // The host is untouched.
+        let host_shift = (0..host_atoms)
+            .map(|i| (mol.pos[i] - before[i]).length())
+            .fold(0.0f32, f32::max);
+        assert!(host_shift < 0.01, "the host moved by {host_shift:.4} A");
+
+        // The fragment is rigid: every internal distance is unchanged.
+        let internal = |pos: &[Vec3]| -> Vec<f32> {
+            let mut d = Vec::new();
+            for a in 0..fragment.len() {
+                for b in (a + 1)..fragment.len() {
+                    d.push((pos[fragment[a]] - pos[fragment[b]]).length());
+                }
+            }
+            d
+        };
+        let worst = internal(&before)
+            .iter()
+            .zip(internal(&mol.pos))
+            .map(|(x, y)| (x - y).abs())
+            .fold(0.0f32, f32::max);
+        assert!(
+            worst < 1.0e-3,
+            "the fragment was distorted: an internal distance changed by {worst:.4} A"
+        );
+
+        // And it really did move closer, by the amount asked for.
+        let moved = (mol.pos[connector] - before[connector]).length();
+        assert!(
+            (moved - 0.3).abs() < 0.01,
+            "the connector moved {moved:.3} A, asked for 0.3"
+        );
+    }
+}
