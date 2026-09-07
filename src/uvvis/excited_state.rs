@@ -35,7 +35,7 @@ use crate::qchem_interfaces::method::{
 /// count, so it needs its own controls rather than being bent into these.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExcitedStateMethod {
-    /// The published sTDA-xTB, `--method xtb --stda`. Needs an external
+    /// Grimme's original sTDA-xTB, `--method xtb --stda`. Needs an external
     /// `xtb4stda` binary to generate its orbitals.
     StdaXtbOriginal,
     /// sTDA on Behemoth's own GFN1 orbitals,
@@ -58,7 +58,7 @@ impl ExcitedStateMethod {
 
     pub fn label(self) -> &'static str {
         match self {
-            ExcitedStateMethod::StdaXtbOriginal => "sTDA-xTB (published)",
+            ExcitedStateMethod::StdaXtbOriginal => "sTDA-xTB (Grimme's original)",
             ExcitedStateMethod::StdaXtbGfn1 => "sTDA-xTB (GFN1 orbitals)",
             ExcitedStateMethod::StdaTasi => "sTDA (TASI)",
             ExcitedStateMethod::Tddft => "TD-DFT",
@@ -70,7 +70,7 @@ impl ExcitedStateMethod {
     pub fn description(self) -> &'static str {
         match self {
             ExcitedStateMethod::StdaXtbOriginal => {
-                "Grimme's published sTDA-xTB. Needs the external xtb4stda orbital generator."
+                "The original sTDA-xTB. Needs the external xtb4stda orbital generator."
             }
             ExcitedStateMethod::StdaXtbGfn1 => {
                 "sTDA on Behemoth's own GFN1 orbitals. No external program needed."
@@ -162,7 +162,7 @@ pub struct ExcitedStateConfig {
     pub emax_ev: f64,
     /// Tamm-Dancoff, i.e. `--stda` rather than `--stddft`. On by default.
     pub tda: bool,
-    /// Where the external `xtb4stda` generator lives, for the published
+    /// Where the external `xtb4stda` generator lives, for the original
     /// sTDA-xTB route. Empty until the user points at one.
     pub xtb4stda_path: String,
 }
@@ -217,7 +217,7 @@ pub fn validate(
         ExcitedStateMethod::StdaXtbOriginal => {
             if config.xtb4stda_path.trim().is_empty() {
                 issues.push(MethodIssue::block(
-                    "The published sTDA-xTB needs the external xtb4stda orbital generator. \
+                    "The original sTDA-xTB needs the external xtb4stda orbital generator. \
                      Give its path, or pick a route that does not need one.",
                 ));
             }
@@ -337,7 +337,7 @@ pub fn spectrum_command(
         }
     }
 
-    // GFN1 orbitals have to be asked for; the published generator and TASI are
+    // GFN1 orbitals have to be asked for; the original generator and TASI are
     // what `--method` already implies, and naming them again is redundant.
     if config.method == ExcitedStateMethod::StdaXtbGfn1 {
         command.arg("--stda-orbitals").arg("gfn1");
@@ -457,10 +457,10 @@ mod tests {
         assert!(is_hybrid(DEFAULT_SPECTRUM_FUNCTIONAL));
     }
 
-    /// The requested method: the published sTDA-xTB, blocked until its
+    /// The requested method: the original sTDA-xTB, blocked until its
     /// external generator is pointed at.
     #[test]
-    fn the_published_stda_xtb_is_blocked_without_its_generator() {
+    fn the_original_stda_xtb_is_blocked_without_its_generator() {
         let mut c = config(ExcitedStateMethod::StdaXtbOriginal);
         let issues = validate(&c, &MethodConfig::default(), 1, &atoms(&["C", "O"]));
         assert!(is_blocked(&issues));
@@ -701,7 +701,7 @@ mod tests {
     }
 
     #[test]
-    fn the_published_route_passes_the_generator_path_it_was_given() {
+    fn the_original_route_passes_the_generator_path_it_was_given() {
         let c = ExcitedStateConfig {
             xtb4stda_path: "  /opt/xtb4stda  ".to_string(),
             ..config(ExcitedStateMethod::StdaXtbOriginal)

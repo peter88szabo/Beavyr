@@ -43,14 +43,14 @@ Behemoth's own CLI tests show is inferred from `--method` when not given:
 
 | requested method | command | works today? |
 |---|---|---|
-| sTDA-xTB (published) | `--method xtb --stda` | **needs an external `xtb4stda` binary** |
+| sTDA-xTB (Grimme's original) | `--method xtb --stda` | **needs an external `xtb4stda` binary** |
 | sTDA-xTB (GFN1 orbitals) | `--method xtb --stda --stda-orbitals gfn1` | runs, but was numerically unstable in testing |
 | sTDA (TASI) | `--method tasi --stda` | yes |
 | TD-DFT | `--method rks\|uks --functional H --basis B --stda` or `--stddft` | yes, `H` a global hybrid |
 
 Three findings that shape the UI:
 
-* **The published sTDA-xTB needs a binary the machine does not have.**
+* **Grimme's original sTDA-xTB needs a binary the machine does not have.**
   `--method xtb --stda` fails with "failed to execute original sTDA-xTB
   generator `xtb4stda`; install xtb4stda, set BEHEMOTH_XTB4STDA, or pass
   `--xtb4stda-executable`". `~/Programs/xtb4stda` is a source tree with no
@@ -215,7 +215,7 @@ no duplicate.
 
 Validation, at `Block` severity:
 
-* the published sTDA-xTB with no `xtb4stda` path given
+* the original sTDA-xTB with no `xtb4stda` path given
 * TASI with any element outside its seven, reusing `method::TASI_ELEMENTS`
 * TD-DFT with a non-hybrid functional -- unreachable through the dropdown,
   which offers only hybrids, but stated where the other rules live
