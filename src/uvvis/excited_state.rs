@@ -138,6 +138,14 @@ pub fn spectrum_functionals() -> Vec<&'static Functional> {
 /// The default functional for a spectrum. A hybrid, necessarily.
 pub const DEFAULT_SPECTRUM_FUNCTIONAL: &str = "b3lyp";
 
+/// The canonical molecular orbitals `--wf2molden` writes.
+///
+/// Canonical rather than natural: the excitation assignments are given as
+/// canonical MO indices ("8 HOMO ==> 9 LUMO"), so these are the orbitals those
+/// numbers refer to. `naturalMO.molden` is written in the same run and is the
+/// right file for a correlated density, which is not what this panel shows.
+pub const CANONICAL_MOLDEN_FILE: &str = "canonicalMO.molden";
+
 /// Everything the excited-state calculation needs beyond the reference's own
 /// level of theory.
 #[derive(Debug, Clone, PartialEq)]
@@ -307,6 +315,13 @@ pub fn spectrum_command(
 
     if config.method == ExcitedStateMethod::Tddft {
         command.arg("--functional").arg(&reference.functional);
+        // The ground-state orbitals the excitations are expressed in, written
+        // as Molden in the same run -- verified to work alongside `--stda`,
+        // so no second calculation is needed. Only the Gaussian-basis
+        // references can do this: `--wf2molden` is documented for "HF,
+        // MP2/RI-MP2, RKS, and UKS", which is why the sTDA routes do not ask
+        // for it.
+        command.arg("--wf2molden");
         // Reuses the reference's own rule, so a basis is passed exactly when
         // the method takes one.
         if let Some(basis) = behemoth_basis_flag(&MethodConfig {
@@ -605,6 +620,40 @@ mod tests {
             value_after(&build(&config(ExcitedStateMethod::Tddft), 3), "--method"),
             Some("uks")
         );
+    }
+
+    /// The requested behaviour: a TD-DFT run also writes the ground-state
+    /// orbitals, in the same run, so the Surface tool can show the orbitals a
+    /// root involves. Verified against the binary: `--wf2molden` alongside
+    /// `--stda` produces both the spectrum and canonicalMO.molden.
+    #[test]
+    fn a_tddft_run_also_writes_the_ground_state_orbitals() {
+        let built = build(&config(ExcitedStateMethod::Tddft), 1);
+        assert!(built.contains(&"--wf2molden".to_string()), "{built:?}");
+    }
+
+    /// The sTDA routes have no Gaussian basis, and `--wf2molden` is documented
+    /// only for the Gaussian-basis references, so they must not ask for it.
+    #[test]
+    fn an_stda_route_does_not_ask_for_orbitals_it_cannot_write() {
+        for method in [
+            ExcitedStateMethod::StdaTasi,
+            ExcitedStateMethod::StdaXtbGfn1,
+            ExcitedStateMethod::StdaXtbOriginal,
+        ] {
+            let built = build(&config(method), 1);
+            assert!(
+                !built.contains(&"--wf2molden".to_string()),
+                "{method:?}: {built:?}"
+            );
+        }
+    }
+
+    /// The canonical set is the one the assignments are written in.
+    #[test]
+    fn the_orbital_file_read_back_is_the_canonical_one() {
+        assert_eq!(CANONICAL_MOLDEN_FILE, "canonicalMO.molden");
+        assert!(!CANONICAL_MOLDEN_FILE.contains("natural"));
     }
 
     /// Only TD-DFT carries a functional and a basis set; the semi-empirical

@@ -109,6 +109,13 @@ pub struct OrbitalState {
     pub file_name: Option<String>,
     pub last_dir: Option<PathBuf>,
     pub warning: Option<String>,
+    /// Where this orbital set came from, when it was not a file the user
+    /// opened: the method line of the excited-state run that produced it.
+    /// `None` for a loaded file, whose name is shown instead.
+    pub provenance: Option<String>,
+    /// The Molden text behind a computed set, kept so it can be saved. A run's
+    /// scratch directory is discarded, so this is the only copy.
+    pub molden_text: Option<String>,
 
     /// Which scalar field the panel is showing.
     pub quantity: Quantity,
@@ -150,6 +157,8 @@ impl Default for OrbitalState {
             file_name: None,
             last_dir: None,
             warning: None,
+            provenance: None,
+            molden_text: None,
             quantity: Quantity::Orbital,
             spin: Spin::Alpha,
             selected: None,
@@ -219,9 +228,47 @@ impl OrbitalState {
     }
 
     /// Drop the loaded file and everything derived from it.
+    /// Takes on a parsed orbital set, however it arrived.
+    ///
+    /// One place for the several fields that have to move together -- the
+    /// data, what to show first, and the isovalue that suits it -- so a set
+    /// loaded from a file and one computed by the spectrum tool cannot end up
+    /// in different states.
+    ///
+    /// Opens on the HOMO, which is what one usually wants to look at first and
+    /// is also the orbital most excitations start from.
+    pub fn adopt(
+        &mut self,
+        data: OrbitalData,
+        file_name: Option<String>,
+        provenance: Option<String>,
+        molden_text: Option<String>,
+    ) {
+        let spin = Spin::Alpha;
+        self.selected = data.homo_index(spin);
+        self.spin = spin;
+        self.quantity = Quantity::Orbital;
+        self.isovalue = Quantity::Orbital.default_isovalue();
+        self.file_name = file_name;
+        self.provenance = provenance;
+        self.molden_text = molden_text;
+        self.warning = None;
+        // A previous set's cached field and density describe different
+        // orbitals entirely.
+        self.density = None;
+        self.field = None;
+        self.field_key = None;
+        self.job = None;
+        self.job_key = None;
+        self.data = Some(Arc::new(data));
+        self.mark_surface_dirty();
+    }
+
     pub fn clear(&mut self) {
         self.data = None;
         self.file_name = None;
+        self.provenance = None;
+        self.molden_text = None;
         self.selected = None;
         self.density = None;
         self.field = None;
@@ -446,6 +493,84 @@ fn draw_orbital_mesh(mut gizmos: Gizmos<OrbitalMeshGizmos>, state: Res<OrbitalSt
     }
     for segment in &state.mesh_negative {
         gizmos.line(segment[0], segment[1], state.negative_color);
+    }
+}
+
+#[cfg(test)]
+mod adopt_tests {
+    use super::*;
+
+    fn behemoth_orbitals() -> OrbitalData {
+        let text = include_str!("../../tests/fixtures/behemoth_ch2o_canonicalMO.molden");
+        crate::orbitals::molden::parse_molden(text).expect("Behemoth's Molden parses")
+    }
+
+    /// A computed set arrives with a provenance line and the text to save,
+    /// where a loaded file has a name and neither -- it is already on disk.
+    #[test]
+    fn a_computed_set_carries_its_provenance_and_its_text() {
+        let mut state = OrbitalState::default();
+        let text = "molden text".to_string();
+        state.adopt(
+            behemoth_orbitals(),
+            None,
+            Some("From this sTDA / Behemoth RKS PBE0 run".to_string()),
+            Some(text.clone()),
+        );
+        assert!(state.data.is_some());
+        assert!(state.file_name.is_none(), "there is no file behind it yet");
+        assert_eq!(state.molden_text.as_deref(), Some(text.as_str()));
+        assert!(state.provenance.as_deref().unwrap().contains("PBE0"));
+    }
+
+    #[test]
+    fn a_loaded_file_has_a_name_and_no_provenance() {
+        let mut state = OrbitalState::default();
+        state.adopt(behemoth_orbitals(), Some("mine.molden".to_string()), None, None);
+        assert_eq!(state.file_name.as_deref(), Some("mine.molden"));
+        assert!(state.provenance.is_none(), "its name is its provenance");
+        assert!(state.molden_text.is_none(), "already on disk, nothing to save");
+    }
+
+    /// Adopting opens on the HOMO, which is where most excitations start.
+    #[test]
+    fn adopting_opens_on_the_homo_as_an_orbital() {
+        let data = behemoth_orbitals();
+        let homo = data.homo_index(Spin::Alpha);
+        let mut state = OrbitalState::default();
+        state.adopt(data, None, None, None);
+        assert_eq!(state.selected, homo);
+        assert_eq!(state.quantity, Quantity::Orbital);
+        assert_eq!(state.spin, Spin::Alpha);
+    }
+
+    /// A second set must not be drawn with the first one's cached field, which
+    /// describes different orbitals entirely.
+    #[test]
+    fn adopting_discards_the_previous_sets_caches() {
+        let mut state = OrbitalState::default();
+        state.adopt(behemoth_orbitals(), None, None, None);
+        state.warning = Some("stale".to_string());
+        state.adopt(behemoth_orbitals(), None, Some("run 2".to_string()), None);
+        assert!(state.warning.is_none(), "a fresh set clears the old warning");
+        assert!(state.surface_dirty, "the surface has to be rebuilt");
+    }
+
+    /// Closing a computed set must forget the text and the provenance too, or
+    /// the panel would offer to save orbitals that are no longer shown.
+    #[test]
+    fn clearing_forgets_a_computed_sets_provenance_and_text() {
+        let mut state = OrbitalState::default();
+        state.adopt(
+            behemoth_orbitals(),
+            None,
+            Some("run".to_string()),
+            Some("text".to_string()),
+        );
+        state.clear();
+        assert!(state.data.is_none());
+        assert!(state.provenance.is_none());
+        assert!(state.molden_text.is_none());
     }
 }
 

@@ -616,3 +616,23 @@ s   1 1.0
         assert_eq!(data.shells.len(), 2);
     }
 }
+
+#[cfg(test)]
+mod behemoth_fixture_tests {
+    use super::*;
+
+    /// Behemoth's own `--wf2molden` output has to parse with the same reader
+    /// that reads Molden's, since the spectrum tool loads it automatically.
+    #[test]
+    fn behemoths_canonical_orbitals_parse() {
+        let text = include_str!("../../tests/fixtures/behemoth_ch2o_canonicalMO.molden");
+        let data = parse_molden(text).expect("Behemoth's Molden output should parse");
+        assert_eq!(data.positions.len(), 4, "formaldehyde has four atoms");
+        assert!(!data.is_open_shell(), "a singlet RKS reference");
+        let alpha = data.orbitals(crate::orbitals::Spin::Alpha);
+        assert!(!alpha.is_empty(), "there are orbitals to draw");
+        // The excitations name MO 8 as the HOMO, so the reader must agree.
+        let homo = data.homo_index(crate::orbitals::Spin::Alpha).expect("a HOMO");
+        assert_eq!(homo + 1, 8, "HOMO is MO 8, as the assignment section says");
+    }
+}

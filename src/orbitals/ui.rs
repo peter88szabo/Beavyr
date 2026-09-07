@@ -1,6 +1,5 @@
 //! egui panel for the molecular orbital viewer.
 
-use std::sync::Arc;
 
 use bevy::prelude::*;
 use bevy_egui::egui;
@@ -44,6 +43,38 @@ fn adopt_geometry(
     ev_changed.write(MoleculeChanged::parse_xyz(true));
 }
 
+/// Writes the Molden text behind a computed orbital set to a file the user
+/// picks.
+///
+/// The text is kept in memory because the run directory it was written in is
+/// discarded as soon as the run succeeds, so this is the only copy -- which is
+/// exactly why the button exists.
+fn save_molden(state: &mut OrbitalState) {
+    let Some(text) = state.molden_text.clone() else {
+        return;
+    };
+    let mut dialog = rfd::FileDialog::new()
+        .add_filter("Molden", &["molden"])
+        .set_file_name("canonicalMO.molden");
+    if let Some(dir) = &state.last_dir {
+        dialog = dialog.set_directory(dir);
+    }
+    let Some(path) = dialog.save_file() else {
+        return;
+    };
+    state.last_dir = path.parent().map(|p| p.to_path_buf());
+    match std::fs::write(&path, text) {
+        Ok(()) => {
+            state.warning = None;
+            // The file now exists, so it is named the way a loaded one is.
+            state.file_name = path.file_name().map(|n| n.to_string_lossy().into_owned());
+        }
+        Err(err) => {
+            state.warning = Some(format!("Could not write {}: {err}", path.display()));
+        }
+    }
+}
+
 pub fn orbital_panel(
     ui: &mut egui::Ui,
     state: &mut OrbitalState,
@@ -70,17 +101,12 @@ pub fn orbital_panel(
                             // spheres hide the lobes they sit inside.
                             settings.representation = RepresentationMode::SticksRounded;
                             settings.geometry_dirty = true;
-                            // Open on the HOMO, which is what one usually wants
-                            // to look at first.
-                            let spin = Spin::Alpha;
-                            state.selected = data.homo_index(spin);
-                            state.spin = spin;
-                            state.quantity = Quantity::Orbital;
-                            state.isovalue = Quantity::Orbital.default_isovalue();
-                            state.file_name =
+                            let name =
                                 path.file_name().map(|n| n.to_string_lossy().into_owned());
-                            state.data = Some(Arc::new(data));
-                            state.mark_surface_dirty();
+                            // A file the user opened needs no provenance line:
+                            // its name is the provenance, and the file is
+                            // already on disk so there is nothing to save.
+                            state.adopt(data, name, None, None);
                         }
                         Err(error) => {
                             state.warning = Some(format!("Could not read Molden file: {error}"));
@@ -111,6 +137,21 @@ pub fn orbital_panel(
     ui.add_space(4.0);
     if let Some(name) = &state.file_name {
         ui.weak(name.clone());
+    }
+    // A computed set has no file behind it, so it says where it came from and
+    // offers to become one. Without this the panel would look as though a file
+    // had been loaded, with no way to tell which run these orbitals belong to
+    // or to keep them once the scratch directory is gone.
+    if let Some(provenance) = state.provenance.clone() {
+        ui.horizontal(|ui| {
+            ui.colored_label(
+                egui::Color32::from_rgb(120, 170, 220),
+                format!("\u{2699} {provenance}"),
+            );
+            if state.molden_text.is_some() && ui.button("Save .molden\u{2026}").clicked() {
+                save_molden(state);
+            }
+        });
     }
     ui.weak(format!(
         "{} basis functions, {}",

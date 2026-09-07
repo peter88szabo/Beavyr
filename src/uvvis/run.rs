@@ -20,10 +20,9 @@ use bevy::prelude::*;
 use bevy::tasks::{block_on, futures_lite::future, AsyncComputeTaskPool, Task};
 
 use super::behemoth::parse_behemoth_spectrum;
-use super::excited_state::{spectrum_command, ExcitedStateConfig};
+use super::excited_state::{spectrum_command, ExcitedStateConfig, CANONICAL_MOLDEN_FILE};
 use super::types::TddftResult;
 use super::UvVisState;
-use crate::molecule::Molecule;
 use crate::qchem_interfaces::method::MethodConfig;
 use crate::qchem_interfaces::xtb_optimize::{
     create_xtb_run_dir, discard_xtb_run_dir, write_xyz_string, xtb_scratch_dir,
@@ -36,10 +35,16 @@ const POLL_INTERVAL: Duration = Duration::from_millis(50);
 const STDOUT_FILE: &str = "behemoth.stdout";
 const STDERR_FILE: &str = "behemoth.stderr";
 
-/// A finished spectrum.
+/// A finished spectrum, and the ground-state orbitals it was expressed in.
 #[derive(Debug)]
 pub struct SpectrumOutput {
     pub result: TddftResult,
+    /// `canonicalMO.molden`, when the run wrote one. Read here rather than
+    /// left on disk because a successful run's scratch directory is discarded
+    /// moments later, and this is what the Surface tool loads.
+    ///
+    /// `None` for the sTDA routes, which have no Gaussian basis to write.
+    pub molden: Option<String>,
 }
 
 /// The background run, plus what cancelling it needs.
@@ -214,8 +219,10 @@ fn run_spectrum_cancellable(
                     &workdir.join(STDOUT_FILE),
                     Some(config.roots as usize),
                 );
+                let molden =
+                    fs::read_to_string(workdir.join(CANONICAL_MOLDEN_FILE)).ok();
                 return match parsed {
-                    Ok(result) => Ok(SpectrumOutput { result }),
+                    Ok(result) => Ok(SpectrumOutput { result, molden }),
                     Err(err) if status.success() => Err(err),
                     Err(err) => Err(format!("Behemoth exited with an error: {err}")),
                 };
@@ -232,7 +239,8 @@ fn run_spectrum_cancellable(
 pub fn poll_spectrum_run(
     mut task: ResMut<SpectrumTask>,
     mut state: ResMut<UvVisState>,
-    _mol: Option<Res<Molecule>>,
+    mut orbitals: ResMut<crate::orbitals::OrbitalState>,
+    mut settings: ResMut<crate::settings::MolSettings>,
 ) {
     let Some(running) = task.task.as_mut() else {
         return;
@@ -269,6 +277,37 @@ pub fn poll_spectrum_run(
                 if roots == 1 { "" } else { "s" }
             ));
             task.last_is_error = false;
+
+            // The ground-state orbitals the excitations are expressed in,
+            // straight into the Surface tool -- the point of asking for them
+            // being to look at the orbitals a root actually involves. A TD-DFT
+            // run writes them; the sTDA routes have no Gaussian basis to
+            // write, so there is nothing to load and nothing is disturbed.
+            if let Some(text) = &output.molden {
+                match crate::orbitals::molden::parse_molden(text) {
+                    Ok(data) => {
+                        // Solid spheres hide the lobes they sit inside, so the
+                        // same switch the file loader makes is made here.
+                        settings.representation =
+                            crate::settings::RepresentationMode::SticksRounded;
+                        settings.geometry_dirty = true;
+                        orbitals.adopt(
+                            data,
+                            None,
+                            Some(format!("From this {} run", output.result.method)),
+                            Some(text.clone()),
+                        );
+                    }
+                    Err(err) => {
+                        // The spectrum is still perfectly good, so this is a
+                        // note against the result rather than a failed run.
+                        orbitals.warning = Some(format!(
+                            "The spectrum ran, but its orbitals could not be read: {err}"
+                        ));
+                    }
+                }
+            }
+
             // A run's spectrum replaces a loaded one, exactly as loading a
             // second file would, so the panel has one result to show.
             state.expanded_root = None;

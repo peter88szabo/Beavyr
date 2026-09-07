@@ -134,6 +134,41 @@ string shown in the panel:
 Orbital source: Behemoth RKS PBE0 (this response model does not replace the orbital Hamiltonian)
 ```
 
+### The ground-state orbitals, in the same run
+
+A spectrum is far more use with the orbitals its assignments name. Behemoth
+can write them without a second calculation: `--wf2molden` "writes
+canonicalMO.molden and naturalMO.molden for Gaussian-basis HF, MP2/RI-MP2,
+RKS, and UKS references", and it works alongside `--stda` -- verified on
+formaldehyde, where one run produced the six-root spectrum and both Molden
+files.
+
+So the TD-DFT route always passes `--wf2molden`, the run reads
+`canonicalMO.molden` back out of its scratch directory before that directory
+is discarded, and the Surface tool adopts it automatically.
+
+**Canonical, not natural.** The assignments are given as canonical MO indices
+("8 HOMO ==> 9 LUMO"), so those are the orbitals the numbers refer to.
+`naturalMO.molden` is the right file for a correlated density, which is not
+what this shows.
+
+**Not for the sTDA routes.** `--wf2molden` is documented for the
+Gaussian-basis references only, and the xTB and TASI routes have no Gaussian
+basis to write, so they do not ask for it and nothing in the Surface tool is
+disturbed when one of them runs.
+
+The file parses with the existing `orbitals::molden` reader unchanged, and the
+HOMO it reports -- MO 8 -- agrees with the assignment section's own `8 HOMO`,
+which is a useful cross-check on both.
+
+`OrbitalState` gains `provenance` and `molden_text`. A computed set has no file
+behind it, so the panel names the run it came from and offers a
+"Save .molden..." button; the text is held in memory because the scratch
+directory is gone, which is exactly why the button is needed. A loaded file
+keeps showing its name and neither field. Both routes go through one
+`OrbitalState::adopt`, so a set that was computed and a set that was loaded
+cannot end up in different states.
+
 ## Code
 
 ### `src/uvvis/behemoth.rs` (new)
