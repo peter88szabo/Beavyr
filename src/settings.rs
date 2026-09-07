@@ -190,7 +190,7 @@ impl Default for MolSettings {
 
             // three-point defaults (gentle)
             fill_intensity: 4_000_000.0,
-            fill_distance: 10.0,
+            fill_distance: 15.0,
             rim_intensity: 4_000_000.0,
             rim_distance: 10.0,
 

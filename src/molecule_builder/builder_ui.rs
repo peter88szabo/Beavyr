@@ -2029,7 +2029,8 @@ pub fn draw_builder_highlights(
     }
 }
 
-/// Left-side, resizable panel with a collapsible “Molecule Editor” section.
+/// Left-side, resizable panel with collapsible “Molecule Builder” and
+/// “Fragment Editor” sections.
 /// NOTE: We now do a clean jump: no immediate atom transform sync; instead we
 /// update `mol.pos` + `mol.bonds` and flag geometry/topology dirty so the scene
 /// rebuilds atoms & bonds together next frame (no mismatched frame).
@@ -2870,7 +2871,7 @@ pub fn builder_ui_contents(
             ui.add_space(8.0);
             ui.separator();
             ui.add_space(8.0);
-            ui.collapsing("Molecule Editor", |ui| {
+            ui.collapsing("Fragment Editor", |ui| {
                 ui.horizontal(|ui| {
                     if ui
                         .button(if state.active {
