@@ -412,7 +412,7 @@ mod tests {
     #[test]
     fn the_command_reflects_the_config_the_run_was_given() {
         let config = ExcitedStateConfig {
-            method: ExcitedStateMethod::Tddft,
+            method: ExcitedStateMethod::StdaDft,
             roots: 12,
             tda: false,
             ..Default::default()

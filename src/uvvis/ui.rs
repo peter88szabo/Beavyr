@@ -275,9 +275,14 @@ fn run_block(
         });
 }
 
-/// Draws the "UV-Vis (TD-DFT)" section: run a spectrum or load one from a
+/// Draws the UV-Vis section: run a spectrum, or load one from an existing
 /// TD-DFT output, list the roots with the orbital excitations behind each, and
 /// open the spectrum plot.
+///
+/// Note the asymmetry, which the labels have to make plain: a *loaded* file
+/// can be full TD-DFT, because ORCA computes it. A spectrum run from here
+/// cannot be, because the only excited-state engine Behemoth exposes on its
+/// command line is the simplified one.
 pub fn uvvis_panel(
     ui: &mut egui::Ui,
     state: &mut UvVisState,
@@ -300,7 +305,7 @@ pub fn uvvis_panel(
             state.spectrum_window_open = false;
         }
     });
-    ui.weak("Or read an existing TD-DFT output. ORCA only for now.");
+    ui.weak("Or read an existing TD-DFT output \u{2014} full TD-DFT included. ORCA only for now.");
 
     if let Some(err) = &state.load_error {
         ui.add_space(4.0);

@@ -44,8 +44,22 @@ pub enum ExcitedStateMethod {
     /// sTDA on TASI orbitals, `--method tasi --stda`. No external binary, but
     /// TASI's seven elements only.
     StdaTasi,
-    /// sTDA or sTD-DFT on a hybrid DFT reference.
-    Tddft,
+    /// Grimme's simplified methods on a hybrid DFT reference: `--stda`, which
+    /// is sTDA run with that functional, or `--stddft`, which is sTD-DFT.
+    ///
+    /// One variant for both because they are one engine in two modes, selected
+    /// by the Tamm-Dancoff switch. What the run actually was is read back out
+    /// of the output, which names itself `sTDA` or `sTD-DFT`.
+    ///
+    /// This is **not** full TD-DFT. Behemoth's own help calls `--stddft`
+    /// "Coupled simplified TD-DFT", and its exact TD-DFT engine is a separate
+    /// module (`src/hamiltonian/tddft/`, whose notes describe `stddft` as "the
+    /// deliberately simplified Grimme-style model"). That exact engine has
+    /// public entry points, `pbe_tddft_from_rks` among them, but nothing
+    /// outside the library calls them -- no CLI flag, no input-file keyword --
+    /// so a subprocess cannot reach it. The name here says which of the two
+    /// this is, because the difference is not a detail.
+    StdaDft,
 }
 
 impl ExcitedStateMethod {
@@ -53,7 +67,7 @@ impl ExcitedStateMethod {
         ExcitedStateMethod::StdaXtbOriginal,
         ExcitedStateMethod::StdaXtbGfn1,
         ExcitedStateMethod::StdaTasi,
-        ExcitedStateMethod::Tddft,
+        ExcitedStateMethod::StdaDft,
     ];
 
     pub fn label(self) -> &'static str {
@@ -61,7 +75,10 @@ impl ExcitedStateMethod {
             ExcitedStateMethod::StdaXtbOriginal => "sTDA-xTB (Grimme's original)",
             ExcitedStateMethod::StdaXtbGfn1 => "sTDA-xTB (GFN1 orbitals)",
             ExcitedStateMethod::StdaTasi => "sTDA (TASI)",
-            ExcitedStateMethod::Tddft => "TD-DFT",
+            // Both modes of one engine, so the entry names both: with the
+            // Tamm-Dancoff switch on this is sTDA run on a DFT reference,
+            // with it off it is sTD-DFT. Neither is full TD-DFT.
+            ExcitedStateMethod::StdaDft => "sTDA / sTD-DFT (DFT reference)",
         }
     }
 
@@ -78,8 +95,9 @@ impl ExcitedStateMethod {
             ExcitedStateMethod::StdaTasi => {
                 "sTDA on TASI orbitals. No external program needed; C, H, N, O, F, S, Cl only."
             }
-            ExcitedStateMethod::Tddft => {
-                "Simplified TD-DFT on a hybrid reference. Choose the functional and basis set."
+            ExcitedStateMethod::StdaDft => {
+                "Grimme's simplified methods on a DFT reference, not full TD-DFT: \
+                 sTDA with Tamm-Dancoff on, sTD-DFT with it off. Hybrid functionals only."
             }
         }
     }
@@ -91,7 +109,7 @@ impl ExcitedStateMethod {
             ExcitedStateMethod::StdaTasi => "tasi",
             // An open shell is always the unrestricted method: `rks` is
             // refused above a singlet outright.
-            ExcitedStateMethod::Tddft => {
+            ExcitedStateMethod::StdaDft => {
                 if multiplicity > 1 {
                     "uks"
                 } else {
@@ -103,12 +121,12 @@ impl ExcitedStateMethod {
 
     /// Whether the Tamm-Dancoff switch means anything for this route.
     ///
-    /// Only TD-DFT can turn it off. `--stddft` "currently requires a
+    /// Only the sTD-DFT route can turn it off. `--stddft` "currently requires a
     /// global-hybrid `--method rks` or `--method uks` reference", so every
     /// other route is Tamm-Dancoff by construction and the switch is hidden
     /// for them rather than shown and ignored.
     pub fn supports_full_response(self) -> bool {
-        self == ExcitedStateMethod::Tddft
+        self == ExcitedStateMethod::StdaDft
     }
 }
 
@@ -189,7 +207,7 @@ pub struct VisibleFields {
 }
 
 pub fn visible_fields(config: &ExcitedStateConfig) -> VisibleFields {
-    let tddft = config.method == ExcitedStateMethod::Tddft;
+    let tddft = config.method == ExcitedStateMethod::StdaDft;
     VisibleFields {
         functional: tddft,
         basis: tddft,
@@ -234,7 +252,7 @@ pub fn validate(
                 )));
             }
         }
-        ExcitedStateMethod::Tddft => {
+        ExcitedStateMethod::StdaDft => {
             let heavy = elements_needing_ecp(atoms);
             if !heavy.is_empty() {
                 issues.push(MethodIssue::block(format!(
@@ -272,7 +290,7 @@ pub fn validate(
         format_ev(config.emax_ev)
     )));
 
-    if multiplicity > 1 && config.method == ExcitedStateMethod::Tddft {
+    if multiplicity > 1 && config.method == ExcitedStateMethod::StdaDft {
         issues.push(MethodIssue::note(
             "An open-shell reference runs as UKS.",
         ));
@@ -313,7 +331,7 @@ pub fn spectrum_command(
         .arg("--multi")
         .arg(multiplicity.to_string());
 
-    if config.method == ExcitedStateMethod::Tddft {
+    if config.method == ExcitedStateMethod::StdaDft {
         command.arg("--functional").arg(&reference.functional);
         // The ground-state orbitals the excitations are expressed in, written
         // as Molden in the same run -- verified to work alongside `--stda`, so
@@ -422,7 +440,7 @@ mod tests {
     fn a_functional_and_basis_are_shown_only_for_tddft() {
         for method in ExcitedStateMethod::ALL {
             let fields = visible_fields(&config(method));
-            let tddft = method == ExcitedStateMethod::Tddft;
+            let tddft = method == ExcitedStateMethod::StdaDft;
             assert_eq!(fields.functional, tddft, "{method:?}");
             assert_eq!(fields.basis, tddft, "{method:?}");
             assert_eq!(fields.tda, tddft, "{method:?} TDA switch");
@@ -501,7 +519,7 @@ mod tests {
     #[test]
     fn tddft_is_blocked_on_an_element_needing_an_ecp() {
         let issues = validate(
-            &config(ExcitedStateMethod::Tddft),
+            &config(ExcitedStateMethod::StdaDft),
             &MethodConfig::default(),
             1,
             &atoms(&["Rb", "C"]),
@@ -515,7 +533,7 @@ mod tests {
     fn tddft_is_blocked_on_a_functional_with_no_exact_exchange() {
         let reference = MethodConfig { functional: "pbe".to_string(), ..Default::default() };
         let issues =
-            validate(&config(ExcitedStateMethod::Tddft), &reference, 1, &atoms(&["C"]));
+            validate(&config(ExcitedStateMethod::StdaDft), &reference, 1, &atoms(&["C"]));
         assert!(is_blocked(&issues));
         assert!(
             issues.iter().any(|i| i.message.contains("global-hybrid")),
@@ -568,7 +586,7 @@ mod tests {
     /// TDA on gives `--stda`, TDA off gives `--stddft`: the requested switch.
     #[test]
     fn the_tda_switch_chooses_the_engine_mode() {
-        let mut c = config(ExcitedStateMethod::Tddft);
+        let mut c = config(ExcitedStateMethod::StdaDft);
         let tda = build(&c, 1);
         assert!(tda.contains(&"--stda".to_string()), "{tda:?}");
         assert!(!tda.contains(&"--stddft".to_string()));
@@ -613,7 +631,7 @@ mod tests {
             Some("xtb")
         );
         assert_eq!(
-            value_after(&build(&config(ExcitedStateMethod::Tddft), 1), "--method"),
+            value_after(&build(&config(ExcitedStateMethod::StdaDft), 1), "--method"),
             Some("rks")
         );
     }
@@ -622,7 +640,7 @@ mod tests {
     #[test]
     fn an_open_shell_tddft_reference_is_uks() {
         assert_eq!(
-            value_after(&build(&config(ExcitedStateMethod::Tddft), 3), "--method"),
+            value_after(&build(&config(ExcitedStateMethod::StdaDft), 3), "--method"),
             Some("uks")
         );
     }
@@ -633,7 +651,7 @@ mod tests {
     /// `--stda` produces both the spectrum and canonicalMO.molden.
     #[test]
     fn a_tddft_run_also_writes_the_ground_state_orbitals() {
-        let built = build(&config(ExcitedStateMethod::Tddft), 1);
+        let built = build(&config(ExcitedStateMethod::StdaDft), 1);
         assert!(built.contains(&"--wf2molden".to_string()), "{built:?}");
     }
 
@@ -669,7 +687,7 @@ mod tests {
     /// routes would be given two answers to the same question.
     #[test]
     fn only_tddft_passes_a_functional_and_a_basis() {
-        let tddft = build(&config(ExcitedStateMethod::Tddft), 1);
+        let tddft = build(&config(ExcitedStateMethod::StdaDft), 1);
         assert_eq!(value_after(&tddft, "--functional"), Some("b3lyp"));
         assert_eq!(value_after(&tddft, "--basis"), Some("def2-svp"));
 
@@ -690,7 +708,7 @@ mod tests {
         for method in [
             ExcitedStateMethod::StdaTasi,
             ExcitedStateMethod::StdaXtbOriginal,
-            ExcitedStateMethod::Tddft,
+            ExcitedStateMethod::StdaDft,
         ] {
             let built = build(&config(method), 1);
             assert!(
@@ -732,6 +750,31 @@ mod tests {
     fn a_zero_root_count_is_clamped_rather_than_passed_on() {
         let c = ExcitedStateConfig { roots: 0, ..config(ExcitedStateMethod::StdaTasi) };
         assert_eq!(value_after(&build(&c, 1), "--stddft-roots"), Some("1"));
+    }
+
+    /// No label may claim to be full TD-DFT. Nothing this panel can run is:
+    /// Behemoth exposes only the simplified engine on its command line, and
+    /// its exact TD-DFT module has no CLI entry point. Calling the DFT route
+    /// "TD-DFT" is the mistake this test exists to prevent recurring.
+    #[test]
+    fn no_label_claims_to_be_full_tddft() {
+        for method in ExcitedStateMethod::ALL {
+            let label = method.label();
+            assert!(
+                !label.contains("TD-DFT") || label.contains("sTD-DFT"),
+                "{label:?} reads as full TD-DFT"
+            );
+        }
+        // The DFT route names both modes of the one engine it drives.
+        let label = ExcitedStateMethod::StdaDft.label();
+        assert!(label.contains("sTDA"), "{label}");
+        assert!(label.contains("sTD-DFT"), "{label}");
+        // And its description says outright that it is not full TD-DFT.
+        assert!(
+            ExcitedStateMethod::StdaDft.description().contains("not full TD-DFT"),
+            "{}",
+            ExcitedStateMethod::StdaDft.description()
+        );
     }
 
     /// Every route offered must be describable, or the dropdown has an entry

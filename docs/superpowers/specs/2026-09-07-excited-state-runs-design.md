@@ -16,6 +16,31 @@ The controls asked for: a method (sTDA-xTB or TD-DFT), a functional and basis
 set when it is TD-DFT, a root count in every case, and a TDA switch for TD-DFT
 that defaults to on.
 
+## What this does NOT provide, and must not be read as providing
+
+**Full TD-DFT is not available through Behemoth's command line.** Only
+Grimme's simplified methods are: `--stda` and `--stddft`, the latter described
+by Behemoth's own help as "Coupled *simplified* TD-DFT".
+
+Behemoth does implement exact TD-DFT, in `src/hamiltonian/tddft/`, whose notes
+state it is "independent of `src/hamiltonian/stddft`. The latter remains the
+deliberately simplified Grimme-style model." It has public entry points --
+`pbe_tddft_from_rks`, `hybrid_gga_tddft_from_rks`,
+`unrestricted_gga_tddft_from_uks` -- and 17 tests. But **nothing outside the
+library calls any of them**: `main.rs` imports only from `stddft::`, there is
+no `--tddft` flag, and no input-file keyword for it. Beavyr drives Behemoth as
+a subprocess, so that engine is unreachable.
+
+Every method this panel offers is therefore a simplified one, and every label
+says so. The route on a DFT reference is named "sTD-DFT (simplified)", not
+"TD-DFT" -- it was briefly named the latter, which misrepresented it.
+
+The consequence for functionals: the simplified engine requires nonzero exact
+exchange, so pure functionals cannot be offered *here*. That is a restriction
+of sTDA, not of TD-DFT. Exposing the exact engine on Behemoth's command line
+would lift it, and is the change to make if PBE and the other pure functionals
+are wanted for a computed spectrum.
+
 ## What Behemoth actually offers
 
 Verified by running the binary and by reading `src/utils/cli/` and
