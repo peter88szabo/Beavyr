@@ -5,6 +5,7 @@ use bevy_egui::{EguiGlobalSettings, EguiPlugin, EguiPrimaryContextPass};
 mod bond_order;
 mod camera;
 mod color_schemes;
+mod custom_schemes;
 mod diagnostics;
 mod events;
 mod export_image;

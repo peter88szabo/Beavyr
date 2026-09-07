@@ -72,6 +72,12 @@ pub struct MolSettings {
     // appearance
     pub scheme: ColorScheme,
     pub element_colors: HashMap<String, Color>,
+    /// Name the current custom colours are saved under, or would be. Empty
+    /// until the user names one. Only meaningful while `scheme` is `Custom`.
+    pub custom_scheme_name: String,
+    /// What the last save, default or delete did. Shown under the buttons,
+    /// because a save that failed silently would look like one that worked.
+    pub scheme_message: Option<String>,
     pub bg_color: Color,
 
     // material (shared by atoms and bonds)
@@ -149,8 +155,20 @@ impl Default for MolSettings {
             trace_show_atoms: false,
             trace_atom_scale: 1.0,
 
-            scheme: ColorScheme::Jmol,
-            element_colors: color_scheme_map(ColorScheme::Jmol),
+            // A saved default is a custom scheme by definition; without one
+            // the built-in Jmol colours stand.
+            scheme: if crate::custom_schemes::load_default().is_some() {
+                ColorScheme::Custom
+            } else {
+                ColorScheme::Jmol
+            },
+            // A saved default scheme wins over the built-in one, which is the
+            // point of being able to make one the default.
+            element_colors: crate::custom_schemes::load_default()
+                .map(|(_, colors)| colors)
+                .unwrap_or_else(|| color_scheme_map(ColorScheme::Jmol)),
+            custom_scheme_name: crate::custom_schemes::default_name().unwrap_or_default(),
+            scheme_message: None,
             bg_color: Color::srgb(0.0, 0.0, 0.0),
 
             metallic: 0.05,

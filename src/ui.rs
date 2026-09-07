@@ -1403,12 +1403,100 @@ pub fn ui_panel(
                                         settings.scheme = sc;
                                         if sc != ColorScheme::Custom {
                                             settings.element_colors = color_scheme_map(sc);
+                                            settings.custom_scheme_name.clear();
                                         }
                                         settings.materials_dirty = true;
                                     }
                                 }
+
+                                // The user's own schemes, alongside the
+                                // built-ins: a saved scheme is a Custom one
+                                // with a name, so selecting it loads its
+                                // colours and adopts its name.
+                                let saved = crate::custom_schemes::list_saved();
+                                if !saved.is_empty() {
+                                    ui.separator();
+                                    for name in saved {
+                                        let selected = settings.scheme == ColorScheme::Custom
+                                            && settings.custom_scheme_name == name;
+                                        if ui.selectable_label(selected, &name).clicked() {
+                                            if let Some(colors) =
+                                                crate::custom_schemes::load(&name)
+                                            {
+                                                settings.element_colors = colors;
+                                                settings.scheme = ColorScheme::Custom;
+                                                settings.custom_scheme_name = name.clone();
+                                                settings.materials_dirty = true;
+                                            }
+                                        }
+                                    }
+                                }
                             });
                     });
+
+                    // Naming and saving. Editing any element colour above
+                    // already switches the scheme to Custom, so this is where
+                    // that edit becomes something the user keeps.
+                    ui.horizontal(|ui| {
+                        ui.label("Name:");
+                        ui.add(
+                            egui::TextEdit::singleline(&mut settings.custom_scheme_name)
+                                .desired_width(140.0)
+                                .hint_text("my scheme"),
+                        );
+                    });
+                    ui.horizontal(|ui| {
+                        let name = settings.custom_scheme_name.trim().to_string();
+                        let can_save = !name.is_empty();
+                        let save_now = ui
+                            .add_enabled(can_save, egui::Button::new("Save Color Scheme"))
+                            .on_disabled_hover_text("Give the scheme a name first.")
+                            .clicked();
+                        let save_default = ui
+                            .add_enabled(can_save, egui::Button::new("Save & Make Default"))
+                            .on_disabled_hover_text("Give the scheme a name first.")
+                            .on_hover_text("Also load this scheme when Beavyr starts.")
+                            .clicked();
+
+                        if save_now || save_default {
+                            match crate::custom_schemes::save(&name, &settings.element_colors) {
+                                Ok(saved_as) => {
+                                    settings.custom_scheme_name = saved_as.clone();
+                                    settings.scheme = ColorScheme::Custom;
+                                    let mut message = format!("Saved \u{201c}{saved_as}\u{201d}.");
+                                    if save_default {
+                                        match crate::custom_schemes::set_default(&saved_as) {
+                                            Ok(()) => message
+                                                .push_str(" It will load when Beavyr starts."),
+                                            Err(err) => {
+                                                message = err;
+                                            }
+                                        }
+                                    }
+                                    settings.scheme_message = Some(message);
+                                }
+                                Err(err) => settings.scheme_message = Some(err),
+                            }
+                        }
+
+                        // Deleting matters because the names are typed: a
+                        // mistyped scheme would otherwise sit in the list for
+                        // good.
+                        let exists = crate::custom_schemes::list_saved().contains(&name);
+                        if ui
+                            .add_enabled(exists, egui::Button::new("Delete"))
+                            .on_disabled_hover_text("No saved scheme by that name.")
+                            .clicked()
+                        {
+                            settings.scheme_message = match crate::custom_schemes::delete(&name) {
+                                Ok(()) => Some(format!("Deleted \u{201c}{name}\u{201d}.")),
+                                Err(err) => Some(err),
+                            };
+                        }
+                    });
+                    if let Some(message) = &settings.scheme_message {
+                        ui.weak(message);
+                    }
 
                     ui.collapsing("Per-element overrides (active in Custom)", |ui| {
                         ui.spacing_mut().item_spacing = egui::vec2(6.0, 4.0);
