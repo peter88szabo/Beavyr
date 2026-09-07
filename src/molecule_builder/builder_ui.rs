@@ -1329,15 +1329,21 @@ fn auto_placement(
     coords: &[Vec3],
     host: usize,
     symbol: &str,
-    bond_order: BondOrder,
     angle_ref: Option<usize>,
     dihedral_ref: Option<usize>,
 ) -> (f64, f64, f64) {
     let host_symbol = zmat[host].symbol.as_str();
+    // Always a single bond, whatever the panel's bond-order selector says.
+    // Automatic placement is for building a structure up quickly, and a
+    // single bond is the overwhelmingly common case for every element; a
+    // double or triple bond is a deliberate choice, so it belongs to the
+    // reference-picking mode where the user states the geometry anyway. The
+    // length follows from that: the covalent-radius sum, not a shortened
+    // multiple-bond distance.
     let bond_len = bond_length_for(
         symbol,
         host_symbol,
-        bond_order,
+        BondOrder::Single,
         covalent_radius_angstrom(symbol),
         covalent_radius_angstrom(host_symbol),
     );
@@ -1349,9 +1355,36 @@ fn auto_placement(
         .collect();
     let center = coords[host];
 
+    // With exactly two neighbours the arrangement is ambiguous, and the two
+    // readings put the next bond in very different places: a trigonal centre
+    // completes in the plane of the existing bonds, a tetrahedral one out of
+    // it. Negating the summed bond vectors -- correct for three bonds -- gives
+    // the in-plane answer, which on an sp3 centre lands at 125.3 degrees
+    // instead of 109.5 and flattens it. So the observed angle decides, and
+    // anything short of clearly trigonal is treated as sp3.
+    const CLEARLY_TRIGONAL_DEG: f32 = 115.0;
+    let sp3_completion = (neighbor_positions.len() == 2)
+        .then(|| {
+            let a = (neighbor_positions[0] - center).normalize_or_zero();
+            let b = (neighbor_positions[1] - center).normalize_or_zero();
+            let observed = a.dot(b).clamp(-1.0, 1.0).acos().to_degrees();
+            (observed < CLEARLY_TRIGONAL_DEG)
+                .then(|| {
+                    attach::tetrahedral_completion(
+                        center,
+                        neighbor_positions[0],
+                        neighbor_positions[1],
+                    )
+                })
+                .flatten()
+        })
+        .flatten();
+
     // The direction that completes the geometry already there, when there is
     // enough of it to be definite.
-    let measured = attach::ideal_direction_from_neighbors(center, &neighbor_positions).or_else(|| {
+    let measured = sp3_completion.or_else(|| {
+        attach::ideal_direction_from_neighbors(center, &neighbor_positions)
+    }).or_else(|| {
         // A single neighbour is only definite when the bond is short enough to
         // be a genuine multiple bond, which forces the centre linear.
         let (&only, &only_index) = match (neighbor_positions.first(), neighbors.first()) {
@@ -1429,7 +1462,6 @@ fn commit_add_atom_auto(
         &coords,
         host,
         &symbol,
-        zmat_state.new_bond_order,
         angle_ref,
         dihedral_ref,
     );
@@ -4416,6 +4448,107 @@ mod editor_flow_tests {
                 "H{h} to the new atom is {angle:.1} deg, expected tetrahedral"
             );
         }
+    }
+
+    /// The reported case: CH3-C where the second carbon is bare. Adding
+    /// hydrogens to it one at a time must build a tetrahedral centre -- the
+    /// first H at 109.5 from the C-C bond, and the second out of the plane
+    /// rather than flattening it.
+    #[test]
+    fn auto_builds_a_tetrahedral_centre_on_a_bare_carbon() {
+        let mut mol = Molecule::empty();
+        let mut zmat_state = ZMatrixBuilderState::default();
+        let mut settings = MolSettings::default();
+
+        // A methyl, then a bare carbon on it: CH3-C.
+        let frag = find_fragment("-CH3").unwrap();
+        add_fragment_to_zmat(&mut zmat_state.zmat, frag.xyz, None, 0.0, 109.5, 180.0);
+        mol.pos = zmat2xyz::zmat_to_xyz(&zmat_state.zmat);
+        mol.atoms = zmat_state.zmat.iter().map(|a| a.symbol.clone()).collect();
+        mol.recompute_bonds(2.0, 3.0);
+        zmat_state.new_symbol = "C".to_string();
+        zmat_state.add_atom_active = true;
+        zmat_state.add_atom_auto = true;
+        collect_add_atom_pick(&mut zmat_state, &mol.atoms, Some(0));
+        commit_add_atom_auto(&mut zmat_state, &mut mol, &mut settings);
+        let bare = mol.atoms.len() - 1;
+        assert_eq!(mol.atoms[bare], "C");
+
+        let angle_at = |center: usize, a: usize, b: usize, mol: &Molecule| {
+            (mol.pos[a] - mol.pos[center])
+                .normalize()
+                .dot((mol.pos[b] - mol.pos[center]).normalize())
+                .clamp(-1.0, 1.0)
+                .acos()
+                .to_degrees()
+        };
+
+        // First H on the bare carbon: nothing to measure, so sp3 by default
+        // -- not the 180 degrees a linear guess would give.
+        zmat_state.new_symbol = "H".to_string();
+        zmat_state.add_atom_active = true;
+        zmat_state.add_atom_auto = true;
+        collect_add_atom_pick(&mut zmat_state, &mol.atoms, Some(bare));
+        commit_add_atom_auto(&mut zmat_state, &mut mol, &mut settings);
+        let h1 = mol.atoms.len() - 1;
+        let first = angle_at(bare, 0, h1, &mol);
+        assert!(
+            (first - 109.471).abs() < 1.0,
+            "the first H sits at {first:.1} deg from the C-C bond, expected sp3"
+        );
+
+        // Second H: two neighbours at 109.5, so the centre is sp3 and the new
+        // bond must leave their plane.
+        zmat_state.add_atom_active = true;
+        zmat_state.add_atom_auto = true;
+        collect_add_atom_pick(&mut zmat_state, &mol.atoms, Some(bare));
+        commit_add_atom_auto(&mut zmat_state, &mut mol, &mut settings);
+        let h2 = mol.atoms.len() - 1;
+        for (label, other) in [("C-C", 0usize), ("first H", h1)] {
+            let angle = angle_at(bare, other, h2, &mol);
+            assert!(
+                (angle - 109.471).abs() < 1.5,
+                "the second H is {angle:.1} deg from the {label}, expected sp3 \
+                 (125.3 would mean the centre was flattened)"
+            );
+        }
+    }
+
+    /// Auto mode makes single bonds whatever the bond-order selector says,
+    /// and the length follows from that.
+    #[test]
+    fn auto_always_makes_a_single_bond() {
+        let (mut mol, mut zmat_state) = methyl_host();
+        let mut settings = MolSettings::default();
+        zmat_state.new_symbol = "C".to_string();
+        // Deliberately set to triple: auto mode must ignore it.
+        zmat_state.new_bond_order = BondOrder::Triple;
+        zmat_state.add_atom_active = true;
+        zmat_state.add_atom_auto = true;
+        collect_add_atom_pick(&mut zmat_state, &mol.atoms, Some(0));
+        commit_add_atom_auto(&mut zmat_state, &mut mol, &mut settings);
+
+        let placed = zmat_state.zmat.last().unwrap().bond_len;
+        let single = bond_length_for(
+            "C",
+            "C",
+            BondOrder::Single,
+            covalent_radius_angstrom("C"),
+            covalent_radius_angstrom("C"),
+        );
+        assert!(
+            (placed - single).abs() < 1.0e-6,
+            "C-C came out {placed:.3} A, single-bond length is {single:.3}"
+        );
+        // A triple bond would have been materially shorter.
+        let triple = bond_length_for(
+            "C",
+            "C",
+            BondOrder::Triple,
+            covalent_radius_angstrom("C"),
+            covalent_radius_angstrom("C"),
+        );
+        assert!(placed > triple + 0.05, "and not the triple-bond length");
     }
 
     /// Auto mode needs one pick, not three.

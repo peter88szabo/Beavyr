@@ -149,17 +149,22 @@ pub fn ideal_bond_angle_deg(symbol: &str, sigma_bonds: usize) -> f64 {
     const TETRAHEDRAL: f64 = 109.471;
 
     match symbol {
-        // No lone pairs: the sigma bonds alone set the geometry.
-        "C" | "Si" | "B" | "Al" => match sigma_bonds {
-            0 | 1 | 2 => LINEAR,
-            3 => TRIGONAL,
-            _ => TETRAHEDRAL,
-        },
-        // One lone pair on a trivalent centre: pyramidal, slightly tighter
-        // than tetrahedral.
+        // sp3 unless the geometry proves otherwise. This table is only
+        // consulted when the existing arrangement is too sparse or too
+        // distorted to measure a direction from, and in that situation a
+        // partly-built carbon is overwhelmingly more likely to be heading for
+        // a tetrahedral centre than a linear or trigonal one -- a carbon with
+        // one neighbour is far more often a future CH3 than an alkyne. Real
+        // sp and sp2 centres are caught before this by their bond lengths and
+        // their neighbours' angles.
+        "C" | "Si" => TETRAHEDRAL,
+        // Boron and aluminium are the exception: with no lone pair they are
+        // genuinely trigonal planar, and BH3 or AlCl3 is the common case
+        // rather than a tetrahedral borate.
+        "B" | "Al" => TRIGONAL,
+        // One lone pair: pyramidal, slightly tighter than tetrahedral.
         "N" | "P" => match sigma_bonds {
-            0 | 1 | 2 => TRIGONAL,
-            3 => 107.0,
+            0 | 1 | 2 | 3 => 107.0,
             _ => TETRAHEDRAL,
         },
         // Two lone pairs: the familiar bent geometry of water and ethers.
@@ -375,16 +380,29 @@ mod tests {
         assert_eq!(classify_valence("C", 0.0).0, ValenceVerdict::Satisfied);
     }
 
-    /// The angles a chemist would draw: methane tetrahedral, ethylene
-    /// trigonal, acetylene linear, water bent, ammonia pyramidal.
+    /// Carbon defaults to sp3 at every coordination, because this table is
+    /// only reached when the geometry could not be measured -- and a
+    /// half-built carbon is far more often a future CH3 than an alkyne.
+    #[test]
+    fn carbon_always_falls_back_to_sp3() {
+        for sigma in 0..=4 {
+            assert!(
+                (ideal_bond_angle_deg("C", sigma) - 109.471).abs() < 1e-3,
+                "C with {sigma} sigma bonds gave {}",
+                ideal_bond_angle_deg("C", sigma)
+            );
+        }
+        assert!((ideal_bond_angle_deg("Si", 2) - 109.471).abs() < 1e-3);
+    }
+
+    /// The others keep the geometry their lone pairs dictate.
     #[test]
     fn the_ideal_angles_follow_vsepr() {
-        assert!((ideal_bond_angle_deg("C", 4) - 109.471).abs() < 1e-3, "methane");
-        assert_eq!(ideal_bond_angle_deg("C", 3), 120.0, "ethylene");
-        assert_eq!(ideal_bond_angle_deg("C", 2), 180.0, "acetylene");
         assert_eq!(ideal_bond_angle_deg("O", 2), 104.5, "water");
         assert_eq!(ideal_bond_angle_deg("N", 3), 107.0, "ammonia");
+        assert_eq!(ideal_bond_angle_deg("N", 2), 107.0, "a half-built amine");
         assert_eq!(ideal_bond_angle_deg("B", 3), 120.0, "borane, trigonal planar");
+        assert_eq!(ideal_bond_angle_deg("Al", 2), 120.0);
     }
 
     /// A completed centre has no room; a partly built one does.

@@ -417,6 +417,38 @@ pub fn ideal_direction_from_neighbors(center: Vec3, neighbors: &[Vec3]) -> Optio
     }
 }
 
+/// The direction completing a tetrahedral centre that already has two bonds.
+///
+/// Negating the sum of the two existing bond vectors -- the right answer for
+/// three bonds, and for a trigonal centre with two -- is wrong here: it lands
+/// **in** the plane of the two bonds, at 125.26 degrees from each, not the
+/// 109.47 a tetrahedron needs. The two remaining vertices are out of that
+/// plane, symmetric about it; this returns one of them.
+///
+/// Derivation: with `s` the in-plane bisector and `n` the plane normal, the
+/// remaining vertices are `-s cos(54.7356) +/- n sin(54.7356)`, whose
+/// components are `sqrt(1/3)` and `sqrt(2/3)`.
+pub fn tetrahedral_completion(center: Vec3, first: Vec3, second: Vec3) -> Option<Vec3> {
+    /// cos(54.7356 deg) = sqrt(1/3): half the tetrahedral angle's complement.
+    const IN_PLANE: f32 = 0.577_350_3;
+    /// sin(54.7356 deg) = sqrt(2/3).
+    const OUT_OF_PLANE: f32 = 0.816_496_6;
+
+    let a = (first - center).normalize_or_zero();
+    let b = (second - center).normalize_or_zero();
+    if a.length() < 0.5 || b.length() < 0.5 {
+        return None;
+    }
+    let bisector = (a + b).normalize_or_zero();
+    let normal = a.cross(b).normalize_or_zero();
+    // Collinear bonds leave the normal undefined, so there is no plane to sit
+    // out of and no tetrahedron to complete.
+    if bisector.length() < 0.5 || normal.length() < 0.5 {
+        return None;
+    }
+    Some((-bisector * IN_PLANE + normal * OUT_OF_PLANE).normalize_or_zero())
+}
+
 /// Direction that completes a linear (sp) arrangement, when the single
 /// existing neighbour is short enough to be a genuine double or triple bond.
 ///
@@ -528,6 +560,54 @@ pub fn geometric_bonded_neighbors(
         .collect()
 }
 
+
+#[cfg(test)]
+mod tetrahedral_tests {
+    use super::*;
+
+    /// Two bonds at the tetrahedral angle: the completion must sit at 109.47
+    /// from both, and out of their plane.
+    #[test]
+    fn completing_a_tetrahedral_centre_gives_the_tetrahedral_angle() {
+        let center = Vec3::ZERO;
+        let half = 109.471_f32.to_radians() * 0.5;
+        let a = Vec3::new(half.sin(), 0.0, half.cos());
+        let b = Vec3::new(-half.sin(), 0.0, half.cos());
+        let c = tetrahedral_completion(center, a, b).expect("a completion");
+
+        let angle = |u: Vec3, v: Vec3| u.normalize().dot(v.normalize()).acos().to_degrees();
+        assert!((angle(a, c) - 109.471).abs() < 0.01, "{}", angle(a, c));
+        assert!((angle(b, c) - 109.471).abs() < 0.01, "{}", angle(b, c));
+        assert!(c.y.abs() > 0.5, "it must leave the a-b plane, got y = {}", c.y);
+        assert!((c.length() - 1.0).abs() < 1.0e-5);
+    }
+
+    /// What the naive negated sum would have given, for contrast: in-plane at
+    /// 125.26 degrees. This is the bug the function exists to avoid.
+    #[test]
+    fn the_negated_sum_would_have_been_planar_and_too_wide() {
+        let half = 109.471_f32.to_radians() * 0.5;
+        let a = Vec3::new(half.sin(), 0.0, half.cos());
+        let b = Vec3::new(-half.sin(), 0.0, half.cos());
+        let naive = -(a + b).normalize();
+        let angle = a.normalize().dot(naive).acos().to_degrees();
+        assert!((angle - 125.26).abs() < 0.1, "{angle}");
+        assert!(naive.y.abs() < 1.0e-5, "and it stays in the plane");
+    }
+
+    /// Collinear bonds have no plane to sit out of.
+    #[test]
+    fn collinear_bonds_have_no_tetrahedral_completion() {
+        let center = Vec3::ZERO;
+        assert!(tetrahedral_completion(center, Vec3::X, -Vec3::X).is_none());
+        assert!(tetrahedral_completion(center, Vec3::X, Vec3::X * 2.0).is_none());
+    }
+
+    #[test]
+    fn a_bond_of_zero_length_is_rejected() {
+        assert!(tetrahedral_completion(Vec3::ZERO, Vec3::ZERO, Vec3::X).is_none());
+    }
+}
 
 #[cfg(test)]
 mod tests {
