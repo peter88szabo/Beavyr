@@ -1504,6 +1504,7 @@ mod bond_span_tests {
     }
 }
 
+#[cfg(test)]
 mod axis_gizmo_tests {
     use super::*;
 
