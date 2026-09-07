@@ -819,6 +819,36 @@ fn place_and_derive_fragment(
         let single_bond_length = covalent_radius_angstrom(&zmat[attach].symbol)
             + covalent_radius_angstrom(&zmat[single].symbol);
         attach::linear_direction_for_multiple_bond(attach_pos, only_neighbor, single_bond_length)
+    })
+    .or_else(|| {
+        // A single ordinary bond leaves a cone of equally valid directions:
+        // the angle is fixed by the element, the rotation about the existing
+        // bond is free. Without this the placement fell through to a general
+        // clearance search, and a straight line clears best -- which is why
+        // replacing a phenol's hydroxyl hydrogen with -OH produced a
+        // collinear C-O-O.
+        if real_neighbors.len() != 1 {
+            return None;
+        }
+        let axis = (neighbor_positions[0] - attach_pos).normalize_or_zero();
+        if axis.length() < 0.5 {
+            return None;
+        }
+        let ideal =
+            crate::bond_order::ideal_bond_angle_deg(&zmat[attach].symbol, 2) as f32;
+        // Spend the free rotation on whatever clears the rest of the molecule
+        // best, rather than on an arbitrary perpendicular.
+        const CONE_SAMPLES: usize = 24;
+        attach::cone_directions(axis, ideal, CONE_SAMPLES)
+            .into_iter()
+            .map(|direction| {
+                let origin = attach_pos + direction * bond_len as f32;
+                let placed = attach::place_fragment(local, open, origin, direction, 0.0);
+                let clearance = attach::clearance_against(&placed, &host_coords, &ignore);
+                (clearance, direction)
+            })
+            .max_by(|a, b| a.0.total_cmp(&b.0))
+            .map(|(_, direction)| direction)
     });
 
     let (clearance, placed) = if let Some(direction) = valence_direction {
@@ -5127,6 +5157,82 @@ mod editor_flow_tests {
 #[cfg(test)]
 mod zmat_edit_tests {
     use super::*;
+
+    /// The reported case: build a phenol-like C-O-H, replace the hydroxyl
+    /// hydrogen with another -OH, and the resulting C-O-O must be bent.
+    ///
+    /// The host oxygen has one remaining bond after the hydrogen goes, so
+    /// there is nothing to measure a direction from -- and a clearance search
+    /// prefers a straight line, which is what produced the collinear result.
+    #[test]
+    fn replacing_a_hydroxyl_hydrogen_gives_a_bent_peroxide() {
+        // A methyl with an -OH on it: C-O-H, the same connectivity as a
+        // phenol's hydroxyl without the ring.
+        let mut mol = Molecule::from_xyz(
+            "C  0.000  0.000  0.000\n\
+             H  0.629  0.629  0.629\n\
+             H -0.629 -0.629  0.629\n\
+             H -0.629  0.629 -0.629\n",
+        );
+        mol.recompute_bonds(1.2, 2.5);
+        let mut zmat_state = ZMatrixBuilderState::default();
+        let mut settings = MolSettings::default();
+        let mut rotate = EditorRotateState::default();
+        zmat_state.zmat = zmat2xyz::xyz_to_zmat(&mol.atoms, &mol.pos);
+
+        zmat_state.frag_name = "-OH".to_string();
+        set_selected_atom(&mut zmat_state, &mol.atoms, Some(0));
+        commit_fragment_connect(&mut zmat_state, &mut mol, &mut settings);
+        assert!(zmat_state.last_error.is_none(), "{:?}", zmat_state.last_error);
+        let oxygen = mol.atoms.iter().position(|s| s == "O").expect("the hydroxyl O");
+        // Its hydrogen is the atom bonded to it that is not the carbon.
+        let hydroxyl_h = (0..mol.atoms.len())
+            .filter(|&i| i != oxygen && mol.atoms[i] == "H")
+            .min_by(|&a, &b| {
+                mol.pos[oxygen]
+                    .distance(mol.pos[a])
+                    .total_cmp(&mol.pos[oxygen].distance(mol.pos[b]))
+            })
+            .expect("the hydroxyl H");
+        assert!(
+            mol.pos[oxygen].distance(mol.pos[hydroxyl_h]) < 1.2,
+            "that hydrogen should be the one on the oxygen"
+        );
+
+        // Replace it with a second -OH, making C-O-O-H.
+        set_selected_atom(&mut zmat_state, &mol.atoms, Some(hydroxyl_h));
+        commit_fragment_replace(&mut zmat_state, &mut mol, &mut settings, &mut rotate);
+        assert!(zmat_state.last_error.is_none(), "{:?}", zmat_state.last_error);
+
+        let oxygens: Vec<usize> = (0..mol.atoms.len())
+            .filter(|&i| mol.atoms[i] == "O")
+            .collect();
+        assert_eq!(oxygens.len(), 2, "a peroxide has two oxygens");
+        let carbon = 0usize;
+        // The oxygen bonded to the carbon, and the far one.
+        let (near, far) = if mol.pos[carbon].distance(mol.pos[oxygens[0]])
+            < mol.pos[carbon].distance(mol.pos[oxygens[1]])
+        {
+            (oxygens[0], oxygens[1])
+        } else {
+            (oxygens[1], oxygens[0])
+        };
+
+        let angle = (mol.pos[carbon] - mol.pos[near])
+            .normalize()
+            .dot((mol.pos[far] - mol.pos[near]).normalize())
+            .clamp(-1.0, 1.0)
+            .acos()
+            .to_degrees();
+        assert!(
+            angle < 130.0,
+            "C-O-O came out {angle:.1} deg -- 180 is the collinear bug"
+        );
+        assert!(
+            (angle - 104.5).abs() < 12.0,
+            "C-O-O came out {angle:.1} deg, expected near 104.5"
+        );
+    }
 
     /// The angle at a fragment's connector after a real placement, measured
     /// against the connector's nearest bonded atom inside the fragment --

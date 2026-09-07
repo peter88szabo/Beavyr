@@ -375,6 +375,31 @@ pub fn open_valence_direction(
     }
 }
 
+/// Unit directions making `angle_deg` with `axis`, spread evenly around it.
+///
+/// A centre with a single existing bond leaves a whole cone of chemically
+/// equivalent directions for the next one: the angle is fixed but the rotation
+/// about the existing bond is free. Enumerating the cone lets the caller spend
+/// that freedom on whatever clears the rest of the molecule best, instead of
+/// on an arbitrary perpendicular.
+pub fn cone_directions(axis: Vec3, angle_deg: f32, count: usize) -> Vec<Vec3> {
+    let axis = axis.normalize_or_zero();
+    let perpendicular = any_perpendicular(axis);
+    if axis.length() < 0.5 || perpendicular.length() < 0.5 || count == 0 {
+        return Vec::new();
+    }
+    let other = axis.cross(perpendicular).normalize_or_zero();
+    let theta = angle_deg.to_radians();
+    (0..count)
+        .map(|k| {
+            let phi = std::f32::consts::TAU * k as f32 / count as f32;
+            (axis * theta.cos()
+                + (perpendicular * phi.cos() + other * phi.sin()) * theta.sin())
+            .normalize_or_zero()
+        })
+        .collect()
+}
+
 pub fn fragment_open_valence(local: &[Vec3], connector_symbol: &str, local_symbols: &[&str]) -> Vec3 {
     if local.len() < 2 {
         return -Vec3::Z;
@@ -669,6 +694,37 @@ pub fn geometric_bonded_neighbors(
 #[cfg(test)]
 mod tetrahedral_tests {
     use super::*;
+
+    /// Every direction on the cone makes the requested angle with the axis,
+    /// and they are spread around it rather than bunched.
+    #[test]
+    fn cone_directions_all_make_the_requested_angle() {
+        let axis = Vec3::new(0.3, -0.5, 0.81).normalize();
+        let dirs = cone_directions(axis, 104.5, 12);
+        assert_eq!(dirs.len(), 12);
+        for d in &dirs {
+            let angle = axis.dot(*d).clamp(-1.0, 1.0).acos().to_degrees();
+            assert!((angle - 104.5).abs() < 0.01, "got {angle}");
+            assert!((d.length() - 1.0).abs() < 1.0e-5);
+        }
+        // Spread: the first and the opposite one differ.
+        assert!(dirs[0].distance(dirs[6]) > 1.0, "the cone is not degenerate");
+    }
+
+    #[test]
+    fn a_degenerate_cone_request_yields_nothing() {
+        assert!(cone_directions(Vec3::ZERO, 104.5, 8).is_empty());
+        assert!(cone_directions(Vec3::X, 104.5, 0).is_empty());
+    }
+
+    /// A 180-degree cone collapses onto the reversed axis, which is what an
+    /// sp centre wants.
+    #[test]
+    fn a_straight_cone_is_the_reversed_axis() {
+        for d in cone_directions(Vec3::Z, 180.0, 5) {
+            assert!((d - -Vec3::Z).length() < 1.0e-5, "{d:?}");
+        }
+    }
 
     /// Two bonds at the tetrahedral angle: the completion must sit at 109.47
     /// from both, and out of their plane.
