@@ -2470,6 +2470,23 @@ pub fn builder_ui_contents(
                     }
                 });
 
+                // Why a press did nothing, said where the press happened. The
+                // panel's other error line sits above the Z-matrix table,
+                // which in a scrolling window is off-screen by the time these
+                // controls are in view -- so a failure looked like silence.
+                if let Some(err) = &zmat_state.last_error {
+                    ui.colored_label(egui::Color32::LIGHT_RED, err);
+                }
+                ui.weak(format!(
+                    "Z-matrix {} rows \u{2022} molecule {} atoms \u{2022} selected {}",
+                    zmat_state.zmat.len(),
+                    mol.atoms.len(),
+                    match (zmat_state.selected_index, &zmat_state.selected_symbol) {
+                        (Some(i), Some(sym)) => format!("{sym}{}", i + 1),
+                        _ => "nothing".to_string(),
+                    }
+                ));
+
                 if let Some(score) = zmat_state.frag_scan_score {
                     ui.weak(format!("Fragment scan min distance: {:.3} Å", score));
                 }
