@@ -114,9 +114,18 @@ pub fn eckart_reactionpath_transform(
     }
     let mut proj_grad = Array2::<f64>::zeros((ndim, ndim));
     let norm = g_internal.iter().map(|v| v * v).sum::<f64>().sqrt();
-    if norm <= 0.0 {
+    let raw_norm = grad_mw.iter().map(|v| v * v).sum::<f64>().sqrt();
+    // The test is relative, not against zero. Removing the translations and
+    // rotations from a gradient that was made of little else leaves a residue
+    // of rounding error -- around 1e-18 -- which is not zero, so an absolute
+    // test passes it through and normalises noise into a unit vector. A
+    // direction chosen at random is then projected out of the Hessian, which
+    // silently destroys a real vibration.
+    const MIN_INTERNAL_FRACTION: f64 = 1.0e-6;
+    if raw_norm <= 0.0 || norm <= MIN_INTERNAL_FRACTION * raw_norm {
         return Err(anyhow!(
-            "gradient norm is zero; cannot project reaction path"
+            "gradient norm is zero after removing translations and rotations \
+             ({norm:.3e} of {raw_norm:.3e}); there is no reaction-path direction in it"
         ));
     }
     let mut g = vec![0.0_f64; ndim];
@@ -152,4 +161,140 @@ fn pinv_symmetric(a: &Array2<f64>, la: &LinAlg, tol: f64) -> Result<Array2<f64>>
     let vt = la.transpose(&evecs);
     let tmp = la.matmul(&evecs, &d_inv);
     Ok(la.matmul(&tmp, &vt))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::normalmode::linalg_shim::Backend;
+
+    /// Water, bent, in bohr; masses in electron masses.
+    fn water() -> (Vec<f64>, Vec<f64>) {
+        const AMU: f64 = 1822.888_486_209;
+        let mass_au = vec![15.994_915 * AMU, 1.007_825 * AMU, 1.007_825 * AMU];
+        let q_bohr = vec![
+            0.0, 0.0, 0.2217, 0.0, 1.4309, -0.8867, 0.0, -1.4309, -0.8867,
+        ];
+        (mass_au, q_bohr)
+    }
+
+    /// A gradient with a deliberate net force and net torque, which is what a
+    /// finite-grid DFT gradient really looks like: ORCA's for the 43-atom
+    /// example in `examples/` carries a net force of 8.9% of its own norm.
+    fn contaminated_gradient() -> Vec<f64> {
+        vec![
+            0.01, -0.004, 0.02, // a genuine internal displacement ...
+            -0.006, 0.011, -0.008, 0.003, -0.002, 0.005,
+        ]
+        .iter()
+        .zip([0.004_f64; 9])
+        // ... plus a uniform push on every atom, i.e. a pure translation.
+        .map(|(g, shift)| g + shift)
+        .collect()
+    }
+
+    fn max_abs_diff(a: &Array2<f64>, b: &Array2<f64>) -> f64 {
+        let (n, m) = a.dim();
+        let mut worst = 0.0_f64;
+        for i in 0..n {
+            for j in 0..m {
+                worst = worst.max((a[(i, j)] - b[(i, j)]).abs());
+            }
+        }
+        worst
+    }
+
+    /// The Eckart projector is a projector: `R^2 = R`.
+    #[test]
+    fn the_eckart_projector_is_idempotent() {
+        let (mass_au, q_bohr) = water();
+        let la = LinAlg::new(Backend::Auto).unwrap();
+        let r = get_eckart_projector(&mass_au, &q_bohr, &la).unwrap();
+        let r2 = la.matmul(&r, &r);
+        assert!(max_abs_diff(&r, &r2) < 1e-12, "R is not idempotent");
+    }
+
+    /// Six directions for a bent triatomic: three translations, three
+    /// rotations. The trace of a projector is the dimension it projects onto.
+    #[test]
+    fn the_eckart_projector_spans_six_directions() {
+        let (mass_au, q_bohr) = water();
+        let la = LinAlg::new(Backend::Auto).unwrap();
+        let r = get_eckart_projector(&mass_au, &q_bohr, &la).unwrap();
+        let trace: f64 = (0..9).map(|i| r[(i, i)]).sum();
+        assert!((trace - 6.0).abs() < 1e-10, "trace was {trace}");
+    }
+
+    /// The fix, tested at its cause rather than its symptom.
+    ///
+    /// Page and McIver's `P = R + v v^t`, Eq. (D1), is a projector only when
+    /// the tangent is orthogonal to the translation/rotation subspace. A real
+    /// gradient is not: a net force or torque puts part of it inside R. The
+    /// implementation removes that first, so `P` is idempotent whatever it is
+    /// handed -- which is what makes it annihilate exactly seven directions.
+    #[test]
+    fn the_reaction_path_projector_is_idempotent_despite_a_contaminated_gradient() {
+        let (mass_au, q_bohr) = water();
+        let la = LinAlg::new(Backend::Auto).unwrap();
+        let grad = contaminated_gradient();
+
+        // The contamination is real: the raw tangent overlaps R.
+        let r = get_eckart_projector(&mass_au, &q_bohr, &la).unwrap();
+        let norm: f64 = grad.iter().map(|v| v * v).sum::<f64>().sqrt();
+        let raw: Vec<f64> = grad.iter().map(|v| v / norm).collect();
+        let mut leak = 0.0;
+        for i in 0..9 {
+            let mut acc = 0.0;
+            for j in 0..9 {
+                acc += r[(i, j)] * raw[j];
+            }
+            leak += acc * acc;
+        }
+        assert!(
+            leak.sqrt() > 0.05,
+            "the fixture must actually be contaminated; leak was {}",
+            leak.sqrt()
+        );
+
+        // Recover I - P from the transform by feeding it the identity, then
+        // check that P projects.
+        let identity = Array2::<f64>::eye(9);
+        let i_minus_p =
+            eckart_reactionpath_transform(&mass_au, &q_bohr, &grad, &identity, &la).unwrap();
+        let squared = la.matmul(&i_minus_p, &i_minus_p);
+        assert!(
+            max_abs_diff(&i_minus_p, &squared) < 1e-10,
+            "I - P is not idempotent: {:e}",
+            max_abs_diff(&i_minus_p, &squared)
+        );
+
+        // And it removes exactly seven directions: six plus the path.
+        let trace: f64 = (0..9).map(|i| i_minus_p[(i, i)]).sum();
+        assert!(
+            (trace - 2.0).abs() < 1e-10,
+            "I - P should have rank 3N - 7 = 2; trace was {trace}"
+        );
+    }
+
+    /// A gradient that is nothing but a translation has no path direction left
+    /// once the translations are removed, and must be refused rather than
+    /// normalised into noise.
+    #[test]
+    fn a_gradient_that_is_pure_translation_is_refused() {
+        let (mass_au, q_bohr) = water();
+        let la = LinAlg::new(Backend::Auto).unwrap();
+        // The same mass-weighted shift on every atom: a pure translation.
+        let mut grad = vec![0.0; 9];
+        for a in 0..3 {
+            grad[3 * a] = mass_au[a].sqrt() * 0.01;
+        }
+        let identity = Array2::<f64>::eye(9);
+        let err = eckart_reactionpath_transform(&mass_au, &q_bohr, &grad, &identity, &la)
+            .expect_err("no internal direction survives");
+        let message = err.to_string();
+        assert!(
+            message.contains("after removing translations and rotations"),
+            "{message}"
+        );
+    }
 }
