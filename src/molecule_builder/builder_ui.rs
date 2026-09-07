@@ -900,11 +900,35 @@ fn place_and_derive_fragment(
                     let rotation = attach::fragment_rotation(local, open, direction, spin);
                     let rotated_normal = rotation * frag_local_normal;
                     let coplanarity = rotated_normal.normalize_or_zero().dot(host_normal).powi(2);
-                    // Planarity dominates; clearance only breaks ties between
-                    // the (normally two) orientations that are equally flat --
-                    // which is exactly the s-cis vs. s-trans choice, and
-                    // favours the roomier s-trans exactly as real dienes do.
-                    coplanarity * 1000.0 + clearance
+                    // Conjugation is worth having only when it does not cost a
+                    // steric clash. Planar biphenyl puts two ortho hydrogens
+                    // 1.83 A apart -- no amount of conjugation pays for that,
+                    // and real biphenyl is twisted by some 44 degrees. A
+                    // diene's planar form has no such contact, so it keeps the
+                    // bonus and stays flat.
+                    //
+                    // The threshold is the van der Waals contact distance of
+                    // two hydrogens, which is what the clash actually is. At
+                    // that value the search reproduces biphenyl's twist to
+                    // within a couple of degrees, and 2.4 gives the same
+                    // answer, so it sits on a plateau rather than a knife
+                    // edge.
+                    //
+                    // Below the threshold the bonus is withdrawn entirely and
+                    // the spin is chosen on clearance alone, which is what
+                    // "rotate it to overlap least" means.
+                    const CLASH_FREE_CLEARANCE: f32 = 2.3;
+                    let planarity_bonus = if clearance >= CLASH_FREE_CLEARANCE {
+                        coplanarity * 1000.0
+                    } else {
+                        0.0
+                    };
+                    // Planarity still dominates when it is affordable, so
+                    // clearance only breaks ties between the (normally two)
+                    // equally flat orientations -- the s-cis vs. s-trans
+                    // choice, which it settles in favour of the roomier
+                    // s-trans exactly as real dienes do.
+                    planarity_bonus + clearance
                 }
                 _ => clearance,
             };
@@ -5157,6 +5181,84 @@ mod editor_flow_tests {
 #[cfg(test)]
 mod zmat_edit_tests {
     use super::*;
+
+    /// Two aromatic rings joined by a single bond must not come out coplanar.
+    ///
+    /// Both connectors are trigonal, which is the conjugation case, and
+    /// conjugation used to outrank clearance outright -- so the rings were
+    /// laid flat with two ortho hydrogens 1.83 A apart. Real biphenyl twists
+    /// by about 44 degrees for exactly that reason.
+    #[test]
+    fn two_aromatic_rings_twist_out_of_plane() {
+        let phenyl = find_fragment("-Phenyl").expect("-Phenyl is a built-in fragment");
+        let (_n, symbols, coords) = parse_xyz_angstrom(phenyl.xyz);
+        let positions: Vec<Vec3> = coords
+            .iter()
+            .map(|v| Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32))
+            .collect();
+        let mut mol = Molecule {
+            atoms: symbols.clone(),
+            pos: positions,
+            bonds: vec![],
+            hydrogen_bonds: vec![],
+        };
+        mol.recompute_bonds(1.2, 2.5);
+        let mut zmat_state = ZMatrixBuilderState::default();
+        let mut settings = MolSettings::default();
+        let mut rotate = EditorRotateState::default();
+        zmat_state.zmat = zmat2xyz::xyz_to_zmat(&mol.atoms, &mol.pos);
+        zmat_state.frag_name = "-Phenyl".to_string();
+
+        let first_ring: Vec<usize> = (0..mol.atoms.len())
+            .filter(|&i| mol.atoms[i] == "C")
+            .take(3)
+            .collect();
+        let hydrogen = mol.atoms.iter().position(|s| s == "H").unwrap();
+        set_selected_atom(&mut zmat_state, &mol.atoms, Some(hydrogen));
+        commit_fragment_replace(&mut zmat_state, &mut mol, &mut settings, &mut rotate);
+        assert!(zmat_state.last_error.is_none(), "{:?}", zmat_state.last_error);
+
+        // Three carbons from each ring give the two plane normals. The second
+        // ring's atoms are the ones appended by the replace.
+        let second_ring: Vec<usize> = (symbols.len() - 1..mol.atoms.len())
+            .filter(|&i| mol.atoms[i] == "C")
+            .take(3)
+            .collect();
+        assert_eq!(second_ring.len(), 3, "the second ring went on");
+        let normal = |ids: &[usize], mol: &Molecule| -> Vec3 {
+            (mol.pos[ids[1]] - mol.pos[ids[0]])
+                .cross(mol.pos[ids[2]] - mol.pos[ids[0]])
+                .normalize()
+        };
+        let twist = normal(&first_ring, &mol)
+            .dot(normal(&second_ring, &mol))
+            .abs()
+            .clamp(0.0, 1.0)
+            .acos()
+            .to_degrees();
+        assert!(
+            twist > 25.0,
+            "the rings are {twist:.1} deg apart -- near zero is the coplanar bug"
+        );
+        assert!(
+            (twist - 44.0).abs() < 20.0,
+            "the rings are {twist:.1} deg apart, expected roughly biphenyl's 44"
+        );
+
+        // And no hydrogen pair is jammed inside a van der Waals contact.
+        let mut closest = f32::MAX;
+        for a in 0..mol.atoms.len() {
+            for b in (a + 1)..mol.atoms.len() {
+                if mol.atoms[a] == "H" && mol.atoms[b] == "H" {
+                    closest = closest.min(mol.pos[a].distance(mol.pos[b]));
+                }
+            }
+        }
+        assert!(
+            closest > 2.2,
+            "two hydrogens are {closest:.2} A apart, closer than they can be"
+        );
+    }
 
     /// The reported case: build a phenol-like C-O-H, replace the hydroxyl
     /// hydrogen with another -OH, and the resulting C-O-O must be bent.
