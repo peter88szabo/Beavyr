@@ -1,26 +1,29 @@
-//! Beavyr's first piece of on-disk state: just the xTB executable path.
+//! Where the external programs' executable paths are remembered.
 //!
 //! The design considered a RON config file (matching `Tautomer`, which
 //! already depends on `serde`/`ron`), but Beavyr's own `Cargo.toml` carries
-//! neither dependency, and one string does not justify adding them. A plain
-//! text file -- the path, and nothing else -- is the whole format.
+//! neither dependency, and a handful of paths does not justify adding them.
+//! One plain text file per program -- the path, and nothing else -- is the
+//! whole format.
 
 use std::path::PathBuf;
 
-/// Where the xTB path is remembered, or `None` if there is no sensible
+use super::program::QcProgram;
+
+/// Where `program`'s path is remembered, or `None` if there is no sensible
 /// location (`$HOME` unset) -- callers treat that exactly like an empty file.
-pub fn config_path() -> Option<PathBuf> {
+pub fn config_path_for(program: QcProgram) -> Option<PathBuf> {
     let base = std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config")))?;
-    Some(base.join("beavyr").join("xtb_path.txt"))
+    Some(base.join("beavyr").join(program.config_file()))
 }
 
-/// The remembered xTB path, or an empty string if nothing is saved yet, the
-/// file is missing, or it cannot be read. Never errors: a missing config is
-/// simply "nothing configured", not a failure.
-pub fn load_xtb_path() -> String {
-    let Some(path) = config_path() else {
+/// `program`'s remembered path, or an empty string if nothing is saved yet,
+/// the file is missing, or it cannot be read. Never errors: a missing config
+/// is simply "nothing configured", not a failure.
+pub fn load_path(program: QcProgram) -> String {
+    let Some(path) = config_path_for(program) else {
         return String::new();
     };
     std::fs::read_to_string(path)
@@ -30,10 +33,10 @@ pub fn load_xtb_path() -> String {
 }
 
 /// Best-effort save. A failure (unwritable config directory, for instance)
-/// is not surfaced to the caller: forgetting the path across restarts is a
+/// is not surfaced to the caller: forgetting a path across restarts is a
 /// minor inconvenience, never a reason to interrupt the user's session.
-pub fn save_xtb_path(path: &str) {
-    let Some(config_file) = config_path() else {
+pub fn save_path(program: QcProgram, path: &str) {
+    let Some(config_file) = config_path_for(program) else {
         return;
     };
     if let Some(parent) = config_file.parent() {
@@ -41,6 +44,8 @@ pub fn save_xtb_path(path: &str) {
     }
     let _ = std::fs::write(config_file, path.trim());
 }
+
+
 
 #[cfg(test)]
 mod tests {
@@ -69,9 +74,9 @@ mod tests {
             std::env::set_var("HOME", &dir);
         }
 
-        assert_eq!(load_xtb_path(), "", "nothing saved yet");
-        save_xtb_path("/usr/local/bin/xtb");
-        assert_eq!(load_xtb_path(), "/usr/local/bin/xtb");
+        assert_eq!(load_path(QcProgram::Xtb), "", "nothing saved yet");
+        save_path(QcProgram::Xtb, "/usr/local/bin/xtb");
+        assert_eq!(load_path(QcProgram::Xtb), "/usr/local/bin/xtb");
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -91,6 +96,6 @@ mod tests {
             std::env::remove_var("XDG_CONFIG_HOME");
             std::env::set_var("HOME", &dir);
         }
-        assert_eq!(load_xtb_path(), "");
+        assert_eq!(load_path(QcProgram::Xtb), "");
     }
 }

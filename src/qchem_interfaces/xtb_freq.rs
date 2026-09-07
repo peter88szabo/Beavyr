@@ -18,9 +18,7 @@ use bevy::tasks::{block_on, futures_lite::future, AsyncComputeTaskPool, Task};
 use bevy_egui::egui;
 use ndarray::Array2;
 
-use crate::molecule::{atomic_mass_amu, Molecule};
-#[cfg(test)]
-use crate::molecule::parse_xyz_angstrom;
+use crate::molecule::{atomic_mass_amu, parse_xyz_angstrom, Molecule};
 use crate::normalmode::thermofuncs::{self, ThermoResults};
 use crate::normalmode::{normal_modes_with_projection, EckartMode};
 use crate::spectrum::broadening::{format_spectrum_dat, format_spectrum_sticks, BroadeningKind};
@@ -28,6 +26,7 @@ use crate::spectrum::plot::{draw_spectrum, SpectrumAxis};
 use crate::trajectory::{PlaybackMode, TrajectoryFrame, TrajectoryState};
 
 use super::hessian_file::{parse_turbomole_gradient, parse_turbomole_hessian, parse_vibspectrum};
+use super::program::QcProgram;
 use super::valence::validate_electronic_state;
 use super::xtb_optimize::{create_xtb_run_dir, discard_xtb_run_dir, xtb_scratch_dir};
 
@@ -165,9 +164,11 @@ impl XtbFrequencyTask {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn start(
         &mut self,
-        xtb_path: &Path,
+        program: QcProgram,
+        binary: &Path,
         atoms: &[String],
         pos: &[Vec3],
         charge: i32,
@@ -179,7 +180,8 @@ impl XtbFrequencyTask {
             return;
         }
         let input_xyz = super::xtb_optimize::write_xyz_string(atoms, pos);
-        let xtb_path = xtb_path.to_path_buf();
+        let binary = binary.to_path_buf();
+        let task_atoms = atoms.to_vec();
         let cancel = Arc::new(AtomicBool::new(false));
         let child_slot = Arc::new(Mutex::new(None));
         let run_dir = match create_xtb_run_dir(&xtb_scratch_dir()) {
@@ -195,12 +197,15 @@ impl XtbFrequencyTask {
         let task_child = child_slot.clone();
         let task_dir = run_dir.clone();
         let task = AsyncComputeTaskPool::get().spawn(async move {
-            run_xtb_hess_cancellable(
-                &xtb_path,
+            run_hess_cancellable(
+                program,
+                &binary,
                 &task_dir,
                 &input_xyz,
+                &task_atoms,
                 charge,
                 uhf,
+                multiplicity,
                 need_gradient,
                 &task_cancel,
                 &task_child,
@@ -217,18 +222,22 @@ impl XtbFrequencyTask {
     }
 }
 
-fn run_xtb_hess_cancellable(
-    xtb_path: &Path,
+#[allow(clippy::too_many_arguments)]
+fn run_hess_cancellable(
+    program: QcProgram,
+    binary: &Path,
     workdir: &Path,
     input_xyz: &str,
+    atoms: &[String],
     charge: i32,
     uhf: i32,
+    multiplicity: i32,
     need_gradient: bool,
     cancel: &AtomicBool,
     child_slot: &Mutex<Option<Child>>,
 ) -> Result<RawFrequencyOutput, String> {
-    if xtb_path.as_os_str().is_empty() {
-        return Err("XTB path is empty".to_string());
+    if binary.as_os_str().is_empty() {
+        return Err(format!("{} path is empty", program.label()));
     }
     fs::create_dir_all(workdir).map_err(|e| format!("Failed to create workdir: {e}"))?;
     fs::write(workdir.join("input.xyz"), input_xyz)
@@ -238,22 +247,36 @@ fn run_xtb_hess_cancellable(
         .map_err(|e| format!("Failed to create xtb.stdout: {e}"))?;
     let stderr = fs::File::create(workdir.join("xtb.stderr"))
         .map_err(|e| format!("Failed to create xtb.stderr: {e}"))?;
-    let mut cmd = Command::new(xtb_path);
-    cmd.current_dir(workdir)
-        .arg("input.xyz")
-        .arg("--hess")
-        .arg("--chrg")
-        .arg(charge.to_string())
-        .stdout(Stdio::from(stdout))
-        .stderr(Stdio::from(stderr));
-    if uhf > 0 {
-        cmd.arg("--uhf").arg(uhf.to_string());
-    }
-    if need_gradient {
-        cmd.arg("--grad");
-    }
+    let mut cmd = match program {
+        QcProgram::Xtb => {
+            let mut cmd = Command::new(binary);
+            cmd.current_dir(workdir)
+                .arg("input.xyz")
+                .arg("--hess")
+                .arg("--chrg")
+                .arg(charge.to_string());
+            if uhf > 0 {
+                cmd.arg("--uhf").arg(uhf.to_string());
+            }
+            if need_gradient {
+                cmd.arg("--grad");
+            }
+            cmd
+        }
+        // Behemoth prints the matrix to stdout, which is captured below.
+        QcProgram::Behemoth => super::behemoth::hessian_command(
+            binary,
+            workdir,
+            "input.xyz",
+            charge,
+            multiplicity,
+        ),
+    };
+    cmd.stdout(Stdio::from(stdout)).stderr(Stdio::from(stderr));
 
-    let child = cmd.spawn().map_err(|e| format!("Failed to run xTB: {e}"))?;
+    let child = cmd
+        .spawn()
+        .map_err(|e| format!("Failed to run {}: {e}", program.label()))?;
     *child_slot
         .lock()
         .map_err(|_| "xTB child-process lock was poisoned".to_string())? = Some(child);
@@ -282,9 +305,36 @@ fn run_xtb_hess_cancellable(
         std::thread::sleep(Duration::from_millis(50));
     };
     if !status.success() {
-        return Err(
-            "xTB frequency calculation failed (see xtb.stderr in the run directory)".to_string(),
-        );
+        return Err(format!(
+            "{} frequency calculation failed (see xtb.stderr in the run directory)",
+            program.label()
+        ));
+    }
+
+    if program == QcProgram::Behemoth {
+        // Behemoth builds the Hessian at the geometry it was given and prints
+        // the matrix to stdout, so there is no re-oriented frame to recover
+        // and no separate file to read. It reports no IR intensities with
+        // `--hessian`, so the mode list shows N/A and the spectrum stays
+        // unavailable rather than showing a row of zeroes.
+        let log = fs::read_to_string(workdir.join("xtb.stdout"))
+            .map_err(|_| "Behemoth wrote no output to read the Hessian from".to_string())?;
+        let hessian = super::behemoth::parse_hessian_for(&log, atoms)?;
+        let coords_bohr = parse_xyz_angstrom(input_xyz)
+            .2
+            .into_iter()
+            .flatten()
+            .map(|c| c * ANGSTROM_TO_BOHR)
+            .collect();
+        return Ok(RawFrequencyOutput {
+            atoms: atoms.to_vec(),
+            coords_bohr,
+            hessian,
+            vib_lines: Vec::new(),
+            gradient_bohr: None,
+            masses_amu: None,
+            ir_intensities_km_mol: None,
+        });
     }
 
     // The geometry xTB actually built the Hessian in: `--hess` does not move
@@ -893,6 +943,10 @@ pub fn poll_xtb_frequencies(
 
 #[derive(Resource)]
 pub struct XtbFreqPanelState {
+    /// Which external program computes the Hessian. Kept separate from the
+    /// optimizer's choice: running a Hessian in a different program than the
+    /// optimization is a legitimate thing to want.
+    pub program: QcProgram,
     pub eckart_mode: EckartMode,
     pub thermo_temp_k: f64,
     pub thermo_freq_cutoff_cm1: f64,
@@ -931,6 +985,7 @@ pub struct XtbFreqPanelState {
 impl Default for XtbFreqPanelState {
     fn default() -> Self {
         Self {
+            program: QcProgram::default(),
             eckart_mode: EckartMode::VibRot,
             thermo_temp_k: 298.15,
             thermo_freq_cutoff_cm1: 100.0,
@@ -1190,12 +1245,21 @@ pub fn xtb_frequency_panel(
     // now that one can be loaded, and its charge/multiplicity controls are
     // only in the way until someone actually wants them. Forced open while a
     // run is in flight, so Cancel cannot be hidden behind a closed header.
-    egui::CollapsingHeader::new(
-        egui::RichText::new("Run Freq Calc (with xTB)").strong(),
-    )
-    .default_open(false)
-    .open(running.then_some(true))
-    .show(ui, |ui| {
+    egui::CollapsingHeader::new(egui::RichText::new("Run Freq Calc").strong())
+        .default_open(false)
+        .open(running.then_some(true))
+        .show(ui, |ui| {
+        ui.horizontal(|ui| {
+            ui.label("Program");
+            egui::ComboBox::from_id_salt("freq_program")
+                .selected_text(freq_panel.program.label())
+                .show_ui(ui, |ui| {
+                    for program in QcProgram::ALL {
+                        ui.selectable_value(&mut freq_panel.program, program, program.label());
+                    }
+                });
+            ui.weak("path set in Geometry Optimization");
+        });
         ui.horizontal(|ui| {
             ui.label("Charge");
             ui.add_enabled(
@@ -1244,7 +1308,10 @@ pub fn xtb_frequency_panel(
         ui.horizontal(|ui| {
             let can_run = !running && !mol.atoms.is_empty() && uhf.is_some() && !animating;
             let mut button =
-                ui.add_enabled(can_run, egui::Button::new("Run Freq Calc (with xTB)"));
+                ui.add_enabled(
+                    can_run,
+                    egui::Button::new(format!("Run Freq Calc ({})", freq_panel.program.label())),
+                );
             if animating {
                 button = button.on_disabled_hover_text(
                     "Stop the animation first: the structure on screen is a frame of it.",
@@ -1255,13 +1322,21 @@ pub fn xtb_frequency_panel(
             }
             if button.clicked() {
                 freq_panel.show_warnings = true;
-                match super::xtb_optimize::resolve_xtb_executable(&opt_panel.xtb_path) {
-                    Ok(xtb_path) => {
+                let program = freq_panel.program;
+                let configured = opt_panel
+                    .paths
+                    .iter()
+                    .find(|(p, _)| *p == program)
+                    .map(|(_, path)| path.clone())
+                    .unwrap_or_default();
+                match super::xtb_optimize::resolve_program_executable(program, &configured) {
+                    Ok(binary) => {
                         if let Some(uhf) = uhf {
                             let need_gradient =
                                 freq_panel.eckart_mode == EckartMode::ReactionPath;
                             freq_task.start(
-                                &xtb_path,
+                                program,
+                                &binary,
                                 &mol.atoms,
                                 &mol.pos,
                                 freq_panel.charge,
@@ -1281,7 +1356,6 @@ pub fn xtb_frequency_panel(
                 freq_task.cancel_now();
             }
         });
-        ui.weak("Uses the xTB executable set in the Geometry Optimization panel.");
     });
 
     ui.add_space(6.0);
@@ -1794,6 +1868,73 @@ mod tests {
         assert_eq!(freq.multiplicity, 2);
         assert_eq!(opt.charge, 0);
         assert_eq!(opt.multiplicity, 1);
+    }
+
+    /// Behemoth's Hessian, put through Beavyr's own projection and
+    /// eigensolver, must reproduce the frequencies Behemoth itself reports
+    /// from the same geometry.
+    ///
+    /// `behemoth --xyz water.xyz --method xtb --freq` gives 1506.27, 3551.05
+    /// and 3646.50 cm^-1 with a zero-point energy of 0.019829 Eh. Those are
+    /// computed inside Behemoth from the same finite-difference Hessian this
+    /// test reads, so agreement checks the whole chain: the block-matrix
+    /// parser, the units, the mass weighting and the Eckart projection.
+    #[test]
+    fn behemoths_hessian_reproduces_behemoths_own_frequencies() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("fixtures")
+            .join("behemoth_water_hessian.log");
+        let text = std::fs::read_to_string(&path).unwrap();
+        let atoms: Vec<String> = ["O", "H", "H"].iter().map(|s| s.to_string()).collect();
+        let hessian = super::super::behemoth::parse_hessian_for(&text, &atoms).unwrap();
+
+        // The geometry the Hessian was computed at, in bohr.
+        let coords_angstrom: [f64; 9] = [
+            0.0, 0.0, 0.119262, 0.0, 0.763239, -0.477047, 0.0, -0.763239, -0.477047,
+        ];
+        let coords_bohr: Vec<f64> = coords_angstrom
+            .iter()
+            .map(|c| c * ANGSTROM_TO_BOHR)
+            .collect();
+
+        let raw = RawFrequencyOutput {
+            atoms,
+            coords_bohr,
+            hessian,
+            vib_lines: Vec::new(),
+            gradient_bohr: None,
+            masses_amu: None,
+            ir_intensities_km_mol: None,
+        };
+        let result = analyze(raw, 1, EckartMode::VibRot, 298.15, 100.0, 1.0, 1.0).unwrap();
+
+        assert_eq!(result.zero_indices.len(), 6, "water has six zero modes");
+        assert_eq!(result.positive_indices.len(), 3);
+        assert!(result.negative_indices.is_empty(), "water is a minimum");
+
+        let mut ours: Vec<f64> = result
+            .positive_indices
+            .iter()
+            .map(|&i| result.frequencies_cm1[i])
+            .collect();
+        ours.sort_by(f64::total_cmp);
+        for (mine, theirs) in ours.iter().zip([1506.27, 3551.05, 3646.50]) {
+            assert!(
+                (mine - theirs).abs() < 1.0,
+                "our {mine:.2} cm^-1 against Behemoth's {theirs:.2}"
+            );
+        }
+
+        const BEHEMOTH_ZPE_HARTREE: f64 = 0.019829;
+        let error = (result.thermo.zpe - BEHEMOTH_ZPE_HARTREE).abs();
+        assert!(
+            error < 1.0e-5,
+            "ZPE {:.6} Eh against Behemoth's {BEHEMOTH_ZPE_HARTREE:.6} \
+             (off by {:.4} kcal/mol)",
+            result.thermo.zpe,
+            error * 627.509_474
+        );
     }
 
     fn example_gaussian_path() -> std::path::PathBuf {
@@ -2471,7 +2612,7 @@ mod tests {
     #[test]
     fn a_real_run_on_a_larger_asymmetric_molecule_does_not_need_xtbhess_xyz() {
         let configured = super::super::xtb_optimize::default_xtb_executable();
-        let Ok(xtb_path) = super::super::xtb_optimize::resolve_xtb_executable(&configured) else {
+        let Ok(xtb_path) = super::super::xtb_optimize::resolve_program_executable(QcProgram::Xtb, &configured) else {
             eprintln!("skipping: no xTB executable found (set BEAVYR_XTB_PATH to run this test)");
             return;
         };
@@ -2488,8 +2629,18 @@ mod tests {
         let child_slot = Mutex::new(None);
         let workdir = xtb_scratch_dir().join(format!("test_freq_asym_{}", std::process::id()));
 
-        let raw = run_xtb_hess_cancellable(
-            &xtb_path, &workdir, &input_xyz, 0, 0, false, &cancel, &child_slot,
+        let raw = run_hess_cancellable(
+            QcProgram::Xtb,
+            &xtb_path,
+            &workdir,
+            &input_xyz,
+            &atoms,
+            0,
+            0,
+            1,
+            false,
+            &cancel,
+            &child_slot,
         )
         .expect("a plain --hess run on this real molecule should succeed");
         assert_eq!(raw.atoms.len(), 16);
@@ -2513,7 +2664,7 @@ mod tests {
     #[test]
     fn a_real_xtb_hess_run_reproduces_its_own_vibspectrum() {
         let configured = super::super::xtb_optimize::default_xtb_executable();
-        let Ok(xtb_path) = super::super::xtb_optimize::resolve_xtb_executable(&configured) else {
+        let Ok(xtb_path) = super::super::xtb_optimize::resolve_program_executable(QcProgram::Xtb, &configured) else {
             eprintln!("skipping: no xTB executable found (set BEAVYR_XTB_PATH to run this test)");
             return;
         };
@@ -2529,8 +2680,18 @@ mod tests {
         let child_slot = Mutex::new(None);
         let workdir = xtb_scratch_dir().join(format!("test_freq_{}", std::process::id()));
 
-        let raw = run_xtb_hess_cancellable(
-            &xtb_path, &workdir, &input_xyz, 0, 0, false, &cancel, &child_slot,
+        let raw = run_hess_cancellable(
+            QcProgram::Xtb,
+            &xtb_path,
+            &workdir,
+            &input_xyz,
+            &atoms,
+            0,
+            0,
+            1,
+            false,
+            &cancel,
+            &child_slot,
         )
         .expect("a plain --hess run on a stable closed-shell molecule should succeed");
         assert_eq!(raw.atoms.len(), 4);
@@ -2577,7 +2738,7 @@ mod tests {
     #[test]
     fn the_full_bevy_task_pipeline_produces_a_result_for_the_loaded_molecule() {
         let configured = super::super::xtb_optimize::default_xtb_executable();
-        let Ok(xtb_path) = super::super::xtb_optimize::resolve_xtb_executable(&configured) else {
+        let Ok(xtb_path) = super::super::xtb_optimize::resolve_program_executable(QcProgram::Xtb, &configured) else {
             eprintln!("skipping: no xTB executable found (set BEAVYR_XTB_PATH to run this test)");
             return;
         };
@@ -2593,7 +2754,11 @@ mod tests {
         AsyncComputeTaskPool::get_or_init(bevy::tasks::TaskPool::default);
 
         let mut task = XtbFrequencyTask::default();
-        task.start(&xtb_path, &atoms, &pos, 0, 0, 1, false);
+        task.start(
+            QcProgram::Xtb,
+            &xtb_path,
+            &atoms,
+            &pos, 0, 0, 1, false);
         assert!(task.is_running(), "start() should have spawned a task");
 
         let panel_state = XtbFreqPanelState::default();

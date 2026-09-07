@@ -1,7 +1,9 @@
 pub mod config;
+pub mod behemoth;
 pub mod gaussian_log;
 pub mod hessian_file;
 pub mod orca_hess;
+pub mod program;
 pub mod xtb_freq;
 pub mod valence;
 pub mod xtb_optimize;

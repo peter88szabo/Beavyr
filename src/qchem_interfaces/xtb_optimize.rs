@@ -22,6 +22,7 @@ use crate::trajectory::{self, TrajectoryState};
 use bevy_egui::egui;
 
 use super::config;
+use super::program::QcProgram;
 use super::valence::validate_electronic_state;
 
 /// Charge/multiplicity inputs and the xTB path field, plus the last
@@ -32,7 +33,11 @@ use super::valence::validate_electronic_state;
 pub struct XtbPanelState {
     pub charge: i32,
     pub multiplicity: i32,
-    pub xtb_path: String,
+    /// Which external program runs the optimization.
+    pub program: QcProgram,
+    /// One path per program, so switching programs switches paths rather than
+    /// overwriting the one the user set for the other.
+    pub paths: Vec<(QcProgram, String)>,
     /// Whether the energy-vs-iteration plot window is open. Kept here rather
     /// than in `XtbOptimizationTask` because it is purely a UI toggle, not
     /// part of the run itself.
@@ -48,17 +53,50 @@ pub struct XtbPanelState {
     pub show_warnings: bool,
 }
 
+impl XtbPanelState {
+    /// The path currently entered for the selected program.
+    pub fn path(&self) -> &str {
+        self.paths
+            .iter()
+            .find(|(p, _)| *p == self.program)
+            .map(|(_, path)| path.as_str())
+            .unwrap_or("")
+    }
+
+    /// Editable access to the selected program's path, so the one text field
+    /// always writes to the program it is showing.
+    pub fn path_mut(&mut self) -> &mut String {
+        let program = self.program;
+        if !self.paths.iter().any(|(p, _)| *p == program) {
+            self.paths.push((program, String::new()));
+        }
+        self.paths
+            .iter_mut()
+            .find(|(p, _)| *p == program)
+            .map(|(_, path)| path)
+            .expect("just inserted if missing")
+    }
+}
+
 impl Default for XtbPanelState {
     fn default() -> Self {
-        let saved = config::load_xtb_path();
         Self {
+            program: QcProgram::default(),
+            // A saved path per program; xTB falls back to a sensible guess so
+            // a first run needs no configuration on a normal installation.
+            paths: QcProgram::ALL
+                .iter()
+                .map(|&p| {
+                    let saved = config::load_path(p);
+                    let path = match (saved.is_empty(), p) {
+                        (true, QcProgram::Xtb) => default_xtb_executable(),
+                        _ => saved,
+                    };
+                    (p, path)
+                })
+                .collect(),
             charge: 0,
             multiplicity: 1,
-            xtb_path: if saved.is_empty() {
-                default_xtb_executable()
-            } else {
-                saved
-            },
             energy_plot_open: false,
             show_warnings: false,
         }
@@ -144,17 +182,19 @@ impl XtbOptimizationTask {
     /// function does not re-check them.
     pub fn start(
         &mut self,
-        xtb_path: &Path,
+        program: QcProgram,
+        binary: &Path,
         atoms: &[String],
         pos: &[Vec3],
         charge: i32,
         uhf: i32,
+        multiplicity: i32,
     ) {
         if self.is_running() {
             return;
         }
         let input_xyz = write_xyz_string(atoms, pos);
-        let xtb_path = xtb_path.to_path_buf();
+        let binary = binary.to_path_buf();
         let cancel = Arc::new(AtomicBool::new(false));
         let child_slot = Arc::new(Mutex::new(None));
         let run_dir = match create_xtb_run_dir(&xtb_scratch_dir()) {
@@ -170,17 +210,19 @@ impl XtbOptimizationTask {
         let task_child = child_slot.clone();
         let task_dir = run_dir.clone();
         let task = AsyncComputeTaskPool::get().spawn(async move {
-            run_xtb_optimize_cancellable(
-                &xtb_path,
+            run_optimize_cancellable(
+                program,
+                &binary,
                 &task_dir,
                 &input_xyz,
                 charge,
                 uhf,
+                multiplicity,
                 &task_cancel,
                 &task_child,
             )
             .map_err(|message| XtbOptimizationFailure {
-                energy_history: read_energy_history(&task_dir),
+                energy_history: energy_history_for(program, &task_dir),
                 message,
             })
         });
@@ -371,28 +413,41 @@ pub fn xtb_optimization_panel(
     });
 
     ui.horizontal(|ui| {
-        ui.label("xTB path");
+        ui.label("Program");
+        egui::ComboBox::from_id_salt("opt_program")
+            .selected_text(panel_state.program.label())
+            .show_ui(ui, |ui| {
+                for program in QcProgram::ALL {
+                    ui.selectable_value(&mut panel_state.program, program, program.label());
+                }
+            });
+    });
+    ui.horizontal(|ui| {
+        let program = panel_state.program;
+        ui.label(format!("{} path", program.label()));
         let response = ui.add_enabled(
             !running,
-            egui::TextEdit::singleline(&mut panel_state.xtb_path).desired_width(220.0),
+            egui::TextEdit::singleline(panel_state.path_mut())
+                .desired_width(220.0)
+                .hint_text(program.binary_hint()),
         );
         if response.lost_focus() {
-            config::save_xtb_path(&panel_state.xtb_path);
+            config::save_path(program, panel_state.path());
         }
         if ui
             .add_enabled(!running, egui::Button::new("Browse…"))
             .clicked()
         {
             let mut dlg = rfd::FileDialog::new();
-            if let Some(dir) = std::path::Path::new(&panel_state.xtb_path)
+            if let Some(dir) = std::path::Path::new(panel_state.path())
                 .parent()
                 .filter(|p| p.is_dir())
             {
                 dlg = dlg.set_directory(dir);
             }
             if let Some(path) = dlg.pick_file() {
-                panel_state.xtb_path = path.display().to_string();
-                config::save_xtb_path(&panel_state.xtb_path);
+                *panel_state.path_mut() = path.display().to_string();
+                config::save_path(program, panel_state.path());
             }
         }
     });
@@ -435,14 +490,26 @@ pub fn xtb_optimization_panel(
             .clicked()
         {
             panel_state.show_warnings = true;
-            if let (Some(uhf), Ok(xtb_path)) =
-                (uhf, resolve_xtb_executable(&panel_state.xtb_path))
-            {
-                config::save_xtb_path(&panel_state.xtb_path);
-                task.start(&xtb_path, &mol.atoms, &mol.pos, panel_state.charge, uhf);
-            } else if let Err(err) = resolve_xtb_executable(&panel_state.xtb_path) {
-                task.last_message = Some(err);
-                task.last_is_error = true;
+            let program = panel_state.program;
+            let entered = panel_state.path().to_string();
+            match (uhf, resolve_program_executable(program, &entered)) {
+                (Some(uhf), Ok(binary)) => {
+                    config::save_path(program, &entered);
+                    task.start(
+                        program,
+                        &binary,
+                        &mol.atoms,
+                        &mol.pos,
+                        panel_state.charge,
+                        uhf,
+                        panel_state.multiplicity,
+                    );
+                }
+                (_, Err(err)) => {
+                    task.last_message = Some(err);
+                    task.last_is_error = true;
+                }
+                _ => {}
             }
         }
         if running && ui.button("Cancel").clicked() {
@@ -739,17 +806,30 @@ pub fn default_xtb_executable() -> String {
     std::env::var("BEAVYR_XTB_PATH").unwrap_or_else(|_| "xtb".to_string())
 }
 
-pub fn resolve_xtb_executable(configured: &str) -> Result<PathBuf, String> {
+/// Turns whatever the user typed into an executable to run: an absolute or
+/// relative path is checked directly, a bare name is looked up on `PATH`.
+///
+/// The program is named in every message, because with more than one backend
+/// "executable was not found" on its own does not say which one to fix.
+pub fn resolve_program_executable(
+    program: QcProgram,
+    configured: &str,
+) -> Result<PathBuf, String> {
     let configured = configured.trim();
     if configured.is_empty() {
-        return Err("Set the xTB executable path first.".to_string());
+        return Err(format!(
+            "Set the {} executable path first.",
+            program.label()
+        ));
     }
     let candidate = PathBuf::from(configured);
     if candidate.components().count() > 1 || candidate.is_absolute() {
-        return candidate
-            .is_file()
-            .then_some(candidate)
-            .ok_or_else(|| format!("xTB executable was not found: {configured}"));
+        return candidate.is_file().then_some(candidate).ok_or_else(|| {
+            format!(
+                "{} executable was not found: {configured}",
+                program.label()
+            )
+        });
     }
     let path = std::env::var_os("PATH")
         .ok_or_else(|| format!("Could not find {configured:?} because PATH is not available"))?;
@@ -906,6 +986,30 @@ fn parse_full_energy_history(stdout_text: &str) -> Vec<EnergyHistoryPoint> {
 
 /// Best-effort read of a run directory's xTB stdout, for the energy history.
 /// Never errors: a missing or unreadable file just means no history to show.
+/// The per-iteration energies to plot, from wherever the chosen program puts
+/// them: xTB prints them to its log, Behemoth writes them into the
+/// trajectory's comment lines.
+///
+/// Read separately from the trajectory so a run that failed or was cancelled
+/// still plots how far it got.
+fn energy_history_for(program: QcProgram, workdir: &Path) -> Vec<EnergyHistoryPoint> {
+    match program {
+        QcProgram::Xtb => read_energy_history(workdir),
+        QcProgram::Behemoth => {
+            let text = fs::read_to_string(workdir.join(super::behemoth::TRAJECTORY_FILE))
+                .unwrap_or_default();
+            super::behemoth::parse_trajectory_energies(&text)
+                .into_iter()
+                .enumerate()
+                .map(|(i, energy)| EnergyHistoryPoint {
+                    iteration: i as u32 + 1,
+                    energy_hartree: energy,
+                })
+                .collect()
+        }
+    }
+}
+
 fn read_energy_history(workdir: &Path) -> Vec<EnergyHistoryPoint> {
     fs::read_to_string(workdir.join("xtb.stdout"))
         .map(|text| parse_full_energy_history(&text))
@@ -923,17 +1027,25 @@ fn parse_final_energy(trajectory_text: &str) -> Option<f64> {
         .and_then(|tok| tok.parse::<f64>().ok())
 }
 
-fn run_xtb_optimize_cancellable(
-    xtb_path: &Path,
+/// Runs a geometry optimization with whichever program was chosen.
+///
+/// The process handling -- spawn, poll, cancel, kill -- is the same whatever
+/// the program; only the command line and the files to read back differ, and
+/// both of those are the only things that branch below.
+#[allow(clippy::too_many_arguments)]
+fn run_optimize_cancellable(
+    program: QcProgram,
+    binary: &Path,
     workdir: &Path,
     input_xyz: &str,
     charge: i32,
     uhf: i32,
+    multiplicity: i32,
     cancel: &AtomicBool,
     child_slot: &Mutex<Option<Child>>,
 ) -> Result<XtbOptimizationOutput, String> {
-    if xtb_path.as_os_str().is_empty() {
-        return Err("XTB path is empty".to_string());
+    if binary.as_os_str().is_empty() {
+        return Err(format!("{} path is empty", program.label()));
     }
     fs::create_dir_all(workdir).map_err(|e| format!("Failed to create workdir: {e}"))?;
     fs::write(workdir.join("input.xyz"), input_xyz)
@@ -943,19 +1055,32 @@ fn run_xtb_optimize_cancellable(
         .map_err(|e| format!("Failed to create xtb.stdout: {e}"))?;
     let stderr = fs::File::create(workdir.join("xtb.stderr"))
         .map_err(|e| format!("Failed to create xtb.stderr: {e}"))?;
-    let mut cmd = Command::new(xtb_path);
-    cmd.current_dir(workdir)
-        .arg("input.xyz")
-        .arg("--opt")
-        .arg("--chrg")
-        .arg(charge.to_string())
-        .stdout(Stdio::from(stdout))
-        .stderr(Stdio::from(stderr));
-    if uhf > 0 {
-        cmd.arg("--uhf").arg(uhf.to_string());
-    }
+    let mut cmd = match program {
+        QcProgram::Xtb => {
+            let mut cmd = Command::new(binary);
+            cmd.current_dir(workdir)
+                .arg("input.xyz")
+                .arg("--opt")
+                .arg("--chrg")
+                .arg(charge.to_string());
+            if uhf > 0 {
+                cmd.arg("--uhf").arg(uhf.to_string());
+            }
+            cmd
+        }
+        QcProgram::Behemoth => super::behemoth::optimize_command(
+            binary,
+            workdir,
+            "input.xyz",
+            charge,
+            multiplicity,
+        ),
+    };
+    cmd.stdout(Stdio::from(stdout)).stderr(Stdio::from(stderr));
 
-    let child = cmd.spawn().map_err(|e| format!("Failed to run xTB: {e}"))?;
+    let child = cmd
+        .spawn()
+        .map_err(|e| format!("Failed to run {}: {e}", program.label()))?;
     *child_slot
         .lock()
         .map_err(|_| "xTB child-process lock was poisoned".to_string())? = Some(child);
@@ -984,14 +1109,34 @@ fn run_xtb_optimize_cancellable(
         std::thread::sleep(Duration::from_millis(50));
     };
     if !status.success() {
-        return Err("xTB optimization failed (see xtb.stderr in the run directory)".to_string());
+        return Err(format!(
+            "{} optimization failed (see xtb.stderr in the run directory)",
+            program.label()
+        ));
     }
 
-    let trajectory_text = fs::read_to_string(workdir.join("xtbopt.log"))
-        .or_else(|_| fs::read_to_string(workdir.join("xtbopt.xyz")))
-        .map_err(|_| "No optimized geometry found".to_string())?;
-    let final_energy_hartree = parse_final_energy(&trajectory_text);
-    let energy_history = read_energy_history(workdir);
+    let (trajectory_text, final_energy_hartree) = match program {
+        QcProgram::Xtb => {
+            let text = fs::read_to_string(workdir.join("xtbopt.log"))
+                .or_else(|_| fs::read_to_string(workdir.join("xtbopt.xyz")))
+                .map_err(|_| "No optimized geometry found".to_string())?;
+            let energy = parse_final_energy(&text);
+            (text, energy)
+        }
+        QcProgram::Behemoth => {
+            let text = fs::read_to_string(workdir.join(super::behemoth::TRAJECTORY_FILE))
+                .or_else(|_| {
+                    fs::read_to_string(workdir.join(super::behemoth::OPTIMIZED_GEOMETRY_FILE))
+                })
+                .map_err(|_| "No optimized geometry found".to_string())?;
+            // The summary is more precise than the last trajectory comment,
+            // which is the energy *before* the final step.
+            let log = fs::read_to_string(workdir.join("xtb.stdout")).unwrap_or_default();
+            let energy = super::behemoth::parse_summary(&log).final_energy_hartree;
+            (text, energy)
+        }
+    };
+    let energy_history = energy_history_for(program, workdir);
 
     Ok(XtbOptimizationOutput {
         trajectory_text,
@@ -1111,7 +1256,7 @@ mod tests {
     #[test]
     fn a_failing_real_xtb_run_still_reports_whatever_history_it_produced() {
         let configured = default_xtb_executable();
-        let Ok(xtb_path) = resolve_xtb_executable(&configured) else {
+        let Ok(xtb_path) = resolve_program_executable(QcProgram::Xtb, &configured) else {
             eprintln!("skipping: no xTB executable found (set BEAVYR_XTB_PATH to run this test)");
             return;
         };
@@ -1133,8 +1278,16 @@ mod tests {
 
         // An enormous, impossible charge: xTB rejects this outright rather
         // than silently proceeding, unlike the `--uhf` case.
-        let result = run_xtb_optimize_cancellable(
-            &xtb_path, &workdir, &input_xyz, 99, 0, &cancel, &child_slot,
+        let result = run_optimize_cancellable(
+            QcProgram::Xtb,
+            &xtb_path,
+            &workdir,
+            &input_xyz,
+            99,
+            0,
+            1,
+            &cancel,
+            &child_slot,
         );
         assert!(result.is_err(), "an impossible charge must make xTB fail");
 
@@ -1201,7 +1354,7 @@ H 0.0 0.0 0.74
     #[test]
     fn a_real_xtb_run_produces_a_trajectory_the_player_can_load() {
         let configured = default_xtb_executable();
-        let Ok(xtb_path) = resolve_xtb_executable(&configured) else {
+        let Ok(xtb_path) = resolve_program_executable(QcProgram::Xtb, &configured) else {
             eprintln!("skipping: no xTB executable found (set BEAVYR_XTB_PATH to run this test)");
             return;
         };
@@ -1221,12 +1374,14 @@ H 0.0 0.0 0.74
         let workdir = xtb_scratch_dir().join(format!("test_{}", std::process::id()));
         let input_xyz = write_xyz_string(&atoms, &pos);
 
-        let result = run_xtb_optimize_cancellable(
+        let result = run_optimize_cancellable(
+            QcProgram::Xtb,
             &xtb_path,
             &workdir,
             &input_xyz,
             0,
             0,
+            1,
             &cancel,
             &child_slot,
         );

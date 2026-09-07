@@ -1,0 +1,58 @@
+Run resources
+Compute cores: 16
+Memory limit:  1024 MiB
+
+
+Basis set summary
+Orbital basis: method-internal xTB valence basis
+
+============================================================================
+                            GFN1-xTB calculation                            
+============================================================================
+
+Initial guess:  GFN1-xTB H0 generalized diagonalization
+Fermi smearing: enabled at 300.000 K
+SCF mixer:      Broyden
+Geometry optimization
+ Energy Change:   5.00e-06 Eh
+ Max. Gradient:   3.00e-04 Eh/bohr
+ RMS Gradient:    1.00e-04 Eh/bohr
+ Max Step:        4.00e-03 bohr
+ RMS Step:        2.00e-03 bohr
+
+Threshold Values:                 1.31e-02     4.00e-03    2.00e-03    3.00e-04    1.00e-04
+                                      |            |           |           |           |
+                                      V            V           V           V           V
+step               E[Eh]         dE[kJ/mol]    max_step    rms_step    max_grad    rms_grad
+    1        -5.76866785          -0.573303    1.49e-02    6.88e-03    8.81e-03    3.83e-03
+    2        -5.76877493          -0.281130    1.95e-02    8.75e-03    2.75e-05    1.51e-05
+    3        -5.76877493          -0.000005    5.33e-05    2.56e-05    1.12e-05    5.69e-06
+
+====================
+**** CONVERGED *****
+Convergence reached.
+====================
+
+
+  converged : true
+  cycles    : 3
+  E(final)  :      -5.7687749333 Eh
+  RMS(g)    :       0.0000056858 Eh/bohr
+
+  final coordinates (Angstrom):
+   O     0.0000000    -0.0000000     0.1010571
+   H     0.0000000     0.7708794    -0.4679445
+   H     0.0000000    -0.7708794    -0.4679445
+
+  wrote optimized geometry: optimized_geoemtry.xyz
+  wrote optimization trajectory: optimization_trajectory.xyz
+
+Total TS polarizability: 7.298372 a0^3   1.081507 Ang^3
+TS atomic polarizabilities and C6 coefficients
+ Atom  Element      alpha (a0^3)      C6 (Eh*a0^6)
+     1 O       4.062285       8.828316
+     2 H       1.618043       0.840366
+     3 H       1.618043       0.840366
+
+Total run time (s): 0.049
+Total run time (days:hours:minutes:s): 0:00:00:00.049
