@@ -316,11 +316,16 @@ pub fn spectrum_command(
     if config.method == ExcitedStateMethod::Tddft {
         command.arg("--functional").arg(&reference.functional);
         // The ground-state orbitals the excitations are expressed in, written
-        // as Molden in the same run -- verified to work alongside `--stda`,
-        // so no second calculation is needed. Only the Gaussian-basis
-        // references can do this: `--wf2molden` is documented for "HF,
-        // MP2/RI-MP2, RKS, and UKS", which is why the sTDA routes do not ask
-        // for it.
+        // as Molden in the same run -- verified to work alongside `--stda`, so
+        // no second calculation is needed.
+        //
+        // TD-DFT only, and not merely because `--wf2molden` is restricted to
+        // the Gaussian-basis references. A semi-empirical orbital set is
+        // parameterised to reproduce *transitions*, not the ground-state
+        // electronic structure, so its orbitals are not a description of the
+        // ground state and showing them as one would be wrong. That holds even
+        // where such a set could be written, which is why this is a decision
+        // rather than a limitation.
         command.arg("--wf2molden");
         // Reuses the reference's own rule, so a basis is passed exactly when
         // the method takes one.
@@ -632,10 +637,14 @@ mod tests {
         assert!(built.contains(&"--wf2molden".to_string()), "{built:?}");
     }
 
-    /// The sTDA routes have no Gaussian basis, and `--wf2molden` is documented
-    /// only for the Gaussian-basis references, so they must not ask for it.
+    /// The sTDA routes must not ask for orbitals, and the reason is chemical
+    /// rather than mechanical: a semi-empirical set is fitted to reproduce
+    /// transitions, not the ground-state electronic structure, so it is not a
+    /// description of the ground state and must not be offered as one. The
+    /// restriction of `--wf2molden` to the Gaussian-basis references happens
+    /// to agree, but this would hold without it.
     #[test]
-    fn an_stda_route_does_not_ask_for_orbitals_it_cannot_write() {
+    fn an_stda_route_does_not_ask_for_ground_state_orbitals() {
         for method in [
             ExcitedStateMethod::StdaTasi,
             ExcitedStateMethod::StdaXtbGfn1,

@@ -43,7 +43,9 @@ pub struct SpectrumOutput {
     /// left on disk because a successful run's scratch directory is discarded
     /// moments later, and this is what the Surface tool loads.
     ///
-    /// `None` for the sTDA routes, which have no Gaussian basis to write.
+    /// `None` for the sTDA routes, which are not asked for orbitals: a
+    /// semi-empirical set is fitted to transitions, not to the ground-state
+    /// electronic structure, so it does not describe the ground state.
     pub molden: Option<String>,
 }
 
@@ -280,9 +282,13 @@ pub fn poll_spectrum_run(
 
             // The ground-state orbitals the excitations are expressed in,
             // straight into the Surface tool -- the point of asking for them
-            // being to look at the orbitals a root actually involves. A TD-DFT
-            // run writes them; the sTDA routes have no Gaussian basis to
-            // write, so there is nothing to load and nothing is disturbed.
+            // being to look at the orbitals a root actually involves.
+            //
+            // A TD-DFT run writes them; an sTDA run is deliberately not asked
+            // for any, because a semi-empirical orbital set describes
+            // transitions rather than the ground state. So there is nothing to
+            // load after one, and whatever the Surface tool already holds is
+            // left alone.
             if let Some(text) = &output.molden {
                 match crate::orbitals::molden::parse_molden(text) {
                     Ok(data) => {

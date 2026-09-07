@@ -152,10 +152,17 @@ is discarded, and the Surface tool adopts it automatically.
 `naturalMO.molden` is the right file for a correlated density, which is not
 what this shows.
 
-**Not for the sTDA routes.** `--wf2molden` is documented for the
-Gaussian-basis references only, and the xTB and TASI routes have no Gaussian
-basis to write, so they do not ask for it and nothing in the Surface tool is
-disturbed when one of them runs.
+**Not for the sTDA routes, and not only because they cannot.** A
+semi-empirical orbital set is parameterised to reproduce *transitions*, not the
+ground-state electronic structure. Its orbitals are therefore not a
+description of the ground state, and presenting them in the Surface tool as if
+they were would misrepresent them -- so they would be withheld even from a
+route that could write them. That `--wf2molden` is restricted to the
+Gaussian-basis references happens to agree with the decision; it is not the
+reason for it.
+
+Nothing in the Surface tool is disturbed when an sTDA route runs: whatever it
+already holds stays.
 
 The file parses with the existing `orbitals::molden` reader unchanged, and the
 HOMO it reports -- MO 8 -- agrees with the assignment section's own `8 HOMO`,
