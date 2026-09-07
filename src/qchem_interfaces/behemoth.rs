@@ -12,6 +12,11 @@ use std::process::Command;
 
 use ndarray::Array2;
 
+use super::method::{
+    behemoth_basis_flag, behemoth_dispersion_flag, behemoth_functional_flag,
+    behemoth_method_flag, MethodConfig,
+};
+
 /// The file Behemoth writes the optimized geometry to.
 ///
 /// The spelling is Behemoth's own and has to be matched exactly -- looking for
@@ -20,11 +25,6 @@ pub const OPTIMIZED_GEOMETRY_FILE: &str = "optimized_geoemtry.xyz";
 /// The multi-frame XYZ it writes the optimization path to.
 pub const TRAJECTORY_FILE: &str = "optimization_trajectory.xyz";
 
-/// The electronic method to ask Behemoth for.
-///
-/// Only xTB is offered for now: the others need a basis set, and the DFT ones
-/// a functional, which is a separate piece of UI rather than a hidden default.
-pub const METHOD: &str = "xtb";
 
 /// A geometry optimization, run in `run_dir`.
 pub fn optimize_command(
@@ -33,8 +33,9 @@ pub fn optimize_command(
     xyz_file: &str,
     charge: i32,
     multiplicity: i32,
+    method: &MethodConfig,
 ) -> Command {
-    let mut command = base_command(binary, run_dir, xyz_file, charge, multiplicity);
+    let mut command = base_command(binary, run_dir, xyz_file, charge, multiplicity, method);
     command.arg("--opt");
     command
 }
@@ -52,30 +53,54 @@ pub fn hessian_command(
     xyz_file: &str,
     charge: i32,
     multiplicity: i32,
+    method: &MethodConfig,
 ) -> Command {
-    let mut command = base_command(binary, run_dir, xyz_file, charge, multiplicity);
+    let mut command = base_command(binary, run_dir, xyz_file, charge, multiplicity, method);
     command.arg("--hessian");
     command
 }
 
+/// The flags every task shares: the geometry, the level of theory and the
+/// resources.
+///
+/// Which of the level-of-theory flags apply is `method`'s decision, not this
+/// function's -- a composite functional passes no basis set, HF-3c travels as
+/// the method name rather than a functional, and an open shell is always the
+/// unrestricted method. All of that lives in `super::method`, with its tests.
 fn base_command(
     binary: &Path,
     run_dir: &Path,
     xyz_file: &str,
     charge: i32,
     multiplicity: i32,
+    method: &MethodConfig,
 ) -> Command {
+    let multiplicity = multiplicity.max(1);
     let mut command = Command::new(binary);
     command
         .current_dir(run_dir)
         .arg("--xyz")
         .arg(xyz_file)
         .arg("--method")
-        .arg(METHOD)
+        .arg(behemoth_method_flag(method, multiplicity))
         .arg("--charge")
         .arg(charge.to_string())
         .arg("--multi")
-        .arg(multiplicity.max(1).to_string());
+        .arg(multiplicity.to_string());
+    if let Some(functional) = behemoth_functional_flag(method) {
+        command.arg("--functional").arg(functional);
+    }
+    if let Some(basis) = behemoth_basis_flag(method) {
+        command.arg("--basis").arg(basis);
+    }
+    if let Some(dispersion) = behemoth_dispersion_flag(method) {
+        command.arg("--dispersion").arg(dispersion);
+    }
+    command
+        .arg("--memory")
+        .arg(method.memory_mb.to_string())
+        .arg("--nproc")
+        .arg(method.nproc.max(1).to_string());
     command
 }
 
@@ -225,6 +250,7 @@ pub fn parse_hessian_for(stdout: &str, symbols: &[String]) -> Result<Array2<f64>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use super::super::method::{BehemothMethod, Dispersion};
 
     fn fixture(name: &str) -> String {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -247,6 +273,7 @@ mod tests {
             "input.xyz",
             -1,
             2,
+            &MethodConfig::default(),
         );
         let args: Vec<String> = command
             .get_args()
@@ -254,7 +281,21 @@ mod tests {
             .collect();
         assert_eq!(
             args,
-            vec!["--xyz", "input.xyz", "--method", "xtb", "--charge", "-1", "--multi", "2", "--opt"]
+            vec![
+                "--xyz",
+                "input.xyz",
+                "--method",
+                "xtb",
+                "--charge",
+                "-1",
+                "--multi",
+                "2",
+                "--memory",
+                "1024",
+                "--nproc",
+                "1",
+                "--opt"
+            ]
         );
         assert_eq!(command.get_current_dir(), Some(Path::new("/tmp/run")));
     }
@@ -267,6 +308,7 @@ mod tests {
             "input.xyz",
             0,
             1,
+            &MethodConfig::default(),
         );
         let args: Vec<String> = command
             .get_args()
@@ -276,12 +318,166 @@ mod tests {
         assert!(!args.contains(&"--freq".to_string()), "--freq has no modes");
     }
 
+    /// The flags for a plain DFT job: the functional, the basis and the
+    /// dispersion correction all travel, and a singlet is `rks`.
+    #[test]
+    fn a_dft_command_carries_the_functional_basis_and_dispersion() {
+        let method = MethodConfig {
+            behemoth: BehemothMethod::Dft,
+            functional: "pbe0".to_string(),
+            basis: "def2-tzvp".to_string(),
+            dispersion: Dispersion::D4,
+            memory_mb: 4096,
+            nproc: 8,
+            ..Default::default()
+        };
+        let args = args_of(optimize_command(
+            Path::new("b"),
+            Path::new("."),
+            "in.xyz",
+            0,
+            1,
+            &method,
+        ));
+        assert_eq!(value_after(&args, "--method"), Some("rks"));
+        assert_eq!(value_after(&args, "--functional"), Some("pbe0"));
+        assert_eq!(value_after(&args, "--basis"), Some("def2-tzvp"));
+        assert_eq!(value_after(&args, "--dispersion"), Some("d4"));
+        assert_eq!(value_after(&args, "--memory"), Some("4096"));
+        assert_eq!(value_after(&args, "--nproc"), Some("8"));
+    }
+
+    /// An open shell is always the unrestricted method, as asked: `uks` for
+    /// DFT -- which Behemoth also enforces, refusing `rks` above a singlet --
+    /// and `uhf` for Hartree-Fock.
+    #[test]
+    fn an_open_shell_command_is_unrestricted() {
+        let dft = MethodConfig { behemoth: BehemothMethod::Dft, ..Default::default() };
+        let args = args_of(hessian_command(Path::new("b"), Path::new("."), "in.xyz", 0, 3, &dft));
+        assert_eq!(value_after(&args, "--method"), Some("uks"));
+
+        let hf = MethodConfig { behemoth: BehemothMethod::Hf, ..Default::default() };
+        let args = args_of(hessian_command(Path::new("b"), Path::new("."), "in.xyz", 0, 2, &hf));
+        assert_eq!(value_after(&args, "--method"), Some("uhf"));
+
+        let singlet =
+            args_of(hessian_command(Path::new("b"), Path::new("."), "in.xyz", 0, 1, &hf));
+        assert_eq!(value_after(&singlet, "--method"), Some("hf"));
+    }
+
+    /// A composite defines its own basis set and dispersion correction, so
+    /// neither may be passed alongside it -- Behemoth would be given two
+    /// answers to the same question.
+    #[test]
+    fn a_composite_command_passes_no_basis_or_dispersion() {
+        let method = MethodConfig {
+            behemoth: BehemothMethod::Dft,
+            functional: "r2scan-3c".to_string(),
+            basis: "cc-pvtz".to_string(),
+            dispersion: Dispersion::D3Bj,
+            ..Default::default()
+        };
+        let args = args_of(optimize_command(
+            Path::new("b"),
+            Path::new("."),
+            "in.xyz",
+            0,
+            1,
+            &method,
+        ));
+        assert_eq!(value_after(&args, "--functional"), Some("r2scan-3c"));
+        assert!(!args.iter().any(|a| a == "--basis"), "{args:?}");
+        assert!(!args.iter().any(|a| a == "--dispersion"), "{args:?}");
+    }
+
+    /// HF-3c is the one composite that is a method rather than a functional.
+    #[test]
+    fn hf3c_travels_as_the_method_with_no_functional() {
+        let method = MethodConfig {
+            behemoth: BehemothMethod::Dft,
+            functional: "hf-3c".to_string(),
+            ..Default::default()
+        };
+        let args = args_of(optimize_command(
+            Path::new("b"),
+            Path::new("."),
+            "in.xyz",
+            0,
+            1,
+            &method,
+        ));
+        assert_eq!(value_after(&args, "--method"), Some("hf-3c"));
+        assert!(!args.iter().any(|a| a == "--functional"), "{args:?}");
+        assert!(!args.iter().any(|a| a == "--basis"), "{args:?}");
+    }
+
+    /// A wavefunction method takes a basis but no functional or dispersion.
+    #[test]
+    fn a_correlated_command_carries_only_the_basis() {
+        for (method, expected) in
+            [(BehemothMethod::Mp2, "mp2"), (BehemothMethod::RiMp2, "ri-mp2")]
+        {
+            let config = MethodConfig {
+                behemoth: method,
+                dispersion: Dispersion::D3Bj,
+                ..Default::default()
+            };
+            let args = args_of(optimize_command(
+                Path::new("b"),
+                Path::new("."),
+                "in.xyz",
+                0,
+                1,
+                &config,
+            ));
+            assert_eq!(value_after(&args, "--method"), Some(expected));
+            assert_eq!(value_after(&args, "--basis"), Some("def2-svp"));
+            assert!(!args.iter().any(|a| a == "--functional"), "{method:?}");
+            assert!(!args.iter().any(|a| a == "--dispersion"), "{method:?}");
+        }
+    }
+
+    /// No dispersion selected means no flag, not an empty one.
+    #[test]
+    fn no_dispersion_selected_passes_no_flag() {
+        let method = MethodConfig { behemoth: BehemothMethod::Dft, ..Default::default() };
+        let args = args_of(optimize_command(
+            Path::new("b"),
+            Path::new("."),
+            "in.xyz",
+            0,
+            1,
+            &method,
+        ));
+        assert!(!args.iter().any(|a| a == "--dispersion"), "{args:?}");
+    }
+
+    fn args_of(command: Command) -> Vec<String> {
+        command
+            .get_args()
+            .map(|a| a.to_string_lossy().to_string())
+            .collect()
+    }
+
+    /// The value a flag was given, so a test names the flag rather than
+    /// hard-coding a position that shifts when a flag is added.
+    fn value_after<'a>(args: &'a [String], flag: &str) -> Option<&'a str> {
+        let at = args.iter().position(|a| a == flag)?;
+        args.get(at + 1).map(|s| s.as_str())
+    }
+
     /// A multiplicity of zero is not a thing; clamping keeps a bad panel value
     /// from reaching the command line.
     #[test]
     fn a_multiplicity_below_one_is_clamped() {
-        let command =
-            optimize_command(Path::new("b"), Path::new("."), "in.xyz", 0, 0);
+        let command = optimize_command(
+            Path::new("b"),
+            Path::new("."),
+            "in.xyz",
+            0,
+            0,
+            &MethodConfig::default(),
+        );
         let args: Vec<String> = command
             .get_args()
             .map(|a| a.to_string_lossy().to_string())
@@ -409,7 +605,7 @@ mod tests {
         .unwrap();
 
         // Optimization.
-        let status = optimize_command(&binary, &dir, "input.xyz", 0, 1)
+        let status = optimize_command(&binary, &dir, "input.xyz", 0, 1, &MethodConfig::default())
             .stdout(std::process::Stdio::piped())
             .output()
             .expect("Behemoth should run");
@@ -427,7 +623,7 @@ mod tests {
         assert!(!energies.is_empty(), "the plot needs per-cycle energies");
 
         // Hessian.
-        let hess = hessian_command(&binary, &dir, "input.xyz", 0, 1)
+        let hess = hessian_command(&binary, &dir, "input.xyz", 0, 1, &MethodConfig::default())
             .stdout(std::process::Stdio::piped())
             .output()
             .expect("Behemoth should run");

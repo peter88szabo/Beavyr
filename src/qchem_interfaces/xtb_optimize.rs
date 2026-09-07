@@ -22,6 +22,8 @@ use crate::trajectory::{self, TrajectoryState};
 use bevy_egui::egui;
 
 use super::config;
+use super::method::MethodConfig;
+use super::method_ui::method_config_ui;
 use super::program::QcProgram;
 use super::valence::validate_electronic_state;
 
@@ -38,6 +40,10 @@ pub struct XtbPanelState {
     /// One path per program, so switching programs switches paths rather than
     /// overwriting the one the user set for the other.
     pub paths: Vec<(QcProgram, String)>,
+    /// The level of theory to optimize at. Its own copy, not shared with the
+    /// frequency panel: optimizing and then taking a Hessian at a different
+    /// level is a legitimate thing to want.
+    pub method: MethodConfig,
     /// Whether the energy-vs-iteration plot window is open. Kept here rather
     /// than in `XtbOptimizationTask` because it is purely a UI toggle, not
     /// part of the run itself.
@@ -95,6 +101,7 @@ impl Default for XtbPanelState {
                     (p, path)
                 })
                 .collect(),
+            method: MethodConfig::default(),
             charge: 0,
             multiplicity: 1,
             energy_plot_open: false,
@@ -189,11 +196,14 @@ impl XtbOptimizationTask {
         charge: i32,
         uhf: i32,
         multiplicity: i32,
+        method: &MethodConfig,
     ) {
         if self.is_running() {
             return;
         }
         let input_xyz = write_xyz_string(atoms, pos);
+        // Owned, because the task outlives the caller's borrow.
+        let method = method.clone();
         let binary = binary.to_path_buf();
         let cancel = Arc::new(AtomicBool::new(false));
         let child_slot = Arc::new(Mutex::new(None));
@@ -218,6 +228,7 @@ impl XtbOptimizationTask {
                 charge,
                 uhf,
                 multiplicity,
+                &method,
                 &task_cancel,
                 &task_child,
             )
@@ -452,6 +463,24 @@ pub fn xtb_optimization_panel(
         }
     });
 
+    // The level of theory, in the same block the frequency panel uses.
+    // Returns whether anything about it forbids running -- a heavy element
+    // with no ECP behind it, TASI on an element it has no parameters for, a
+    // correlated method on an open shell -- which gates the button below.
+    let method_blocked = {
+        let program = panel_state.program;
+        let atoms = mol.atoms.clone();
+        method_config_ui(
+            ui,
+            program,
+            &mut panel_state.method,
+            panel_state.multiplicity,
+            &atoms,
+            running,
+            "opt",
+        )
+    };
+
     // A playing frame is a distorted geometry, so its bond lengths -- and
     // every valence conclusion drawn from them -- are about that frame, not
     // about the molecule. Checking it would produce warnings that change from
@@ -479,11 +508,17 @@ pub fn xtb_optimization_panel(
     }
 
     ui.horizontal(|ui| {
-        let can_optimize = !running && !mol.atoms.is_empty() && uhf.is_some() && !animating;
+        let can_optimize = !running
+            && !mol.atoms.is_empty()
+            && uhf.is_some()
+            && !animating
+            && !method_blocked;
         if ui
             .add_enabled(can_optimize, egui::Button::new("Optimize"))
             .on_disabled_hover_text(if animating {
                 "Stop the animation first: the structure on screen is a frame of it."
+            } else if method_blocked {
+                "This method cannot run on this structure -- see the note above."
             } else {
                 "Nothing to optimize with the current structure and electronic state."
             })
@@ -503,6 +538,7 @@ pub fn xtb_optimization_panel(
                         panel_state.charge,
                         uhf,
                         panel_state.multiplicity,
+                        &panel_state.method,
                     );
                 }
                 (_, Err(err)) => {
@@ -1041,6 +1077,7 @@ fn run_optimize_cancellable(
     charge: i32,
     uhf: i32,
     multiplicity: i32,
+    method: &MethodConfig,
     cancel: &AtomicBool,
     child_slot: &Mutex<Option<Child>>,
 ) -> Result<XtbOptimizationOutput, String> {
@@ -1066,6 +1103,10 @@ fn run_optimize_cancellable(
             if uhf > 0 {
                 cmd.arg("--uhf").arg(uhf.to_string());
             }
+            // The parametrisation, and the thread count. xTB has no memory
+            // option, so none is passed.
+            cmd.args(super::method::xtb_method_args(method));
+            cmd.arg("-P").arg(method.nproc.max(1).to_string());
             cmd
         }
         QcProgram::Behemoth => super::behemoth::optimize_command(
@@ -1074,6 +1115,7 @@ fn run_optimize_cancellable(
             "input.xyz",
             charge,
             multiplicity,
+            method,
         ),
     };
     cmd.stdout(Stdio::from(stdout)).stderr(Stdio::from(stderr));
@@ -1286,6 +1328,7 @@ mod tests {
             99,
             0,
             1,
+            &MethodConfig::default(),
             &cancel,
             &child_slot,
         );
@@ -1382,6 +1425,7 @@ H 0.0 0.0 0.74
             0,
             0,
             1,
+            &MethodConfig::default(),
             &cancel,
             &child_slot,
         );

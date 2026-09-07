@@ -26,6 +26,8 @@ use crate::spectrum::plot::{draw_spectrum, SpectrumAxis};
 use crate::trajectory::{PlaybackMode, TrajectoryFrame, TrajectoryState};
 
 use super::hessian_file::{parse_turbomole_gradient, parse_turbomole_hessian, parse_vibspectrum};
+use super::method::MethodConfig;
+use super::method_ui::method_config_ui;
 use super::program::QcProgram;
 use super::valence::validate_electronic_state;
 use super::xtb_optimize::{create_xtb_run_dir, discard_xtb_run_dir, xtb_scratch_dir};
@@ -175,11 +177,14 @@ impl XtbFrequencyTask {
         uhf: i32,
         multiplicity: i32,
         need_gradient: bool,
+        method: &MethodConfig,
     ) {
         if self.is_running() {
             return;
         }
         let input_xyz = super::xtb_optimize::write_xyz_string(atoms, pos);
+        // Owned, because the task outlives the caller's borrow.
+        let method = method.clone();
         let binary = binary.to_path_buf();
         let task_atoms = atoms.to_vec();
         let cancel = Arc::new(AtomicBool::new(false));
@@ -207,6 +212,7 @@ impl XtbFrequencyTask {
                 uhf,
                 multiplicity,
                 need_gradient,
+                &method,
                 &task_cancel,
                 &task_child,
             )
@@ -233,6 +239,7 @@ fn run_hess_cancellable(
     uhf: i32,
     multiplicity: i32,
     need_gradient: bool,
+    method: &MethodConfig,
     cancel: &AtomicBool,
     child_slot: &Mutex<Option<Child>>,
 ) -> Result<RawFrequencyOutput, String> {
@@ -261,6 +268,10 @@ fn run_hess_cancellable(
             if need_gradient {
                 cmd.arg("--grad");
             }
+            // The parametrisation, and the thread count. xTB has no memory
+            // option, so none is passed.
+            cmd.args(super::method::xtb_method_args(method));
+            cmd.arg("-P").arg(method.nproc.max(1).to_string());
             cmd
         }
         // Behemoth prints the matrix to stdout, which is captured below.
@@ -270,6 +281,7 @@ fn run_hess_cancellable(
             "input.xyz",
             charge,
             multiplicity,
+            method,
         ),
     };
     cmd.stdout(Stdio::from(stdout)).stderr(Stdio::from(stderr));
@@ -947,6 +959,9 @@ pub struct XtbFreqPanelState {
     /// optimizer's choice: running a Hessian in a different program than the
     /// optimization is a legitimate thing to want.
     pub program: QcProgram,
+    /// The level of theory the Hessian is computed at. Its own copy, for the
+    /// same reason `program` is.
+    pub method: MethodConfig,
     pub eckart_mode: EckartMode,
     pub thermo_temp_k: f64,
     pub thermo_freq_cutoff_cm1: f64,
@@ -986,6 +1001,7 @@ impl Default for XtbFreqPanelState {
     fn default() -> Self {
         Self {
             program: QcProgram::default(),
+            method: MethodConfig::default(),
             eckart_mode: EckartMode::VibRot,
             thermo_temp_k: 298.15,
             thermo_freq_cutoff_cm1: 100.0,
@@ -1281,6 +1297,19 @@ pub fn xtb_frequency_panel(
             }
         });
 
+        // The same block the optimizer draws, from the same implementation.
+        // Placed after the multiplicity row because its validation depends on
+        // it: a correlated method needs a closed shell.
+        let method_blocked = method_config_ui(
+            ui,
+            freq_panel.program,
+            &mut freq_panel.method,
+            freq_panel.multiplicity,
+            &mol.atoms,
+            running,
+            "freq",
+        );
+
         // Same check the optimizer runs: a multiplicity that cannot be made
         // from this many electrons would have xTB fail (or worse, converge to
         // something meaningless) several minutes into a Hessian.
@@ -1306,7 +1335,11 @@ pub fn xtb_frequency_panel(
         }
 
         ui.horizontal(|ui| {
-            let can_run = !running && !mol.atoms.is_empty() && uhf.is_some() && !animating;
+            let can_run = !running
+                && !mol.atoms.is_empty()
+                && uhf.is_some()
+                && !animating
+                && !method_blocked;
             let mut button =
                 ui.add_enabled(
                     can_run,
@@ -1319,6 +1352,10 @@ pub fn xtb_frequency_panel(
             } else if mol.atoms.is_empty() {
                 button =
                     button.on_disabled_hover_text("There is no structure on screen to analyze.");
+            } else if method_blocked {
+                button = button.on_disabled_hover_text(
+                    "This method cannot run on this structure -- see the note above.",
+                );
             }
             if button.clicked() {
                 freq_panel.show_warnings = true;
@@ -1343,6 +1380,7 @@ pub fn xtb_frequency_panel(
                                 uhf,
                                 freq_panel.multiplicity,
                                 need_gradient,
+                                &freq_panel.method,
                             );
                         }
                     }
@@ -2639,6 +2677,7 @@ mod tests {
             0,
             1,
             false,
+            &MethodConfig::default(),
             &cancel,
             &child_slot,
         )
@@ -2690,6 +2729,7 @@ mod tests {
             0,
             1,
             false,
+            &MethodConfig::default(),
             &cancel,
             &child_slot,
         )
@@ -2758,7 +2798,7 @@ mod tests {
             QcProgram::Xtb,
             &xtb_path,
             &atoms,
-            &pos, 0, 0, 1, false);
+            &pos, 0, 0, 1, false, &MethodConfig::default());
         assert!(task.is_running(), "start() should have spawned a task");
 
         let panel_state = XtbFreqPanelState::default();
