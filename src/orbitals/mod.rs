@@ -44,9 +44,9 @@ const RESOLUTION_SPACING: [f32; 8] = [0.0, 0.40, 0.30, 0.25, 0.20, 0.15, 0.12, 0
 
 /// Lowest and highest selectable surface resolution.
 pub const MIN_RESOLUTION: u32 = 1;
-pub const MAX_RESOLUTION: u32 = 7;
+pub const MAX_RESOLUTION: u32 = 8;
 /// Matches the 0.20 A spacing the viewer used before the control existed.
-const DEFAULT_RESOLUTION: u32 = 4;
+const DEFAULT_RESOLUTION: u32 = 6;
 
 /// Plane spacing for the wireframe net is `MESH_SPACING_BASE / density`, so a
 /// higher slider value means a denser net -- the direction people expect.
