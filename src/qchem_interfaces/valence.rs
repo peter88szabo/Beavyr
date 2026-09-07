@@ -206,6 +206,42 @@ mod tests {
         }
     }
 
+    /// The reported bug: attaching an -OOH group and pressing Optimize warned
+    /// that both peroxide oxygens had "estimated valence 1.5" and might be
+    /// radicals. They are ordinary divalent oxygens; the O-O bond was being
+    /// scored as half formed because a peroxide bond is longer than the sum of
+    /// the covalent radii. Real distances, not ratios, so the test would have
+    /// caught it.
+    #[test]
+    fn a_hydroperoxide_group_draws_no_valence_warnings() {
+        // Methyl hydroperoxide, CH3-O-O-H: the smallest closed-shell molecule
+        // with a peroxide bond in it.
+        let m = Molecule {
+            atoms: ["C", "H", "H", "H", "O", "O", "H"]
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+            pos: vec![Default::default(); 7],
+            bonds: vec![
+                (0, 1, 1.09),
+                (0, 2, 1.09),
+                (0, 3, 1.09),
+                (0, 4, 1.43),
+                // The peroxide bond itself, at hydrogen peroxide's length.
+                (4, 5, 1.458),
+                (5, 6, 0.97),
+            ],
+            hydrogen_bonds: vec![],
+        };
+        let (uhf, warnings) = validate_electronic_state(&m, 0, 1).unwrap();
+        assert_eq!(uhf, 0);
+        assert!(
+            warnings.is_empty(),
+            "a peroxide is not a pair of radicals: {:?}",
+            warnings.iter().map(|w| &w.message).collect::<Vec<_>>()
+        );
+    }
+
     #[test]
     fn water_singlet_neutral_is_valid_with_no_warnings() {
         let m = mol(&["O", "H", "H"], &[(0, 1), (0, 2)]);

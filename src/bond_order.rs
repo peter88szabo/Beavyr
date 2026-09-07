@@ -66,6 +66,14 @@ const AROMATIC_MAX: f32 = 0.965;
 /// bond, forming or breaking. Counting it as a whole bond is what makes a
 /// transition state's transferring hydrogen look divalent.
 const SINGLE_MAX: f32 = 1.05;
+/// The same limit for a single bond between two second-period atoms that both
+/// carry lone pairs -- N, O and F. Those lone pairs repel across the bond and
+/// stretch it well past the radius sum, so the general limit calls a perfectly
+/// ordinary bond half-formed. See `single_max_ratio`.
+const LONE_PAIR_SINGLE_MAX: f32 = 1.16;
+/// F-F is the extreme of the same effect and needs its own allowance: 1.412 A
+/// against a 1.14 A radius sum is a ratio of 1.24.
+const FLUORINE_SINGLE_MAX: f32 = 1.28;
 /// What a stretched bond contributes. Half a bond is the right order of
 /// magnitude at a transition state, where the transferring atom is roughly
 /// half bonded to each partner -- and the two halves then sum to one whole
@@ -76,6 +84,37 @@ pub const PARTIAL_BOND_ORDER: f64 = 0.5;
 /// their covalent radii. Every bond-order judgement is a ratio against this.
 pub fn single_bond_length(symbol_a: &str, symbol_b: &str) -> f32 {
     bond_order_radius(symbol_a) + bond_order_radius(symbol_b)
+}
+
+/// How far past the radius sum a bond between these two elements can stretch
+/// and still be a whole single bond.
+///
+/// Only the upper boundary moves: the tiers below it are calibrated on bonds
+/// that are *shorter* than the radius sum, where nothing about this applies.
+///
+/// Lone pairs on both atoms repel across the bond and lengthen it. Hydrogen
+/// peroxide's O-O is 1.458 A against a 1.32 A radius sum -- a ratio of 1.105,
+/// past the general 1.05 -- and dialkyl peroxides reach 1.48. So every
+/// peroxide read as two half bonds, and the diagnostics duly reported both
+/// oxygens as radicals with a valence of 1.5. The same error hit hydroxylamine
+/// (N-O 1.453 against 1.37) and NF3 (N-F 1.371 against 1.28).
+///
+/// This does not blunt the partial-bond detection that matters for reactive
+/// structures: a peroxide bond in the middle of forming or breaking is 1.8 A
+/// or more, a ratio above 1.36, so it still reads as partial.
+fn single_max_ratio(symbol_a: &str, symbol_b: &str) -> f32 {
+    let has_lone_pairs = |s: &str| matches!(s, "N" | "O" | "F");
+    if !has_lone_pairs(symbol_a) || !has_lone_pairs(symbol_b) {
+        return SINGLE_MAX;
+    }
+    // Fluorine's radius is the smallest of the three, so a bond to it is
+    // under-estimated by the most: HOF's O-F is 1.442 A against a 1.23 A sum,
+    // a ratio of 1.17, and F2's is 1.24.
+    if symbol_a == "F" || symbol_b == "F" {
+        FLUORINE_SINGLE_MAX
+    } else {
+        LONE_PAIR_SINGLE_MAX
+    }
 }
 
 /// The estimated order of a bond of length `distance` between two elements.
@@ -91,7 +130,7 @@ pub fn estimate_bond_order(symbol_a: &str, symbol_b: &str, distance: f32) -> f64
         2.0
     } else if ratio <= AROMATIC_MAX {
         1.5
-    } else if ratio <= SINGLE_MAX {
+    } else if ratio <= single_max_ratio(symbol_a, symbol_b) {
         1.0
     } else {
         PARTIAL_BOND_ORDER
@@ -280,6 +319,72 @@ mod tests {
         assert_eq!(estimate_bond_order("C", "O", 1.43), 1.0, "ether C-O");
         assert_eq!(estimate_bond_order("C", "N", 1.16), 3.0, "nitrile");
         assert_eq!(estimate_bond_order("C", "C", 1.40), 1.5, "aromatic");
+    }
+
+    /// The reported bug: an -OOH group's O-O read as two half bonds, so both
+    /// oxygens were reported with a valence of 1.5 and flagged as possible
+    /// radicals. A peroxide bond is a perfectly ordinary single bond that
+    /// happens to be longer than the sum of the covalent radii.
+    #[test]
+    fn a_peroxide_bond_is_a_whole_single_bond() {
+        // H2O2, gas phase.
+        assert_eq!(estimate_bond_order("O", "O", 1.458), 1.0);
+        // Dialkyl and dialkyl-substituted peroxides span roughly 1.45-1.48.
+        assert_eq!(estimate_bond_order("O", "O", 1.45), 1.0);
+        assert_eq!(estimate_bond_order("O", "O", 1.48), 1.0);
+
+        // So a hydroperoxide oxygen is divalent, and says nothing about
+        // radicals: one bond to carbon, one to the other oxygen.
+        let valence = estimate_bond_order("C", "O", 1.43) + estimate_bond_order("O", "O", 1.458);
+        assert_eq!(valence, 2.0);
+        assert_eq!(classify_valence("O", valence).0, ValenceVerdict::Satisfied);
+    }
+
+    /// The same lone-pair lengthening in the other bonds it affects.
+    #[test]
+    fn single_bonds_between_lone_pair_atoms_are_not_partial() {
+        assert_eq!(estimate_bond_order("N", "N", 1.447), 1.0, "hydrazine");
+        assert_eq!(estimate_bond_order("N", "O", 1.453), 1.0, "hydroxylamine");
+        assert_eq!(estimate_bond_order("N", "F", 1.371), 1.0, "NF3");
+        assert_eq!(estimate_bond_order("O", "F", 1.442), 1.0, "HOF");
+        assert_eq!(estimate_bond_order("F", "F", 1.412), 1.0, "F2");
+    }
+
+    /// The wider limit is granted only to the pairs that need it, so an
+    /// ordinary stretched bond is still detected as partial.
+    #[test]
+    fn the_lone_pair_allowance_does_not_leak_to_other_elements() {
+        // A carbon or hydrogen partner gets the general limit, however
+        // lone-pair-rich the other atom is. A C-O at 1.55 A is only a ratio
+        // of 1.09 -- inside the lone-pair allowance, outside the general one.
+        assert_eq!(estimate_bond_order("C", "O", 1.55), PARTIAL_BOND_ORDER);
+        assert_eq!(estimate_bond_order("O", "H", 1.30), PARTIAL_BOND_ORDER);
+        assert_eq!(estimate_bond_order("C", "N", 1.70), PARTIAL_BOND_ORDER);
+    }
+
+    /// A peroxide bond being broken or formed must still read as partial:
+    /// this is the case the wider limit could have cost us.
+    #[test]
+    fn a_forming_or_breaking_peroxide_bond_is_still_partial() {
+        assert_eq!(estimate_bond_order("O", "O", 1.75), PARTIAL_BOND_ORDER);
+        assert_eq!(estimate_bond_order("O", "O", 2.10), PARTIAL_BOND_ORDER);
+        assert_eq!(estimate_bond_order("N", "O", 1.90), PARTIAL_BOND_ORDER);
+    }
+
+    /// The wider limit moved only the stretched boundary, so a *short* O-O is
+    /// read exactly as it was before: dioxygen's 1.208 A still reads as
+    /// multiply bonded.
+    ///
+    /// Ozone, whose terminal O-O is 1.278 A and whose true order is 1.5, sits
+    /// just inside the single tier at a ratio of 0.968. That is a limitation
+    /// of judging delocalised bonds by length alone -- the O-O single bond is
+    /// anomalously long and the double anomalously short, so no single ratio
+    /// scale fits both ends -- and it is the same answer this gave before the
+    /// stretched limit was widened. Recorded rather than asserted as correct.
+    #[test]
+    fn widening_the_stretched_limit_left_short_bonds_alone() {
+        assert_eq!(estimate_bond_order("O", "O", 1.208), 1.5, "dioxygen");
+        assert_eq!(estimate_bond_order("O", "O", 1.278), 1.0, "ozone");
     }
 
     /// A bond stretched past a normal single bond counts as partial. This is

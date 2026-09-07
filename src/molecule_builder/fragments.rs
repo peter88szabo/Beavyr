@@ -83,10 +83,24 @@ pub const FRAG_CYCLOPENTANE: &str = r#"
 /// only three atoms, so there is no dihedral involved -- angle alone fixes
 /// it, with no risk of the dihedral-convention mismatch noted below for
 /// -CH3.
+/// An amine nitrogen is pyramidal, not planar: the lone pair occupies the
+/// fourth position, so H-N-H is 106 degrees (ammonia's is 106.7, and aniline's
+/// and methylamine's are within a degree of it) and the nitrogen sits above the
+/// plane of its three substituents.
+///
+/// Molden's own -NH2 has the two hydrogens 120 degrees apart and coplanar with
+/// the connector, which makes the placed amine flat. That is wrong for sp3-like
+/// nitrogen and was the shape Beavyr shipped until this was corrected. The
+/// hydrogens are kept at Molden's 1.010 A bond length and only the angle is
+/// changed; `open_valence_direction` then takes the out-of-plane branch,
+/// because 106 is under its planar threshold and both N-H bonds are single.
+///
+/// Nitro and pyrrole nitrogens really are flat, and stay so: they are held
+/// planar by their bond orders, not by this angle.
 pub const FRAG_NH2: &str = r#"
  N     0.000000     0.000000     0.000000
- H     1.010000     0.000000     0.000000
- H    -0.505000     0.874686     0.000000
+ H     0.806622     0.000000     0.607833
+ H    -0.806622     0.000000     0.607833
 "#;
 
 /// Source: -NO2.xyz

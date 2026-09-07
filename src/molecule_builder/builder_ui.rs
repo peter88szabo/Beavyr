@@ -1688,6 +1688,18 @@ pub fn set_selected_atom(
         None => {
             zmat_state.selected_index = None;
             zmat_state.selected_symbol = None;
+            // `edit_preview` is a second set of highlighted atoms, drawn by
+            // `draw_builder_highlights` alongside the selection. It is derived
+            // from the selection whenever the Z-matrix table is drawn, but the
+            // table is not always drawn -- the Fragment Editor is a window the
+            // user can close -- and it used to be left alone when nothing was
+            // selected. The result was a magenta sphere stuck on an atom that
+            // no longer had anything to do with the selection, which no click
+            // could get rid of: clicking the background cleared the selection,
+            // which was not what was drawing the sphere.
+            //
+            // Clearing the selection clears what was derived from it.
+            zmat_state.edit_preview.clear();
         }
     }
     zmat_state.edit_refresh = true;
@@ -1758,9 +1770,13 @@ fn commit_fragment_connect(
     settings.bond_topology_dirty = true;
     zmat_state.last_error = None;
 
-    // The selection survives: Connect only appends rows, so the selected
-    // index still names the same atom and the user can hang a second
-    // substituent off it without re-clicking.
+    // Nothing stays selected once the fragment is on. Connect only appends
+    // rows, so the index would still name the same atom and keeping it would
+    // save a click when hanging a second substituent off it -- but it also
+    // leaves the atom lit up with no way to tell whether that highlight means
+    // "this is where the last group went" or "this is what the next one will
+    // attach to". Clearing it makes the highlight mean one thing.
+    set_selected_atom(zmat_state, &mol.atoms, None);
     zmat_state.edit_refresh = true;
 }
 
@@ -2501,11 +2517,14 @@ pub fn builder_ui_contents(
                                 apply_zmat_edits(&mut zmat_state, &mut mol, &mut settings);
                             }
                         });
-                    if let Some(preview) = preview_indices {
-                        zmat_state.edit_preview = preview;
-                    } else if let Some(sel) = zmat_state.selected_index {
-                        zmat_state.edit_preview = vec![sel];
-                    }
+                    // Derived outright, every frame the table is drawn: a
+                    // focused reference field previews the atoms it names,
+                    // otherwise the selection previews itself, and with
+                    // neither there is nothing to highlight. Assigning only in
+                    // the first two cases is what let a stale index survive.
+                    zmat_state.edit_preview = preview_indices
+                        .or_else(|| zmat_state.selected_index.map(|sel| vec![sel]))
+                        .unwrap_or_default();
                     if let Some(idx) = zmat_state.selected_index {
                         if can_remove_zmat_index(&zmat_state.zmat, idx) {
                             if ui.button("Remove Atom").clicked() {
@@ -3558,12 +3577,15 @@ C   2.050   1.450   0.000
         }
     }
 
-    /// -NH2's geometry was corrected against Molden's canonical values
-    /// (N-H = 1.010 A, H-N-H = 120 deg). Measuring it directly from the
-    /// stored fragment text, rather than after a splice, isolates the
-    /// fixture itself from any splice-time relaxation.
+    /// -NH2 keeps Molden's 1.010 A N-H bond length but not its 120 degree
+    /// H-N-H: an amine nitrogen is pyramidal, and a 120 degree fragment makes
+    /// the placed amine flat. See the doc comment on `FRAG_NH2`.
+    ///
+    /// Measured directly from the stored fragment text, rather than after a
+    /// splice, so the fixture itself is isolated from any splice-time
+    /// relaxation.
     #[test]
-    fn nh2_fragment_matches_moldens_corrected_geometry() {
+    fn nh2_fragment_is_a_pyramidal_amine_not_a_planar_one() {
         let frag = find_fragment("-NH2").expect("-NH2 is a built-in fragment");
         let (_n, symbols, coords) = parse_xyz_angstrom(frag.xyz);
         let positions: Vec<Vec3> = coords
@@ -3579,9 +3601,12 @@ C   2.050   1.450   0.000
 
         let angle = calc_angle_deg(positions[1], positions[0], positions[2]);
         assert!(
-            (angle - 120.0).abs() < 1e-2,
-            "H-N-H = {angle}, expected 120"
+            (angle - 106.0).abs() < 0.5,
+            "H-N-H = {angle}, expected ammonia's 106"
         );
+        // Under `open_valence_direction`'s planar threshold, which is what
+        // makes the placement put the third bond out of plane.
+        assert!(angle < 115.0, "H-N-H = {angle} would read as a flat centre");
     }
 
     /// -CH3's C-H bond length was rescaled to Molden's value (1.089 A) by
@@ -5182,6 +5207,67 @@ mod editor_flow_tests {
 mod zmat_edit_tests {
     use super::*;
 
+    /// Every fragment atom's local geometry, for review: how many neighbours
+    /// it has and whether it is planar or pyramidal.
+    #[test]
+    #[ignore]
+    fn survey_fragment_local_geometry() {
+        for def in fragments::FRAGMENTS.iter() {
+            let (_n, symbols, coords) = parse_xyz_angstrom(def.xyz);
+            if symbols.len() < 3 {
+                continue;
+            }
+            let pos: Vec<Vec3> = coords
+                .iter()
+                .map(|v| Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32))
+                .collect();
+            let mut mol = Molecule {
+                atoms: symbols.clone(),
+                pos: pos.clone(),
+                bonds: vec![],
+                hydrogen_bonds: vec![],
+            };
+            mol.recompute_bonds(1.2, 2.5);
+            let mut adj = vec![Vec::new(); symbols.len()];
+            for &(i, j, _) in &mol.bonds {
+                adj[i].push(j);
+                adj[j].push(i);
+            }
+            println!("--- {} ---", def.name);
+            for a in 0..symbols.len() {
+                if symbols[a] == "H" {
+                    continue;
+                }
+                let nb = &adj[a];
+                let angle = |x: usize, y: usize| {
+                    (pos[x] - pos[a])
+                        .normalize()
+                        .dot((pos[y] - pos[a]).normalize())
+                        .clamp(-1.0, 1.0)
+                        .acos()
+                        .to_degrees()
+                };
+                match nb.len() {
+                    2 => println!(
+                        "  {}{} 2 nbrs  angle {:.1}",
+                        symbols[a], a + 1, angle(nb[0], nb[1])
+                    ),
+                    3 => {
+                        let sum = angle(nb[0], nb[1]) + angle(nb[0], nb[2]) + angle(nb[1], nb[2]);
+                        println!(
+                            "  {}{} 3 nbrs  angle sum {:.1}  ({})",
+                            symbols[a],
+                            a + 1,
+                            sum,
+                            if sum > 350.0 { "PLANAR" } else { "pyramidal" }
+                        );
+                    }
+                    n => println!("  {}{} {n} nbrs", symbols[a], a + 1),
+                }
+            }
+        }
+    }
+
     /// Two aromatic rings joined by a single bond must not come out coplanar.
     ///
     /// Both connectors are trigonal, which is the conjugation case, and
@@ -5380,6 +5466,92 @@ mod zmat_edit_tests {
         )
     }
 
+    /// The reported bug: after adding or replacing with a fragment the picked
+    /// atom stayed highlighted, and no click would clear it -- not the
+    /// background, not another atom.
+    ///
+    /// Two separate causes, so both are checked. Connect used to keep the
+    /// selection deliberately, and `edit_preview` -- the second set of atoms
+    /// `draw_builder_highlights` lights up -- was left holding a stale index
+    /// once nothing was selected.
+    #[test]
+    fn placing_a_fragment_leaves_nothing_highlighted() {
+        for how in [Placement::Connect, Placement::Replace] {
+            let mut mol = Molecule::from_xyz(match how {
+                Placement::Connect => {
+                    "C  0.000  0.000  0.000\n\
+                     H  0.629  0.629  0.629\n\
+                     H -0.629 -0.629  0.629\n\
+                     H -0.629  0.629 -0.629\n"
+                }
+                Placement::Replace => {
+                    "C  0.000  0.000  0.000\n\
+                     H  0.629  0.629  0.629\n\
+                     H -0.629 -0.629  0.629\n\
+                     H -0.629  0.629 -0.629\n\
+                     H  0.629 -0.629 -0.629\n"
+                }
+            });
+            mol.recompute_bonds(1.2, 2.5);
+            let mut zmat_state = ZMatrixBuilderState::default();
+            let mut settings = MolSettings::default();
+            zmat_state.zmat = zmat2xyz::xyz_to_zmat(&mol.atoms, &mol.pos);
+            zmat_state.frag_name = "-OH".to_string();
+
+            let pick = match how {
+                Placement::Connect => 0,
+                Placement::Replace => 1,
+            };
+            set_selected_atom(&mut zmat_state, &mol.atoms, Some(pick));
+            // As the table does on the frame it draws the selection.
+            zmat_state.edit_preview = vec![pick];
+
+            match how {
+                Placement::Connect => {
+                    commit_fragment_connect(&mut zmat_state, &mut mol, &mut settings)
+                }
+                Placement::Replace => commit_fragment_replace(
+                    &mut zmat_state,
+                    &mut mol,
+                    &mut settings,
+                    &EditorRotateState::default(),
+                ),
+            }
+            assert!(zmat_state.last_error.is_none(), "{:?}", zmat_state.last_error);
+
+            assert_eq!(
+                zmat_state.selected_index, None,
+                "the picked atom is still selected after the fragment went on"
+            );
+            assert!(
+                zmat_state.edit_preview.is_empty(),
+                "a stale highlight survived: {:?}",
+                zmat_state.edit_preview
+            );
+        }
+    }
+
+    /// Clicking empty background clears the highlight outright, rather than
+    /// clearing the selection and leaving the preview drawing a sphere.
+    #[test]
+    fn clicking_the_background_clears_every_highlight() {
+        let atoms: Vec<String> = ["C", "H", "H"].iter().map(|s| s.to_string()).collect();
+        let mut zmat_state = ZMatrixBuilderState::default();
+
+        set_selected_atom(&mut zmat_state, &atoms, Some(1));
+        zmat_state.edit_preview = vec![1];
+        assert_eq!(zmat_state.selected_index, Some(1));
+
+        // What `handle_viewport_click` does for a click that hit no atom.
+        set_selected_atom(&mut zmat_state, &atoms, None);
+        assert_eq!(zmat_state.selected_index, None);
+        assert!(
+            zmat_state.edit_preview.is_empty(),
+            "background click left a highlight behind: {:?}",
+            zmat_state.edit_preview
+        );
+    }
+
     /// The reported bug: -OH came out as a straight C-O-H line, because the
     /// open valence was placed exactly opposite the only bond the oxygen had.
     #[test]
@@ -5463,18 +5635,129 @@ mod zmat_edit_tests {
 
     /// -NH2's own hydrogens are 120 degrees apart in the fragment data, a
     /// deliberate choice matching Molden and pinned by
-    /// `nh2_fragment_matches_moldens_corrected_geometry`. A planar nitrogen's
-    /// third bond belongs in that plane, so the placement gives 120 too --
-    /// self-consistent with the fragment, though a real amine is nearer 110.
-    /// Changing that means changing the fragment's geometry, not the
-    /// placement code.
+    /// The reported bug: -NH2 on a benzene came out flat. An amine nitrogen
+    /// is pyramidal, so its three bonds must not be coplanar -- and both the
+    /// add and the replace path have to get that right.
+    ///
+    /// Measured as the sum of the three angles at nitrogen: 360 degrees is a
+    /// flat centre, 328.4 is a perfect tetrahedral one, and ammonia's is
+    /// 3 x 106.7 = 320.1.
     #[test]
-    fn an_amine_follows_its_fragments_own_planar_geometry() {
-        let (_, _, angle) = connector_angle("-NH2");
+    fn an_amine_is_pyramidal_not_planar_however_it_was_placed() {
+        for (how, mol) in [
+            ("added", placed_on_methane("-NH2", Placement::Connect)),
+            ("replaced", placed_on_methane("-NH2", Placement::Replace)),
+        ] {
+            let nitrogen = only_atom(&mol, "N");
+            let neighbors = bonded_neighbors(&mol, nitrogen);
+            assert_eq!(
+                neighbors.len(),
+                3,
+                "{how}: nitrogen should have three bonds, has {neighbors:?}"
+            );
+
+            let angle_at = |a: usize, b: usize| {
+                calc_angle_deg(mol.pos[a], mol.pos[nitrogen], mol.pos[b])
+            };
+            let sum = angle_at(neighbors[0], neighbors[1])
+                + angle_at(neighbors[0], neighbors[2])
+                + angle_at(neighbors[1], neighbors[2]);
+            assert!(
+                sum < 350.0,
+                "{how}: angles at N sum to {sum:.1} deg -- the amine is flat"
+            );
+            // Not so puckered that it stops looking like an amine either.
+            assert!(
+                sum > 300.0,
+                "{how}: angles at N sum to only {sum:.1} deg"
+            );
+        }
+    }
+
+    /// Both routes a fragment can arrive by, so a geometry test can check
+    /// each: the user either grows the fragment off the picked atom, or
+    /// swaps the picked atom out for it.
+    #[derive(Clone, Copy)]
+    enum Placement {
+        Connect,
+        Replace,
+    }
+
+    /// Puts `fragment` on a methyl or a methane and returns the molecule,
+    /// ready to have the geometry at the join measured.
+    ///
+    /// The host differs by route, because each route needs a different thing
+    /// from it: `Connect` grows the fragment off a carbon that has an open
+    /// valence, so the host is a methyl radical, while `Replace` swaps out one
+    /// of methane's four hydrogens. Either way the fragment ends up bonded to
+    /// carbon 0, as it would be anywhere in a real structure.
+    fn placed_on_methane(fragment: &str, how: Placement) -> Molecule {
+        let methyl = "C  0.000  0.000  0.000\n\
+                      H  0.629  0.629  0.629\n\
+                      H -0.629 -0.629  0.629\n\
+                      H -0.629  0.629 -0.629\n";
+        let methane = "C  0.000  0.000  0.000\n\
+                       H  0.629  0.629  0.629\n\
+                       H -0.629 -0.629  0.629\n\
+                       H -0.629  0.629 -0.629\n\
+                       H  0.629 -0.629 -0.629\n";
+        let mut mol = Molecule::from_xyz(match how {
+            Placement::Connect => methyl,
+            Placement::Replace => methane,
+        });
+        mol.recompute_bonds(1.2, 2.5);
+        let mut zmat_state = ZMatrixBuilderState::default();
+        let mut settings = MolSettings::default();
+        zmat_state.zmat = zmat2xyz::xyz_to_zmat(&mol.atoms, &mol.pos);
+        zmat_state.frag_name = fragment.to_string();
+
+        // Connect grows off the carbon; Replace takes a hydrogen's place.
+        let pick = match how {
+            Placement::Connect => 0,
+            Placement::Replace => 1,
+        };
+        set_selected_atom(&mut zmat_state, &mol.atoms, Some(pick));
+        match how {
+            Placement::Connect => {
+                commit_fragment_connect(&mut zmat_state, &mut mol, &mut settings)
+            }
+            Placement::Replace => commit_fragment_replace(
+                &mut zmat_state,
+                &mut mol,
+                &mut settings,
+                &EditorRotateState::default(),
+            ),
+        }
         assert!(
-            (angle - 120.0).abs() < 8.0,
-            "C-N-H came out {angle:.1} deg, expected the fragment's own 120"
+            zmat_state.last_error.is_none(),
+            "{fragment}: {:?}",
+            zmat_state.last_error
         );
+        mol.recompute_bonds(1.2, 2.5);
+        mol
+    }
+
+    /// The index of the only atom of `symbol` in the molecule -- how a test
+    /// finds a placed fragment's connector without depending on where the
+    /// splice happened to put it in the atom order.
+    fn only_atom(mol: &Molecule, symbol: &str) -> usize {
+        let found: Vec<usize> = (0..mol.atoms.len())
+            .filter(|&i| mol.atoms[i] == symbol)
+            .collect();
+        assert_eq!(found.len(), 1, "expected exactly one {symbol}: {found:?}");
+        found[0]
+    }
+
+    /// Every atom bonded to `atom`, by the molecule's own bond list.
+    fn bonded_neighbors(mol: &Molecule, atom: usize) -> Vec<usize> {
+        mol.bonds
+            .iter()
+            .filter_map(|&(i, j, _)| match (i == atom, j == atom) {
+                (true, false) => Some(j),
+                (false, true) => Some(i),
+                _ => None,
+            })
+            .collect()
     }
 
     /// Every fragment's connector angle after a real placement, for review.
