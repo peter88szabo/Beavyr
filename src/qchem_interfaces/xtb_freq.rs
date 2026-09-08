@@ -930,6 +930,39 @@ pub fn stop_mode_animation(
     traj.overlay_dirty = true;
 }
 
+/// Stops a mode animation when the frequency window is closed.
+///
+/// Closing the window used to leave the animation running, with the molecule
+/// stuck oscillating and no visible control to stop it: the Stop button lives
+/// on one row of a mode list that may be a hundred long, so finding it again
+/// meant reopening the window and hunting for whichever row was playing.
+/// Closing the window is a clear enough statement that the user is done with
+/// it.
+///
+/// Only a *mode* animation is stopped. A trajectory the user loaded
+/// separately, or an optimization path, has nothing to do with this window and
+/// is left alone -- which is why the check is `selected_mode`, the panel's own
+/// record of what it put on screen, rather than `traj.playing`.
+///
+/// Call this every frame with the window's current open state.
+pub fn stop_animation_when_panel_closes(
+    freq_panel: &mut XtbFreqPanelState,
+    freq_task: &XtbFrequencyTask,
+    traj: &mut TrajectoryState,
+    is_open: bool,
+) {
+    let was_open = freq_panel.was_open;
+    freq_panel.was_open = is_open;
+    if was_open && !is_open {
+        if let (Some(_), Some(result)) = (freq_panel.selected_mode, &freq_task.result) {
+            stop_mode_animation(traj, &result.atoms, &result.coords_angstrom);
+            // Forgotten as well as stopped, so reopening the window does not
+            // show a Stop button for a mode that is no longer moving.
+            freq_panel.selected_mode = None;
+        }
+    }
+}
+
 pub fn load_mode_animation(
     traj: &mut TrajectoryState,
     atoms: &[String],
@@ -1025,6 +1058,12 @@ pub struct XtbFreqPanelState {
     /// The level of theory the Hessian is computed at. Its own copy, for the
     /// same reason `program` is.
     pub method: MethodConfig,
+    /// Whether the panel's window was open on the previous frame.
+    ///
+    /// Used to notice the window being closed, which stops any running mode
+    /// animation. Kept here rather than read from the layout because the
+    /// panel is what owns the animation.
+    pub was_open: bool,
     /// The gradient file supplying the reaction-path direction, and its name
     /// for the panel to show.
     ///
@@ -1072,6 +1111,7 @@ impl Default for XtbFreqPanelState {
         Self {
             program: QcProgram::default(),
             method: MethodConfig::default(),
+            was_open: false,
             gradient_file_name: None,
             eckart_mode: EckartMode::VibRot,
             thermo_temp_k: 298.15,
@@ -2255,6 +2295,98 @@ mod tests {
             "frame 0 should be displaced, not equilibrium: {}",
             drift(&frames[0])
         );
+    }
+
+    /// Closing the window stops the animation it started and restores the
+    /// equilibrium geometry, so the user does not have to find the one row of
+    /// a long mode list whose Stop button is live.
+    #[test]
+    fn closing_the_panel_stops_a_mode_animation() {
+        let result = loaded_ts();
+        let mut task = XtbFrequencyTask::default();
+        let mut panel = XtbFreqPanelState::default();
+        let mut traj = TrajectoryState::default();
+
+        let mode = *result.positive_indices.last().unwrap();
+        let equilibrium = result.coords_angstrom.clone();
+        load_mode_animation(
+            &mut traj,
+            &result.atoms,
+            &result.coords_angstrom,
+            &result.modes,
+            mode,
+            0.3,
+            60.0,
+        );
+        panel.selected_mode = Some(mode);
+        task.result = Some(result);
+        assert!(traj.playing);
+        assert!(traj.frames.len() > 1);
+
+        // The window is open for a frame, then closed.
+        stop_animation_when_panel_closes(&mut panel, &task, &mut traj, true);
+        assert!(traj.playing, "still open, still animating");
+        stop_animation_when_panel_closes(&mut panel, &task, &mut traj, false);
+
+        assert!(!traj.playing, "closing the window stops the animation");
+        assert_eq!(traj.frames.len(), 1, "one undistorted frame remains");
+        for (got, want) in traj.frames[0].pos.iter().zip(&equilibrium) {
+            assert!(
+                (*got - *want).length() < 1e-6,
+                "the equilibrium geometry should be back"
+            );
+        }
+        assert!(
+            panel.selected_mode.is_none(),
+            "reopening must not offer Stop for a mode that is no longer moving"
+        );
+    }
+
+    /// A trajectory the user loaded themselves has nothing to do with this
+    /// window and must survive its closing.
+    #[test]
+    fn closing_the_panel_leaves_an_unrelated_trajectory_alone() {
+        let mut task = XtbFrequencyTask::default();
+        let mut panel = XtbFreqPanelState::default();
+        let mut traj = TrajectoryState::default();
+        traj.frames = vec![
+            TrajectoryFrame { atoms: vec!["C".into()], pos: vec![Vec3::ZERO] },
+            TrajectoryFrame { atoms: vec!["C".into()], pos: vec![Vec3::X] },
+        ];
+        traj.playing = true;
+        // No mode was ever animated from this panel.
+        assert!(panel.selected_mode.is_none());
+
+        stop_animation_when_panel_closes(&mut panel, &task, &mut traj, true);
+        stop_animation_when_panel_closes(&mut panel, &task, &mut traj, false);
+        assert!(traj.playing, "an unrelated trajectory keeps playing");
+        assert_eq!(traj.frames.len(), 2);
+        let _ = &mut task;
+    }
+
+    /// Opening the window must not stop anything, and neither must a window
+    /// that simply stays shut.
+    #[test]
+    fn only_the_transition_to_closed_stops_the_animation() {
+        let result = loaded_ts();
+        let mut task = XtbFrequencyTask::default();
+        let mut panel = XtbFreqPanelState::default();
+        let mut traj = TrajectoryState::default();
+        let mode = *result.positive_indices.last().unwrap();
+        let (atoms, coords) = (result.atoms.clone(), result.coords_angstrom.clone());
+        let modes = result.modes.clone();
+        task.result = Some(result);
+
+        // Stays closed: nothing to do, and no animation to disturb.
+        stop_animation_when_panel_closes(&mut panel, &task, &mut traj, false);
+        stop_animation_when_panel_closes(&mut panel, &task, &mut traj, false);
+
+        // Opened, then an animation started, and it survives staying open.
+        stop_animation_when_panel_closes(&mut panel, &task, &mut traj, true);
+        load_mode_animation(&mut traj, &atoms, &coords, &modes, mode, 0.3, 60.0);
+        panel.selected_mode = Some(mode);
+        stop_animation_when_panel_closes(&mut panel, &task, &mut traj, true);
+        assert!(traj.playing, "staying open keeps it running");
     }
 
     /// Stopping must put the equilibrium structure back on screen, whatever

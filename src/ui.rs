@@ -540,6 +540,15 @@ pub fn ui_panel(
             // 1c) Frequency Analysis
             // ===========================
             ui.add_space(8.0);
+            // Closing the window stops any mode animation it started and puts
+            // the equilibrium geometry back, so the user is not left hunting a
+            // long mode list for the row whose Stop button is live.
+            crate::qchem_interfaces::xtb_freq::stop_animation_when_panel_closes(
+                &mut xtb_freq_panel_state,
+                &xtb_freq_task,
+                &mut traj,
+                open[Tab::Vibrations.index()],
+            );
             section(
                 ui,
                 windowed,
