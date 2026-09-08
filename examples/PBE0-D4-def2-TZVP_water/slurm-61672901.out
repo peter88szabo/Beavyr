@@ -1,0 +1,30 @@
+SLURM_JOB_ID: 61672901
+SLURM_JOB_USER: vsc35002
+SLURM_JOB_ACCOUNT: lp_harvey_first
+SLURM_JOB_NAME: PBE0
+SLURM_CLUSTER_NAME: wice
+SLURM_JOB_PARTITION: batch_icelake
+SLURM_NNODES: 1
+SLURM_NODELIST: m28c30n1
+SLURM_JOB_CPUS_PER_NODE: 8
+Date: Thu Aug  6 11:54:10 CEST 2026
+Walltime: 01-00:00:00
+========================================================================
+Home:  /lustre1/scratch/350/vsc35002/Fe3+Acac3/ExcitedState_Spectrum/Sextett_Manifold/PBE0-D4-def2-TZVP_water
+Workdir:  /tmp
+sending incremental file list
+./
+Exc_PBE0-D4-def2-TZVP_SCMwater.bibtex
+Exc_PBE0-D4-def2-TZVP_SCMwater.cis
+Exc_PBE0-D4-def2-TZVP_SCMwater.cpcm
+Exc_PBE0-D4-def2-TZVP_SCMwater.cpcm_corr
+Exc_PBE0-D4-def2-TZVP_SCMwater.densities
+Exc_PBE0-D4-def2-TZVP_SCMwater.densitiesinfo
+Exc_PBE0-D4-def2-TZVP_SCMwater.gbw
+Exc_PBE0-D4-def2-TZVP_SCMwater.out
+Exc_PBE0-D4-def2-TZVP_SCMwater.property.txt
+Exc_PBE0-D4-def2-TZVP_SCMwater.smd
+pbe0-d4-def2-TZVP_SCMwater.xyz
+
+sent 143,757,804 bytes  received 228 bytes  95,838,688.00 bytes/sec
+total size is 143,721,879  speedup is 1.00

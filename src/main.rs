@@ -18,6 +18,7 @@ mod numerics;
 mod orbitals;
 mod picking;
 mod qchem_interfaces;
+mod recent_dir;
 mod rmsd;
 mod scene;
 mod settings;
@@ -27,6 +28,7 @@ mod ui;
 mod ui_layout;
 mod ui_measurements;
 mod uvvis;
+mod vibronic;
 
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
 enum UpdateSet {

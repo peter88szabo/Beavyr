@@ -80,7 +80,9 @@ fn run_block(
                             .hint_text("xtb4stda"),
                     );
                     if ui.add_enabled(!running, egui::Button::new("Browse\u{2026}")).clicked() {
-                        if let Some(path) = rfd::FileDialog::new().pick_file() {
+                        if let Some(path) =
+                            crate::recent_dir::pick_file(crate::recent_dir::open())
+                        {
                             state.run_config.xtb4stda_path = path.display().to_string();
                         }
                     }
@@ -385,11 +387,11 @@ pub fn uvvis_panel(
 }
 
 fn load_from_dialog(state: &mut UvVisState) {
-    let Some(path) = rfd::FileDialog::new()
-        .add_filter("ORCA output", &["out", "log", "txt"])
-        .add_filter("All files", &["*"])
-        .pick_file()
-    else {
+    let Some(path) = crate::recent_dir::pick_file(
+        crate::recent_dir::open()
+            .add_filter("ORCA output", &["out", "log", "txt"])
+            .add_filter("All files", &["*"]),
+    ) else {
         return;
     };
     match std::fs::read_to_string(&path) {
@@ -694,11 +696,9 @@ fn export_dialog(
         )
     };
     let name = format!("uv_vis_spectrum_{}.dat", unit.label());
-    if let Some(path) = rfd::FileDialog::new()
-        .set_file_name(name)
-        .add_filter("Data file", &["dat", "txt"])
-        .save_file()
-    {
+    if let Some(path) = crate::recent_dir::save_file(
+        crate::recent_dir::save(&name).add_filter("Data file", &["dat", "txt"]),
+    ) {
         if let Err(err) = std::fs::write(&path, text) {
             eprintln!("Failed to write {}: {err}", path.display());
         }

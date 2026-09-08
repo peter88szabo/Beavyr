@@ -391,11 +391,8 @@ pub fn ui_panel(
                     let dim = ui.visuals().widgets.inactive.bg_fill;
 
                     if ui.button("Load XYZ file").clicked() {
-                        let mut dlg = rfd::FileDialog::new().add_filter("XYZ", &["xyz"]);
-                        if let Some(dir) = &xyz_buf.last_dir {
-                            dlg = dlg.set_directory(dir);
-                        }
-                        if let Some(path) = dlg.pick_file() {
+                        let dlg = crate::recent_dir::open().add_filter("XYZ", &["xyz"]);
+                        if let Some(path) = crate::recent_dir::pick_file(dlg) {
                             xyz_buf.last_dir = path.parent().map(|p| p.to_path_buf());
                             xyz_buf.current_file = Some(path.clone());
                             if let Ok(text) = fs::read_to_string(&path) {
@@ -615,11 +612,8 @@ pub fn ui_panel(
                 "Trajectory",
                 |ui| {
                 if ui.button("Load trajectory XYZ").clicked() {
-                    let mut dlg = rfd::FileDialog::new().add_filter("XYZ", &["xyz"]);
-                    if let Some(dir) = &traj.last_dir {
-                        dlg = dlg.set_directory(dir);
-                    }
-                    if let Some(path) = dlg.pick_file() {
+                    let dlg = crate::recent_dir::open().add_filter("XYZ", &["xyz"]);
+                    if let Some(path) = crate::recent_dir::pick_file(dlg) {
                         traj.last_dir = path.parent().map(|p| p.to_path_buf());
                         traj.current_file = Some(path.clone());
                         xyz_buf.warning = None;

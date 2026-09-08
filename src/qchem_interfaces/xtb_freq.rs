@@ -1108,11 +1108,11 @@ fn load_gradient_from_dialog(
     freq_panel: &mut XtbFreqPanelState,
     freq_task: &mut XtbFrequencyTask,
 ) -> bool {
-    let Some(path) = rfd::FileDialog::new()
-        .add_filter("ORCA gradient", &["engrad"])
-        .add_filter("All files", &["*"])
-        .pick_file()
-    else {
+    let Some(path) = crate::recent_dir::pick_file(
+        crate::recent_dir::open()
+            .add_filter("ORCA gradient", &["engrad"])
+            .add_filter("All files", &["*"]),
+    ) else {
         return false;
     };
     let Some(HessianSource::Computed(raw)) = freq_task.last_raw.clone() else {
@@ -1165,11 +1165,11 @@ fn load_gradient_from_dialog(
 /// -- that becomes the panel's factor, so the numbers shown match the ones the
 /// user already has in their output file. They can still change it afterwards.
 fn load_hessian_from_dialog(freq_panel: &mut XtbFreqPanelState, freq_task: &mut XtbFrequencyTask) {
-    let Some(path) = rfd::FileDialog::new()
-        .add_filter("Hessian or frequency output", &["hess", "log", "out"])
-        .add_filter("All files", &["*"])
-        .pick_file()
-    else {
+    let Some(path) = crate::recent_dir::pick_file(
+        crate::recent_dir::open()
+            .add_filter("Hessian or frequency output", &["hess", "log", "out"])
+            .add_filter("All files", &["*"]),
+    ) else {
         return;
     };
     let (source, file_scale) = match read_hessian_file(&path) {
@@ -1953,11 +1953,9 @@ fn thermochemistry_window(ctx: &egui::Context, open: &mut bool, result: &Frequen
 /// Saves the thermochemistry table exactly as displayed -- same columns, same
 /// rules -- so the file reads the way the window does.
 fn export_thermochemistry(text: &str) {
-    if let Some(path) = rfd::FileDialog::new()
-        .set_file_name("thermochemistry.dat")
-        .add_filter("Data file", &["dat", "txt"])
-        .save_file()
-    {
+    if let Some(path) = crate::recent_dir::save_file(
+        crate::recent_dir::save("thermochemistry.dat").add_filter("Data file", &["dat", "txt"]),
+    ) {
         if let Err(err) = std::fs::write(&path, text) {
             eprintln!("Failed to write {}: {err}", path.display());
         }
@@ -2033,11 +2031,10 @@ fn ir_spectrum_window(
                         EXPORT_RESOLUTION_CM1,
                     )
                 };
-                if let Some(path) = rfd::FileDialog::new()
-                    .set_file_name("ir_spectrum.dat")
-                    .add_filter("Data file", &["dat", "txt"])
-                    .save_file()
-                {
+                if let Some(path) = crate::recent_dir::save_file(
+                    crate::recent_dir::save("ir_spectrum.dat")
+                        .add_filter("Data file", &["dat", "txt"]),
+                ) {
                     if let Err(err) = std::fs::write(&path, text) {
                         eprintln!("Failed to write {}: {err}", path.display());
                     }

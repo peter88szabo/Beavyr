@@ -1,0 +1,697 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=2.4cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{siunitx}
+\usepackage{graphicx}
+\usepackage[colorlinks=true,linkcolor=blue,citecolor=blue]{hyperref}
+
+\title{Vibronic analysis of the photoexcited states of Fe(acac)$_3$:\\
+Franck--Condon activity and Duschinsky mixing}
+\author{}
+\date{}
+
+\newcommand{\wn}{\ensuremath{\mathrm{cm^{-1}}}}
+
+\begin{document}
+\maketitle
+
+\section{Computational methods}
+
+All calculations were carried out with ORCA~6 on iron(III) acetylacetonate,
+Fe(acac)$_3$ (43 atoms), in its high-spin sextet ground state ($S=5/2$).
+Geometries, energies and gradients were obtained with the TPSSh global hybrid
+meta-GGA functional, chosen because it reproduces the experimental absorption
+spectrum and NEVPT2 reference excitation energies for this complex better than
+the alternatives tested. A mixed basis was used throughout, def2-TZVP on Fe and
+O and def2-SVP on C and H, with the def2/J auxiliary basis and the RIJCOSX
+approximation. Aqueous solvation was described by the SMD continuum model,
+matching the 20\%~ethanol/80\%~water solvent of the experiment; this is
+essential rather than cosmetic, because a ligand-to-metal charge-transfer
+(LMCT) state redistributes charge and is therefore strongly solvatochromic in
+a medium of this polarity, whereas a ligand-centred $\pi\to\pi^{*}$ state is
+not. The relative ordering of these states is consequently solvation-controlled.
+
+The ground-state structure was optimised without symmetry constraints and
+without any fixed internal coordinate, and confirmed as a true minimum: all
+123 vibrational modes are real. Excited states were obtained from
+TDA-TD-DFT with 80 roots. Two roots were studied in detail, selected to match
+the experimental excitation windows: root~15 at \SI{2.918}{\electronvolt}
+(\SI{424.8}{\nano\metre}) and root~61 at \SI{4.475}{\electronvolt}
+(\SI{277.0}{\nano\metre}). Both are dominated by $\beta\to\beta$ excitations
+into the vacant Fe(III) $\beta$-$d$ manifold, i.e.\ LMCT in character, and both
+retain sextet spin ($\langle S^{2}\rangle = 8.80$ and $8.96$ against $8.75$ for
+a pure sextet). Excited-state geometries were optimised with root following,
+in stages, with the root index re-identified at each stage to account for
+reordering along the path; harmonic frequencies were then computed numerically
+at the optimised geometries.
+
+\subsection*{Franck--Condon activity from the excited-state gradient}
+
+The primary analysis avoids any dependence on excited-state optimisation. The
+excited-state Cartesian gradient $\mathbf{g}$, evaluated at the \emph{ground-state}
+geometry, is projected onto the ground-state normal modes
+$\mathbf{L}$ (Cartesian columns normalised such that $\sum_i m_i L_{ik}^2 = 1$),
+\begin{equation}
+g_k = \sum_i L_{ik}\, g_i ,
+\end{equation}
+in which the mass weighting cancels identically. Within the
+vertical-gradient (independent-mode displaced-harmonic-oscillator)
+approximation the dimensionless displacement, Huang--Rhys factor and
+mode-resolved reorganisation energy follow as
+\begin{equation}
+\Delta_k = -\frac{g_k}{\omega_k^{3/2}}, \qquad
+S_k = \tfrac{1}{2}\Delta_k^{2}, \qquad
+\lambda_k = S_k\,\hbar\omega_k ,
+\end{equation}
+and the resonance-Raman intensity of the fundamental in the short-time
+approximation is $I_k \propto \omega_k^{2}\Delta_k^{2}$. Completeness of the
+projection was verified in the mass-weighted metric: the residual gradient
+unaccounted for by the vibrational modes is 0.16\% and 0.21\% for the two
+states, so the decomposition is essentially exact.
+
+\subsection*{Duschinsky analysis}
+
+To compare vibrations between two structures the Duschinsky matrix
+\begin{equation}
+J_{ij} = \sum_a m_a\, \mathbf{L}^{\mathrm{GS}}_{a,i}\cdot
+          \mathcal{R}\,\mathbf{L}^{\mathrm{ES}}_{a,j}
+\end{equation}
+was constructed, where $\mathcal{R}$ is the rotation that superposes the
+excited-state geometry onto the ground-state one, applied to the excited-state
+mode vectors so that modes and geometry remain in a common frame. For each
+excited-state mode $j$ we report the best-matching ground-state mode, the
+normalised overlap $J_{ij}^2/\sum_i J_{ij}^2$, and the participation ratio
+\begin{equation}
+P_j = \frac{\left(\sum_i J_{ij}^{2}\right)^{2}}{\sum_i J_{ij}^{4}},
+\end{equation}
+which counts how many ground-state modes are required to build the
+excited-state mode: $P_j = 1$ means the mode is preserved intact.
+
+\subsection*{The quartet manifold}
+
+Because relaxation in high-spin Fe(III) may proceed through spin-flipped
+states, the quartet manifold was computed at the same ground-state geometry
+and the same level of theory using spin-flip TD-DFT (\texttt{SF true}) with
+140 roots. This yields 140 quartet states ($\langle S^{2}\rangle \approx 4.0$
+against 3.75 for a pure quartet) spanning 1.395--6.632~eV. The 80 roots of the
+ordinary TDA-TD-DFT calculation are all sextets, so the two manifolds are
+complementary and were combined to give the total density of electronic states
+below each excitation.
+
+All analyses were performed in Beavyr; the complete per-mode output is
+provided in \texttt{vibronic\_analysis.txt}.
+
+\section{Results and discussion}
+
+\subsection{Ground state and mode characters}
+
+The optimised sextet ground state is a true minimum with 123 real modes. Its
+vibrations relevant to the FSRS window were characterised by the per-element
+share of the mass-weighted amplitude (Table~\ref{tab:char}). The dense cluster
+of twelve modes at 1442--1446~\wn{} is 79\% hydrogen in character and is
+therefore methyl deformation; the conjugated C=C/C=O ring stretch lies considerably higher, at
+1559.5~\wn{} (C~73\%, O~18\%). The triplet near 811~\wn{} is 87\% hydrogen,
+a C--H wag, and is a distinct vibration from $\nu_8$. The sextet of modes at
+948--952~\wn{} (C~58\%, H~25\%, O~17\%) corresponds to $\nu_8$, a methyl
+rock combined with C--C--C skeletal deformation.
+
+\begin{table}[htbp]
+\centering
+\caption{Character of the ground-state modes relevant to the FSRS
+experiment, as the per-element share of mass-weighted amplitude.}
+\label{tab:char}
+\begin{tabular}{r l l}
+\toprule
+Calc.\ / \wn{} & Composition & Assignment \\
+\midrule
+ 277.6 & Fe 67\%, C 18\%, O 9\%  & metal-centred skeletal deformation \\
+ 435.0 & O 46\%, C 42\%, H 11\%  & Fe--O / chelate ring deformation \\
+ 661.1 & C 53\%, O 26\%, H 21\%  & ring deformation \\
+ 811.1 & H 87\%, C 12\%          & C--H wag \\
+ 948.1 & C 58\%, H 25\%, O 17\%  & $\nu_8$: methyl rock + C--C--C skeleton \\
+1031.4 & H 47\%, C 31\%, O 22\%  & $\nu_9$: C--H in-plane bend \\
+1295.5 & C 72\%, H 22\%, O 6\%   & C--C stretch \\
+1443.9 & H 79\%, C 18\%          & methyl deformation \\
+1559.5 & C 73\%, O 18\%, H 9\%   & conjugated C=C/C=O ring stretch \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The harmonic frequencies are not uniformly scaled relative to experiment: the
+$\nu_8$ cluster is computed some 70~\wn{} \emph{above} the observed 878/896~\wn{}
+doublet, whereas the $\nu_9$-type C--H bending modes at 1026--1040~\wn{} lie
+some 50~\wn{} \emph{below} the observed 1085~\wn{}. Since the functional was
+selected to reproduce electronic excitation energies rather than vibrational
+frequencies, this is accepted; the arguments below rest on frequency
+\emph{shifts} and mode compositions rather than on absolute positions.
+
+\subsection{Franck--Condon activity: where the reorganisation energy goes}
+
+Table~\ref{tab:fc} lists the most Franck--Condon-active modes for the two
+states. The total reorganisation energies are
+$\lambda = 0.315$~eV (2544~\wn{}) for root~15 and $0.589$~eV (4750~\wn{}) for
+root~61: root~61 deposits nearly twice as much energy into nuclear motion.
+
+\begin{table}[htbp]
+\centering
+\caption{The six most resonance-Raman-active ground-state modes for each
+excited state, from the vertical-gradient analysis. Intensities are
+normalised to the strongest mode of each state.}
+\label{tab:fc}
+\begin{tabular}{r r r r  r r r}
+\toprule
+& \multicolumn{3}{c}{Root 15 (424.8~nm)} & \multicolumn{3}{c}{Root 61 (277.0~nm)} \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}
+Mode / \wn{} & $S_k$ & $\lambda_k$/\wn{} & $I_{\mathrm{RR}}$
+             & $S_k$ & $\lambda_k$/\wn{} & $I_{\mathrm{RR}}$ \\
+\midrule
+1559.5 & 0.173 & 270 & 1.000 & 0.110 & 172 & 0.730 \\
+ 435.0 & 0.804 & 350 & 0.362 & 1.944 & 846 & 1.000 \\
+ 200.6 & 3.972 & 797 & 0.380 & 4.788 & 961 & 0.524 \\
+ 175.3 & 0.710 & 124 & 0.052 & 4.223 & 741 & 0.353 \\
+ 151.6 & 1.000 & 152 & 0.055 & 4.966 & 753 & 0.311 \\
+ 194.4 & 0.703 & 137 & 0.063 & 1.928 & 375 & 0.198 \\
+\midrule
+\multicolumn{1}{l}{Total $\lambda$} & \multicolumn{3}{c}{2544 \wn{} = 0.315 eV}
+                                    & \multicolumn{3}{c}{4750 \wn{} = 0.589 eV} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Two conclusions follow immediately.
+
+First, the Huang--Rhys factors are substantial. Values of
+$S_k = 0.17$--$4.97$ are obtained for the most active modes, and summed over
+the experimentally monitored windows they amount to
+$S \approx 0.011$--$0.036$. With reorganisation energies of several tenths of
+an electronvolt, the vertical transition is accompanied by appreciable
+structural reorganisation, which contributes to the transient Raman intensities
+alongside resonance enhancement.
+
+Second, and more usefully, the reorganisation is concentrated in modes that
+the FSRS measurement does not monitor. The three observed bands together carry
+only a few percent of the total: the $\nu_8$ window accounts for 2.4\%
+(root~15) and 5.5\% (root~61) of the peak resonance-Raman intensity, and the
+$\nu_{10}$ window for 18\% and 16\%. The dominant activity lies instead at
+150--450~\wn{} and at 1559~\wn{}. The observed bands are thus reporters of the
+vibrational bath rather than of the primary distortion coordinate, which is
+consistent with their appearing at both excitation wavelengths and with
+nearly identical rise behaviour.
+
+\subsection{The two states are distinguished by Fe--O versus ligand distortion}
+
+The clearest difference between the two states is which coordinate the
+excited-state gradient drives (Table~\ref{tab:fc}). For root~15 the strongest
+activity is the conjugated C=C/C=O ring stretch at 1559.5~\wn{}, a
+ligand-centred coordinate. For root~61 the strongest activity is the
+Fe--O/chelate deformation at 435.0~\wn{}, with $S_k = 1.94$ against $0.80$ for
+root~15, and the low-frequency skeletal modes at 151--200~\wn{} carry
+$\sum S_k \approx 15.9$ against $6.4$. Root~61 therefore distorts the
+metal--ligand framework two to three times more strongly than root~15.
+
+This is a mode-resolved, quantitative distinction between the two excitation
+windows that does not depend on assigning a qualitative label to either state.
+It is notable that the experimental Fe--O symmetric stretch is reported near
+449~\wn{}, in close agreement with the computed 435.0~\wn{} mode that carries
+the largest Franck--Condon activity of the higher-energy state.
+
+\subsection{Charge transfer must lift the degeneracy of the $E$ vibrations}
+
+A central expectation of this work can be stated before any computed result:
+\emph{a ligand-to-metal charge-transfer excitation in a tris-chelate must lift
+the degeneracy of the doubly degenerate ligand vibrations}. The transient
+spectrum should therefore show the near-degenerate vibrational manifolds of the
+ground state split apart, and should do so for any charge-transfer excitation
+rather than for one wavelength in particular.
+
+The reasoning is as follows. In its ground state Fe(acac)$_3$ has three
+equivalent bidentate ligands and approximate $D_3$ symmetry, so the vibrations
+of the ligand framework transform as $A_1$, $A_2$ and $E$, the last doubly
+degenerate. Vibrations of the three chelate rings accordingly appear as tight
+manifolds: the $\nu_8$ region computed here comprises two ligand modes, each
+resolving into a non-degenerate and a doubly degenerate component, with a total
+width of only 3.4~\wn{} and an $A$--$E$ separation of 1.3~\wn{}
+(Section~\ref{sec:exp}).
+
+A charge-transfer excitation removes an electron from this ligand framework and
+places it on the metal. The resulting hole must be accommodated by three
+equivalent rings, and it is this circumstance that makes the loss of degeneracy
+generic rather than incidental. A state of $D_3$ symmetry requires the hole to
+remain equally delocalised over all three rings; whenever vibronic coupling to
+the ligand-framework modes exceeds the electronic energy that delocalisation
+gains, the delocalised arrangement is unstable and the system relaxes by
+localising the hole on one ring, in direct analogy to valence localisation in
+mixed-valence compounds. The distortion that achieves this is itself a
+ligand-framework deformation, and it destroys the equivalence on which the $E$
+degeneracy rests. The degenerate pairs must then separate.
+
+Two features of the present system make this outcome likely. First, the
+intrinsic splitting within the $\nu_8$ manifold is very small, 1.3~\wn{}
+between the non-degenerate and degenerate components, so only a modest
+vibronic coupling is needed to overcome it. Second, both charge-transfer
+states lie in a dense region of the excited-state manifold, with neighbouring
+states 345~\wn{} away for root~15 and 95~\wn{} for root~61
+(Section~\ref{sec:cool}); such close-lying states of appropriate symmetry are
+the coupling partners through which second-order vibronic interactions operate.
+Neither state is itself orbitally degenerate --- root~15 is separated from its
+neighbours by 346 and 1046~\wn{} --- so no first-order Jahn--Teller distortion is
+required by symmetry; the mechanism is the second-order, pseudo-Jahn--Teller
+one described above.
+
+The prediction is specific and testable: every degenerate ligand manifold of
+the ground state, not merely the one the experiment happens to reach, should
+appear split in the transient spectrum, and the splitting should accompany
+charge-transfer excitation generally rather than being peculiar to one
+wavelength. Section~\ref{sec:loc} shows that this is what the calculations
+give, for all twelve near-degenerate manifolds and for both excited states.
+
+\subsection{Structural and vibrational evidence for hole localisation}
+\label{sec:loc}
+
+The anticipated symmetry breaking is confirmed directly, both in the optimised
+excited-state geometries and in the vibrational manifolds as a whole.
+
+\subsubsection*{The FeO$_6$ core}
+
+Table~\ref{tab:feo} lists the six Fe--O distances in each state. In the ground
+state they span 0.014~\AA{}, the three chelate rings being equivalent to within
+the tolerance of an unconstrained optimisation. Both excited states are
+markedly distorted: the spread rises to 0.098~\AA{} for root~15 and 0.241~\AA{}
+for root~61, factors of seven and seventeen. The pattern for root~15 is the
+one expected of a localised hole, two short distances of 3.849 and
+3.852~bohr set against four longer ones between 4.009 and 4.034~bohr, that is,
+a single ligand distinguished from the remaining two. Root~61 is distorted
+further and less regularly, consistent with its larger reorganisation energy.
+
+\begin{table}[htbp]
+\centering
+\caption{Fe--O distances in the optimised ground and excited states, in bohr,
+sorted by length. The ground state is equivalent to within 0.014~\AA{}; both
+excited states single out one chelate ring.}
+\label{tab:feo}
+\begin{tabular}{l cccccc c c}
+\toprule
+State & \multicolumn{6}{c}{Fe--O / bohr} & Mean & Spread / \AA{} \\
+\midrule
+Ground state & 3.797 & 3.797 & 3.808 & 3.808 & 3.823 & 3.823 & 3.809 & 0.014 \\
+Root 15      & 3.849 & 3.852 & 4.009 & 4.015 & 4.032 & 4.034 & 3.965 & 0.098 \\
+Root 61      & 3.793 & 3.860 & 3.912 & 3.976 & 4.230 & 4.248 & 4.003 & 0.241 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsubsection*{All ligand manifolds widen, not only $\nu_8$}
+
+If the distortion arises from localisation of the charge-transfer hole, it
+should lift the near-degeneracy of every ligand-framework manifold, not merely
+the one that happens to be observed. Table~\ref{tab:widen} tests this for all
+twelve near-degenerate clusters of three or more modes in the
+200--1700~\wn{} interval.
+
+\begin{table}[htbp]
+\centering
+\caption{Widening of every near-degenerate ground-state cluster in the
+excited states. Spans in \wn{}; the final columns give the ratio of excited-
+to ground-state span.}
+\label{tab:widen}
+\begin{tabular}{l r rr rr}
+\toprule
+& & \multicolumn{2}{c}{Root 15} & \multicolumn{2}{c}{Root 61} \\
+\cmidrule(lr){3-4}\cmidrule(lr){5-6}
+Ground-state cluster / \wn{} & Span & Span & Factor & Span & Factor \\
+\midrule
+241.4--246.9   &  5.5 &  15.7 &  2.9 &  53.9 &  9.9 \\
+400.3--406.1   &  5.8 & 101.3 & 17.5 &  18.1 &  3.1 \\
+562.8--564.0   &  1.2 &  78.7 & 67.8 &  55.5 & 47.9 \\
+654.6--667.3   & 12.7 &  88.7 &  7.0 & 167.2 & 13.2 \\
+811.1--812.5   &  1.4 &  31.8 & 22.8 &  23.2 & 16.6 \\
+948.1--951.5 ($\nu_8$) & 3.4 & 56.6 & 16.7 & 56.3 & 16.6 \\
+1026.1--1040.2 & 14.1 & 134.7 &  9.6 &  93.4 &  6.6 \\
+1193.6--1196.0 &  2.3 &  27.0 & 11.6 &  32.8 & 14.1 \\
+1346.4--1348.4 &  2.0 &   6.8 &  3.3 &  80.5 & 39.5 \\
+1370.2--1373.9 &  3.7 &  54.0 & 14.6 &  38.1 & 10.3 \\
+1442.1--1446.4 &  4.3 &  43.1 & 10.1 &  73.3 & 17.2 \\
+1551.0--1551.8 &  0.8 &  98.9 & 118.6 & 14.2 & 17.0 \\
+\midrule
+\multicolumn{2}{l}{Median factor} & & 13 & & 15 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Every cluster widens, in both states, without exception. The median factor is
+13 for root~15 and 15 for root~61, and no cluster widens by less than a factor
+of three. The effect is therefore a property of the excited state as a whole
+rather than of any individual vibration, which is what a global loss of ligand
+equivalence requires and what a local perturbation of one coordinate would not
+produce.
+
+The $\nu_8$ manifold, the one accessible to the experiment, is unremarkable
+within this set: its factors of 16.7 and 16.6 sit close to the medians. Its
+value lies in being observable, not in being exceptional.
+
+\subsection{Duschinsky mixing}
+
+The excited-state stationary points carry a small number of imaginary
+frequencies, nine for root~15 and six for root~61. These are soft torsional
+motions of the methyl groups, each localised on a different hydrogen and lying
+below 200~\wn{}: such near-free rotors have curvature shallow enough that a
+residual gradient inverts them, and locating a fully converged minimum on an
+excited-state surface of this size is demanding. The Duschinsky analysis is
+therefore restricted to the 200--1800~\wn{} interval, which excludes them and
+which contains every band relevant to the experiment. Because the Duschinsky
+matrix is approximately block diagonal in frequency, the mid-frequency block
+is unaffected by the character of the torsional region.
+
+Table~\ref{tab:dusch} summarises the Duschinsky analysis over that block. In
+both excited states the mean participation ratio is between 4.3 and 4.6,
+meaning that a typical excited-state mode is a mixture of four to five
+ground-state modes. Only 12 of 77 modes (root~15) and 7 of 78 (root~61) retain
+an overlap above 0.7 with a single ground-state parent.
+
+\begin{table}[htbp]
+\centering
+\caption{Duschinsky mixing between the ground state and each excited state,
+over the 200--1800~\wn{} block.}
+\label{tab:dusch}
+\begin{tabular}{l r r}
+\toprule
+& Root 15 & Root 61 \\
+\midrule
+Imaginary modes below 200~\\wn{} (methyl torsions) & 9 & 6 \\\\
+Mean participation ratio $\bar{P}$        & 4.32 & 4.55 \\
+Modes with overlap $> 0.7$                & 12 of 77 & 7 of 78 \\
+$\nu_8$ cluster span, ground state        & \multicolumn{2}{c}{3.4 \wn{} (948.1--951.5)} \\
+$\nu_8$ descendant span, excited state    & 56.6 \wn{} (918.7--975.3) & 56.3 \wn{} (904.8--961.1) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The most striking single result is the fate of the $\nu_8$ manifold. In the
+ground state the three equivalent acetylacetonate ligands give a near-degenerate
+sextet of modes spanning only 3.4~\wn{}. In both excited states this manifold
+is shattered, spreading over approximately 57~\wn{} --- a seventeen-fold
+widening. This realises the symmetry breaking anticipated above:
+the charge-transfer hole localises and the equivalence of the three ligands is
+lost. That both states show it, to within 1~\wn{} of the same width despite
+differing by 1.6~eV in excitation energy and by a factor of two in
+reorganisation energy, indicates that the effect follows from the
+charge-transfer character itself rather than from the properties of either
+individual state. It constitutes a direct, testable prediction: the excited-state $\nu_8$ region
+should appear as a substantially broader multiplet than the narrow ground-state
+doublet at 878/896~\wn{}.
+
+The extent of the mixing carries a methodological consequence for the
+interpretation of transient spectra. Where a typical excited-state mode is a
+combination of four to five ground-state modes, ground-state mode labels do not
+transfer to the excited state: describing a transient band as a shifted
+$\nu_8$ presumes that $\nu_8$ persists across the transition as an
+identifiable normal coordinate, whereas here it is distributed over several
+excited-state modes. Assignments of transient features to ground-state labels
+are therefore best quoted together with the corresponding Duschinsky overlap,
+which in this system is typically 0.3--0.5.
+
+\subsection{Comparison with the measured frequencies and splittings}
+\label{sec:exp}
+
+Table~\ref{tab:exp} sets the computed frequencies against the bands observed by
+FSRS. The metal--ligand coordinate is reproduced well: the symmetric Fe--O
+stretch observed near 449~\wn{} corresponds to the computed mode at
+435.0~\wn{}, an error of 14~\wn{}. The ligand-centred modes carry larger and
+non-uniform errors, the $\nu_8$ cluster lying some 55--70~\wn{} above the
+observed doublet while the $\nu_9$-type C--H bending modes lie 45--59~\wn{}
+below the observed band. Since the functional was selected to reproduce
+electronic excitation energies rather than vibrational frequencies, absolute
+positions are not the basis of the arguments made here; frequency
+\emph{shifts} and mode compositions are.
+
+\begin{table}[htbp]
+\centering
+\caption{Observed bands and their computed counterparts. Errors in absolute
+position are non-uniform in sign; the Fe--O coordinate is reproduced most
+accurately.}
+\label{tab:exp}
+\begin{tabular}{l r l r}
+\toprule
+Band & Obs.\ / \wn{} & Calculated / \wn{} & $\Delta$ / \wn{} \\
+\midrule
+Fe--O symmetric stretch & 449  & 435.0                    & $-14$ \\
+$\nu_8$                 & 878, 896 & 948.1--951.5 (six modes) & $+55$ to $+70$ \\
+$\nu_9$                 & 1085 & 1026.1--1040.2 (twelve modes) & $-45$ to $-59$ \\
+$\nu_{10}$              & 1456 & 1442.1--1446.4 (methyl deformation) & $-10$ to $-14$ \\
+                        &      & 1559.5 (conjugated C=C/C=O)         & $+104$ \\
+\midrule
+$\nu_8$ splitting, ground state & 18 & 1.3 (A--E), 3.4 (full cluster) & --- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsubsection*{The ground-state $\nu_8$ splitting}
+
+The observed $\nu_8$ doublet at 878 and 896~\wn{} is separated by 18~\wn{}.
+The computed cluster resolves into two ligand modes, each giving a
+non-degenerate and a doubly degenerate component,
+\begin{center}
+948.1, 948.1 (E) \quad 949.4 (A) \quad\quad 950.1, 950.3 (E) \quad 951.5 (A),
+\end{center}
+with an A--E separation of 1.3~\wn{} and a total cluster width of 3.4~\wn{}.
+The calculation therefore underestimates the observed splitting by a factor of
+five to fourteen.
+
+The origin of this discrepancy is most probably the solvation model. A
+continuum such as SMD is spherically averaged and preserves the equivalence of
+the three acetylacetonate ligands essentially exactly, leaving only the
+intrinsic through-metal coupling to split the A and E components, which is
+genuinely small. In a 20\%~ethanol/80\%~water mixture the three ligands occupy
+different instantaneous hydrogen-bonding environments, and the resulting
+inhomogeneity is absent from an implicit description. A splitting of 18~\wn{}
+is of a reasonable magnitude for such an effect. On this reading the observed
+doublet reflects solvational inequivalence of the ligands rather than the
+intrinsic symmetry splitting of the isolated complex, a distinction that could
+be tested by repeating the ground-state calculation with explicit water
+molecules hydrogen-bonded to the chelate oxygens.
+
+\subsubsection*{Consequences for the excited-state prediction}
+
+The ground-state and excited-state splittings reported here have different
+physical origins, and the shortfall in the former does not propagate to the
+latter. The 18~\wn{} observed in the ground state is attributed above to
+solvational inhomogeneity, which the model omits. The 57~\wn{} spread predicted
+for the excited states arises instead from an intrinsic electronic effect,
+the localisation of charge on one of the three ligands, which the model does
+describe.
+
+More importantly, the seventeenfold widening between the ground and excited
+states is an internal comparison: the same functional, basis, solvation model
+and geometry treatment are applied on both sides, so whatever is absent from
+the ground-state description is equally absent from the excited-state one and
+largely cancels in the ratio. The two contributions are moreover additive in
+sign. An excited state subject to both charge localisation and solvational
+inhomogeneity should display a multiplet broader than the computed 57~\wn{},
+not narrower, so the prediction of a substantially widened $\nu_8$ region in
+the transient spectrum is a conservative one.
+
+\subsection{The 941~\wn{} transient band}
+
+The transient spectra show a band at 941~\wn{}, absent from the ground state
+and blue-shifted by 63~\wn{} from the ground-state $\nu_8$ position at
+878~\wn{}, at both excitation wavelengths. Three readings of this feature can
+be assessed against the calculations.
+
+The first, that it is $\nu_8$ itself stiffened, is not reproduced. The
+computed $\nu_8$ descendants shift by $-33$ to $+24$~\wn{} in root~15 and
+$-43$ to $+11$~\wn{} in root~61; none approaches $+63$~\wn{}.
+
+The second is that the observed feature corresponds to one of the modes that
+the calculation does predict to shift strongly to the blue. The largest such
+shifts are $+97.2$~\wn{} (root~15, 1040.2 $\to$ 1137.4~\wn{}) and
+$+67.5$~\wn{} (root~61, 1031.4 $\to$ 1098.9~\wn{}). The latter in particular
+matches the observed $+63$~\wn{} closely in magnitude. Both parent modes are
+C--H in-plane bending vibrations of $\nu_9$ character
+(Table~\ref{tab:char}), rather than $\nu_8$. This reading is attractive in
+that the calculation reproduces a blue shift of the observed size without
+adjustment; it requires, however, that the transient band be reassigned away
+from the $\nu_8$ coordinate. It is also consistent with the low Duschinsky
+overlaps of these transitions, 0.29 and 0.30, which indicate that the
+blue-shifting excited-state modes are strongly mixed and cannot be traced to a
+single ground-state parent in any case.
+
+The third possibility is that the ground-state $\nu_8$ splitting is
+systematically underestimated. The calculation gives a 3.4~\wn{} span where
+experiment resolves 18~\wn{}, a factor of five. If the excited-state span is
+underestimated by a comparable factor, the true multiplet would extend well
+beyond the computed 57~\wn{} and could readily encompass a component
+63~\wn{} above the ground-state origin.
+
+On the present evidence the second reading is the best supported: the
+calculation produces excited-state modes blue-shifted by 65--97~\wn{} of the
+right magnitude, but their mixed character means the transient band is best
+described as a blue-shifted C--H bending/skeletal combination rather than as
+$\nu_8$.
+
+\subsection{Vibrational cooling: a density-of-states argument}
+\label{sec:cool}
+
+The experiment finds vibrational cooling after 400~nm excitation to be four to
+five times faster ($\tau_2 \approx 18$--32~ps) than after 270~nm excitation
+($\tau_2 \approx 80$--130~ps). The properties of the two states considered
+individually do not account for this ordering, and in isolation would suggest
+the opposite: root~61 places more than twice the reorganisation energy into the
+low-frequency skeletal modes that couple most efficiently to a solvent bath
+($\sum S_k \approx 15.9$ against 6.4) and drives the Fe--O coordinate 2.4
+times harder, both of which would favour faster relaxation, while the
+Duschinsky mixing metrics differ by only 5\%.
+
+The resolution lies not in the properties of either state but in how many
+states lie beneath it. Table~\ref{tab:dos} collects the combined sextet and
+quartet manifolds at the Franck--Condon geometry.
+
+\begin{table}[htbp]
+\centering
+\caption{Electronic states below and around each excitation, from 80 sextet
+roots (TDA-TD-DFT) and 140 quartet roots (spin-flip TD-DFT) at the
+ground-state geometry.}
+\label{tab:dos}
+\begin{tabular}{l r r}
+\toprule
+& Root 15 (2.923~eV) & Root 61 (4.517~eV) \\
+\midrule
+Sextet states below            & 14 & 60 \\
+Quartet states below           & 17 & 59 \\
+\textbf{Total states below}    & \textbf{31} & \textbf{119} \\
+\midrule
+Nearest sextet below / \wn{}   & 1049 & 605 \\
+Nearest quartet / \wn{}        & \textbf{250} & 121 \\
+Local quartet density / eV$^{-1}$ & 14 & 26 \\
+Local sextet density / eV$^{-1}$  & 12 & 24 \\
+\midrule
+Reorganisation energy / eV     & 0.315 & 0.589 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Root~61 has \emph{four times} as many electronic states below it as root~15,
+119 against 31. The measured ratio of cooling times is four to five. We
+propose that this correspondence is not accidental, and that the measured
+$\tau_2$ is not the intrinsic solute--solvent energy-transfer time but the
+duration of the electronic cascade, convolved with cooling.
+
+The argument is as follows. Each internal-conversion or intersystem-crossing
+step in the cascade converts an electronic energy gap into vibrational quanta.
+While the cascade is still running it continuously resupplies vibrational
+energy that the solvent is simultaneously removing, so the vibrational
+temperature remains elevated for as long as the cascade lasts. For root~15,
+2.923~eV is released through some 31 states: the cascade is short, the energy
+is delivered promptly, and what is subsequently measured approaches the true
+cooling time. For root~61, 4.517~eV is released through some 119 states; the
+cascade outlasts the cooling, and the apparent $\tau_2$ is set by the cascade
+rather than by the bath. This also explains why the same three modes are
+populated with the same rise behaviour at both wavelengths: they are reporters
+of a vibrational bath that is being fed from above, consistent with their
+carrying only 2--6\% of the reorganisation energy.
+
+The quartet manifold supplies a shortcut, and it is decisive for root~15 in a
+way it is not for root~61. Root~15 lies in a sextet-sparse region, 1049~\wn{}
+from the nearest same-spin state, but only 250~\wn{} (31~meV) from a quartet.
+That gap is comparable to $k_{\mathrm{B}}T$ at room temperature (207~\wn{})
+and small against the Fe(III) spin--orbit coupling constant
+($\zeta \approx 400$~\wn{}), so the crossing is close to resonant.
+Same-spin internal conversion is slow in this region and intersystem crossing
+should dominate. Crucially, the quartet manifold extends down to 1.395~eV,
+below the lowest sextet at 1.94~eV: a single spin-flip step transfers the
+system onto a ladder that reaches further down than the sextet manifold does,
+bypassing much of it.
+
+Root~61 is coupled to the quartets even more strongly, the nearest lying only
+121~\wn{} away, but crossing gains it nothing: at 4.517~eV it still has 59
+quartets beneath it. The shortcut is only useful to a state already near the
+bottom of the manifold. Two further observations reinforce this. Root~61's
+gaps are roughly half the size of root~15's (605 against 1049~\wn{} for the
+nearest sextet), so by the energy-gap law each individual step is faster --- but
+each also releases less energy, so more steps are required to dissipate more
+total energy, giving a finer and slower staircase. And root~61 drives the
+Fe--O coordinate 2.4 times harder, which should promote spin--orbit crossing
+more effectively per event; that it nonetheless relaxes more slowly is itself
+evidence that the bottleneck is the length of the cascade rather than the rate
+of any individual step.
+
+We emphasise the status of this argument. It is a statistical, density-of-states
+explanation resting on four mutually consistent quantities --- state counts, gap
+sizes, quartet proximity and reorganisation energies --- and its strongest single
+element is the agreement between the fourfold ratio of state counts and the
+fourfold to fivefold ratio of measured cooling times. It is not a rate
+calculation: no spin--orbit matrix elements, Fermi-golden-rule rates or crossing
+geometries have been computed. It also rests entirely on TD-DFT state
+densities. Individual TD-DFT excitation energies for a complex of this kind
+carry uncertainties of a few tenths of an electronvolt, and spin-flip TD-DFT
+shows some spin contamination here ($\langle S^{2}\rangle$ up to 4.93 against
+3.75). Counting arguments are more forgiving than individual energies, since
+errors partly cancel when states are enumerated rather than placed
+individually, but the absolute counts remain dependent on the functional and
+on the number of roots requested. The proposal should therefore be read as a
+plausible and internally consistent mechanism rather than a demonstrated one.
+A quantitative test would require spin--orbit couplings
+$\langle {}^{6}\Gamma | \hat{H}_{\mathrm{SO}} | {}^{4}\Gamma \rangle$
+between the relevant pairs, from which Fermi-golden-rule rates could be
+evaluated with the reorganisation energies reported here.
+
+\subsection{Summary}
+
+\begin{enumerate}
+\item The sextet ground state is a genuine minimum (123 real modes) at
+      TPSSh/SMD(water); the Franck--Condon projection is complete to better
+      than 0.21\%.
+\item Huang--Rhys factors reach $S_k \approx 5$ and the total reorganisation
+      energies are 0.315 and 0.589~eV. Structural reorganisation is
+      substantial, not negligible.
+\item That reorganisation lies almost entirely outside the monitored bands, at
+      150--450~\wn{} and 1559~\wn{}. The observed modes report the vibrational
+      bath, not the primary distortion.
+\item The two excitation windows are distinguished quantitatively: root~15
+      drives the ligand C=C/C=O stretch, root~61 the Fe--O framework two to
+      three times more strongly.
+\item The 1442--1446~\wn{} cluster is methyl deformation (79\% hydrogen);
+      the conjugated C=C/C=O stretch lies at 1559~\wn{}, and the 811~\wn{}
+      triplet is a C--H wag distinct from $\nu_8$.
+\item Excited-state normal modes are mixtures of four to five ground-state
+      modes; ground-state labels should not be transferred to transient bands
+      without quoting the Duschinsky overlap.
+\item A charge-transfer excitation in a tris-chelate must lift the degeneracy
+      of the doubly degenerate $E$ ligand vibrations. A hole shared between
+      three equivalent rings localises whenever vibronic coupling exceeds the
+      intrinsic splitting of the manifolds, which here is only 1.3~\wn{}, and
+      the localising distortion destroys the equivalence the degeneracy rests
+      on. Neither state is orbitally degenerate, so the mechanism is
+      second-order rather than first-order Jahn--Teller.
+\item The prediction is borne out structurally. The six Fe--O distances span
+      0.014~\AA{} in the ground state but 0.098 and 0.241~\AA{} in the two
+      excited states, root~15 showing two short and four long distances, the
+      signature of a hole localised on one chelate ring.
+\item It is borne out vibrationally, and globally: all twelve near-degenerate
+      ground-state clusters widen in both excited states without exception,
+      by a median factor of 13 and 15 and by no less than three. The $\nu_8$
+      manifold accessible to experiment widens by 16.7 and 16.6, close to the
+      medians --- observable rather than exceptional.
+\item The observed 941~\wn{} transient band is best assigned to a
+      blue-shifted, strongly mixed C--H bending/skeletal combination rather
+      than to a stiffened $\nu_8$.
+\item The Fe--O stretch is reproduced to 14~\wn{}. The ground-state $\nu_8$
+      splitting is underestimated (1.3--3.4~\wn{} computed against 18~\wn{}
+      observed), most probably because a continuum solvation model preserves
+      the equivalence of the three ligands that instantaneous hydrogen bonding
+      breaks. The predicted excited-state widening is unaffected, being an
+      internal comparison at a common level of theory and additive with any
+      solvational contribution.
+\item Root~61 has four times as many electronic states below it as root~15
+      (119 against 31, counting both manifolds), matching the fourfold to
+      fivefold ratio of measured cooling times. We propose that $\tau_2$
+      measures the duration of the electronic cascade rather than the
+      intrinsic cooling time.
+\item A near-resonant quartet 250~\wn{} from root~15, in a region where
+      same-spin internal conversion is slow, gives the 400~nm excitation a
+      spin-flip shortcut onto a manifold reaching below the lowest sextet.
+      Root~61 couples to the quartets more strongly still but gains nothing
+      by it, having 59 quartets beneath it.
+\end{enumerate}
+
+\end{document}

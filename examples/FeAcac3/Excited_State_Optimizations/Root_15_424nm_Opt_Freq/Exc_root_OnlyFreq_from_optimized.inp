@@ -1,0 +1,32 @@
+%MaxCore 2000
+%pal nprocs 24 end
+
+! UKS def2/J RIJCOSX TightSCF NumFreq SMD(Water) 
+!MOREAD
+
+%moinp "Exc_root_opt_continue.gbw"
+
+%basis
+  NewGTO H  "def2-SVP" end
+  NewGTO C "def2-SVP" end
+  NewGTO Fe "def2-TZVP" end
+  NewGTO O  "def2-TZVP" end
+end
+
+%method
+  Method     DFT
+  Functional HYB_MGGA_XC_TPSSH
+end
+
+
+%tddft
+  NRoots 80
+  TDA true
+  IROOT         13
+  FOLLOWIROOT   TRUE
+  FIRKEEPFIRSTREF TRUE
+  Restart "Exc_root_opt_continue.gbw"
+end
+
+
+* xyzfile 0 6 Exc_root_opt_continue.xyz 

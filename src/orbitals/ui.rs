@@ -53,13 +53,8 @@ fn save_molden(state: &mut OrbitalState) {
     let Some(text) = state.molden_text.clone() else {
         return;
     };
-    let mut dialog = rfd::FileDialog::new()
-        .add_filter("Molden", &["molden"])
-        .set_file_name("canonicalMO.molden");
-    if let Some(dir) = &state.last_dir {
-        dialog = dialog.set_directory(dir);
-    }
-    let Some(path) = dialog.save_file() else {
+    let dialog = crate::recent_dir::save("canonicalMO.molden").add_filter("Molden", &["molden"]);
+    let Some(path) = crate::recent_dir::save_file(dialog) else {
         return;
     };
     state.last_dir = path.parent().map(|p| p.to_path_buf());
@@ -84,12 +79,9 @@ pub fn orbital_panel(
 ) {
     ui.horizontal(|ui| {
         if ui.button("Load .molden file").clicked() {
-            let mut dialog =
-                rfd::FileDialog::new().add_filter("Molden", &["molden", "molden.input", "inp"]);
-            if let Some(dir) = &state.last_dir {
-                dialog = dialog.set_directory(dir);
-            }
-            if let Some(path) = dialog.pick_file() {
+            let dialog =
+                crate::recent_dir::open().add_filter("Molden", &["molden", "molden.input", "inp"]);
+            if let Some(path) = crate::recent_dir::pick_file(dialog) {
                 state.last_dir = path.parent().map(|p| p.to_path_buf());
                 state.warning = None;
                 match std::fs::read_to_string(&path) {

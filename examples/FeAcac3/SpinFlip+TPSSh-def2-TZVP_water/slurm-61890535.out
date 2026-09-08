@@ -1,0 +1,29 @@
+SLURM_JOB_ID: 61890535
+SLURM_JOB_USER: vsc35002
+SLURM_JOB_ACCOUNT: lp_harvey_first
+SLURM_JOB_NAME: 16TPSSh
+SLURM_CLUSTER_NAME: wice
+SLURM_JOB_PARTITION: batch_icelake
+SLURM_NNODES: 1
+SLURM_NODELIST: l33c22n1
+SLURM_JOB_CPUS_PER_NODE: 16
+Date: Thu Sep  3 01:46:53 CEST 2026
+Walltime: 00-01:00:00
+========================================================================
+Home:  /lustre1/scratch/350/vsc35002/Fe3+Acac3/ExcitedState_Spectrum/Excited_Optimization/SpinFlip+TPSSh-def2-TZVP_water
+Workdir:  /tmp
+sending incremental file list
+./
+Exc_TPSSh-D4-def2-TZVP_SCMwater_16.bibtex
+Exc_TPSSh-D4-def2-TZVP_SCMwater_16.cis
+Exc_TPSSh-D4-def2-TZVP_SCMwater_16.cpcm
+Exc_TPSSh-D4-def2-TZVP_SCMwater_16.cpcm_corr
+Exc_TPSSh-D4-def2-TZVP_SCMwater_16.densities
+Exc_TPSSh-D4-def2-TZVP_SCMwater_16.densitiesinfo
+Exc_TPSSh-D4-def2-TZVP_SCMwater_16.gbw
+Exc_TPSSh-D4-def2-TZVP_SCMwater_16.out
+Exc_TPSSh-D4-def2-TZVP_SCMwater_16.property.txt
+Exc_TPSSh-D4-def2-TZVP_SCMwater_16.smd
+
+sent 87,586,657 bytes  received 209 bytes  4,073,807.72 bytes/sec
+total size is 87,564,563  speedup is 1.00

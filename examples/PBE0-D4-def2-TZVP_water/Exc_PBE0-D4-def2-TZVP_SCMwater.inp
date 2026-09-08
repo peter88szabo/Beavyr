@@ -1,0 +1,21 @@
+%MaxCore 3000
+%pal nprocs 8 end
+
+! UKS PBE0 D4  def2-TZVP def2/J RIJCOSX TightSCF UseSym SMD(Water) 
+
+%tddft
+  NRoots 70
+  TDA true
+end
+
+
+%symmetry
+  PointGroup "D3"
+  SymRelaxOpt false
+  CleanUpCoords true
+  CleanUpGradient true
+  Print 2
+end
+
+
+* xyzfile  0 6 pbe0-d4-def2-TZVP_SCMwater.xyz 

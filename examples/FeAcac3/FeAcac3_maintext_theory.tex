@@ -1,0 +1,158 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage[colorlinks=true,linkcolor=blue]{hyperref}
+\newcommand{\wn}{\ensuremath{\mathrm{cm^{-1}}}}
+\title{\vspace{-2cm}Electronic structure calculations: draft main-text section}
+\date{}
+\begin{document}
+\maketitle
+\vspace{-1.5cm}
+
+\section{Computational results and their relation to the observed dynamics}
+
+Electronic structure calculations were performed to identify the states reached
+at the two excitation wavelengths and to determine which nuclear coordinates
+they drive. All calculations used the TPSSh functional with a mixed
+def2-TZVP(Fe,O)/def2-SVP(C,H) basis and SMD aqueous solvation, matching the
+solvent of the experiment; the ground state was optimised without symmetry
+constraints and confirmed as a true minimum. Excited states were obtained from
+TDA-TD-DFT with 80 roots, and the quartet manifold from spin-flip TD-DFT with
+140 roots. Full details, tables and the complete mode-by-mode analysis are given
+in the Supporting Information.
+
+\subsection{Both excitation windows access ligand-to-metal charge transfer}
+
+The calculated spectrum places a state at 2.92~eV (425~nm) and a second at
+4.52~eV (277~nm), matching the two experimental excitation windows. Both are
+dominated by $\beta \to \beta$ excitations into the vacant Fe(III)
+$\beta$-$d$ manifold and both retain sextet spin
+($\langle S^2 \rangle = 8.80$ and 8.96 against 8.75 for a pure sextet), so both
+are ligand-to-metal charge transfer in character.
+
+The two are nevertheless distinguished by the nuclear coordinate they drive.
+Projecting each excited-state gradient, evaluated at the ground-state geometry,
+onto the ground-state normal modes gives the displacement each mode undergoes
+on vertical excitation. For the lower state the largest activity is the
+conjugated C=C/C=O ring stretch at 1560~\wn{}; for the higher state it is the
+Fe--O chelate deformation at 435~\wn{}, with a Huang--Rhys factor of 1.94
+against 0.80. The higher-energy excitation distorts the metal--ligand framework
+two to three times more strongly, and deposits nearly twice the total
+reorganisation energy (0.59 against 0.32~eV). The computed Fe--O mode at
+435~\wn{} corresponds to the band observed near 449~\wn{}.
+
+\subsection{Why the same three modes are populated at both wavelengths}
+
+The reorganisation energy is concentrated in modes that the measurement does
+not monitor. Summed over the $\nu_8$, $\nu_9$ and $\nu_{10}$ windows, the
+Huang--Rhys factors amount to $S \approx 0.01$--0.04, and these bands together
+carry only 2--6\% of the total resonance-Raman activity. The dominant
+Franck--Condon activity lies instead at 150--450~\wn{} and at 1560~\wn{}.
+
+The three observed bands are therefore not the primary distortion coordinates
+of either excited state. They are reporters of the vibrational bath, populated
+by whatever relaxation cascade is running above them. This accounts for the
+observation that $\nu_8$, $\nu_9$ and $\nu_{10}$ appear with the same prompt
+rise at both excitation wavelengths despite the two states differing by
+1.6~eV in energy and by a factor of two in reorganisation energy: the bands
+report the arrival of vibrational energy rather than the identity of the state
+that delivered it.
+
+\subsection{The 941~\wn{} transient band and excited-state symmetry breaking}
+
+A charge-transfer excitation in a tris-chelate must lift the degeneracy of the
+doubly degenerate ligand vibrations. In $D_3$ the ligand-framework modes
+transform as $A_1$, $A_2$ and $E$, and the three equivalent chelate rings give
+tight manifolds: the calculated $\nu_8$ region spans only 3.4~\wn{}, with an
+$A$--$E$ separation of 1.3~\wn{}. A charge-transfer hole must be accommodated
+by three equivalent rings, and wherever vibronic coupling exceeds that small
+intrinsic splitting the delocalised arrangement is unstable and the hole
+localises on one ring, as valence localises in a mixed-valence compound. The
+distortion that achieves this destroys the equivalence on which the $E$
+degeneracy rests.
+
+The calculations confirm this on two independent grounds. Structurally, the six
+Fe--O distances span 0.014~\AA{} in the ground state but 0.098 and 0.241~\AA{}
+in the two excited states, the lower state showing two short and four long
+distances, the signature of a single ring singled out. Vibrationally, all
+twelve near-degenerate ground-state manifolds between 200 and 1700~\wn{} widen
+in both excited states without exception, by median factors of 13 and 15 and by
+no less than three. The $\nu_8$ manifold widens from 3.4 to 57~\wn{}, by
+factors of 16.7 and 16.6 --- the same at both wavelengths to within 1~\wn{},
+confirming that the effect follows from charge-transfer character rather than
+from the properties of either state.
+
+This bears directly on the transient band at 941~\wn{}, which appears at both
+excitation wavelengths and which lies 63~\wn{} above the ground-state $\nu_8$
+position. The calculations do not reproduce a rigid 63~\wn{} stiffening of
+$\nu_8$: the individual descendants of that manifold shift by between $-43$
+and $+24$~\wn{}. What they predict instead is that the manifold ceases to be a
+single narrow feature and spreads over some 57~\wn{}, so that the transient
+$\nu_8$ region should be substantially broader than the ground-state doublet at
+878 and 896~\wn{} and may resolve into additional components. Since the
+calculation already underestimates the ground-state splitting by a factor of
+five (Supporting Information), the true excited-state spread is likely larger
+still. On this reading the 941~\wn{} feature is best understood as a resolved
+component of a split $\nu_8$ manifold rather than as a uniformly stiffened
+mode, which also accounts for its appearance at both wavelengths.
+
+\subsection{Why vibrational cooling is faster following 400~nm excitation}
+
+The measured cooling times differ by a factor of four to five between the two
+excitation wavelengths. This ordering does not follow from the properties of
+either state considered alone; if anything those properties suggest the
+opposite, since the higher state places more than twice the reorganisation
+energy into the low-frequency skeletal modes that couple most efficiently to
+the solvent. The difference instead reflects how many electronic states lie
+below each excitation.
+
+\begin{table}[htbp]
+\centering
+\caption{Electronic states below each excitation, from 80 sextet roots and 140
+quartet roots computed at the ground-state geometry.}
+\begin{tabular}{l r r}
+\toprule
+ & 2.92~eV (425~nm) & 4.52~eV (277~nm) \\
+\midrule
+Sextet states below              & 14 & 60 \\
+Quartet states below             & 17 & 59 \\
+\textbf{Total}                   & \textbf{31} & \textbf{119} \\
+Nearest quartet / \wn{}          & 250 & 121 \\
+Reorganisation energy / eV       & 0.32 & 0.59 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The higher excitation has four times as many states beneath it, and the
+measured cooling times differ by four to five. We propose that the measured
+$\tau_2$ reflects the duration of the electronic cascade rather than the
+intrinsic rate of energy transfer to the solvent. Each internal-conversion or
+intersystem-crossing step converts an electronic gap into vibrational quanta,
+so while the cascade is still descending it continuously resupplies vibrational
+energy that the solvent is simultaneously removing. Following 400~nm excitation
+2.9~eV is released through some 31 states and the cascade is short, so the
+measured decay approaches the true cooling time. Following 270~nm excitation
+4.5~eV is released through some 119 states, the cascade outlasts the cooling,
+and the observed decay is set by the cascade.
+
+The quartet manifold supplies a further asymmetry. The lower state lies in a
+sparse region of the sextet manifold, 1049~\wn{} from the nearest same-spin
+state, but only 250~\wn{} from a quartet --- comparable to $k_{\mathrm{B}}T$ and
+small against the Fe(III) spin--orbit coupling constant. Same-spin internal
+conversion is slow there and intersystem crossing should dominate, and because
+the quartet manifold extends below the lowest sextet, a single spin-flip step
+transfers the system onto a ladder that reaches further down than the sextet
+manifold does. The higher state couples to the quartets more strongly still,
+121~\wn{} to the nearest, but gains nothing by it: at 4.52~eV it retains 59
+quartets beneath it. The shortcut is only useful to a state already near the
+bottom of the manifold, and this is consistent with the faster sub-picosecond
+decay of the 941~\wn{} feature observed following 400~nm excitation.
+
+This explanation is a statistical one, resting on computed densities of states
+rather than on calculated rates, and we present it as such. A quantitative
+treatment would require spin--orbit couplings between the relevant sextet and
+quartet pairs, from which intersystem-crossing rates could be evaluated using
+the reorganisation energies reported here.
+
+\end{document}
