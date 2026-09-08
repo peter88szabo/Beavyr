@@ -10,6 +10,7 @@ mod custom_schemes;
 mod diagnostics;
 mod events;
 mod export_image;
+mod forcefield;
 mod hbonds;
 mod measurements;
 mod molecule;
