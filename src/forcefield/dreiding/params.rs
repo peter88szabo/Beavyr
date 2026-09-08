@@ -248,12 +248,15 @@ mod tests {
             "Pt", "Rb", "Ru", "S_2", "S_R", "Sr", "Tc", "Ti",
         ];
 
-        let missing: Vec<&str> = EMITTABLE
+        let mut missing: Vec<&str> = EMITTABLE
             .iter()
             .copied()
             .filter(|t| !is_parameterized(t))
             .collect();
-        assert_eq!(missing, UNPARAMETERIZED);
+        missing.sort_unstable();
+        let mut expected = UNPARAMETERIZED.to_vec();
+        expected.sort_unstable();
+        assert_eq!(missing, expected);
         assert_eq!(EMITTABLE.len(), 56);
         assert_eq!(EMITTABLE.len() - UNPARAMETERIZED.len(), 34);
     }

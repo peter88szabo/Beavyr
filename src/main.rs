@@ -17,6 +17,7 @@ mod molecule;
 mod molecule_builder;
 mod normalmode;
 mod numerics;
+mod optimizer;
 mod orbitals;
 mod picking;
 mod qchem_interfaces;

@@ -50,12 +50,18 @@ pub mod core;
 pub mod perception;
 pub mod typing;
 
+// The full upstream API is re-exported even where Beavyr does not yet use all of it: keeping the
+// surface intact is what makes re-vendoring from upstream a copy rather than a merge.
+#[allow(unused_imports)]
 pub use self::core::error::{AssignmentError, GraphValidationError, PerceptionError, TyperError};
+#[allow(unused_imports)]
 pub use self::core::graph::{AtomNode, BondEdge, MolecularGraph};
+#[allow(unused_imports)]
 pub use self::core::properties::{
     Element, GraphBondOrder, Hybridization, ParseBondOrderError, ParseElementError,
     ParseHybridizationError, TopologyBondOrder,
 };
+#[allow(unused_imports)]
 pub use self::core::topology::{
     Angle, Atom, Bond, ImproperDihedral, MolecularTopology, ProperDihedral,
 };
@@ -66,6 +72,7 @@ pub use self::core::topology::{
 /// and a custom deck is built by constructing [`Rule`](rules::Rule) values
 /// directly.
 pub mod rules {
+    #[allow(unused_imports)]
     pub use super::typing::rules::{Conditions, Rule};
     pub use super::typing::rules_data::get_default_rules;
 }
