@@ -244,6 +244,58 @@ impl XtbFrequencyTask {
     }
 }
 
+/// Frequencies from the built-in DREIDING force field.
+///
+/// Milliseconds rather than seconds, since the Hessian comes from central differences of an
+/// analytic gradient with no process to launch and no SCF to converge.
+///
+/// **No infrared intensities.** An intensity is the dipole derivative along a mode, a dipole needs
+/// partial charges, and this force field has no charge model -- so `vib_lines` is left empty
+/// rather than filled with a fabricated column. The panel says so where the intensities would be.
+fn dreiding_hessian(
+    input_xyz: &str,
+    atoms: &[String],
+    need_gradient: bool,
+) -> Result<RawFrequencyOutput, String> {
+    use crate::forcefield::dreiding::hessian::hessian_and_gradient;
+    use crate::forcefield::dreiding::objective::BOHR_TO_ANGSTROM;
+    use crate::forcefield::dreiding::DreidingTopology;
+
+    let mut mol = crate::molecule::Molecule::from_xyz(input_xyz);
+    // Perceived at the standard threshold rather than at whatever the viewport is set to: the
+    // force field needs chemically correct connectivity, and a generous display setting bonds
+    // atoms that are merely close -- which mistypes every atom downstream.
+    mol.recompute_bonds(1.2, 2.5);
+
+    let topology = DreidingTopology::build(&mol).map_err(|e| e.to_string())?;
+    let coords_bohr: Vec<f64> = mol
+        .pos
+        .iter()
+        .flat_map(|p| {
+            [
+                p.x as f64 / BOHR_TO_ANGSTROM,
+                p.y as f64 / BOHR_TO_ANGSTROM,
+                p.z as f64 / BOHR_TO_ANGSTROM,
+            ]
+        })
+        .collect();
+
+    let (hessian, gradient) =
+        hessian_and_gradient(&topology, &coords_bohr).map_err(|e| e.to_string())?;
+
+    Ok(RawFrequencyOutput {
+        atoms: atoms.to_vec(),
+        coords_bohr,
+        hessian,
+        // No dipole model, so no intensities.
+        vib_lines: Vec::new(),
+        gradient_bohr: need_gradient.then_some(gradient),
+        // Standard atomic weights apply; nothing here states an isotope.
+        masses_amu: None,
+        ir_intensities_km_mol: None,
+    })
+}
+
 #[allow(clippy::too_many_arguments)]
 fn run_hess_cancellable(
     program: QcProgram,
@@ -259,6 +311,11 @@ fn run_hess_cancellable(
     cancel: &AtomicBool,
     child_slot: &Mutex<Option<Child>>,
 ) -> Result<RawFrequencyOutput, String> {
+    // DREIDING is part of Beavyr, so it needs no executable, no scratch directory and no output
+    // parsing. It answers here and returns before any of that machinery is reached.
+    if program == QcProgram::Dreiding {
+        return dreiding_hessian(input_xyz, atoms, need_gradient);
+    }
     if binary.as_os_str().is_empty() {
         return Err(format!("{} path is empty", program.label()));
     }
@@ -271,6 +328,9 @@ fn run_hess_cancellable(
     let stderr = fs::File::create(workdir.join("xtb.stderr"))
         .map_err(|e| format!("Failed to create xtb.stderr: {e}"))?;
     let mut cmd = match program {
+        // Unreachable: the DREIDING branch returned at the top of this function, before any
+        // command was built.
+        QcProgram::Dreiding => unreachable!("DREIDING runs in process"),
         QcProgram::Xtb => {
             let mut cmd = Command::new(binary);
             cmd.current_dir(workdir)
@@ -1514,7 +1574,11 @@ pub fn xtb_frequency_panel(
                         ui.selectable_value(&mut freq_panel.program, program, program.label());
                     }
                 });
-            ui.weak("path set in Geometry Optimization");
+            if freq_panel.program.runs_in_process() {
+                ui.weak("built in");
+            } else {
+                ui.weak("path set in Geometry Optimization");
+            }
         });
         ui.horizontal(|ui| {
             ui.label("Charge");
@@ -1536,6 +1600,19 @@ pub fn xtb_frequency_panel(
                 freq_panel.show_warnings = false;
             }
         });
+
+        if freq_panel.program.runs_in_process() {
+            ui.label(
+                egui::RichText::new(
+                    "Frequencies and normal modes, but no infrared intensities: an intensity is \
+                     the dipole derivative along a mode, and this force field has no charge \
+                     model to take a dipole from. Good for checking that a geometry really is a \
+                     minimum; not a substitute for a quantum-chemical Hessian.",
+                )
+                .small()
+                .weak(),
+            );
+        }
 
         // The same block the optimizer draws, from the same implementation.
         // Placed after the multiplicity row because its validation depends on

@@ -1,3 +1,10 @@
+// Parts of the surface here exist for work the design calls for but that has not shipped yet:
+// masses and the unit conversions for molecular dynamics, the Morse bond parameters the paper
+// defines but that `DREIDING/M` would use, and the rotatable-bond list for conformational search
+// beyond what the search itself perceives. They are kept because deriving them later would mean
+// re-perceiving chemistry the topology has already done -- see the design spec.
+#![allow(dead_code)]
+
 //! The DREIDING generic force field.
 //!
 //! S. L. Mayo, B. D. Olafson and W. A. Goddard III, "DREIDING: A Generic Force Field for
@@ -1209,3 +1216,6 @@ mod tests {
         assert!(benzene.rotatable_bonds().is_empty());
     }
 }
+
+/// Second derivatives, for vibrational analysis.
+pub mod hessian;

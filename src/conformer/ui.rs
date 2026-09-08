@@ -194,6 +194,18 @@ fn results_section(
         .small()
         .weak(),
     );
+    // If the winner only appeared at the very end, the search had not settled and more effort is
+    // likely to find something better. Saying so is more use than the raw generation number.
+    if outcome.generations > 1 && outcome.best_found_in_generation >= outcome.generations {
+        ui.label(
+            egui::RichText::new(
+                "The best conformer was found in the last generation, so the search was still \
+                 improving when it stopped -- try a higher search effort.",
+            )
+            .small()
+            .color(egui::Color32::from_rgb(200, 160, 70)),
+        );
+    }
 
     ui.add_space(8.0);
     ui.horizontal(|ui| {
@@ -423,13 +435,11 @@ mod tests {
                     positions_angstrom: vec![0.0, 0.0, 0.0, 1.1, 0.0, 0.0],
                     relative_energy_kcal: 0.0,
                     population_fraction: 0.8,
-                    generation: 1,
                 },
                 Conformer {
                     positions_angstrom: vec![0.0, 0.0, 0.0, 0.0, 1.1, 0.0],
                     relative_energy_kcal: 0.9,
                     population_fraction: 0.2,
-                    generation: 3,
                 },
             ],
             rotors: 1,
@@ -438,7 +448,7 @@ mod tests {
             local_optimizations: 30,
             termination: "Converged".into(),
             elapsed: Duration::from_millis(1500),
-            refined_with_gfnff: false,
+            best_found_in_generation: 3,
             atoms: vec!["C".into(), "H".into()],
         }
     }

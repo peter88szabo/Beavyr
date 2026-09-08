@@ -512,6 +512,10 @@ pub fn visible_fields(program: QcProgram, config: &MethodConfig) -> VisibleField
         // option at all, so the field is hidden rather than shown and
         // silently ignored.
         QcProgram::Xtb => VisibleFields { nproc: true, ..hidden },
+        // DREIDING has no level of theory to choose. Its parameters come from the atom types,
+        // which are perceived rather than selected, and it is single-threaded because a force
+        // field evaluation is already far below the cost of spawning threads for it.
+        QcProgram::Dreiding => hidden,
         QcProgram::Behemoth => {
             let base = VisibleFields { memory: true, nproc: true, ..hidden };
             match config.behemoth {

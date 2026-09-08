@@ -1,3 +1,10 @@
+// The module is imported whole and deliberately: transition-state search, RDA with its
+// poor-man's nudged elastic band, IRC following, spin-crossing optimisation and the conformer
+// search's parallel and reporting entry points are all here awaiting panels of their own. Keeping
+// the public surface intact is what makes re-vendoring from Behemoth a copy rather than a merge,
+// so unused items are expected rather than a sign of dead code.
+#![allow(dead_code, unused_imports)]
+
 //! Geometry optimization, imported from Behemoth.
 //!
 //! # Provenance

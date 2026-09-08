@@ -482,35 +482,48 @@ pub fn xtb_optimization_panel(
                 }
             });
     });
-    ui.horizontal(|ui| {
-        let program = panel_state.program;
-        ui.label(format!("{} path", program.label()));
-        let response = ui.add_enabled(
-            !running,
-            egui::TextEdit::singleline(panel_state.path_mut())
-                .desired_width(220.0)
-                .hint_text(program.binary_hint()),
+    // A built-in backend has no executable, so offering a path field would be a dead end.
+    if panel_state.program.runs_in_process() {
+        ui.label(
+            egui::RichText::new(
+                "Built into Beavyr -- no program to install, and it answers in milliseconds. \
+                 A generic force field, so use it to clean up a structure or to check that a \
+                 geometry is a minimum, not in place of a quantum-chemical result.",
+            )
+            .small()
+            .weak(),
         );
-        if response.lost_focus() {
-            config::save_path(program, panel_state.path());
-        }
-        if ui
-            .add_enabled(!running, egui::Button::new("Browse…"))
-            .clicked()
-        {
-            let mut dlg = rfd::FileDialog::new();
-            if let Some(dir) = std::path::Path::new(panel_state.path())
-                .parent()
-                .filter(|p| p.is_dir())
-            {
-                dlg = dlg.set_directory(dir);
-            }
-            if let Some(path) = dlg.pick_file() {
-                *panel_state.path_mut() = path.display().to_string();
+    } else {
+        ui.horizontal(|ui| {
+            let program = panel_state.program;
+            ui.label(format!("{} path", program.label()));
+            let response = ui.add_enabled(
+                !running,
+                egui::TextEdit::singleline(panel_state.path_mut())
+                    .desired_width(220.0)
+                    .hint_text(program.binary_hint()),
+            );
+            if response.lost_focus() {
                 config::save_path(program, panel_state.path());
             }
-        }
-    });
+            if ui
+                .add_enabled(!running, egui::Button::new("Browse…"))
+                .clicked()
+            {
+                let mut dlg = rfd::FileDialog::new();
+                if let Some(dir) = std::path::Path::new(panel_state.path())
+                    .parent()
+                    .filter(|p| p.is_dir())
+                {
+                    dlg = dlg.set_directory(dir);
+                }
+                if let Some(path) = dlg.pick_file() {
+                    *panel_state.path_mut() = path.display().to_string();
+                    config::save_path(program, panel_state.path());
+                }
+            }
+        });
+    }
 
     // The level of theory, in the same block the frequency panel uses.
     // Returns whether anything about it forbids running -- a heavy element
@@ -1110,6 +1123,11 @@ pub fn resolve_program_executable(
     program: QcProgram,
     configured: &str,
 ) -> Result<PathBuf, String> {
+    // A built-in backend has no executable to resolve. Returning an empty path is what the
+    // run functions check for when deciding to answer in process.
+    if program.runs_in_process() {
+        return Ok(PathBuf::new());
+    }
     let configured = configured.trim();
     if configured.is_empty() {
         return Err(format!(
@@ -1290,7 +1308,9 @@ fn parse_full_energy_history(stdout_text: &str) -> Vec<EnergyHistoryPoint> {
 fn energy_history_for(program: QcProgram, workdir: &Path) -> Vec<EnergyHistoryPoint> {
     match program {
         QcProgram::Xtb => read_energy_history(workdir),
-        QcProgram::Behemoth => {
+        // DREIDING writes its trajectory in Behemoth's format precisely so that this, the
+        // trajectory player and the summary window all work without a second code path.
+        QcProgram::Behemoth | QcProgram::Dreiding => {
             let text = fs::read_to_string(workdir.join(super::behemoth::TRAJECTORY_FILE))
                 .unwrap_or_default();
             super::behemoth::parse_trajectory_energies(&text)
@@ -1340,6 +1360,11 @@ fn run_optimize_cancellable(
     cancel: &AtomicBool,
     child_slot: &Mutex<Option<Child>>,
 ) -> Result<XtbOptimizationOutput, String> {
+    // DREIDING is part of Beavyr: no executable, no child process, nothing to cancel. It answers
+    // here, before any of the machinery below.
+    if program == QcProgram::Dreiding {
+        return super::dreiding_run::optimize(workdir, input_xyz);
+    }
     if binary.as_os_str().is_empty() {
         return Err(format!("{} path is empty", program.label()));
     }
@@ -1352,6 +1377,8 @@ fn run_optimize_cancellable(
     let stderr = fs::File::create(workdir.join("xtb.stderr"))
         .map_err(|e| format!("Failed to create xtb.stderr: {e}"))?;
     let mut cmd = match program {
+        // Unreachable: the DREIDING branch returned above, before any command was built.
+        QcProgram::Dreiding => unreachable!("DREIDING runs in process"),
         QcProgram::Xtb => {
             let mut cmd = Command::new(binary);
             cmd.current_dir(workdir)
@@ -1417,6 +1444,8 @@ fn run_optimize_cancellable(
     }
 
     let (trajectory_text, final_energy_hartree) = match program {
+        // Unreachable: see above.
+        QcProgram::Dreiding => unreachable!("DREIDING runs in process"),
         QcProgram::Xtb => {
             let text = fs::read_to_string(workdir.join("xtbopt.log"))
                 .or_else(|_| fs::read_to_string(workdir.join("xtbopt.xyz")))

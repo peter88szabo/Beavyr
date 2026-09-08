@@ -11,3 +11,6 @@ pub mod xtb_freq;
 pub mod valence;
 pub mod xtb_optimize;
 pub mod xtbrun;
+
+/// Running the built-in DREIDING force field like an external backend.
+pub mod dreiding_run;

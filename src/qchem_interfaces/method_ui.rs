@@ -18,6 +18,7 @@ use super::program::QcProgram;
 pub fn method_summary(program: QcProgram, config: &MethodConfig) -> String {
     match program {
         QcProgram::Xtb => config.xtb.label().to_string(),
+        QcProgram::Dreiding => "DREIDING force field".to_string(),
         QcProgram::Behemoth => match config.behemoth {
             BehemothMethod::Dft => {
                 let name = functional(&config.functional)
@@ -69,6 +70,19 @@ pub fn method_config_ui(
         .default_open(true)
         .show(ui, |ui| {
             match program {
+                QcProgram::Dreiding => {
+                    ui.label(
+                        "A generic force field with no level of theory to set: its parameters \
+                         follow from the atom types, which are perceived from the structure.",
+                    );
+                    ui.label(
+                        egui::RichText::new(
+                            "Mayo, Olafson & Goddard, J. Phys. Chem. 1990, 94, 8897.",
+                        )
+                        .small()
+                        .weak(),
+                    );
+                }
                 QcProgram::Xtb => {
                     ui.horizontal(|ui| {
                         ui.label("Method");

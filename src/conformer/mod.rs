@@ -126,8 +126,6 @@ pub struct Conformer {
     /// Fraction of molecules expected in this conformer at 298.15 K, from the relative energies
     /// alone. Ignores vibrational entropy and any symmetry factor, so it is indicative only.
     pub population_fraction: f64,
-    /// Which generation of the search produced it.
-    pub generation: usize,
 }
 
 /// A finished search.
@@ -141,8 +139,11 @@ pub struct ConformerOutcome {
     pub local_optimizations: usize,
     pub termination: String,
     pub elapsed: Duration,
-    /// Set when the conformers were re-ranked with GFN-FF.
-    pub refined_with_gfnff: bool,
+    /// The generation that produced the lowest-energy conformer.
+    ///
+    /// Worth showing: if the best structure only turned up in the last generation, the search was
+    /// still improving when it stopped and more effort would probably find something better.
+    pub best_found_in_generation: usize,
     /// Atom symbols, so a conformer can be written out or loaded back.
     pub atoms: Vec<String>,
 }
@@ -216,7 +217,7 @@ pub fn search(
     // as a failure, come down to what the molecule actually has. Halving converges in a few
     // steps and each attempt on a small molecule is milliseconds.
     let mut population = population_size;
-    let mut last_error = None;
+    let mut last_error;
     loop {
         let options = ConformerSearchOptions {
             population_size: population,
@@ -238,7 +239,7 @@ pub fn search(
         ) {
             Ok(result) => return Ok(assemble(result, atoms, started.elapsed())),
             Err(error) => {
-                last_error = Some(error.to_string());
+                last_error = error.to_string();
                 if population <= 2 {
                     break;
                 }
@@ -247,9 +248,7 @@ pub fn search(
         }
     }
 
-    Err(ConformerError::Search(
-        last_error.unwrap_or_else(|| "the search produced no conformers".into()),
-    ))
+    Err(ConformerError::Search(last_error))
 }
 
 /// Coordination-number connectivity for the search's own bond perception.
@@ -320,7 +319,6 @@ fn assemble(
                 .collect(),
             relative_energy_kcal,
             population_fraction,
-            generation: c.generation,
         })
         .collect();
 
@@ -332,7 +330,12 @@ fn assemble(
         local_optimizations: result.statistics.local_optimizations,
         termination: format!("{:?}", result.termination),
         elapsed,
-        refined_with_gfnff: false,
+        best_found_in_generation: result
+            .conformers
+            .iter()
+            .min_by(|a, b| a.energy_hartree.total_cmp(&b.energy_hartree))
+            .map(|c| c.generation)
+            .unwrap_or(0),
         atoms,
     }
 }
