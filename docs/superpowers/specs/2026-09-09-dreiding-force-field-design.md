@@ -307,22 +307,40 @@ N/O/F acceptors, with `D_hb = 9.5`, `R_hb = 2.75 Å` per the no-charges
 convention above. Beavyr already has `src/hbonds.rs` for detection geometry to
 draw on.
 
-## Minimiser
+## Minimiser, and the rest of Behemoth's optimizer
 
-L-BFGS (history 8) with backtracking line search on the max-force criterion.
-Chosen over steepest descent because a sketched structure can start with atoms
-badly placed, where steepest descent crawls.
+**Not written here.** Behemoth's `src/optimizer/` is imported whole into
+`src/optimizer/`: its `Objective` trait, Cartesian minimisation, redundant
+internals, constrained optimisation, transition-state search, RDA with the
+poor-man's nudged elastic band, IRC following, spin-crossing optimisation,
+rigid scans and the genetic conformer search -- about 12,000 lines. A second,
+weaker implementation in Beavyr would be duplicated maintenance and diverging
+behaviour for no gain.
 
-* converge at `max|F| < 0.05` kcal/mol/Å, or 500 iterations
-* hard iteration cap so the UI can never hang
-* cleanup reports iterations used, initial and final energy, and the
-  `EnergyBreakdown`
+It arrives BLAS-free. Behemoth wrote the interface to be backend-agnostic --
+"any backend that can provide `E(x)` and `∇E(x)` can be plugged in" -- and
+nothing in the module touches `ndarray-linalg`. Four redirections cover
+everything it reached for outside the optimizer:
 
-Cleanup runs on a background task via `AsyncComputeTaskPool`, matching how the
-xTB and Behemoth runners already work in this codebase, so even a pathological
-case cannot stall a frame. Positions are applied through the existing
-`MoleculeChanged` message so the renderer, measurements and bond recomputation
-stay consistent.
+| Behemoth | here |
+|---|---|
+| `numeric::linalg::{Backend, LinAlg}` | `normalmode::linalg_shim`, the pure-Rust Jacobi eigensolver already written for the imported frequency code |
+| `numeric::linalg::solve_linear_system_array2` | `optimizer::linalg_solve` -- Behemoth's own Gauss-Jordan, which needed no BLAS |
+| `utils::atomic_masses::AtomicMasses` | a forwarder onto Beavyr's mass table |
+| `rand` | `optimizer::prng`, a seedable xoshiro256** with the same call surface |
+
+Left behind: `xtb_gfn1` and `tasi_eht` (the quantum-chemistry engine, not
+optimiser logic), `scan`'s two `*_method` wrappers that call it directly, and
+the conformer search's one-thread Rayon pool, which exists so Rayon inside an
+electronic-structure method cannot steal the other workers' threads.
+
+`Objective` works in **bohr and Hartree** where DREIDING works in Å and
+kcal/mol, so `dreiding::objective` converts at the boundary and neither side
+knows about the other's units.
+
+Cleanup uses looser convergence than a geometry optimisation, and both are
+looser than Behemoth's quantum-chemistry defaults: there is no point converging
+a generic force field's geometry beyond the accuracy of its own parameters.
 
 ## Bridging Beavyr to the typer
 
@@ -363,18 +381,37 @@ diagnosable rather than mysterious.
    molecule conserves total energy over 10 ps. Written now as an ignored test so
    the requirement is recorded in the tree rather than in memory.
 
-## What ships first
+## What shipped
 
-Cleanup: typing, all six terms with gradients, the L-BFGS minimiser, the
-Fragment Editor button, refusal on unparameterised types.
+* **Fragment Editor "Clean up geometry"** -- the original goal. Runs
+  synchronously, since a hand-built molecule relaxes in milliseconds.
+* **The optimizer and frequency panels** offer DREIDING as a third program
+  alongside xTB and Behemoth. `QcProgram::runs_in_process()` distinguishes a
+  built-in backend, which needs no path, no scratch directory and nothing to
+  kill on cancel. The optimisation writes its trajectory in Behemoth's
+  comment-line format, so the energy plot, trajectory player and summary window
+  work unchanged.
+* **Frequencies** from central differences of the analytic gradient. **No
+  infrared intensities**: an intensity is a dipole derivative, a dipole needs
+  charges, and there is no charge model. Stated in the panel rather than
+  fabricated.
+* **A Conformer Search tab**, driving Behemoth's genetic algorithm over
+  DREIDING. It asks only how hard to look -- rotors, population and generations
+  all follow from the structure. Results load as a trajectory, save as
+  multi-frame XYZ, and carry the citation for the algorithm.
 
-Deferred, with the architecture already shaped for both:
+## Still to do
 
-* **Molecular dynamics** -- velocity Verlet, a thermostat, constraints, and
-  trajectory capture into the existing `trajectory.rs`.
-* **Conformational search** -- torsion-driving or random-perturbation sampling,
-  parallel minimisation over a shared `Arc<DreidingTopology>`, RMSD duplicate
-  rejection via `rmsd/kabsch.rs`, and energy-window ranking.
-
-Both are drivers on top of `energy_and_forces`, not changes to it. That is the
-whole point of the topology/workspace split.
+* **Molecular dynamics** -- velocity Verlet, a thermostat, constraints. The
+  topology/workspace split and the unit constants are already in place.
+* **GFN-FF re-ranking of conformers.** Worth doing, since relative conformer
+  energies are where a generic force field is weakest, and cheap -- a few
+  hundred xTB calls on the survivors rather than the tens of thousands the
+  search itself needs. Blocked on `xtbrun::call_xtb` writing fixed filenames
+  into the current working directory, so it cannot be driven in a loop until it
+  is scratch-directory aware.
+* **Panels for the imported tools** -- transition states, IRC, RDA,
+  spin-crossing and scans are all in the tree and unexposed.
+* **Widening parameter coverage**, if wanted: estimated `S_R`/`S_2` radii would
+  bring thiophene and thiones in, and Ti/Ru could be imported from DREIDING/A.
+  Both are deliberate decisions rather than defaults.
