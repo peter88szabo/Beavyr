@@ -499,6 +499,8 @@ pub struct ZMatrixBuilderState {
     pub original_atoms: Option<Vec<String>>,
     pub original_pos: Option<Vec<Vec3>>,
     pub last_error: Option<String>,
+    /// What the last DREIDING cleanup did, or why it could not run.
+    pub cleanup_report: Option<Result<String, String>>,
 }
 
 #[derive(Clone, Default)]
@@ -554,6 +556,7 @@ impl Default for ZMatrixBuilderState {
     fn default() -> Self {
         Self {
             zmat: Vec::new(),
+            cleanup_report: None,
             last_click: None,
             add_atom_active: false,
             add_atom_auto: false,
@@ -2131,6 +2134,108 @@ pub fn draw_builder_highlights(
 /// in: the classic layout docks this in a permanent left panel, while the
 /// tabbed layout puts it in a floating window opened from a small round
 /// button, so it no longer occupies a whole screen edge.
+/// "Clean up geometry": relaxes the structure with the built-in DREIDING force field.
+///
+/// This is what the force field was added for. Building a molecule by hand -- attaching fragments,
+/// setting a bond length, rotating a dihedral -- leaves bond lengths and angles that are roughly
+/// right and locally strained, and the fix wants to be immediate. DREIDING runs in this process,
+/// so a molecule of the size anyone assembles by hand relaxes in milliseconds and the button can
+/// simply do its work before the frame ends, with no task to poll and no spinner to watch.
+///
+/// It is a cleanup, not an optimisation. The result is a sensible starting structure to hand to
+/// xTB or Behemoth, and the panel says so rather than letting it be mistaken for a converged
+/// geometry.
+fn cleanup_row(
+    ui: &mut egui::Ui,
+    zmat_state: &mut ZMatrixBuilderState,
+    mol: &mut Molecule,
+    settings: &mut MolSettings,
+) {
+    ui.horizontal(|ui| {
+        let enabled = !mol.atoms.is_empty();
+        if ui
+            .add_enabled(enabled, egui::Button::new("Clean up geometry"))
+            .on_hover_text(
+                "Relaxes the structure with the built-in DREIDING force field. Fixes the strained \
+                 bond lengths and angles that hand-building leaves behind, in milliseconds. A \
+                 starting structure for a real optimiser, not a substitute for one.",
+            )
+            .clicked()
+        {
+            zmat_state.cleanup_report = Some(run_cleanup(mol, settings));
+        }
+        if ui
+            .add_enabled(
+                zmat_state.cleanup_report.is_some(),
+                egui::Button::new("Dismiss"),
+            )
+            .clicked()
+        {
+            zmat_state.cleanup_report = None;
+        }
+    });
+
+    match &zmat_state.cleanup_report {
+        Some(Ok(message)) => {
+            ui.label(egui::RichText::new(message).small());
+        }
+        Some(Err(message)) => {
+            ui.colored_label(
+                egui::Color32::from_rgb(220, 120, 90),
+                egui::RichText::new(message).small(),
+            );
+        }
+        None => {}
+    }
+}
+
+/// Relaxes `mol` in place, returning a one-line report or the reason it could not.
+fn run_cleanup(mol: &mut Molecule, settings: &mut MolSettings) -> Result<String, String> {
+    use crate::forcefield::dreiding::objective::{cleanup_options, relax_angstrom};
+    use crate::forcefield::dreiding::DreidingTopology;
+
+    // Perceived at the standard threshold rather than at whatever the viewport is set to: a
+    // generous display setting bonds atoms that are merely close, which mistypes every atom and
+    // would return a confidently wrong geometry. The builder's own calls use a loose threshold
+    // for display, so this cannot simply reuse `mol.bonds`.
+    let mut perceived = mol.clone();
+    perceived.recompute_bonds(1.2, 2.5);
+
+    let topology = DreidingTopology::build(&perceived).map_err(|e| e.to_string())?;
+    let start: Vec<f64> = mol
+        .pos
+        .iter()
+        .flat_map(|p| [p.x as f64, p.y as f64, p.z as f64])
+        .collect();
+
+    let (relaxed, report) =
+        relax_angstrom(&topology, &start, cleanup_options()).map_err(|e| e.to_string())?;
+
+    mol.set_pos(
+        relaxed
+            .chunks_exact(3)
+            .map(|c| Vec3::new(c[0] as f32, c[1] as f32, c[2] as f32))
+            .collect(),
+    );
+    mol.recompute_bonds(settings.bond_thresh_scale, settings.hbond_cutoff);
+    settings.geometry_dirty = true;
+    settings.bond_topology_dirty = true;
+
+    let dropped = report.initial_energy - report.final_energy;
+    Ok(format!(
+        "Cleaned up in {} cycles: energy fell {dropped:.1} kcal/mol to {:.1}, largest remaining \
+         force {:.2} kcal/mol/Å.{}",
+        report.cycles,
+        report.final_energy,
+        report.max_force,
+        if report.converged {
+            ""
+        } else {
+            " Stopped before converging -- run it again, or hand it to an optimiser."
+        }
+    ))
+}
+
 pub fn builder_ui_contents(
     ui: &mut egui::Ui,
     state: &mut EditorRotateState,
@@ -2181,6 +2286,9 @@ pub fn builder_ui_contents(
                         }
                     }
                 });
+
+                ui.add_space(6.0);
+                cleanup_row(ui, &mut zmat_state, &mut mol, &mut settings);
 
                 ui.add_space(6.0);
                 // One line saying what "Add Atom" and "Add Fragment" will act
@@ -5836,5 +5944,67 @@ mod zmat_edit_tests {
             (moved - 0.3).abs() < 0.01,
             "the connector moved {moved:.3} A, asked for 0.3"
         );
+    }
+
+    /// The cleanup button is why the force field exists: hand-building leaves bond lengths and
+    /// angles roughly right and locally strained, and this must fix them.
+    #[test]
+    fn cleanup_relaxes_a_distorted_structure() {
+        // Water with both O-H bonds stretched (1.30 and 1.21 A) and the angle opened to 114
+        // degrees -- the shape attaching a fragment by hand actually leaves. The hydrogens are
+        // kept 2.1 A apart on purpose: put them any closer and the connectivity guard is right to
+        // call it an H-H bond rather than a distorted water.
+        let mut mol = Molecule::from_xyz("3\n\nO 0.0 0.0 0.0\nH 1.30 0.0 0.0\nH -0.50 1.10 0.0\n");
+        mol.recompute_bonds(1.2, 2.5);
+        let mut settings = MolSettings::default();
+
+        let before_oh = (mol.pos[1] - mol.pos[0]).length();
+        assert!(before_oh > 1.2, "the test input was not actually distorted");
+        let before_angle = {
+            let u = (mol.pos[1] - mol.pos[0]).normalize();
+            let v = (mol.pos[2] - mol.pos[0]).normalize();
+            u.dot(v).clamp(-1.0, 1.0).acos().to_degrees()
+        };
+        assert!(before_angle > 110.0, "the test angle was not actually distorted");
+
+        let report = run_cleanup(&mut mol, &mut settings).expect("water is cleanable");
+        assert!(report.contains("Cleaned up"), "{report}");
+
+        // DREIDING's Table I: O_3 0.660 + H 0.330 - 0.01, and 104.51 degrees.
+        let after_oh = (mol.pos[1] - mol.pos[0]).length();
+        assert!(
+            (after_oh - 0.98).abs() < 0.02,
+            "O-H is {after_oh}, want about 0.98"
+        );
+
+        let u = (mol.pos[1] - mol.pos[0]).normalize();
+        let v = (mol.pos[2] - mol.pos[0]).normalize();
+        let angle = u.dot(v).clamp(-1.0, 1.0).acos().to_degrees();
+        assert!((angle - 104.51).abs() < 1.0, "H-O-H is {angle}, want 104.51");
+
+        // The renderer has to be told, or the viewport keeps showing the old geometry.
+        assert!(settings.geometry_dirty);
+        assert!(settings.bond_topology_dirty);
+    }
+
+    /// A structure the force field cannot describe must report why, naming the atom, and must
+    /// leave the geometry untouched rather than half-moving it.
+    #[test]
+    fn cleanup_refuses_an_unparameterised_structure_without_moving_it() {
+        let mut mol = Molecule::from_xyz("2\n\nLi 0.0 0.0 0.0\nF 0.0 0.0 1.564\n");
+        mol.recompute_bonds(1.2, 2.5);
+        let before = mol.pos.clone();
+        let mut settings = MolSettings::default();
+
+        let error = run_cleanup(&mut mol, &mut settings).expect_err("lithium is not parameterised");
+        assert!(error.contains("Li") || error.contains("DREIDING"), "{error}");
+        assert_eq!(mol.pos, before, "a refused cleanup must not move anything");
+    }
+
+    #[test]
+    fn cleanup_on_an_empty_structure_reports_rather_than_panics() {
+        let mut mol = Molecule::empty();
+        let mut settings = MolSettings::default();
+        assert!(run_cleanup(&mut mol, &mut settings).is_err());
     }
 }
