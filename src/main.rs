@@ -204,9 +204,15 @@ fn main() {
                 // xtb geometry optimization
                 qchem_interfaces::xtb_optimize::poll_xtb_optimization,
                 qchem_interfaces::xtb_freq::poll_xtb_frequencies,
-                uvvis::run::poll_spectrum_run,
-                export_image::process_pending_canvas_captures,
-                export_image::cleanup_export_captures,
+                // Nested because the outer tuple is at Bevy's 20-element
+                // limit for a system set; nesting costs nothing and keeps
+                // the ordering.
+                (
+                    orbitals::clear_orbitals_on_structure_change,
+                    uvvis::run::poll_spectrum_run,
+                    export_image::process_pending_canvas_captures,
+                    export_image::cleanup_export_captures,
+                ),
             )
                 .in_set(UpdateSet::Extras),
         )

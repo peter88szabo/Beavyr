@@ -375,6 +375,70 @@ fn poll_orbital_job(mut state: ResMut<OrbitalState>) {
 
 /// Re-extract the two lobes.  Cheap enough to run synchronously, which is what
 /// makes the isovalue slider live.
+/// How far an atom may move before the displayed orbitals are taken to belong
+/// to a different structure.
+///
+/// The Molden loader copies its geometry straight into the molecule, so a
+/// freshly loaded set matches exactly; this only has to be loose enough to
+/// survive the f32 round trip.
+const ORBITAL_GEOMETRY_TOLERANCE: f32 = 1.0e-3;
+
+/// Whether the molecule on screen is still the one these orbitals describe.
+fn describes(data: &OrbitalData, mol: &crate::molecule::Molecule) -> bool {
+    if data.atoms.len() != mol.atoms.len() || mol.atoms.is_empty() {
+        return false;
+    }
+    if data.atoms.iter().zip(&mol.atoms).any(|(a, b)| a != b) {
+        return false;
+    }
+    data.positions
+        .iter()
+        .zip(&mol.pos)
+        .all(|(a, b)| a.distance(*b) <= ORBITAL_GEOMETRY_TOLERANCE)
+}
+
+/// Clears a displayed orbital once the structure it belongs to is gone.
+///
+/// An isosurface is only meaningful for the geometry and basis it was computed
+/// at. Loading a different structure, or emptying the viewport, used to leave
+/// the lobes hanging in space around whatever arrived next, with no indication
+/// that they no longer had anything to do with it.
+///
+/// The test is whether the molecule on screen is still the one the orbitals
+/// describe, rather than simply "a structure was loaded". That matters because
+/// loading a Molden file *is* a structure load -- the reader adopts the
+/// geometry from the file -- so a handler keyed on the event alone would
+/// discard the orbitals at the moment they arrived. Comparing geometries
+/// instead makes the outcome independent of system ordering: a freshly loaded
+/// set matches and survives, a stale one does not and goes.
+///
+/// Keyed on `ParseXyz` like its neighbours, so trajectory playback -- which
+/// reports `SetPos` on every frame -- does not repeatedly tear down a surface
+/// the user is watching.
+pub fn clear_orbitals_on_structure_change(
+    mut evr: MessageReader<crate::events::MoleculeChanged>,
+    mol: Option<Res<crate::molecule::Molecule>>,
+    mut state: ResMut<OrbitalState>,
+) {
+    let structure_replaced = evr.read().any(|ev| {
+        matches!(
+            ev.reason,
+            crate::events::MoleculeChangeReason::ParseXyz { .. }
+        )
+    });
+    if !structure_replaced {
+        return;
+    }
+    let Some(data) = state.data.clone() else {
+        return;
+    };
+    let still_ours = mol.as_deref().is_some_and(|mol| describes(&data, mol));
+    if !still_ours {
+        state.clear();
+        state.warning = None;
+    }
+}
+
 fn rebuild_orbital_surface(
     mut commands: Commands,
     mut state: ResMut<OrbitalState>,
@@ -499,6 +563,60 @@ fn draw_orbital_mesh(mut gizmos: Gizmos<OrbitalMeshGizmos>, state: Res<OrbitalSt
 #[cfg(test)]
 mod adopt_tests {
     use super::*;
+
+    use crate::molecule::Molecule;
+
+    fn mol_from(data: &OrbitalData) -> Molecule {
+        Molecule {
+            atoms: data.atoms.clone(),
+            pos: data.positions.clone(),
+            bonds: vec![],
+            hydrogen_bonds: vec![],
+        }
+    }
+
+    /// A freshly loaded set describes the molecule it just put on screen, so
+    /// it must survive its own load event. This is the case a handler keyed on
+    /// the event alone would get wrong.
+    #[test]
+    fn a_freshly_loaded_set_describes_its_own_molecule() {
+        let data = behemoth_orbitals();
+        let mol = mol_from(&data);
+        assert!(describes(&data, &mol));
+    }
+
+    /// A different molecule, and an empty viewport, are both stale.
+    #[test]
+    fn another_structure_is_not_described_by_these_orbitals() {
+        let data = behemoth_orbitals();
+
+        let mut different = mol_from(&data);
+        different.atoms.pop();
+        different.pos.pop();
+        assert!(!describes(&data, &different), "a different atom count");
+
+        let mut relabelled = mol_from(&data);
+        relabelled.atoms[0] = "Xe".to_string();
+        assert!(!describes(&data, &relabelled), "a different element");
+
+        let mut moved = mol_from(&data);
+        moved.pos[0].x += 0.5;
+        assert!(!describes(&data, &moved), "a moved atom");
+
+        let empty = Molecule::empty();
+        assert!(!describes(&data, &empty), "an empty viewport");
+    }
+
+    /// Rounding through f32 must not read as a different structure.
+    #[test]
+    fn a_negligible_displacement_is_still_the_same_structure() {
+        let data = behemoth_orbitals();
+        let mut nudged = mol_from(&data);
+        for p in &mut nudged.pos {
+            p.x += 1.0e-5;
+        }
+        assert!(describes(&data, &nudged));
+    }
 
     fn behemoth_orbitals() -> OrbitalData {
         let text = include_str!("../../tests/fixtures/behemoth_ch2o_canonicalMO.molden");
