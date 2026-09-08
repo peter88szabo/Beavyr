@@ -8,10 +8,11 @@
 # or by hand from the Actions tab, which builds the installers without making
 # a release (useful for checking a change compiles before you tag it).
 #
-# This repository is private, so build time is metered. Linux costs one minute
-# per minute; a Windows machine costs two and a Mac costs ten. That is why this
-# only runs on tags, and why the other two platforms are not here yet -- add
-# them when you actually need them, not before.
+# This repository is private, so build time is metered: Linux costs one minute
+# per minute, a Windows machine two, and a Mac ten. A full three-platform
+# release costs roughly 250 of the 2,000 minutes a month the free plan gives,
+# almost all of it the Mac. That is why this runs on tags only and never on an
+# ordinary push.
 
 name: Release
 
@@ -25,8 +26,43 @@ permissions:
   contents: write
 
 jobs:
+  icons:
+    name: Render the icon
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: packaging
+          fetch-depth: 1
+
+      # rsvg-convert renders SVG properly. ImageMagick alone does not: without
+      # librsvg behind it, it falls back to its own renderer and mangles the
+      # strokes.
+      - name: Install the renderers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends librsvg2-bin imagemagick
+
+      - name: Render every size the three platforms want
+        run: |
+          mkdir -p icons
+          for size in 16 32 64 128 256 512 1024; do
+            rsvg-convert -w $size -h $size packaging/beavyr.svg -o "icons/$size.png"
+          done
+          # Windows wants one .ico holding several sizes.
+          convert icons/16.png icons/32.png icons/64.png icons/128.png icons/256.png \
+                  icons/beavyr.ico
+          ls -la icons
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: icons
+          path: icons/
+          if-no-files-found: error
+
   linux:
     name: Linux (.deb)
+    needs: [icons]
     # Deliberately not ubuntu-latest. A package built on 24.04 will not install
     # on an older machine; built on 22.04 it installs on both.
     runs-on: ubuntu-22.04
@@ -101,9 +137,128 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  windows:
+    name: Windows (setup.exe)
+    needs: [icons]
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            src
+            tests
+            packaging
+          fetch-depth: 1
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: icons
+          path: icons
+
+      - name: Cache the crate registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: cargo-windows-${{ hashFiles('Cargo.lock') }}
+          restore-keys: cargo-windows-
+
+      - name: Build
+        run: cargo build --release --no-default-features
+
+      - name: Lay out what the installer packs
+        shell: bash
+        run: |
+          version="$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          mkdir -p stage
+          cp target/release/Beavyr.exe stage/beavyr.exe
+          cp icons/beavyr.ico          stage/beavyr.ico
+          cp LICENSE                   stage/LICENSE.txt
+          cp README.md                 stage/README.md
+          cp packaging/windows/beavyr.nsi stage/
+
+      # NSIS ships on the GitHub Windows image; install it if that ever changes.
+      - name: Build the installer
+        shell: bash
+        run: |
+          if ! command -v makensis >/dev/null 2>&1; then
+            choco install nsis -y --no-progress
+            export PATH="/c/Program Files (x86)/NSIS:$PATH"
+          fi
+          cd stage
+          makensis -DVERSION=$VERSION beavyr.nsi
+          ls -la *.exe
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: beavyr-windows
+          path: stage/*-setup.exe
+          if-no-files-found: error
+          retention-days: 30
+
+  macos:
+    name: macOS (.dmg)
+    needs: [icons]
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            src
+            tests
+            packaging
+          fetch-depth: 1
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: icons
+          path: icons
+
+      - name: Cache the crate registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: cargo-macos-${{ hashFiles('Cargo.lock') }}
+          restore-keys: cargo-macos-
+
+      # Both architectures, joined into one binary with `lipo`. An Apple
+      # Silicon build will not start on an older Intel Mac at all, and you do
+      # not know which your colleagues have. This is the expensive half of the
+      # expensive runner; drop the x86_64 line if nobody is on an Intel Mac.
+      - name: Build for both Mac architectures
+        run: |
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+          cargo build --release --no-default-features --target aarch64-apple-darwin
+          cargo build --release --no-default-features --target x86_64-apple-darwin
+          mkdir -p stage
+          lipo -create -output stage/beavyr \
+            target/aarch64-apple-darwin/release/Beavyr \
+            target/x86_64-apple-darwin/release/Beavyr
+          lipo -info stage/beavyr
+
+      - name: Build the app and the disk image
+        run: |
+          version="$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)"
+          ./packaging/macos/build-app.sh "$version" stage/beavyr icons stage
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: beavyr-macos
+          path: stage/*.dmg
+          if-no-files-found: error
+          retention-days: 30
+
   release:
     name: Publish the release
-    needs: [linux]
+    needs: [linux, windows, macos]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-22.04
 

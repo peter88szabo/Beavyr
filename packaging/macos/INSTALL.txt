@@ -1,0 +1,27 @@
+Installing Beavyr on a Mac
+==========================
+
+1. Drag Beavyr onto the Applications folder in this window.
+
+2. The first time you open it, macOS will refuse, saying Beavyr "cannot be
+   opened because it is from an unidentified developer" -- or, on some
+   versions, that it "is damaged and should be moved to the Bin".
+
+   Beavyr is not damaged. macOS says this about every application that has not
+   been through Apple's paid notarisation service, which costs a developer
+   account per year and which this program does not have.
+
+3. To open it anyway, once:
+
+     - Open your Applications folder in Finder.
+     - Hold Control and click Beavyr, then choose Open.
+     - Click Open in the dialog that appears.
+
+   macOS remembers the choice. From then on Beavyr opens by double-clicking
+   like anything else.
+
+   If macOS refuses even then, open Terminal and run:
+
+     xattr -dr com.apple.quarantine /Applications/Beavyr.app
+
+To remove Beavyr, drag it from Applications to the Bin.
