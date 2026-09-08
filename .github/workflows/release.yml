@@ -9,9 +9,10 @@
 # a release (useful for checking a change compiles before you tag it).
 #
 # This repository is private, so build time is metered: Linux costs one minute
-# per minute, a Windows machine two, and a Mac ten. A full three-platform
-# release costs roughly 250 of the 2,000 minutes a month the free plan gives,
-# almost all of it the Mac. That is why this runs on tags only and never on an
+# per minute, a Windows machine two, and a Mac ten. A full release across the
+# four packages costs roughly 300 of the 2,000 minutes a month the free plan
+# gives, almost all of it the Mac -- the second Linux job for Arch is the
+# cheapest of the four. That is why this runs on tags only and never on an
 # ordinary push.
 
 name: Release
@@ -137,6 +138,74 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  arch:
+    name: Arch Linux (.pkg.tar.zst)
+    needs: [icons]
+    runs-on: ubuntu-22.04
+    # Arch is rolling, so the toolchain here moves under us between releases.
+    # That is the point -- the package has to work on what Arch users actually
+    # have -- but it does mean this job can break without the code changing.
+    container: archlinux:base-devel
+
+    steps:
+      - name: Install what Bevy needs to compile
+        # git for the checkout action, rust for the build, and the three
+        # libraries the binary links against so pkg-config can find them.
+        run: |
+          pacman -Syu --noconfirm --needed \
+            git rust alsa-lib libcap systemd-libs pkgconf
+
+      - name: Check out the source
+        uses: actions/checkout@v4
+        with:
+          # As for the Debian job: examples/ is only read by the tests at run
+          # time and nothing there is needed to compile.
+          sparse-checkout: |
+            src
+            tests
+            packaging
+          fetch-depth: 1
+
+      - name: Check the tag matches the version in Cargo.toml
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          crate="$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)"
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$crate" != "$tag" ]; then
+            echo "tag $GITHUB_REF_NAME does not match Cargo.toml version $crate" >&2
+            exit 1
+          fi
+
+      - name: Make a build user
+        # makepkg refuses to run as root, and a container runs as root. The
+        # checkout is chowned too, or cargo cannot write target/.
+        run: |
+          useradd -m builder
+          echo 'builder ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers
+          chown -R builder "$GITHUB_WORKSPACE"
+
+      - name: Build the package
+        # The step already runs in the workspace, so sudo only has to change
+        # user. pacman's rust is system-wide, so nothing in the builder's
+        # environment is needed to find cargo.
+        run: sudo -u builder ./packaging/build-arch.sh
+
+      - name: Check the package is well formed
+        run: |
+          pkg="$(ls target/arch/*.pkg.tar.zst)"
+          echo "built: $pkg  ($(du -h "$pkg" | cut -f1))"
+          bsdtar -xOf "$pkg" .PKGINFO
+          bsdtar -tf "$pkg" | grep -v '^\.'
+          # Installing it is the only check that really proves anything.
+          pacman -U --noconfirm "$pkg"
+          beavyr --help | head -1
+
+      - name: Keep the package
+        uses: actions/upload-artifact@v4
+        with:
+          name: beavyr-arch
+          path: target/arch/*.pkg.tar.zst
+
   windows:
     name: Windows (setup.exe)
     needs: [icons]
@@ -258,7 +327,7 @@ jobs:
 
   release:
     name: Publish the release
-    needs: [linux, windows, macos]
+    needs: [linux, arch, windows, macos]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-22.04
 

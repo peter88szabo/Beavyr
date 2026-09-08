@@ -1,10 +1,18 @@
 # Packaging Beavyr for Linux
 
-Everything here builds one file — `beavyr_0.2.0_amd64.deb` — that you can mail
-to a colleague or put on a share. It installs Beavyr the way any other Ubuntu
-program installs, and removes the same way.
+Two packages are built here, one per family of distribution:
 
-## For whoever receives the file
+| file | for | installs with |
+|---|---|---|
+| `beavyr_0.2.0_amd64.deb` | Debian, Ubuntu, Mint | `apt` |
+| `beavyr-0.2.0-1-x86_64.pkg.tar.zst` | Arch, Manjaro, EndeavourOS | `pacman` |
+
+Either is one file you can mail to a colleague or put on a share, and either
+installs and removes the way anything else on that distribution does. A `.deb`
+cannot be installed on Arch and the Arch package cannot be installed on Ubuntu,
+so hand over the one that matches.
+
+## For whoever receives the .deb
 
 **Install** — double-click it, or:
 
@@ -29,6 +37,28 @@ graphics drivers. Beavyr does not need Python, and does not need xTB or ORCA to
 start: those are only wanted when you actually run a calculation, and you point
 Beavyr at them from inside the program.
 
+## For whoever receives the Arch package
+
+**Install**
+
+```sh
+sudo pacman -U ./beavyr-0.2.0-1-x86_64.pkg.tar.zst
+```
+
+**Remove**
+
+```sh
+sudo pacman -R beavyr
+```
+
+**Requirements** — a 64-bit Arch or Arch-derived system with working graphics
+drivers. The package requires only `alsa-lib`, `libcap` and `systemd-libs`,
+which every desktop install already has. The Vulkan loader, a Vulkan driver
+for your GPU and the X11 or Wayland libraries are listed as optional
+dependencies because Beavyr opens them by name at run time rather than linking
+them; in practice a working desktop has them, but `pacman` will name them if
+something is missing.
+
 ## For whoever builds it
 
 ```sh
@@ -38,6 +68,32 @@ Beavyr at them from inside the program.
 
 The result lands in `target/deb/`. The script needs only `cargo`, `dpkg-deb`
 and `strip`, all of which are already on an Ubuntu machine.
+
+### The Arch package
+
+```sh
+./packaging/build-arch.sh             # builds the binary, then the package
+./packaging/build-arch.sh --no-build  # package an already-built release binary
+```
+
+The result lands in `target/arch/`. This one has to run **on Arch**, because it
+needs `makepkg`, and it has to run as an ordinary user, because `makepkg`
+refuses to run as root. From another distribution, use a container:
+
+```sh
+docker run --rm -v "$PWD":/src -w /src archlinux:base-devel bash -c '
+  pacman -Syu --noconfirm --needed git rust alsa-lib libcap systemd-libs pkgconf
+  useradd -m builder && chown -R builder /src
+  sudo -u builder ./packaging/build-arch.sh'
+```
+
+`PKGBUILD` is an *in-tree* one: it packages the release binary already built
+from this repository rather than fetching a source tarball, because building
+Bevy under `makepkg` takes about a quarter of an hour and the release workflow
+has already built exactly the binary we want to ship. A submission to the AUR
+would want a different PKGBUILD, with `source=()` pointing at a release tag and
+a real `build()` running `cargo build --release`; the `depends` and
+`optdepends` here transfer to it unchanged.
 
 ## What the package puts on the system
 
@@ -55,16 +111,20 @@ Five files, all owned by the package manager. That is the whole installation.
 
 | File | What it is |
 |---|---|
-| `build-deb.sh` | builds the package |
+| `build-deb.sh` | builds the Debian/Ubuntu package |
+| `build-arch.sh` | builds the Arch package |
+| `PKGBUILD` | the Arch recipe `build-arch.sh` drives |
 | `beavyr.svg` | the application icon — the beaver in profile, on a pale tile |
 | `beavyr.desktop` | the menu entry: name, icon, category |
 | `be.kuleuven.Beavyr.metainfo.xml` | the App Center description |
 | `icons/` | the six icon candidates and the page for comparing them |
 
-The design decisions behind all of this — why a `.deb` and not a Flatpak, why
-the icon ships as SVG rather than PNG, and why the graphics libraries have to
-be listed by hand — are in
-`docs/superpowers/specs/2026-09-08-debian-package-design.md`.
+The design decisions behind all of this — why native packages and not a
+Flatpak, why the icon ships as SVG rather than PNG, and why the graphics
+libraries have to be listed by hand — are in
+`docs/superpowers/specs/2026-09-08-debian-package-design.md`. The Arch package
+follows the same reasoning and the same dependency split; only the package
+manager differs.
 
 ---
 
