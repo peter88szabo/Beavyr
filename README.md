@@ -1,4 +1,8 @@
-# Beavyr
+<p align="center">
+  <img src="packaging/beavyr.svg" alt="" width="132" height="132">
+</p>
+
+<h1 align="center">Beavyr</h1>
 
 A molecular viewer and quantum-chemistry front-end, written in Rust on
 [Bevy](https://bevyengine.org/). It displays structures and trajectories at
