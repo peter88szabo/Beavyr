@@ -197,7 +197,7 @@ fn finite_difference_hessian<O: Objective>(
     Ok(hess)
 }
 
-fn covalent_radius_bohr(element: &str) -> f64 {
+pub(crate) fn covalent_radius_bohr(element: &str) -> f64 {
     let angstrom = match element.to_ascii_uppercase().as_str() {
         "H" => 0.31,
         "B" => 0.84,
@@ -215,7 +215,7 @@ fn covalent_radius_bohr(element: &str) -> f64 {
     angstrom / BOHR_TO_ANGSTROM
 }
 
-fn default_connectivity_model(atoms: &[String]) -> ConnectivityModel {
+pub(crate) fn default_connectivity_model(atoms: &[String]) -> ConnectivityModel {
     ConnectivityModel {
         rcov_disp: atoms.iter().map(|a| covalent_radius_bohr(a)).collect(),
         kcn: 7.5,

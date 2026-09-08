@@ -7,6 +7,7 @@ mod camera;
 mod cli;
 mod color_schemes;
 mod custom_schemes;
+mod conformer;
 mod diagnostics;
 mod events;
 mod export_image;
@@ -118,6 +119,7 @@ fn main() {
         .insert_resource(ExportCounter::default())
         .insert_resource(ExportSelectArea::default())
         // measurements
+        .init_resource::<conformer::ConformerRun>()
         .init_resource::<measurements::Measurements>()
         .init_resource::<DiagnosticsCache>()
         .init_gizmo_group::<measurements::MeasurementGizmos>()
@@ -212,6 +214,7 @@ fn main() {
                 (
                     orbitals::clear_orbitals_on_structure_change,
                     uvvis::run::poll_spectrum_run,
+                    conformer::poll_conformer_search,
                     export_image::process_pending_canvas_captures,
                     export_image::cleanup_export_captures,
                 ),

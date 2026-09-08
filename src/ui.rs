@@ -164,6 +164,7 @@ pub fn ui_panel(
         ResMut<UvVisState>,
         ResMut<crate::uvvis::run::SpectrumTask>,
         Res<crate::cli::StartupLoadReport>,
+        ResMut<crate::conformer::ConformerRun>,
     ),
 ) {
     // bevy_egui 0.41: ctx_mut() returns Result; if it fails, skip this frame
@@ -184,6 +185,7 @@ pub fn ui_panel(
         mut uvvis_state,
         mut uvvis_task,
         startup_report,
+        mut conformer_run,
     ) = builder_resources;
     if !*style_initialized {
         ctx.style_mut_of(ctx.theme(), |style| {
@@ -590,6 +592,30 @@ pub fn ui_panel(
                     traj.playing,
                 );
             });
+            // ===========================
+            // 1b-bis) Conformer Search
+            // ===========================
+            ui.add_space(8.0);
+            section(
+                ui,
+                windowed,
+                &mut open[Tab::Conformers.index()],
+                rects,
+                Tab::Conformers.default_size(),
+                "Conformer Search",
+                |ui| {
+                    let loaded = crate::conformer::ui::conformer_panel(
+                        ui,
+                        &mut conformer_run,
+                        &mut mol,
+                        &mut traj,
+                        &settings,
+                    );
+                    // Showing a conformer, or loading the set as a trajectory, replaces the
+                    // geometry -- so the renderer, measurements and bond lists have to be told.
+                    crate::conformer::ui::announce(loaded, &mut ev_changed);
+                },
+            );
             // ===========================
             // 1c) Frequency Analysis
             // ===========================
