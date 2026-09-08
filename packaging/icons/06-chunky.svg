@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Beaver, simplified">
+  <g stroke="#1D2B27" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round">
+    <ellipse cx="12" cy="41" rx="10.5" ry="6.6" transform="rotate(-10 12 41)" fill="#9A6B45"/>
+    <circle cx="42" cy="24" r="3.8" fill="#9A6B45"/>
+    <path d="M55 34 C55 27 48 21 37 21 C25 21 18 27 18 35 C18 43 25 47 33 47 C43 47 55 42 55 34 Z" fill="#9A6B45"/>
+    <path d="M51.6 37.4 h3.6 l-0.7 5.6 h-2.2 Z" fill="#E4972B" stroke-width="2.4"/>
+  </g>
+  <g fill="#1D2B27">
+    <circle cx="47" cy="29.5" r="2.2"/>
+    <circle cx="54" cy="32.4" r="2"/>
+  </g>
+  <g stroke="#1D2B27" stroke-width="2.6" stroke-linecap="round" opacity="0.5" fill="none">
+    <path d="M6 39 L17 44 M8 34.5 L19 39.5"/>
+  </g>
+</svg>

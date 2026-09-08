@@ -1,0 +1,339 @@
+<title>Beavyr Icon Plate</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --ink:      #1D2B27;
+    --paper:    #EDEFE9;
+    --surface:  #F7F8F4;
+    --rule:     #C9CEC5;
+    --muted:    #67736D;
+    --wood:     #9A6B45;
+    --tooth:    #C97A16;
+    --pond:     #2E6B68;
+    --tile:     #F4F1E9;
+    --tile-edge:#D8D4C6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ink:      #E6E9E2;
+      --paper:    #131917;
+      --surface:  #1B2320;
+      --rule:     #333E39;
+      --muted:    #9AA79F;
+      --wood:     #B98A62;
+      --tooth:    #E4972B;
+      --pond:     #4F9C97;
+      --tile:     #F4F1E9;
+      --tile-edge:#2C3733;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ink:      #E6E9E2;
+    --paper:    #131917;
+    --surface:  #1B2320;
+    --rule:     #333E39;
+    --muted:    #9AA79F;
+    --wood:     #B98A62;
+    --tooth:    #E4972B;
+    --pond:     #4F9C97;
+    --tile:     #F4F1E9;
+    --tile-edge:#2C3733;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+    font-size: 15px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 56px 28px 80px; }
+
+  header.page { display: flex; flex-direction: column; gap: 14px; padding-bottom: 28px; border-bottom: 2px solid var(--ink); }
+  .eyebrow {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted);
+  }
+  h1 {
+    font-family: "Fraunces", Georgia, serif;
+    font-weight: 600; font-size: clamp(34px, 5.2vw, 52px); line-height: 1.02;
+    margin: 0; text-wrap: balance; letter-spacing: -0.015em;
+  }
+  .lede { max-width: 62ch; margin: 0; color: var(--muted); font-size: 16px; }
+
+  .plate { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 0; margin-top: 8px; }
+
+  .spec { padding: 30px 26px 26px; border-bottom: 1px solid var(--rule); display: flex; flex-direction: column; gap: 18px; }
+  .spec + .spec { border-left: 1px solid var(--rule); }
+  @media (max-width: 719px) { .spec + .spec { border-left: none; } }
+
+  .spec-head { display: flex; align-items: baseline; gap: 12px; }
+  .num {
+    font-family: "IBM Plex Mono", monospace; font-size: 12px; font-weight: 500;
+    color: var(--tooth); letter-spacing: 0.08em;
+  }
+  .spec h2 {
+    font-family: "Fraunces", Georgia, serif; font-weight: 600; font-size: 21px;
+    margin: 0; letter-spacing: -0.01em;
+  }
+
+  .tile {
+    width: 168px; height: 168px; border-radius: 26px;
+    background: var(--tile); border: 1px solid var(--tile-edge);
+    display: grid; place-items: center; align-self: center;
+  }
+  .tile svg { width: 124px; height: 124px; display: block; }
+
+  .sizes { display: flex; align-items: flex-end; gap: 20px; padding-top: 2px; }
+  .size { display: flex; flex-direction: column; align-items: center; gap: 7px; }
+  .size .chip {
+    background: var(--tile); border: 1px solid var(--tile-edge); border-radius: 9px;
+    display: grid; place-items: center;
+  }
+  .size .chip.s48 { width: 56px; height: 56px; }
+  .size .chip.s32 { width: 40px; height: 40px; }
+  .size .chip.s24 { width: 30px; height: 30px; }
+  .size .chip.s48 svg { width: 44px; height: 44px; }
+  .size .chip.s32 svg { width: 30px; height: 30px; }
+  .size .chip.s24 svg { width: 22px; height: 22px; }
+  .size span {
+    font-family: "IBM Plex Mono", monospace; font-size: 10px; color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .note { margin: 0; color: var(--muted); font-size: 14px; max-width: 40ch; }
+
+  code.file {
+    font-family: "IBM Plex Mono", monospace; font-size: 11.5px;
+    color: var(--ink); background: var(--surface); border: 1px solid var(--rule);
+    border-radius: 5px; padding: 4px 8px; align-self: flex-start;
+  }
+
+  footer.page {
+    margin-top: 44px; padding-top: 26px; border-top: 1px solid var(--rule);
+    display: flex; flex-direction: column; gap: 16px;
+  }
+  footer h3 {
+    font-family: "Fraunces", Georgia, serif; font-size: 17px; font-weight: 600; margin: 0;
+  }
+  footer p { margin: 0; color: var(--muted); font-size: 14px; max-width: 68ch; }
+  .swatches { display: flex; flex-wrap: wrap; gap: 18px; margin-top: 4px; }
+  .sw { display: flex; align-items: center; gap: 9px; }
+  .sw i { width: 22px; height: 22px; border-radius: 6px; border: 1px solid var(--tile-edge); display: block; }
+  .sw code { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: var(--muted); }
+  .path { font-family: "IBM Plex Mono", monospace; font-size: 13px; color: var(--ink); }
+</style>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <clipPath id="t1"><ellipse cx="11" cy="42" rx="10" ry="6.2" transform="rotate(-14 11 42)"/></clipPath>
+    <clipPath id="t3"><ellipse cx="50" cy="49" rx="11" ry="5.6" transform="rotate(18 50 49)"/></clipPath>
+    <clipPath id="t5"><ellipse cx="12" cy="24" rx="10" ry="6.2" transform="rotate(-62 12 24)"/></clipPath>
+  </defs>
+
+  <symbol id="ic1" viewBox="0 0 64 64">
+    <g stroke="#1D2B27" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round">
+      <ellipse cx="11" cy="42" rx="10" ry="6.2" transform="rotate(-14 11 42)" fill="#9A6B45"/>
+      <g clip-path="url(#t1)" stroke-width="1.5" opacity="0.55" fill="none">
+        <path d="M0 30 L26 48 M0 38 L26 56 M0 46 L26 64"/>
+        <path d="M0 52 L26 34 M0 60 L26 42 M0 44 L26 26"/>
+      </g>
+      <ellipse cx="11" cy="42" rx="10" ry="6.2" transform="rotate(-14 11 42)" fill="none"/>
+      <rect x="23.5" y="43" width="7" height="9" rx="3.5" fill="#9A6B45"/>
+      <rect x="42" y="43" width="7" height="9" rx="3.5" fill="#9A6B45"/>
+      <circle cx="43.5" cy="22.5" r="3.6" fill="#9A6B45"/>
+      <path d="M55.5 33.5 C55.5 28.5 52.5 24.5 48.5 22.5 C42.5 19 35 18 29 19 C22 20 17.5 24.5 16.5 31.5 C15.8 36.5 16.5 40.5 18 43.5 C20 46.5 24 47.5 29 47.5 C35 47.5 43.5 46.5 48.5 43.5 C52.5 41 55.5 37.5 55.5 33.5 Z" fill="#9A6B45"/>
+      <path d="M52.4 36.6 h3.4 l-0.7 5.4 h-2 Z" fill="#E4972B" stroke-width="2"/>
+    </g>
+    <g fill="#1D2B27"><circle cx="48.5" cy="28.5" r="2"/><circle cx="54.6" cy="31.6" r="1.9"/></g>
+  </symbol>
+
+  <symbol id="ic2" viewBox="0 0 64 64">
+    <g fill="#1D2B27">
+      <ellipse cx="10.5" cy="42" rx="10.5" ry="6.4" transform="rotate(-14 10.5 42)"/>
+      <rect x="23" y="43" width="7.5" height="9.5" rx="3.7"/>
+      <rect x="41.5" y="43" width="7.5" height="9.5" rx="3.7"/>
+      <circle cx="43.5" cy="22" r="4"/>
+      <path d="M55.5 33.5 C55.5 28.5 52.5 24.5 48.5 22.5 C42.5 19 35 18 29 19 C22 20 17.5 24.5 16.5 31.5 C15.8 36.5 16.5 40.5 18 43.5 C20 46.5 24 47.5 29 47.5 C35 47.5 43.5 46.5 48.5 43.5 C52.5 41 55.5 37.5 55.5 33.5 Z"/>
+    </g>
+    <path d="M52.2 36.4 h3.8 l-0.8 5.8 h-2.2 Z" fill="#E4972B"/>
+    <circle cx="48.5" cy="28.5" r="2.4" fill="#F4F1E9"/>
+    <g stroke="#F4F1E9" stroke-width="1.6" opacity="0.8" fill="none" stroke-linecap="round">
+      <path d="M4 40 L15 47 M6 35 L17 42 M15 36 L4 45"/>
+    </g>
+  </symbol>
+
+  <symbol id="ic3" viewBox="0 0 64 64">
+    <g stroke="#1D2B27" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round">
+      <ellipse cx="50" cy="49" rx="11" ry="5.6" transform="rotate(18 50 49)" fill="#9A6B45"/>
+      <g clip-path="url(#t3)" stroke-width="1.5" opacity="0.55" fill="none">
+        <path d="M38 40 L62 54 M38 48 L62 62 M38 32 L62 46"/>
+        <path d="M38 58 L62 44 M38 50 L62 36 M38 66 L62 52"/>
+      </g>
+      <ellipse cx="50" cy="49" rx="11" ry="5.6" transform="rotate(18 50 49)" fill="none"/>
+      <circle cx="19.5" cy="18.5" r="3.4" fill="#9A6B45"/>
+      <circle cx="38.5" cy="18.5" r="3.4" fill="#9A6B45"/>
+      <path d="M29 9 C37.5 9 43 15.5 43 24 C43 30 41 34.5 41 39 C41 47 37 53 29 53 C21 53 17 47 17 39 C17 34.5 15 30 15 24 C15 15.5 20.5 9 29 9 Z" fill="#9A6B45"/>
+      <ellipse cx="29" cy="26.5" rx="7.4" ry="5.4" fill="#B8875C"/>
+    </g>
+    <g stroke="#1D2B27" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M25.4 30.5 h3.1 l-0.5 5.2 h-2.1 Z" fill="#E4972B"/>
+      <path d="M29.5 30.5 h3.1 l-0.5 5.2 h-2.1 Z" fill="#E4972B"/>
+      <rect x="6" y="34.5" width="45" height="5.6" rx="2.8" fill="#7C5233"/>
+      <circle cx="22" cy="40.5" r="3.6" fill="#9A6B45"/>
+      <circle cx="36" cy="40.5" r="3.6" fill="#9A6B45"/>
+    </g>
+    <g fill="#1D2B27"><circle cx="24" cy="20.5" r="2.1"/><circle cx="34" cy="20.5" r="2.1"/><circle cx="29" cy="24.5" r="2"/></g>
+  </symbol>
+
+  <symbol id="ic4" viewBox="0 0 64 64">
+    <g stroke="#1D2B27" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round">
+      <ellipse cx="9" cy="30" rx="8.6" ry="5.2" transform="rotate(-38 9 30)" fill="#9A6B45"/>
+      <circle cx="45" cy="20.5" r="3.4" fill="#9A6B45"/>
+      <path d="M57 30.5 C57 25.5 53.5 21 48.5 19.5 C43.5 18 38.5 19.5 35.5 22.5 C31 20 24 20 19 23.5 C14 27 12 33 12.5 38.5 L57 38.5 Z" fill="#9A6B45"/>
+      <path d="M53.8 31.5 h3.3 l-0.7 5 h-2 Z" fill="#E4972B" stroke-width="2"/>
+    </g>
+    <g fill="#1D2B27"><circle cx="49.5" cy="26" r="2"/><circle cx="56" cy="28.6" r="1.9"/></g>
+    <g fill="none" stroke="#2E6B68" stroke-width="3.2" stroke-linecap="round">
+      <path d="M3 40.5 Q11 36.5 19 40.5 T35 40.5 T51 40.5 T63 40.5"/>
+      <path d="M8 49 Q17 44.5 26 49 T44 49 T60 49"/>
+      <path d="M16 57 Q26 52.5 36 57 T56 57"/>
+    </g>
+  </symbol>
+
+  <symbol id="ic5" viewBox="0 0 64 64">
+    <g stroke="#1D2B27" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round">
+      <ellipse cx="12" cy="24" rx="10" ry="6.2" transform="rotate(-62 12 24)" fill="#9A6B45"/>
+      <g clip-path="url(#t5)" stroke-width="1.5" opacity="0.55" fill="none">
+        <path d="M0 12 L26 30 M0 20 L26 38 M0 4 L26 22"/>
+        <path d="M0 34 L26 16 M0 42 L26 24 M0 26 L26 8"/>
+      </g>
+      <ellipse cx="12" cy="24" rx="10" ry="6.2" transform="rotate(-62 12 24)" fill="none"/>
+      <rect x="24" y="43" width="7" height="9" rx="3.5" fill="#9A6B45"/>
+      <rect x="42" y="43" width="7" height="9" rx="3.5" fill="#9A6B45"/>
+      <circle cx="43.5" cy="24.5" r="3.6" fill="#9A6B45"/>
+      <path d="M55.5 35 C55.5 30 52.5 26.5 48.5 24.5 C42.5 21 35 20.5 29 21.5 C22.5 22.5 18.5 27 18 33.5 C17.6 38.5 18.5 42 20 44.5 C22 47.5 25.5 48.5 30.5 48.5 C36.5 48.5 44 47.5 49 44.5 C53 42 55.5 39 55.5 35 Z" fill="#9A6B45"/>
+      <path d="M52.4 38 h3.4 l-0.7 5.4 h-2 Z" fill="#E4972B" stroke-width="2"/>
+    </g>
+    <g fill="#1D2B27"><circle cx="48.5" cy="30" r="2"/><circle cx="54.6" cy="33" r="1.9"/></g>
+  </symbol>
+
+  <symbol id="ic6" viewBox="0 0 64 64">
+    <g stroke="#1D2B27" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round">
+      <ellipse cx="12" cy="41" rx="10.5" ry="6.6" transform="rotate(-10 12 41)" fill="#9A6B45"/>
+      <circle cx="42" cy="24" r="3.8" fill="#9A6B45"/>
+      <path d="M55 34 C55 27 48 21 37 21 C25 21 18 27 18 35 C18 43 25 47 33 47 C43 47 55 42 55 34 Z" fill="#9A6B45"/>
+      <path d="M51.6 37.4 h3.6 l-0.7 5.6 h-2.2 Z" fill="#E4972B" stroke-width="2.4"/>
+    </g>
+    <g fill="#1D2B27"><circle cx="47" cy="29.5" r="2.2"/><circle cx="54" cy="32.4" r="2"/></g>
+    <g stroke="#1D2B27" stroke-width="2.6" stroke-linecap="round" opacity="0.5" fill="none">
+      <path d="M6 39 L17 44 M8 34.5 L19 39.5"/>
+    </g>
+  </symbol>
+</svg>
+
+<div class="wrap">
+  <header class="page">
+    <p class="eyebrow">Beavyr · application icon · six candidates · second pass</p>
+    <h1>The whole beaver</h1>
+    <p class="lede">Six full animals, each with the paddle tail in view. A low, heavy body, a tiny ear set well back, and a blunt snout with one orange incisor — the head alone was reading as a bear, so none of these rely on it. Pick by number.</p>
+  </header>
+
+  <main class="plate">
+
+    <article class="spec">
+      <div class="spec-head"><span class="num">01</span><h2>Standing, drawn</h2></div>
+      <div class="tile"><svg><use href="#ic1"/></svg></div>
+      <div class="sizes">
+        <div class="size"><div class="chip s48"><svg><use href="#ic1"/></svg></div><span>48</span></div>
+        <div class="size"><div class="chip s32"><svg><use href="#ic1"/></svg></div><span>32</span></div>
+        <div class="size"><div class="chip s24"><svg><use href="#ic1"/></svg></div><span>24</span></div>
+      </div>
+      <p class="note">The animal in profile: humped back, short legs, tail flat behind it. The tail is a third of the width, which is what stops it reading as a rodent.</p>
+      <code class="file">01-side-line.svg</code>
+    </article>
+
+    <article class="spec">
+      <div class="spec-head"><span class="num">02</span><h2>Standing, solid</h2></div>
+      <div class="tile"><svg><use href="#ic2"/></svg></div>
+      <div class="sizes">
+        <div class="size"><div class="chip s48"><svg><use href="#ic2"/></svg></div><span>48</span></div>
+        <div class="size"><div class="chip s32"><svg><use href="#ic2"/></svg></div><span>32</span></div>
+        <div class="size"><div class="chip s24"><svg><use href="#ic2"/></svg></div><span>24</span></div>
+      </div>
+      <p class="note">The same pose as one shape. Nothing to fill in at small sizes, so it stays legible where the outlined versions start to clog.</p>
+      <code class="file">02-side-solid.svg</code>
+    </article>
+
+    <article class="spec">
+      <div class="spec-head"><span class="num">03</span><h2>Sitting, gnawing</h2></div>
+      <div class="tile"><svg><use href="#ic3"/></svg></div>
+      <div class="sizes">
+        <div class="size"><div class="chip s48"><svg><use href="#ic3"/></svg></div><span>48</span></div>
+        <div class="size"><div class="chip s32"><svg><use href="#ic3"/></svg></div><span>32</span></div>
+        <div class="size"><div class="chip s24"><svg><use href="#ic3"/></svg></div><span>24</span></div>
+      </div>
+      <p class="note">Upright, holding a branch, tail out to the side. The pose everyone pictures — and the teeth have something to do.</p>
+      <code class="file">03-sitting-branch.svg</code>
+    </article>
+
+    <article class="spec">
+      <div class="spec-head"><span class="num">04</span><h2>Swimming</h2></div>
+      <div class="tile"><svg><use href="#ic4"/></svg></div>
+      <div class="sizes">
+        <div class="size"><div class="chip s48"><svg><use href="#ic4"/></svg></div><span>48</span></div>
+        <div class="size"><div class="chip s32"><svg><use href="#ic4"/></svg></div><span>32</span></div>
+        <div class="size"><div class="chip s24"><svg><use href="#ic4"/></svg></div><span>24</span></div>
+      </div>
+      <p class="note">Back and head above the water, tail trailing behind, three ripple lines. The most placid of the six.</p>
+      <code class="file">04-swimming.svg</code>
+    </article>
+
+    <article class="spec">
+      <div class="spec-head"><span class="num">05</span><h2>Tail up</h2></div>
+      <div class="tile"><svg><use href="#ic5"/></svg></div>
+      <div class="sizes">
+        <div class="size"><div class="chip s48"><svg><use href="#ic5"/></svg></div><span>48</span></div>
+        <div class="size"><div class="chip s32"><svg><use href="#ic5"/></svg></div><span>32</span></div>
+        <div class="size"><div class="chip s24"><svg><use href="#ic5"/></svg></div><span>24</span></div>
+      </div>
+      <p class="note">Profile again, but the tail lifted behind the rump instead of laid flat — the paddle is fully visible rather than foreshortened.</p>
+      <code class="file">05-tail-raised.svg</code>
+    </article>
+
+    <article class="spec">
+      <div class="spec-head"><span class="num">06</span><h2>Blunt</h2></div>
+      <div class="tile"><svg><use href="#ic6"/></svg></div>
+      <div class="sizes">
+        <div class="size"><div class="chip s48"><svg><use href="#ic6"/></svg></div><span>48</span></div>
+        <div class="size"><div class="chip s32"><svg><use href="#ic6"/></svg></div><span>32</span></div>
+        <div class="size"><div class="chip s24"><svg><use href="#ic6"/></svg></div><span>24</span></div>
+      </div>
+      <p class="note">The fewest strokes that still hold: one body, one tail, one ear, one tooth. Nothing that can break at 24 pixels.</p>
+      <code class="file">06-chunky.svg</code>
+    </article>
+
+  </main>
+
+  <footer class="page">
+    <h3>Notes</h3>
+    <p>The teeth are orange on purpose. Beaver incisors really are — the enamel is reinforced with iron, which is what lets them cut hardwood without the edge wearing flat. It is the one colour the animal actually gives you, so it is the accent throughout.</p>
+    <p>Each mark sits on a rounded pale tile. That tile is part of the icon: application menus and docks are dark on some desktops and light on others, and a bare dark outline disappears against the first kind. Whichever you choose, a dark-tile version is a two-minute change.</p>
+    <p>What makes a beaver read as a beaver is the silhouette, not the face: body twice as long as it is tall, legs barely showing, and a tail wide enough to be unmistakable. The ear is deliberately small and set back — big round ears on top of the head are what turned the first attempt into a bear.</p>
+    <div class="swatches">
+      <div class="sw"><i style="background:#1D2B27"></i><code>#1D2B27 ink</code></div>
+      <div class="sw"><i style="background:#9A6B45"></i><code>#9A6B45 fur</code></div>
+      <div class="sw"><i style="background:#E4972B"></i><code>#E4972B incisor</code></div>
+      <div class="sw"><i style="background:#2E6B68"></i><code>#2E6B68 water</code></div>
+      <div class="sw"><i style="background:#F4F1E9"></i><code>#F4F1E9 tile</code></div>
+    </div>
+    <p class="path">Files: <strong>packaging/icons/</strong> in the Beavyr project — this page is <strong>packaging/icons/preview.html</strong>.</p>
+  </footer>
+</div>

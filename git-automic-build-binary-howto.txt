@@ -1,0 +1,33 @@
+
+What you need to do to use GitHub's build service
+
+Everything is prepared. Three steps, all yours:
+
+1. Commit and push the new files (I haven't committed anything):
+.github/workflows/release.yml     the build recipe
+packaging/                        icon, menu entry, build script
+.gitignore                        updated
+
+2. Tag a version and push the tag:
+git tag v0.1.0
+git push origin v0.1.0
+
+3. Watch it under the Actions tab. About fifteen minutes later there's a release page with beavyr_0.1.0_amd64.deb attached.
+
+Nothing to configure, no keys, no sign-up — the workflow uses the token GitHub gives it automatically.
+
+What's in the workflow. It only runs on tags, so you don't burn your private-repo minutes on every push. It builds on Ubuntu 22.04 rather than 24.04, so the package installs on older machines too. It skips examples/ when checking out, which saves several minutes a run. And it stops with a clear message if the tag says v0.2.0 while Cargo.toml still says 0.1.0.
+
+You can also run it by hand from the Actions tab to check a change compiles, without making a release.
+
+Windows and macOS aren't in it yet, as we discussed — add them when you know you need them.
+
+On the examples folder
+
+I did not ignore examples/ wholesale, and I want you to know why before you decide otherwise. I hid the folder and ran the tests: 531 passed, 97 failed. Those 97 read geometries, ORCA outputs and Hessians from it at runtime. Dropping the folder breaks 15% of your suite for anyone who clones the repo.
+
+What I ignored instead is the part that's actually the problem: 355 MB across 19 files that Beavyr cannot read at all — .gbw, .cis, .densities, .mkl. There's no parser for any of them and none planned. That's essentially your entire repo size.
+
+But be aware .gitignore alone doesn't do what you asked. Those files are already committed, so ignoring them only stops new ones. To actually stop uploading them you need to untrack them, and to actually shrink the 366 MB .git you'd have to rewrite history and force-push. Both commands, and their consequences, are written down at the bottom of packaging/README.md. I haven't run either — the history rewrite in particular is not something to do behind your back.
+
+Also noticed: there's a stray Beavyer_Install.txt in the project root that isn't mine — I've left it alone.

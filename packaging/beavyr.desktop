@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Beavyr
+GenericName=Molecular Viewer
+Comment=View molecules and run quantum-chemistry calculations
+Exec=beavyr
+Icon=beavyr
+Terminal=false
+Categories=Science;Chemistry;
+Keywords=molecule;chemistry;xyz;orbital;spectrum;vibration;xtb;orca;
+StartupNotify=true
+StartupWMClass=Beavyr

@@ -498,6 +498,124 @@ pub fn atomic_mass_amu(sym: &str) -> Option<f64> {
     atomic_number(sym).map(|z| MASSES[(z - 1) as usize])
 }
 
+/// `NA` and `na` to `Na`: the capitalisation element symbols are written in.
+/// Returns `None` for anything that is not one or two ASCII letters, so a
+/// stray token in an XYZ file is reported as unknown rather than mangled.
+fn title_case(sym: &str) -> Option<String> {
+    if sym.is_empty() || sym.len() > 2 || !sym.chars().all(|c| c.is_ascii_alphabetic()) {
+        return None;
+    }
+    let mut out = String::with_capacity(sym.len());
+    for (i, c) in sym.chars().enumerate() {
+        if i == 0 {
+            out.push(c.to_ascii_uppercase());
+        } else {
+            out.push(c.to_ascii_lowercase());
+        }
+    }
+    Some(out)
+}
+
+/// What a structure is made of: how many atoms, its molecular formula, and
+/// its molecular weight.
+///
+/// This is the sanity check a chemist makes before spending CPU on a
+/// structure -- a formula one hydrogen short of what you expected means the
+/// geometry is wrong, and it is far cheaper to notice here than after the
+/// optimisation has run.
+pub struct Composition {
+    /// Total number of atoms, unknown symbols included.
+    pub natoms: usize,
+    /// Molecular formula in Hill notation, e.g. `C12 : H24 : O2`.
+    pub formula: String,
+    /// Molecular weight in g/mol, or `None` if any symbol has no known mass.
+    /// Deliberately not a partial sum: a weight quietly missing one atom's
+    /// contribution is worse than no weight at all.
+    pub mass_amu: Option<f64>,
+    /// Symbols that are in no element table, in the order first met. Shown to
+    /// the user rather than swallowed, since they are usually a typo in the
+    /// XYZ file.
+    pub unknown: Vec<String>,
+}
+
+/// Summarise a list of atomic symbols.
+///
+/// Ordering is Hill notation, the convention every chemist reads formulas in:
+/// carbon first, then hydrogen, then every other element alphabetically. With
+/// no carbon present, all elements are alphabetical. A count of one is left
+/// off, so water is `H2 : O` and not `H2 : O1`.
+pub fn composition(atoms: &[String]) -> Composition {
+    use std::collections::BTreeMap;
+
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+    let mut unknown: Vec<String> = Vec::new();
+
+    for sym in atoms {
+        // Symbols reach us straight from an XYZ file, so `NA`, `na` and `Na`
+        // all turn up. Canonicalise before counting, or one element lands in
+        // the formula three times.
+        //
+        // Note this is done here only. `atomic_number` itself is
+        // case-sensitive, as is `covalent_radius_angstrom`, so an oddly-cased
+        // file still draws with default radii -- a separate problem, not one
+        // to fix silently from inside a formula routine.
+        let canon = title_case(sym)
+            .and_then(|t| atomic_number(&t).and_then(element_symbol))
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| {
+                if !unknown.iter().any(|u| u == sym) {
+                    unknown.push(sym.clone());
+                }
+                sym.clone()
+            });
+        *counts.entry(canon).or_insert(0) += 1;
+    }
+
+    // Hill order: C, then H, then the rest alphabetically -- which is the
+    // order `BTreeMap` already holds them in once C and H are lifted out.
+    let mut ordered: Vec<(String, usize)> = Vec::new();
+    let has_carbon = counts.contains_key("C");
+    if has_carbon {
+        for lead in ["C", "H"] {
+            if let Some(n) = counts.remove(lead) {
+                ordered.push((lead.to_string(), n));
+            }
+        }
+    }
+    ordered.extend(counts.into_iter());
+
+    let formula = ordered
+        .iter()
+        .map(|(sym, n)| {
+            if *n == 1 {
+                sym.clone()
+            } else {
+                format!("{sym}{n}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" : ");
+
+    let mass_amu = if unknown.is_empty() {
+        Some(
+            ordered
+                .iter()
+                .map(|(sym, n)| atomic_mass_amu(sym).unwrap_or(0.0) * *n as f64)
+                .sum(),
+        )
+    } else {
+        None
+    };
+
+    Composition {
+        natoms: atoms.len(),
+        formula,
+        mass_amu,
+        unknown,
+    }
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -527,6 +645,90 @@ mod tests {
         let mol = Molecule::from_xyz("");
         assert!(mol.atoms.is_empty());
         assert!(mol.pos.is_empty());
+    }
+
+    fn syms(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// Hill notation is what a chemist reads: carbon, then hydrogen, then the
+    /// rest alphabetically -- regardless of the order the atoms sit in the
+    /// XYZ file.
+    #[test]
+    fn the_formula_is_written_in_hill_order() {
+        let atoms = syms(&["O", "H", "C", "H", "C", "O", "H", "H"]);
+        assert_eq!(composition(&atoms).formula, "C2 : H4 : O2");
+    }
+
+    /// With no carbon there is nothing to lift out, so everything is
+    /// alphabetical -- water is `H2 : O`, not `O : H2`.
+    #[test]
+    fn without_carbon_every_element_is_alphabetical() {
+        let atoms = syms(&["O", "H", "H"]);
+        assert_eq!(composition(&atoms).formula, "H2 : O");
+    }
+
+    /// A count of one is left off, as in every printed formula.
+    #[test]
+    fn a_single_atom_of_an_element_carries_no_count() {
+        let atoms = syms(&["C", "H", "H", "H", "H"]);
+        assert_eq!(composition(&atoms).formula, "C : H4");
+    }
+
+    /// XYZ files come with the case however the writing program felt: `NA`
+    /// from a fixed-format writer, `na` from a careless one. All three are
+    /// sodium and must land in one entry.
+    #[test]
+    fn symbols_are_counted_regardless_of_how_they_were_capitalised() {
+        let atoms = syms(&["NA", "na", "Na", "cl", "Cl"]);
+        let c = composition(&atoms);
+        assert_eq!(c.formula, "Cl2 : Na3");
+        assert_eq!(c.natoms, 5);
+    }
+
+    /// The number the user is really checking: did I lose an atom?
+    #[test]
+    fn the_atom_count_is_the_raw_number_of_atoms() {
+        let atoms = syms(&["C", "H", "H", "H", "H"]);
+        assert_eq!(composition(&atoms).natoms, 5);
+    }
+
+    #[test]
+    fn the_molecular_weight_sums_the_standard_atomic_weights() {
+        // Water: 2 * 1.008 + 15.999
+        let atoms = syms(&["O", "H", "H"]);
+        let mass = composition(&atoms).mass_amu.unwrap();
+        assert!((mass - 18.015).abs() < 1e-6, "got {mass}");
+    }
+
+    #[test]
+    fn dodecane_diol_reproduces_the_formula_in_the_request() {
+        let mut atoms = vec!["C".to_string(); 12];
+        atoms.extend(vec!["H".to_string(); 24]);
+        atoms.extend(vec!["O".to_string(); 2]);
+        let c = composition(&atoms);
+        assert_eq!(c.formula, "C12 : H24 : O2");
+        assert_eq!(c.natoms, 38);
+    }
+
+    /// A typo in an XYZ file must not turn into a molecular weight that is
+    /// quietly too small -- the user would trust it.
+    #[test]
+    fn an_unknown_symbol_suppresses_the_weight_and_is_named() {
+        let atoms = syms(&["C", "H", "Xx"]);
+        let c = composition(&atoms);
+        assert_eq!(c.mass_amu, None);
+        assert_eq!(c.unknown, vec!["Xx".to_string()]);
+        assert_eq!(c.natoms, 3);
+    }
+
+    /// The program opens empty, so the panel asks for this on the first frame.
+    #[test]
+    fn an_empty_molecule_has_an_empty_formula_and_no_weight() {
+        let c = composition(&[]);
+        assert_eq!(c.natoms, 0);
+        assert_eq!(c.formula, "");
+        assert_eq!(c.mass_amu, Some(0.0));
     }
 
     #[test]

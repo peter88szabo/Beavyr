@@ -394,19 +394,30 @@ fn load_from_dialog(state: &mut UvVisState) {
     ) else {
         return;
     };
-    match std::fs::read_to_string(&path) {
-        Ok(text) => match super::orca::parse_orca_tddft(&text, &path) {
+    load_tddft_from_path(&path, state);
+}
+
+/// Read excited states from an output file we already have the path to.
+///
+/// Shared by the dialog button and by a filename given on the command line.
+/// Returns whether it worked; on failure `state.load_error` says why.
+pub(crate) fn load_tddft_from_path(path: &std::path::Path, state: &mut UvVisState) -> bool {
+    match std::fs::read_to_string(path) {
+        Ok(text) => match super::orca::parse_orca_tddft(&text, path) {
             Ok(result) => {
                 state.result = Some(result);
                 state.load_error = None;
                 state.expanded_root = None;
+                true
             }
             Err(err) => {
                 state.load_error = Some(format!("{}: {err}", path.display()));
+                false
             }
         },
         Err(err) => {
             state.load_error = Some(format!("cannot read {}: {err}", path.display()));
+            false
         }
     }
 }

@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="Beavyr">
+  <defs>
+    <clipPath id="beavyr-tail"><ellipse cx="11" cy="42" rx="10" ry="6.2" transform="rotate(-14 11 42)"/></clipPath>
+  </defs>
+  <rect x="0" y="0" width="256" height="256" rx="56" ry="56" fill="#F4F1E9"/>
+  <g transform="translate(28.6 9.3) scale(3.37)">
+    <g stroke="#1D2B27" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round">
+      <ellipse cx="11" cy="42" rx="10" ry="6.2" transform="rotate(-14 11 42)" fill="#9A6B45"/>
+      <g clip-path="url(#beavyr-tail)" stroke-width="1.5" opacity="0.55" fill="none">
+        <path d="M0 30 L26 48 M0 38 L26 56 M0 46 L26 64"/>
+        <path d="M0 52 L26 34 M0 60 L26 42 M0 44 L26 26"/>
+      </g>
+      <ellipse cx="11" cy="42" rx="10" ry="6.2" transform="rotate(-14 11 42)" fill="none"/>
+      <rect x="23.5" y="43" width="7" height="9" rx="3.5" fill="#9A6B45"/>
+      <rect x="42" y="43" width="7" height="9" rx="3.5" fill="#9A6B45"/>
+      <circle cx="43.5" cy="22.5" r="3.6" fill="#9A6B45"/>
+      <path d="M55.5 33.5 C55.5 28.5 52.5 24.5 48.5 22.5 C42.5 19 35 18 29 19 C22 20 17.5 24.5 16.5 31.5 C15.8 36.5 16.5 40.5 18 43.5 C20 46.5 24 47.5 29 47.5 C35 47.5 43.5 46.5 48.5 43.5 C52.5 41 55.5 37.5 55.5 33.5 Z" fill="#9A6B45"/>
+      <path d="M52.4 36.6 h3.4 l-0.7 5.4 h-2 Z" fill="#E4972B" stroke-width="2"/>
+    </g>
+    <g fill="#1D2B27"><circle cx="48.5" cy="28.5" r="2"/><circle cx="54.6" cy="31.6" r="1.9"/></g>
+  </g>
+</svg>

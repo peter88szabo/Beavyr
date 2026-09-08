@@ -163,6 +163,7 @@ pub fn ui_panel(
         ResMut<UiLayout>,
         ResMut<UvVisState>,
         ResMut<crate::uvvis::run::SpectrumTask>,
+        Res<crate::cli::StartupLoadReport>,
     ),
 ) {
     // bevy_egui 0.41: ctx_mut() returns Result; if it fails, skip this frame
@@ -182,6 +183,7 @@ pub fn ui_panel(
         mut ui_layout,
         mut uvvis_state,
         mut uvvis_task,
+        startup_report,
     ) = builder_resources;
     if !*style_initialized {
         ctx.style_mut_of(ctx.theme(), |style| {
@@ -344,6 +346,58 @@ pub fn ui_panel(
                 Tab::Structure.default_size(),
                 "Structure (XYZ)",
                 |ui| {
+                // What happened to files named on the command line. Shown
+                // here because the Structure panel is the one window that is
+                // always present, and a file that failed to load has nowhere
+                // else to say so -- an empty viewport with no explanation is
+                // exactly the silent failure this program avoids elsewhere.
+                if !startup_report.messages.is_empty() {
+                    for (message, is_error) in &startup_report.messages {
+                        if *is_error {
+                            ui.colored_label(egui::Color32::from_rgb(220, 110, 60), message);
+                        } else {
+                            ui.weak(message);
+                        }
+                    }
+                    ui.separator();
+                    ui.add_space(4.0);
+                }
+
+                // What the structure is made of, before anything is done to
+                // it. A formula one hydrogen short of the expected one is the
+                // cheapest possible way to catch a broken geometry, and it
+                // costs nothing to look at.
+                {
+                    let comp = crate::molecule::composition(&mol.atoms);
+                    if comp.natoms == 0 {
+                        ui.weak("No structure loaded.");
+                    } else {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.strong(format!("{} atoms", comp.natoms));
+                            ui.separator();
+                            ui.monospace(&comp.formula);
+                        });
+                        match comp.mass_amu {
+                            Some(m) => {
+                                ui.weak(format!("Molecular weight {m:.3} g/mol"));
+                            }
+                            None => {
+                                // Never a partial weight: the user would read
+                                // it as the real one.
+                                ui.colored_label(
+                                    egui::Color32::from_rgb(200, 120, 40),
+                                    format!(
+                                        "No molecular weight -- unknown element{}: {}",
+                                        if comp.unknown.len() == 1 { "" } else { "s" },
+                                        comp.unknown.join(", ")
+                                    ),
+                                );
+                            }
+                        }
+                    }
+                    ui.add_space(6.0);
+                }
+
                 let show_type_id = egui::Id::new("show_atom_type");
                 let show_index_id = egui::Id::new("show_atom_index");
                 let edit_mode_id = egui::Id::new("xyz_edit_mode");
@@ -2131,7 +2185,7 @@ fn refresh_live_xyz_cache(cache: &mut XyzBuffer, mol: &Molecule) {
     }
 }
 
-fn compute_centroid(points: &[Vec3]) -> Option<Vec3> {
+pub(crate) fn compute_centroid(points: &[Vec3]) -> Option<Vec3> {
     if points.is_empty() {
         return None;
     }
@@ -2160,7 +2214,7 @@ fn egui_to_color(c: egui::Color32) -> Color {
     )
 }
 
-fn apply_xyz_text(
+pub(crate) fn apply_xyz_text(
     text: &str,
     mol: &mut Molecule,
     cam: &mut crate::camera::OrbitCamera,
@@ -2186,6 +2240,60 @@ fn apply_xyz_text(
         Some("Multiple XYZ frames detected; loaded only the first frame.".to_string())
     } else {
         None
+    }
+}
+
+/// Read an XYZ file from a path we already have, single-frame or trajectory.
+///
+/// The Structure panel's button, the Trajectory panel's button and a filename
+/// given on the command line all end up here, so the multi-frame case is
+/// decided in one place: more than one frame becomes a trajectory rather than
+/// a warning that the other frames were thrown away.
+///
+/// Returns how many frames were loaded.
+pub(crate) fn load_xyz_from_path(
+    path: &std::path::Path,
+    xyz_buf: &mut XyzBuffer,
+    traj: &mut trajectory::TrajectoryState,
+    mol: &mut Molecule,
+    settings: &mut MolSettings,
+    cam: &mut crate::camera::OrbitCamera,
+    ev_changed: &mut MessageWriter<MoleculeChanged>,
+) -> Result<usize, String> {
+    let text = fs::read_to_string(path)
+        .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+
+    let frames = trajectory::parse_multi_xyz(&text)
+        .map_err(|e| format!("{}: {e}", path.display()))?;
+    if frames.is_empty() {
+        return Err(format!("{}: no atoms in this file", path.display()));
+    }
+
+    xyz_buf.last_dir = path.parent().map(|p| p.to_path_buf());
+    xyz_buf.current_file = Some(path.to_path_buf());
+    xyz_buf.text = text.clone();
+    xyz_buf.warning = None;
+
+    if frames.len() > 1 {
+        traj.last_dir = path.parent().map(|p| p.to_path_buf());
+        traj.current_file = Some(path.to_path_buf());
+        traj.frames = frames;
+        traj.current_frame = 0;
+        traj.playing = false;
+        traj.accum = 0.0;
+        traj.last_applied = None;
+        traj.overlay_dirty = true;
+        let n = traj.frames.len();
+        trajectory::apply_current_frame(traj, mol, settings, ev_changed, true, Some(cam));
+        // `apply_current_frame` only reports a coordinate update -- it runs for
+        // every playback frame too. Loading a file replaces the structure, so
+        // say so, or stale measurements carry over. `false`: the call above
+        // already centred the camera.
+        ev_changed.write(MoleculeChanged::parse_xyz(false));
+        Ok(n)
+    } else {
+        apply_xyz_text(&text, mol, cam, ev_changed);
+        Ok(1)
     }
 }
 

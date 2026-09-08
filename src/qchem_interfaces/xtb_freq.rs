@@ -1155,6 +1155,19 @@ fn load_gradient_from_dialog(
     ) else {
         return false;
     };
+    load_gradient_from_path(&path, freq_panel, freq_task)
+}
+
+/// The half of the above that does the work, given a path we already have.
+///
+/// Split out so a file named on the command line goes through exactly the same
+/// checks as one chosen in the dialog -- including the check that the gradient
+/// belongs to the Hessian already loaded.
+pub(crate) fn load_gradient_from_path(
+    path: &std::path::Path,
+    freq_panel: &mut XtbFreqPanelState,
+    freq_task: &mut XtbFrequencyTask,
+) -> bool {
     let Some(HessianSource::Computed(raw)) = freq_task.last_raw.clone() else {
         freq_task.last_message = Some(
             "Load a Hessian first: the gradient has to be checked against it.".to_string(),
@@ -1162,7 +1175,7 @@ fn load_gradient_from_dialog(
         freq_task.last_is_error = true;
         return false;
     };
-    let text = match std::fs::read_to_string(&path) {
+    let text = match std::fs::read_to_string(path) {
         Ok(text) => text,
         Err(err) => {
             freq_task.last_message = Some(format!("Cannot read {}: {err}", path.display()));
@@ -1212,12 +1225,25 @@ fn load_hessian_from_dialog(freq_panel: &mut XtbFreqPanelState, freq_task: &mut 
     ) else {
         return;
     };
-    let (source, file_scale) = match read_hessian_file(&path) {
+    load_hessian_from_path(&path, freq_panel, freq_task);
+}
+
+/// The half of the above that does the work, given a path we already have.
+///
+/// Split out so a `.hess` named on the command line is analysed by exactly the
+/// same code as one chosen in the dialog. Returns whether it worked; either
+/// way `freq_task.last_message` says what happened.
+pub(crate) fn load_hessian_from_path(
+    path: &std::path::Path,
+    freq_panel: &mut XtbFreqPanelState,
+    freq_task: &mut XtbFrequencyTask,
+) -> bool {
+    let (source, file_scale) = match read_hessian_file(path) {
         Ok(pair) => pair,
         Err(err) => {
             freq_task.last_message = Some(err);
             freq_task.last_is_error = true;
-            return;
+            return false;
         }
     };
     if let Some(scale) = file_scale {
@@ -1253,9 +1279,11 @@ fn load_hessian_from_dialog(freq_panel: &mut XtbFreqPanelState, freq_task: &mut 
             freq_task.last_message =
                 Some(format!("Loaded {name}: {natoms} atoms{scaling}."));
             freq_task.last_is_error = false;
+            true
         }
         false => {
             freq_task.last_is_error = true;
+            false
         }
     }
 }

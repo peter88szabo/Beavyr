@@ -1,0 +1,7 @@
+That's the file to send. Your colleagues do:
+
+sudo apt install ./beavyr_0.1.0_amd64.deb     # or just double-click it
+
+and to get rid of it:
+
+sudo apt remove beavyr

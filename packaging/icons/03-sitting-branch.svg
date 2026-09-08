@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Beaver sitting, gnawing a branch">
+  <defs><clipPath id="t3"><ellipse cx="50" cy="49" rx="11" ry="5.6" transform="rotate(18 50 49)"/></clipPath></defs>
+  <g stroke="#1D2B27" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round">
+    <ellipse cx="50" cy="49" rx="11" ry="5.6" transform="rotate(18 50 49)" fill="#9A6B45"/>
+    <g clip-path="url(#t3)" stroke-width="1.5" opacity="0.55" fill="none">
+      <path d="M38 40 L62 54 M38 48 L62 62 M38 32 L62 46"/>
+      <path d="M38 58 L62 44 M38 50 L62 36 M38 66 L62 52"/>
+    </g>
+    <ellipse cx="50" cy="49" rx="11" ry="5.6" transform="rotate(18 50 49)" fill="none"/>
+    <circle cx="19.5" cy="18.5" r="3.4" fill="#9A6B45"/>
+    <circle cx="38.5" cy="18.5" r="3.4" fill="#9A6B45"/>
+    <path d="M29 9 C37.5 9 43 15.5 43 24 C43 30 41 34.5 41 39 C41 47 37 53 29 53 C21 53 17 47 17 39 C17 34.5 15 30 15 24 C15 15.5 20.5 9 29 9 Z" fill="#9A6B45"/>
+    <ellipse cx="29" cy="26.5" rx="7.4" ry="5.4" fill="#B8875C"/>
+  </g>
+  <g stroke="#1D2B27" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M25.4 30.5 h3.1 l-0.5 5.2 h-2.1 Z" fill="#E4972B"/>
+    <path d="M29.5 30.5 h3.1 l-0.5 5.2 h-2.1 Z" fill="#E4972B"/>
+    <rect x="6" y="34.5" width="45" height="5.6" rx="2.8" fill="#7C5233"/>
+    <circle cx="22" cy="40.5" r="3.6" fill="#9A6B45"/>
+    <circle cx="36" cy="40.5" r="3.6" fill="#9A6B45"/>
+  </g>
+  <g fill="#1D2B27">
+    <circle cx="24" cy="20.5" r="2.1"/>
+    <circle cx="34" cy="20.5" r="2.1"/>
+    <circle cx="29" cy="24.5" r="2"/>
+  </g>
+</svg>

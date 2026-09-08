@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Beaver with tail raised">
+  <defs><clipPath id="t5"><ellipse cx="12" cy="24" rx="10" ry="6.2" transform="rotate(-62 12 24)"/></clipPath></defs>
+  <g stroke="#1D2B27" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round">
+    <ellipse cx="12" cy="24" rx="10" ry="6.2" transform="rotate(-62 12 24)" fill="#9A6B45"/>
+    <g clip-path="url(#t5)" stroke-width="1.5" opacity="0.55" fill="none">
+      <path d="M0 12 L26 30 M0 20 L26 38 M0 4 L26 22"/>
+      <path d="M0 34 L26 16 M0 42 L26 24 M0 26 L26 8"/>
+    </g>
+    <ellipse cx="12" cy="24" rx="10" ry="6.2" transform="rotate(-62 12 24)" fill="none"/>
+    <rect x="24" y="43" width="7" height="9" rx="3.5" fill="#9A6B45"/>
+    <rect x="42" y="43" width="7" height="9" rx="3.5" fill="#9A6B45"/>
+    <circle cx="43.5" cy="24.5" r="3.6" fill="#9A6B45"/>
+    <path d="M55.5 35 C55.5 30 52.5 26.5 48.5 24.5 C42.5 21 35 20.5 29 21.5 C22.5 22.5 18.5 27 18 33.5 C17.6 38.5 18.5 42 20 44.5 C22 47.5 25.5 48.5 30.5 48.5 C36.5 48.5 44 47.5 49 44.5 C53 42 55.5 39 55.5 35 Z" fill="#9A6B45"/>
+    <path d="M52.4 38 h3.4 l-0.7 5.4 h-2 Z" fill="#E4972B" stroke-width="2"/>
+  </g>
+  <g fill="#1D2B27">
+    <circle cx="48.5" cy="30" r="2"/>
+    <circle cx="54.6" cy="33" r="1.9"/>
+  </g>
+</svg>

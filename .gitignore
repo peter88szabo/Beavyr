@@ -4,3 +4,32 @@
 *.swp
 *.swo
 *~
+
+# Binary scratch files from ORCA runs under examples/.
+#
+# These are 355 MB of the repository and Beavyr cannot read a single one of
+# them -- there is no parser for any of these formats, and none is planned.
+# The text files beside them (.xyz .out .hess .molden .engrad) are what the
+# tests actually read, and those stay.
+#
+# NOTE: ignoring them here only stops NEW ones being added. The copies already
+# committed stay in the repository until they are untracked -- see the note at
+# the bottom of packaging/README.md.
+*.gbw
+*.cis
+*.densities
+*.densitiesinfo
+*.mkl
+*.cpcm
+*.cpcm_corr
+*.smd
+*.smd.grd
+*.carthess
+*.bibtex
+*.property.txt
+
+# Cluster job leftovers
+slurm-*.out
+
+# Scratch
+continue.txt

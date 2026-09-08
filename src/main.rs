@@ -4,6 +4,7 @@ use bevy_egui::{EguiGlobalSettings, EguiPlugin, EguiPrimaryContextPass};
 
 mod bond_order;
 mod camera;
+mod cli;
 mod color_schemes;
 mod custom_schemes;
 mod diagnostics;
@@ -56,6 +57,16 @@ use molecule_builder::builder_ui::{
 };
 
 fn main() {
+    // `--help` is answered before Bevy is built. Handling it in a `Startup`
+    // system, as this first did, means the window is already on screen by the
+    // time the text prints -- the user asked a question and got a flash of an
+    // application.
+    let cmd = cli::parse_args(std::env::args().skip(1));
+    if cmd.help {
+        println!("{}", cli::help_text());
+        return;
+    }
+
     App::new()
         .add_plugins(
             DefaultPlugins
@@ -133,7 +144,13 @@ fn main() {
         .init_resource::<uvvis::run::SpectrumTask>()
         .init_resource::<ui_layout::UiLayout>()
         // scene
-        .add_systems(Startup, (setup, center_camera_on_startup))
+        // Files named on the command line load before the camera is centred,
+        // so the view frames what was loaded rather than an empty scene.
+        .init_resource::<cli::StartupLoadReport>()
+        .add_systems(
+            Startup,
+            (setup, cli::load_command_line_files, center_camera_on_startup).chain(),
+        )
         // egui pass
         .add_systems(EguiPrimaryContextPass, ui::ui_panel)
         .add_systems(

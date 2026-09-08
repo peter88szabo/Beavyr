@@ -70,6 +70,48 @@ fn save_molden(state: &mut OrbitalState) {
     }
 }
 
+/// Read a Molden file from a path we already have.
+///
+/// The dialog button and a filename given on the command line both come
+/// through here, so an orbital file opens the same way however it arrived.
+/// Returns whether it worked; on failure `state.warning` says why.
+pub(crate) fn load_molden_from_path(
+    path: &std::path::Path,
+    state: &mut OrbitalState,
+    mol: &mut Molecule,
+    settings: &mut MolSettings,
+    ev_changed: &mut MessageWriter<MoleculeChanged>,
+) -> bool {
+    state.last_dir = path.parent().map(|p| p.to_path_buf());
+    state.warning = None;
+    match std::fs::read_to_string(path) {
+        Ok(text) => match parse_molden(&text) {
+            Ok(data) => {
+                adopt_geometry(&data, mol, ev_changed);
+                // Sticks keep the structure readable without filling the
+                // volume the isosurface needs to occupy; solid spheres hide
+                // the lobes they sit inside.
+                settings.representation = RepresentationMode::SticksRounded;
+                settings.geometry_dirty = true;
+                let name = path.file_name().map(|n| n.to_string_lossy().into_owned());
+                // A file the user opened needs no provenance line: its name is
+                // the provenance, and the file is already on disk so there is
+                // nothing to save.
+                state.adopt(data, name, None, None);
+                true
+            }
+            Err(error) => {
+                state.warning = Some(format!("Could not read Molden file: {error}"));
+                false
+            }
+        },
+        Err(error) => {
+            state.warning = Some(format!("Could not open file: {error}"));
+            false
+        }
+    }
+}
+
 pub fn orbital_panel(
     ui: &mut egui::Ui,
     state: &mut OrbitalState,
@@ -82,32 +124,7 @@ pub fn orbital_panel(
             let dialog =
                 crate::recent_dir::open().add_filter("Molden", &["molden", "molden.input", "inp"]);
             if let Some(path) = crate::recent_dir::pick_file(dialog) {
-                state.last_dir = path.parent().map(|p| p.to_path_buf());
-                state.warning = None;
-                match std::fs::read_to_string(&path) {
-                    Ok(text) => match parse_molden(&text) {
-                        Ok(data) => {
-                            adopt_geometry(&data, mol, ev_changed);
-                            // Sticks keep the structure readable without filling
-                            // the volume the isosurface needs to occupy; solid
-                            // spheres hide the lobes they sit inside.
-                            settings.representation = RepresentationMode::SticksRounded;
-                            settings.geometry_dirty = true;
-                            let name =
-                                path.file_name().map(|n| n.to_string_lossy().into_owned());
-                            // A file the user opened needs no provenance line:
-                            // its name is the provenance, and the file is
-                            // already on disk so there is nothing to save.
-                            state.adopt(data, name, None, None);
-                        }
-                        Err(error) => {
-                            state.warning = Some(format!("Could not read Molden file: {error}"));
-                        }
-                    },
-                    Err(error) => {
-                        state.warning = Some(format!("Could not open file: {error}"));
-                    }
-                }
+                load_molden_from_path(&path, state, mol, settings, ev_changed);
             }
         }
         if state.data.is_some() && ui.button("Close").clicked() {

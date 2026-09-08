@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>be.kuleuven.Beavyr</id>
+  <launchable type="desktop-id">beavyr.desktop</launchable>
+  <developer id="be.kuleuven">
+    <name>Peter Szabo</name>
+  </developer>
+  <!-- Add the project homepage here once it has one:
+       <url type="homepage">https://...</url> -->
+  <name>Beavyr</name>
+  <summary>Molecular viewer and quantum-chemistry front-end</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <description>
+    <p>
+      Beavyr displays molecules and trajectories at interactive frame rates,
+      drives external quantum-chemistry programs, and reads back what they
+      produce.
+    </p>
+    <p>What it does:</p>
+    <ul>
+      <li>Build and edit structures, with fragment attachment and a Z-matrix editor</li>
+      <li>Run geometry optimisations and frequency calculations through xTB or Behemoth</li>
+      <li>Normal modes with Eckart projection, animated, with a reaction-path option</li>
+      <li>Thermochemistry using Grimme's quasi-RRHO treatment of low-lying modes</li>
+      <li>IR and UV-Vis spectra, broadened and exportable</li>
+      <li>Molecular orbitals, electron density and spin density as isosurfaces from a Molden file</li>
+      <li>Read ORCA Hessians and gradients, and Gaussian frequency output</li>
+      <li>RMSD and Kabsch superposition between structures or trajectory frames</li>
+    </ul>
+    <p>
+      Beavyr links no quantum-chemistry code of its own. Each backend is an
+      executable you point it at, run in a scratch directory and read back from
+      its output files.
+    </p>
+  </description>
+  <categories>
+    <category>Science</category>
+    <category>Chemistry</category>
+    <category>Education</category>
+  </categories>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.1.0" date="2026-09-08">
+      <description><p>First packaged release.</p></description>
+    </release>
+  </releases>
+</component>
