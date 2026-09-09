@@ -12,7 +12,7 @@ mod options;
 mod output;
 mod parallel;
 pub(crate) mod rings;
-mod rmsd;
+pub(crate) mod rmsd;
 mod topology;
 
 pub use genetic::{

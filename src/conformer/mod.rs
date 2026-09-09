@@ -23,6 +23,7 @@
 pub mod afir;
 pub mod constraints;
 pub mod refine;
+pub mod tstrail;
 pub mod ui;
 
 use std::time::{Duration, Instant};

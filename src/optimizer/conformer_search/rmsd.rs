@@ -51,7 +51,12 @@ fn largest_eigenvalue_symmetric_4(mut matrix: [[f64; 4]; 4]) -> f64 {
         .fold(f64::NEG_INFINITY, f64::max)
 }
 
-fn aligned_rmsd(reference: &[f64], candidate: &[f64], atoms: &[usize], mirror: bool) -> f64 {
+pub(crate) fn aligned_rmsd(
+    reference: &[f64],
+    candidate: &[f64],
+    atoms: &[usize],
+    mirror: bool,
+) -> f64 {
     if atoms.is_empty() {
         return f64::INFINITY;
     }

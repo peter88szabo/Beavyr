@@ -38,13 +38,48 @@ pub const MAX_REFINED: usize = 24;
 /// An xTB calculation presented as an optimisable objective.
 ///
 /// xTB already speaks bohr and Hartree, so unlike DREIDING there is nothing to convert.
-struct XtbObjective<'a> {
+///
+/// Each instance owns a scratch directory, which is what allows several to run at once: xTB is
+/// given fixed file names, so two calculations sharing a directory overwrite each other.
+pub struct XtbObjective<'a> {
     workdir: PathBuf,
     atoms: &'a [String],
     input: QcInput,
-    /// Counted so a caller can report how much external work a refinement cost.
-    calls: usize,
+    /// Counted so a caller can report how much external work something cost.
+    pub calls: usize,
 }
+
+impl<'a> XtbObjective<'a> {
+    /// An objective evaluating `atoms` with xTB in `workdir`.
+    ///
+    /// `method_args` are passed to xTB as they stand -- `"--gfn 2 -P 1"` for GFN2 on one thread,
+    /// `"--gfnff -P 1"` for the force field.
+    pub fn new(
+        workdir: PathBuf,
+        atoms: &'a [String],
+        binary: &std::path::Path,
+        method_args: &str,
+        charge: i32,
+        multiplicity: i32,
+    ) -> Self {
+        Self {
+            workdir,
+            atoms,
+            input: QcInput {
+                path: binary.to_path_buf(),
+                functional: String::new(),
+                charge,
+                multiplicity,
+                additional: method_args.to_string(),
+                wfu: false,
+            },
+            calls: 0,
+        }
+    }
+}
+
+/// xTB arguments for GFN2 on a single thread, the level TStrail uses for pathway searches.
+pub const GFN2_SINGLE_THREAD: &str = "--gfn 2 -P 1";
 
 impl Objective for XtbObjective<'_> {
     fn energy(&mut self, x: &[f64]) -> Result<f64> {
