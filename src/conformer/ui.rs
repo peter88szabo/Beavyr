@@ -16,7 +16,7 @@ use crate::trajectory::{TrajectoryFrame, TrajectoryState};
 
 use crate::optimizer::conformer_search::LocalOptimizer;
 
-use super::{available_cores, ConformerOutcome, ConformerRun, Thoroughness};
+use super::{available_cores, ConformerOutcome, ConformerRun, SearchEngine, Thoroughness};
 
 /// Draws the panel. Returns `true` if the conformers were just loaded into the viewer, so the
 /// caller can announce the structure change.
@@ -29,44 +29,39 @@ pub fn conformer_panel(
 ) -> bool {
     let mut loaded = false;
 
-    ui.label(
-        egui::RichText::new(
-            "Finds the low-energy shapes a flexible molecule can take, by searching over its \
-             rotatable bonds and the pucker of any five- or six-membered ring -- chair against \
-             twist-boat, or a sugar's envelopes and twists.",
-        )
-        .small(),
-    );
-    ui.add_space(6.0);
-
-    // --- Method -------------------------------------------------------------------------------
-    ui.label(egui::RichText::new("Energies from").strong());
+    // --- Engine -------------------------------------------------------------------------------
     ui.horizontal(|ui| {
-        ui.label("DREIDING force field");
-        ui.label(egui::RichText::new("(built in)").weak().small());
+        ui.label("Energies");
+        egui::ComboBox::from_id_salt("conformer_engine")
+            .selected_text(run.settings.engine.label())
+            .show_ui(ui, |ui| {
+                for engine in SearchEngine::ALL {
+                    ui.selectable_value(&mut run.settings.engine, engine, engine.label());
+                }
+            });
+        ui.label(
+            egui::RichText::new(run.settings.engine.speed_note())
+                .small()
+                .weak(),
+        );
     });
-    ui.label(
-        egui::RichText::new(
-            "A search runs tens of thousands of energy evaluations. DREIDING answers each in \
-             microseconds because it runs inside Beavyr; an external program costs a process \
-             launch per evaluation, which would turn seconds into hours.",
-        )
-        .small()
-        .weak(),
-    );
 
-    ui.label(
-        egui::RichText::new(
-            "Once a search has finished you can re-rank its results with xTB's GFN2, which is \
-             offered below the results.",
-        )
-        .small()
-        .weak(),
-    );
+    if run.settings.engine.needs_xtb() {
+        ui.horizontal(|ui| {
+            ui.label("Charge");
+            ui.add_enabled(
+                !run.is_running(),
+                egui::DragValue::new(&mut run.settings.charge).range(-10..=10),
+            );
+            ui.label("Multiplicity");
+            ui.add_enabled(
+                !run.is_running(),
+                egui::DragValue::new(&mut run.settings.multiplicity).range(1..=10),
+            );
+        });
+    }
 
-    ui.add_space(8.0);
-    ui.separator();
-    ui.add_space(8.0);
+    ui.add_space(6.0);
 
     // --- How hard to look ---------------------------------------------------------------------
     ui.label(egui::RichText::new("Search effort").strong());
@@ -85,12 +80,6 @@ pub fn conformer_panel(
             }
         }
     });
-    ui.label(
-        egui::RichText::new(run.settings.thoroughness.description())
-            .small()
-            .weak(),
-    );
-
     ui.add_space(4.0);
     ui.checkbox(&mut run.settings.reproducible, "Repeatable")
         .on_hover_text(
@@ -98,29 +87,22 @@ pub fn conformer_panel(
              the same conformers.",
         );
 
-    ui.add_space(6.0);
-    ui.label(egui::RichText::new("Local optimiser").strong());
+    ui.add_space(4.0);
     ui.horizontal(|ui| {
-        for method in LocalOptimizer::ALL {
-            if ui
-                .selectable_label(run.settings.local_optimizer == method, method.label())
-                .on_hover_text(method.description())
-                .clicked()
-            {
-                run.settings.local_optimizer = method;
-            }
-        }
+        ui.label("Optimiser");
+        egui::ComboBox::from_id_salt("conformer_local_optimiser")
+            .selected_text(run.settings.local_optimizer.label())
+            .show_ui(ui, |ui| {
+                for method in LocalOptimizer::ALL {
+                    ui.selectable_value(
+                        &mut run.settings.local_optimizer,
+                        method,
+                        method.label(),
+                    )
+                    .on_hover_text(method.description());
+                }
+            });
     });
-    ui.label(
-        egui::RichText::new(
-            "Relaxing a candidate is where the search spends its time, and with a force field \
-             almost all of it goes on the coordinate algebra rather than the energy. Cartesian \
-             does far less per cycle; internal coordinates need fewer cycles but pay a matrix \
-             inversion for each.",
-        )
-        .small()
-        .weak(),
-    );
 
     ui.add_space(4.0);
     let cores = available_cores();
@@ -157,8 +139,27 @@ pub fn conformer_panel(
     ui.add_space(8.0);
 
     // --- Run ----------------------------------------------------------------------------------
+    //
+    // An external engine needs the xTB executable. Resolved here rather than inside the search,
+    // so that module never has to know how paths are configured, and so the button can simply be
+    // disabled with the reason shown when it is missing.
+    let xtb = run.settings.engine.needs_xtb().then(|| {
+        let configured = crate::qchem_interfaces::config::load_path(
+            crate::qchem_interfaces::program::QcProgram::Xtb,
+        );
+        crate::qchem_interfaces::xtb_optimize::resolve_program_executable(
+            crate::qchem_interfaces::program::QcProgram::Xtb,
+            &configured,
+        )
+    });
+    run.settings.xtb_binary = match &xtb {
+        Some(Ok(path)) => Some(path.clone()),
+        _ => None,
+    };
+
     ui.horizontal(|ui| {
-        let can_run = !run.is_running() && !mol.atoms.is_empty();
+        let have_engine = !run.settings.engine.needs_xtb() || run.settings.xtb_binary.is_some();
+        let can_run = !run.is_running() && !mol.atoms.is_empty() && have_engine;
         if ui
             .add_enabled(can_run, egui::Button::new("Search for conformers"))
             .clicked()
@@ -176,6 +177,13 @@ pub fn conformer_panel(
     if mol.atoms.is_empty() {
         ui.label(
             egui::RichText::new("Load or build a structure first.")
+                .small()
+                .weak(),
+        );
+    }
+    if let Some(Err(problem)) = &xtb {
+        ui.label(
+            egui::RichText::new(format!("{problem} Set it in Geometry Optimization."))
                 .small()
                 .weak(),
         );
@@ -350,8 +358,7 @@ fn results_section(
     ui.add_space(4.0);
     ui.label(
         egui::RichText::new(
-            "Populations are Boltzmann factors at 298 K from these energies alone. They leave \
-             out vibrational entropy and symmetry, so read them as indicative.",
+            "Populations are Boltzmann factors at 298 K, without vibrational entropy or symmetry.",
         )
         .small()
         .weak(),
@@ -766,8 +773,32 @@ fn refinement_row(ui: &mut egui::Ui, run: &mut ConformerRun, outcome: &Conformer
         &configured,
     );
 
+    let available = outcome.conformers.len();
     ui.horizontal(|ui| {
-        let count = outcome.conformers.len().min(super::refine::MAX_REFINED);
+        ui.label("Re-rank the lowest");
+        ui.add_enabled(
+            !run.is_refining() && !outcome.refined_with_xtb,
+            egui::DragValue::new(&mut run.refine_top).range(1..=available.max(1)),
+        )
+        .on_hover_text(
+            "How many conformers to re-optimise. The cost is roughly linear in this, so it is a \
+             judgement about how much the ordering matters -- refine all of them if it matters a \
+             lot.",
+        );
+        ui.label(format!("of {available}"));
+        if ui
+            .add_enabled(
+                !run.is_refining() && !outcome.refined_with_xtb,
+                egui::Button::new("All"),
+            )
+            .clicked()
+        {
+            run.refine_top = available.max(1);
+        }
+    });
+
+    ui.horizontal(|ui| {
+        let count = available.min(run.refine_top.max(1));
         let can_refine = resolved.is_ok() && !run.is_refining() && !outcome.refined_with_xtb;
         if ui
             .add_enabled(
@@ -824,17 +855,20 @@ fn refinement_row(ui: &mut egui::Ui, run: &mut ConformerRun, outcome: &Conformer
         None => {}
     }
 
-    if outcome.refined_with_xtb && outcome.conformers.len() > super::refine::MAX_REFINED {
-        // The list is honestly mixed, so say so rather than let the numbers look comparable.
-        ui.label(
-            egui::RichText::new(format!(
-                "The first {} energies are GFN2; the rest are still DREIDING and are only \
-                 placed after them.",
-                super::refine::MAX_REFINED
-            ))
-            .small()
-            .weak(),
-        );
+    if let Some(Ok(report)) = &run.refinement {
+        if outcome.refined_with_xtb && report.refined < outcome.conformers.len() {
+            // The list is honestly mixed, so say so rather than let the numbers look comparable.
+            ui.label(
+                egui::RichText::new(format!(
+                    "The first {} energies are GFN2; the remaining {} are still DREIDING and are \
+                     only placed after them.",
+                    report.refined,
+                    outcome.conformers.len() - report.refined
+                ))
+                .small()
+                .weak(),
+            );
+        }
     }
 }
 

@@ -28,12 +28,14 @@ use crate::qchem_interfaces::xtbrun::{call_xtb_in, QcInput};
 
 use super::{Conformer, ConformerOutcome};
 
-/// How many of the search's conformers to re-optimise.
+/// How many conformers to re-optimise unless the user says otherwise.
 ///
-/// A cap, because the point is to sharpen the ordering of the shapes worth caring about, not to
-/// re-run the whole search at a hundred times the cost. Anything past this is far enough up in
-/// energy that its exact place in the list does not matter.
-pub const MAX_REFINED: usize = 24;
+/// A default rather than a limit. Twenty-four covers the thermally accessible set for most
+/// molecules -- at room temperature the twenty-fifth conformer of anything is usually far enough
+/// up that its exact place in the list does not matter -- and it keeps the external cost in
+/// minutes. Where that judgement is wrong, the field in the panel overrides it, up to every
+/// conformer found.
+pub const DEFAULT_REFINE_TOP: usize = 24;
 
 /// An xTB calculation presented as an optimisable objective.
 ///
@@ -151,15 +153,17 @@ pub struct Refinement {
 
 /// Re-optimises the leading conformers with GFN2-xTB and re-ranks the set.
 ///
-/// `binary` is the xTB executable. Conformers past [`MAX_REFINED`] are left where they are, after
-/// the refined ones, and keep their DREIDING energies -- which is why the outcome records that the
-/// energies are mixed rather than pretending otherwise.
+/// `binary` is the xTB executable. `take` is how many conformers to refine, counted from the
+/// lowest; anything past it is left where it is, after the refined ones, and keeps its DREIDING
+/// energy -- which is why the outcome records that the energies are mixed rather than pretending
+/// otherwise. Passing more than there are conformers refines all of them.
 pub fn refine_with_xtb(
     outcome: &mut ConformerOutcome,
     binary: &Path,
     scratch: &Path,
     charge: i32,
     multiplicity: i32,
+    take: usize,
 ) -> Result<Refinement> {
     if outcome.conformers.is_empty() {
         return Ok(Refinement {
@@ -188,7 +192,7 @@ pub fn refine_with_xtb(
         wfu: false,
     };
 
-    let take = outcome.conformers.len().min(MAX_REFINED);
+    let take = outcome.conformers.len().min(take.max(1));
     let before: Vec<Vec<f64>> = outcome.conformers[..take]
         .iter()
         .map(|c| c.positions_angstrom.clone())
@@ -336,7 +340,7 @@ mod tests {
         }
 
         let scratch = std::env::temp_dir().join(format!("beavyr_refine_{}", std::process::id()));
-        let report = refine_with_xtb(&mut outcome, &binary, &scratch, 0, 1)
+        let report = refine_with_xtb(&mut outcome, &binary, &scratch, 0, 1, DEFAULT_REFINE_TOP)
             .expect("the refinement runs");
         let _ = std::fs::remove_dir_all(&scratch);
 
@@ -361,10 +365,10 @@ mod tests {
     }
 
     #[test]
-    fn the_refinement_cap_is_a_sensible_size() {
+    fn the_default_count_is_a_sensible_size() {
         // Enough to cover the thermally accessible set, small enough that the external cost stays
-        // in minutes rather than hours.
-        assert!(MAX_REFINED >= 10 && MAX_REFINED <= 50);
+        // in minutes rather than hours. Only a default -- the panel can ask for any number.
+        assert!(DEFAULT_REFINE_TOP >= 10 && DEFAULT_REFINE_TOP <= 50);
     }
 
     /// An empty set must be a no-op rather than an error: a search that found nothing is not a
@@ -394,6 +398,7 @@ mod tests {
             Path::new("/tmp"),
             0,
             1,
+            DEFAULT_REFINE_TOP,
         )
         .expect("an empty set is a no-op");
         assert_eq!(report.refined, 0);

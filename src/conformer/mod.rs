@@ -36,11 +36,107 @@ use crate::forcefield::dreiding::objective::{
 };
 use crate::forcefield::dreiding::{BuildError, DreidingTopology};
 use crate::molecule::{covalent_radius_angstrom, Molecule};
+use crate::optimizer::traits::Objective as _;
 use crate::optimizer::conformer_search::{
     discover_torsions, genetic_conformer_search_parallel, ConformerSearchOptions,
     ConformerSearchResult, LocalOptimizer, PreparedTorsion, TorsionKind,
 };
 use crate::optimizer::internal_coords::ConnectivityModel;
+
+/// Whichever engine the search was told to use, behind one type.
+///
+/// The search is generic over its objective but instantiates one type, so the choice has to
+/// collapse to a single type somewhere. Doing it here keeps the retry-and-shrink logic in
+/// [`search`] written once rather than duplicated per engine.
+enum SearchObjective<'a> {
+    Dreiding(DreidingObjective<'a>),
+    Xtb(refine::XtbObjective<'a>),
+}
+
+impl crate::optimizer::traits::Objective for SearchObjective<'_> {
+    fn energy(&mut self, x: &[f64]) -> anyhow::Result<f64> {
+        match self {
+            Self::Dreiding(o) => o.energy(x),
+            Self::Xtb(o) => o.energy(x),
+        }
+    }
+
+    fn gradient(&mut self, x: &[f64], grad: &mut [f64]) -> anyhow::Result<()> {
+        match self {
+            Self::Dreiding(o) => o.gradient(x, grad),
+            Self::Xtb(o) => o.gradient(x, grad),
+        }
+    }
+
+    fn energy_gradient(&mut self, x: &[f64], grad: &mut [f64]) -> anyhow::Result<f64> {
+        match self {
+            Self::Dreiding(o) => o.energy_gradient(x, grad),
+            Self::Xtb(o) => o.energy_gradient(x, grad),
+        }
+    }
+}
+
+/// Where the energies for the search come from.
+///
+/// DREIDING runs inside Beavyr and answers in microseconds; the others are separate programs and
+/// cost a process launch per gradient, which for a whole search means minutes rather than
+/// seconds. Measured on the configured xTB, one launch is about 23 ms and one candidate takes
+/// roughly fifty, so a two-hundred-candidate search on GFN2 is a few minutes. That is a real
+/// choice to make, not a reason to withhold the option.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SearchEngine {
+    /// The built-in DREIDING force field.
+    #[default]
+    Dreiding,
+    /// xTB's GFN-FF force field.
+    GfnFf,
+    /// GFN1-xTB.
+    Gfn1,
+    /// GFN2-xTB.
+    Gfn2,
+}
+
+impl SearchEngine {
+    pub const ALL: [SearchEngine; 4] = [
+        SearchEngine::Dreiding,
+        SearchEngine::GfnFf,
+        SearchEngine::Gfn1,
+        SearchEngine::Gfn2,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Dreiding => "DREIDING",
+            Self::GfnFf => "GFN-FF",
+            Self::Gfn1 => "GFN1-xTB",
+            Self::Gfn2 => "GFN2-xTB",
+        }
+    }
+
+    /// Whether this needs the xTB executable.
+    pub fn needs_xtb(self) -> bool {
+        !matches!(self, Self::Dreiding)
+    }
+
+    /// The xTB command-line arguments, or `None` for the built-in engine.
+    pub fn xtb_args(self) -> Option<&'static str> {
+        match self {
+            Self::Dreiding => None,
+            Self::GfnFf => Some("--gfnff -P 1"),
+            Self::Gfn1 => Some("--gfn 1 -P 1"),
+            Self::Gfn2 => Some("--gfn 2 -P 1"),
+        }
+    }
+
+    /// Roughly what a search will feel like, for the one line the panel shows.
+    pub fn speed_note(self) -> &'static str {
+        match self {
+            Self::Dreiding => "In process: seconds.",
+            Self::GfnFf => "External: a minute or two.",
+            Self::Gfn1 | Self::Gfn2 => "External: minutes.",
+        }
+    }
+}
 
 /// How hard to search. The only knob offered, because everything else can be derived.
 ///
@@ -127,6 +223,14 @@ pub struct ConformerSettings {
     pub ncore: usize,
     /// Keep conformers within this window of the lowest, in kcal/mol.
     pub energy_window_kcal: f64,
+    /// Where the energies come from.
+    pub engine: SearchEngine,
+    /// The xTB executable, needed by every engine except DREIDING.
+    ///
+    /// Resolved by the caller, so this module never has to know how paths are configured.
+    pub xtb_binary: Option<std::path::PathBuf>,
+    pub charge: i32,
+    pub multiplicity: i32,
     /// Coordinates held fixed, for searching the conformers of a transition state.
     ///
     /// Empty for an ordinary search. When set, every candidate is relaxed by the constrained
@@ -147,6 +251,10 @@ impl Default for ConformerSettings {
             // Wide enough to keep everything thermally accessible, and then some: at room
             // temperature 10 kcal/mol is already a population of ~1e-7.
             energy_window_kcal: 10.0,
+            engine: SearchEngine::default(),
+            xtb_binary: None,
+            charge: 0,
+            multiplicity: 1,
             constraints: Vec::new(),
         }
     }
@@ -303,6 +411,15 @@ fn nothing_to_rotate(topology: &DreidingTopology) -> ConformerError {
     }
 }
 
+/// Where an external engine's per-worker scratch directories go.
+///
+/// Under the same scratch root the optimizer panel uses, and named by process, so a crashed run
+/// leaves something identifiable rather than files scattered in the working directory.
+fn external_scratch() -> std::path::PathBuf {
+    crate::qchem_interfaces::xtb_optimize::xtb_scratch_dir()
+        .join(format!("conformer_search_{}", std::process::id()))
+}
+
 /// The worker count a request resolves to: never more than the machine has, never fewer than one.
 pub fn resolve_workers(requested: usize) -> usize {
     requested.clamp(1, available_cores())
@@ -417,15 +534,38 @@ pub fn search(
             verbosity: 0,
             ..ConformerSearchOptions::default()
         };
-        // One objective per worker, each borrowing the one shared topology. This is exactly what
-        // the topology/workspace split was for: the parameters and term lists are immutable and
-        // shared, while the neighbour list and scratch buffers live per worker, so N threads
-        // optimise N structures without contending on anything.
+        // One objective per worker. For DREIDING each borrows the one shared topology, which is
+        // exactly what the topology/workspace split was for. For an external engine each gets its
+        // own scratch directory, since xTB is handed fixed file names and two calculations
+        // sharing a directory would overwrite each other.
+        let worker = std::sync::atomic::AtomicUsize::new(0);
         match genetic_conformer_search_parallel(
             coordinates_bohr.clone(),
             &atoms,
             connectivity.clone(),
-            || Ok(DreidingObjective::new(&topology)),
+            || {
+                Ok(match settings.engine.xtb_args() {
+                    None => SearchObjective::Dreiding(DreidingObjective::new(&topology)),
+                    Some(args) => {
+                        let binary = settings.xtb_binary.as_ref().ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "{} needs the xTB executable, which is not set",
+                                settings.engine.label()
+                            )
+                        })?;
+                        let slot =
+                            worker.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        SearchObjective::Xtb(refine::XtbObjective::new(
+                            external_scratch().join(format!("worker_{slot:03}")),
+                            &atoms,
+                            binary,
+                            args,
+                            settings.charge,
+                            settings.multiplicity,
+                        ))
+                    }
+                })
+            },
             options,
         ) {
             Ok(result) => {
@@ -629,6 +769,12 @@ pub struct ConformerRun {
     refine_task: Option<Task<Result<(ConformerOutcome, refine::Refinement), String>>>,
     /// What the last refinement did, or why it could not run.
     pub refinement: Option<Result<refine::Refinement, String>>,
+    /// How many of the lowest conformers to re-rank with xTB.
+    ///
+    /// A choice rather than a fixed cap: the cost is roughly linear in this, so whether it is
+    /// worth refining ten conformers or a hundred depends on the molecule and on how much the
+    /// ordering matters -- which is the user's judgement, not a number to hard-code.
+    pub refine_top: usize,
     /// The TStrail pathway search, which is a separate and much longer run.
     trail_task: Option<Task<Result<tstrail::TrailOutcome, String>>>,
     /// Settings for the pathway search, including the active bonds.
@@ -652,6 +798,7 @@ impl Default for ConformerRun {
             task: None,
             refine_task: None,
             refinement: None,
+            refine_top: refine::DEFAULT_REFINE_TOP,
             trail_task: None,
             trail: tstrail::TrailSettings::default(),
             // One-based, and a pair rather than (0, 0) which names no atom.
@@ -731,12 +878,13 @@ impl ConformerRun {
             return;
         };
         self.refinement = None;
+        let take = self.refine_top.max(1);
 
         let scratch = crate::qchem_interfaces::xtb_optimize::xtb_scratch_dir()
             .join(format!("conformers_{}", std::process::id()));
         self.refine_task = Some(AsyncComputeTaskPool::get().spawn(async move {
             let mut outcome = outcome;
-            match refine::refine_with_xtb(&mut outcome, &binary, &scratch, 0, 1) {
+            match refine::refine_with_xtb(&mut outcome, &binary, &scratch, 0, 1, take) {
                 Ok(report) => {
                     // The scratch tree holds one directory per conformer and is of no further
                     // use once the energies are read back.
@@ -1406,6 +1554,86 @@ mod tests {
                 .map(|a| a / BOHR_TO_ANGSTROM)
                 .collect();
             assert!((measure_bond(&bohr, 0, 1) - wanted).abs() < 0.02);
+        }
+    }
+
+    /// An external engine without its executable must fail with a message naming the engine,
+    /// rather than somewhere deep inside a worker.
+    #[test]
+    fn an_external_engine_without_xtb_is_reported() {
+        let butane = molecule(BUTANE);
+        let error = search(
+            &butane,
+            ConformerSettings {
+                engine: SearchEngine::Gfn2,
+                xtb_binary: None,
+                ..test_settings()
+            },
+        )
+        .expect_err("GFN2 needs xTB");
+        let text = error.to_string();
+        assert!(text.contains("xTB"), "{text}");
+        assert!(text.contains("GFN2"), "{text}");
+    }
+
+    #[test]
+    fn every_engine_is_labelled_and_knows_whether_it_needs_xtb() {
+        assert_eq!(SearchEngine::ALL.len(), 4);
+        for engine in SearchEngine::ALL {
+            assert!(!engine.label().is_empty());
+            assert!(!engine.speed_note().is_empty());
+            // Needing xTB and having xTB arguments are the same question.
+            assert_eq!(engine.needs_xtb(), engine.xtb_args().is_some());
+        }
+        assert_eq!(SearchEngine::default(), SearchEngine::Dreiding);
+        assert!(!SearchEngine::Dreiding.needs_xtb());
+    }
+
+    /// A whole search driven by xTB rather than the force field. Ignored: it needs the configured
+    /// xTB and takes far longer than the in-process engine.
+    ///
+    /// ```text
+    /// cargo test --release --bins a_search_driven_by_xtb -- --ignored --nocapture
+    /// ```
+    #[test]
+    #[ignore = "needs the configured xTB executable"]
+    fn a_search_driven_by_xtb() {
+        use crate::qchem_interfaces::program::QcProgram;
+
+        let configured = crate::qchem_interfaces::config::load_path(QcProgram::Xtb);
+        let Ok(binary) = crate::qchem_interfaces::xtb_optimize::resolve_program_executable(
+            QcProgram::Xtb,
+            &configured,
+        ) else {
+            println!("  no xTB configured; nothing to test against");
+            return;
+        };
+
+        let butane = molecule(BUTANE);
+        for engine in [SearchEngine::Dreiding, SearchEngine::GfnFf, SearchEngine::Gfn2] {
+            let started = Instant::now();
+            let outcome = search(
+                &butane,
+                ConformerSettings {
+                    engine,
+                    xtb_binary: Some(binary.clone()),
+                    ..test_settings()
+                },
+            );
+            match outcome {
+                Ok(outcome) => println!(
+                    "  {:<10} {:>6.2} s  {} conformers, gap {:.2} kcal/mol",
+                    engine.label(),
+                    started.elapsed().as_secs_f64(),
+                    outcome.conformers.len(),
+                    outcome
+                        .conformers
+                        .get(1)
+                        .map(|c| c.relative_energy_kcal)
+                        .unwrap_or(0.0)
+                ),
+                Err(problem) => println!("  {:<10} failed: {problem}", engine.label()),
+            }
         }
     }
 
