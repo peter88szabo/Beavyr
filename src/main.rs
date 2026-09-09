@@ -17,6 +17,7 @@ mod measurements;
 mod molecule;
 mod molecule_builder;
 mod normalmode;
+mod orientation;
 mod numerics;
 mod optimizer;
 mod orbitals;
