@@ -22,6 +22,9 @@ use std::time::Instant;
 
 use anyhow::Result;
 
+use crate::optimizer::constrained::{
+    optimize_constrained_internals, ConstrainedOptimizationOptions, ConstraintTarget,
+};
 use crate::optimizer::geom_opt::{geom_opt_internal_bfgs, GeomOptOptions, GeomOptResult};
 use crate::optimizer::internal_coords::ConnectivityModel;
 use crate::optimizer::minimum_cartesian::{
@@ -91,15 +94,25 @@ pub fn reset_accounting() {
 }
 
 /// Relaxes one candidate, by whichever route was chosen.
+///
+/// `constraints` overrides the choice when it is non-empty: holding coordinates fixed is done in
+/// redundant internal coordinates, which is the only route here that can express a constraint at
+/// all. That costs the per-cycle price internal coordinates carry, and is worth it -- a
+/// transition-state conformer search is careful work on a few structures, not a fast scan.
 pub fn local_optimize<O: Objective>(
     method: LocalOptimizer,
     coordinates: Vec<f64>,
     connectivity: ConnectivityModel,
     objective: &mut O,
     options: GeomOptOptions,
+    constraints: &[ConstraintTarget],
 ) -> Result<GeomOptResult> {
     let started = Instant::now();
-    let result = dispatch(method, coordinates, connectivity, objective, options);
+    let result = if constraints.is_empty() {
+        dispatch(method, coordinates, connectivity, objective, options)
+    } else {
+        constrained(coordinates, connectivity, objective, options, constraints)
+    };
     SPENT_NANOS.fetch_add(started.elapsed().as_nanos() as u64, Ordering::Relaxed);
     COUNT.fetch_add(1, Ordering::Relaxed);
     result
@@ -120,6 +133,53 @@ fn dispatch<O: Objective>(
             cartesian(CartesianMinimumMethod::Bfgs, coordinates, objective, options)
         }
     }
+}
+
+/// The constrained route, presented as a [`GeomOptResult`] like the others.
+fn constrained<O: Objective>(
+    coordinates: Vec<f64>,
+    connectivity: ConnectivityModel,
+    objective: &mut O,
+    options: GeomOptOptions,
+    constraints: &[ConstraintTarget],
+) -> Result<GeomOptResult> {
+    let ndim = coordinates.len();
+    let result = optimize_constrained_internals(
+        objective,
+        coordinates,
+        &connectivity,
+        constraints.to_vec(),
+        ConstrainedOptimizationOptions {
+            max_cycles: options.max_cycles,
+            energy_tol: options.energy_tol,
+            max_step_internal: options.max_step_internal,
+            max_step: options.max_step,
+            rms_step: options.rms_step,
+            max_gradient: options.max_gradient,
+            rms_gradient: options.g_rms_tol,
+            best_fit_iters: options.best_fit_iters,
+            verbosity: options.verbosity,
+            ..ConstrainedOptimizationOptions::default()
+        },
+    )?;
+
+    let grad_rms = if ndim == 0 {
+        0.0
+    } else {
+        (result.gradient.iter().map(|g| g * g).sum::<f64>() / ndim as f64).sqrt()
+    };
+    Ok(GeomOptResult {
+        x: result.x,
+        energy: result.energy,
+        gradient: result.gradient,
+        grad_rms,
+        cycles: result.cycles,
+        converged: result.converged,
+        // The constrained optimiser records its path as steps rather than as geometries, and the
+        // conformer search only ever reads the final structure.
+        trajectory: Vec::new(),
+        trajectory_energies: Vec::new(),
+    })
 }
 
 /// The Cartesian route, presented as a [`GeomOptResult`] so the search need not care which ran.

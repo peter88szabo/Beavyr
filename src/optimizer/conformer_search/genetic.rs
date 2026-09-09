@@ -328,6 +328,7 @@ fn locally_optimize<O: Objective>(
         connectivity.clone(),
         objective,
         options.local_optimization.clone(),
+        &options.constraints,
     )?;
     let is_distinct_minimum = unique_against_blacklist(
         &result.x,
@@ -425,6 +426,7 @@ pub fn genetic_conformer_search<O: Objective>(
         &options.rotatable_dihedrals,
         &options.cis_trans_dihedrals,
         options.exclude_methyl_rotors,
+        &options.constraints,
     )?;
     let rmsd_atoms = heavy_atom_indices(elements);
     let mut rng = match options.random_seed {

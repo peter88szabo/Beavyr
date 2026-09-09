@@ -3,6 +3,7 @@ use std::collections::{HashSet, VecDeque};
 use anyhow::{bail, ensure, Result};
 
 use super::rings::{self, Pucker};
+use crate::optimizer::constrained::{ConstraintCoordinate, ConstraintTarget};
 use crate::optimizer::internal_coords::{analyze_structure, ConnectivityModel};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,6 +28,28 @@ pub struct PreparedTorsion {
     /// Set only for [`TorsionKind::RingPucker`]: the ring this gene reshapes.
     pub ring: Option<PreparedRing>,
     pub user_selected: bool,
+}
+
+/// The atoms a constraint holds.
+fn constraint_atoms(constraint: &ConstraintTarget) -> Vec<usize> {
+    match constraint.coordinate {
+        ConstraintCoordinate::Bond(a) => a.to_vec(),
+        ConstraintCoordinate::Angle(a) => a.to_vec(),
+        ConstraintCoordinate::Dihedral(a) => a.to_vec(),
+    }
+}
+
+/// Whether a constraint holds the torsion about the bond `j-k`.
+///
+/// A held bond length pins the torsion about it in practice, an angle pins both of its bonds, and
+/// a dihedral is exactly the torsion about its central bond.
+fn constraint_claims_bond(constraint: &ConstraintTarget, j: usize, k: usize) -> bool {
+    let same = |p: usize, q: usize| (p == j && q == k) || (p == k && q == j);
+    match constraint.coordinate {
+        ConstraintCoordinate::Bond([a, b]) => same(a, b),
+        ConstraintCoordinate::Angle([a, b, c]) => same(a, b) || same(b, c),
+        ConstraintCoordinate::Dihedral([_, b, c, _]) => same(b, c),
+    }
 }
 
 /// A ring the search can reshape, with everything needed to do it.
@@ -168,6 +191,7 @@ pub fn discover_torsions(
     explicit_rotatable: &[[usize; 4]],
     explicit_cis_trans: &[[usize; 4]],
     exclude_methyl_rotors: bool,
+    constraints: &[ConstraintTarget],
 ) -> Result<(Vec<[usize; 2]>, Vec<PreparedTorsion>)> {
     let natoms = elements.len();
     ensure!(
@@ -227,6 +251,15 @@ pub fn discover_torsions(
             {
                 continue;
             }
+            // A torsion the constraints already hold is not a degree of freedom: the search
+            // would twist it and the constrained optimiser would pull it straight back, wasting
+            // the whole generation.
+            if constraints
+                .iter()
+                .any(|c| constraint_claims_bond(c, left, right))
+            {
+                continue;
+            }
             let Some(a) = representative_neighbour(&graph, elements, left, right) else {
                 continue;
             };
@@ -250,6 +283,14 @@ pub fn discover_torsions(
     for ring in rings::find_rings(natoms, &internals.bonds) {
         let conformers = rings::canonical_conformers(ring.size());
         if conformers.is_empty() {
+            continue;
+        }
+        // Puckering moves every atom of the ring relative to the others, so a constraint holding
+        // two or more of them fights it. Such a ring keeps whatever shape it was drawn in.
+        if constraints.iter().any(|c| {
+            let atoms = constraint_atoms(c);
+            atoms.iter().filter(|a| ring.atoms.contains(a)).count() >= 2
+        }) {
             continue;
         }
         let branches = rings::substituent_branches(natoms, &internals.bonds, &ring.atoms);

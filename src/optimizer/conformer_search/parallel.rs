@@ -69,6 +69,7 @@ where
                 let connectivity = connectivity.clone();
                 let local_options = options.local_optimization.clone();
                 let local_method = options.local_optimizer;
+                let local_constraints = options.constraints.clone();
                 // Behemoth confines each worker to a one-thread Rayon pool here, so that Rayon
                 // inside its electronic-structure method cannot borrow the other conformer
                 // workers' threads. Beavyr's force field uses neither Rayon nor BLAS, so one
@@ -81,6 +82,7 @@ where
                         connectivity,
                         &mut objective,
                         local_options,
+                        &local_constraints,
                     )?;
                     Ok::<LocalOutcome, anyhow::Error>(LocalOutcome { result, generation })
                 })
@@ -167,6 +169,7 @@ where
         &options.rotatable_dihedrals,
         &options.cis_trans_dihedrals,
         options.exclude_methyl_rotors,
+        &options.constraints,
     )?;
     let rmsd_atoms = heavy_atom_indices(elements);
     let mut rng = match options.random_seed {

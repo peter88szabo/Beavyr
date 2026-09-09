@@ -347,6 +347,7 @@ mod tests {
             elapsed: std::time::Duration::ZERO,
             workers: 1,
             local_optimizer: crate::optimizer::conformer_search::LocalOptimizer::Cartesian,
+            constrained: 0,
             best_found_in_generation: 0,
             atoms: Vec::new(),
             radical_warning: None,

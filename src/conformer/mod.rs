@@ -20,6 +20,8 @@
 //! a minute or two -- and it buys a markedly better energy ordering than a generic force field
 //! gives, because relative conformer energies are where a generic force field is weakest.
 
+pub mod afir;
+pub mod constraints;
 pub mod refine;
 pub mod ui;
 
@@ -102,7 +104,7 @@ pub const OFFSPRING_PER_GENERATION: usize = 8;
 
 /// What the user chooses. Deliberately short: rotors, population and generations are all worked
 /// out from the structure rather than asked for.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ConformerSettings {
     pub thoroughness: Thoroughness,
     /// Fix the random seed, so a search can be repeated exactly.
@@ -124,6 +126,12 @@ pub struct ConformerSettings {
     pub ncore: usize,
     /// Keep conformers within this window of the lowest, in kcal/mol.
     pub energy_window_kcal: f64,
+    /// Coordinates held fixed, for searching the conformers of a transition state.
+    ///
+    /// Empty for an ordinary search. When set, every candidate is relaxed by the constrained
+    /// optimiser and no degree of freedom the constraints already hold is sampled -- see
+    /// [`constraints`].
+    pub constraints: Vec<constraints::Constraint>,
 }
 
 impl Default for ConformerSettings {
@@ -138,6 +146,7 @@ impl Default for ConformerSettings {
             // Wide enough to keep everything thermally accessible, and then some: at room
             // temperature 10 kcal/mol is already a population of ~1e-7.
             energy_window_kcal: 10.0,
+            constraints: Vec::new(),
         }
     }
 }
@@ -180,6 +189,9 @@ pub struct ConformerOutcome {
     pub atoms: Vec<String>,
     /// Set when the structure looks open-shell, saying what that means for the result.
     pub radical_warning: Option<String>,
+    /// How many coordinates were held fixed. Non-zero means these are transition-state
+    /// conformers, whose energies are saddle-point energies rather than minima.
+    pub constrained: usize,
     /// Set once the leading conformers have been re-optimised and re-ranked with GFN2.
     ///
     /// When set, the energies of the refined conformers are GFN2 and any beyond the refinement
@@ -267,6 +279,7 @@ fn single_conformer(
         elapsed,
         workers,
         local_optimizer: LocalOptimizer::Cartesian,
+        constrained: 0,
         best_found_in_generation: 0,
         atoms: atoms.to_vec(),
         radical_warning: topology.radical_warning(),
@@ -335,6 +348,14 @@ pub fn search(
         .collect();
 
     let connectivity = connectivity_model(&atoms);
+    let constraint_targets: Vec<_> = settings
+        .constraints
+        .iter()
+        .map(|c| c.target())
+        .collect();
+    if let Err(problem) = constraints::check(&settings.constraints, &atoms) {
+        return Err(ConformerError::Constraints(problem));
+    }
 
     // The rotor count must come from the search's own torsion perception, not from the force
     // field's `rotatable_bonds`. The two disagree on purpose: DREIDING counts every acyclic single
@@ -342,7 +363,15 @@ pub fn search(
     // butane that is three bonds against one -- and budgeting from the larger number asks for a
     // population bigger than the molecule has distinct conformers.
     let degrees_of_freedom =
-        match discover_torsions(&coordinates_bohr, &atoms, &connectivity, &[], &[], true) {
+        match discover_torsions(
+            &coordinates_bohr,
+            &atoms,
+            &connectivity,
+            &[],
+            &[],
+            true,
+            &constraint_targets,
+        ) {
             Ok((_bonds, torsions)) => torsions,
             // Perception only refuses when there is nothing to sample at all. Whether that is
             // because the molecule is genuinely rigid or because its flexibility is in a ring too
@@ -378,6 +407,7 @@ pub fn search(
             max_generations,
             offspring_per_generation: OFFSPRING_PER_GENERATION,
             local_optimizer: settings.local_optimizer,
+            constraints: constraint_targets.clone(),
             random_seed: settings.reproducible.then_some(FIXED_SEED),
             parallel_workers: Some(workers),
             output_energy_window_hartree: settings.energy_window_kcal / HARTREE_TO_KCAL,
@@ -407,6 +437,7 @@ pub fn search(
                     rings,
                 );
                 outcome.radical_warning = topology.radical_warning();
+                outcome.constrained = settings.constraints.len();
                 return Ok(outcome);
             }
             Err(error) => {
@@ -423,7 +454,10 @@ pub fn search(
     // means the molecule has only one -- true of unsubstituted cyclohexane, whose chair is the
     // only minimum this force field keeps -- and that is an answer, not a failure. Relax the given
     // structure and report it as the single conformer.
-    if last_error.contains("distinct converged minima") {
+    // A constrained search must never fall back to relaxing the structure freely: the geometry is
+    // a saddle point, and an unconstrained relaxation would slide it down to reactant or product
+    // and report the result as a conformer.
+    if last_error.contains("distinct converged minima") && settings.constraints.is_empty() {
         return single_conformer(
             &topology,
             mol,
@@ -522,6 +556,7 @@ fn assemble(
         elapsed,
         workers,
         local_optimizer,
+        constrained: 0,
         radical_warning: None,
         refined_with_xtb: false,
         best_found_in_generation: result
@@ -541,6 +576,8 @@ pub enum ConformerError {
     ForceField(BuildError),
     /// Nothing to search: no rotatable bond, so the molecule has one shape.
     Rigid,
+    /// The constraints cannot be used as given.
+    Constraints(String),
     /// The molecule's only flexibility is in a ring of a size this search does not pucker.
     ///
     /// Five- and six-membered rings *are* sampled, through their Cremer-Pople puckering
@@ -573,6 +610,7 @@ impl std::fmt::Display for ConformerError {
                  conformer.",
                 if *rings == 1 { "ring" } else { "rings" }
             ),
+            Self::Constraints(message) => write!(f, "the constraints are not usable: {message}"),
             Self::Search(message) => write!(f, "the conformer search failed: {message}"),
         }
     }
@@ -656,7 +694,7 @@ impl ConformerRun {
         // The molecule is copied rather than borrowed: the search runs for seconds, and the user
         // is free to keep editing meanwhile.
         let snapshot = mol.clone();
-        let settings = self.settings;
+        let settings = self.settings.clone();
         self.task = Some(
             AsyncComputeTaskPool::get().spawn(async move { search(&snapshot, settings) }),
         );
@@ -852,7 +890,7 @@ mod tests {
             reproducible: true,
             ..test_settings()
         };
-        let first = search(&butane, settings).expect("searchable");
+        let first = search(&butane, settings.clone()).expect("searchable");
         let second = search(&butane, settings).expect("searchable");
 
         assert_eq!(first.conformers.len(), second.conformers.len());
@@ -1066,6 +1104,7 @@ mod tests {
                 connectivity.clone(),
                 &mut objective,
                 options.clone(),
+                &[],
             )
             .expect("decane relaxes");
             let elapsed = started.elapsed().as_secs_f64();
@@ -1132,6 +1171,183 @@ mod tests {
                 conformer.positions_angstrom.len(),
                 cyclohexane.atoms.len() * 3
             );
+        }
+    }
+
+    /// A constrained relaxation must hold what it was told to hold. This is the whole point for
+    /// transition states: the reacting part stays put while the rest of the molecule moves.
+    ///
+    /// Tested on one relaxation rather than a whole search, and deliberately. Constraints can only
+    /// be expressed in redundant internal coordinates, so a constrained candidate costs what an
+    /// internal-coordinate cycle costs -- roughly a hundred times a Cartesian one -- and a search
+    /// made of hundreds of them has no business inside a test suite. What is being tested is that
+    /// the constraint survives a relaxation, and one relaxation shows that.
+    #[test]
+    fn a_constrained_relaxation_holds_its_coordinates() {
+        use crate::conformer::constraints::{measure_angle, measure_bond, ActiveSiteLevel};
+        use crate::forcefield::dreiding::objective::DreidingObjective;
+        use crate::optimizer::conformer_search::local::local_optimize;
+        use crate::optimizer::geom_opt::GeomOptOptions;
+
+        let butane = molecule(BUTANE);
+        let topology = DreidingTopology::build(&butane).unwrap();
+        let coords_bohr: Vec<f64> = butane
+            .pos
+            .iter()
+            .flat_map(|p| {
+                [
+                    p.x as f64 / BOHR_TO_ANGSTROM,
+                    p.y as f64 / BOHR_TO_ANGSTROM,
+                    p.z as f64 / BOHR_TO_ANGSTROM,
+                ]
+            })
+            .collect();
+        let adjacency = {
+            let mut adjacency = vec![Vec::new(); butane.atoms.len()];
+            for &(i, j, _) in &butane.bonds {
+                adjacency[i].push(j);
+                adjacency[j].push(i);
+            }
+            adjacency
+        };
+
+        // Treat C1-C2-C3 as an active site: hold both lengths and the angle between them, well
+        // away from the values the force field would relax them to.
+        let mut stretched = coords_bohr.clone();
+        // Pull C1 out along x so the held bond starts at a length DREIDING does not want.
+        stretched[0] -= 0.6;
+        let held = constraints::active_site(
+            &stretched,
+            0,
+            1,
+            2,
+            ActiveSiteLevel::BondsAndAngle,
+            &adjacency,
+        );
+        assert_eq!(held.len(), 3);
+        let wanted_bond = measure_bond(&stretched, 0, 1);
+        let wanted_angle = measure_angle(&stretched, 0, 1, 2);
+        // The constraint has to be doing work, or the test proves nothing.
+        assert!(
+            (wanted_bond - measure_bond(&coords_bohr, 0, 1)).abs() > 0.3,
+            "the test geometry was not actually distorted"
+        );
+
+        let targets: Vec<_> = held.iter().map(|c| c.target()).collect();
+        let mut objective = DreidingObjective::new(&topology);
+        let relaxed = local_optimize(
+            crate::optimizer::conformer_search::LocalOptimizer::RedundantInternal,
+            stretched,
+            connectivity_model(&butane.atoms),
+            &mut objective,
+            GeomOptOptions {
+                verbosity: 0,
+                // Few cycles on purpose. The constrained optimiser satisfies its constraints
+                // early and then relaxes the rest, so holding them is visible within a handful of
+                // steps -- and internal coordinates are expensive enough that letting this run to
+                // full convergence would put half a minute into the test suite.
+                max_cycles: 20,
+                ..GeomOptOptions::default()
+            },
+            &targets,
+        )
+        .expect("a constrained relaxation runs");
+
+        let bond = measure_bond(&relaxed.x, 0, 1);
+        let angle = measure_angle(&relaxed.x, 0, 1, 2);
+        assert!(
+            (bond - wanted_bond).abs() < 0.02,
+            "the held bond drifted from {wanted_bond:.4} to {bond:.4} bohr"
+        );
+        assert!(
+            (angle - wanted_angle).to_degrees().abs() < 2.0,
+            "the held angle drifted from {:.1}° to {:.1}°",
+            wanted_angle.to_degrees(),
+            angle.to_degrees()
+        );
+    }
+
+    /// The same claim through a whole search. Ignored: a constrained search is hundreds of
+    /// internal-coordinate relaxations and takes minutes.
+    ///
+    /// ```text
+    /// cargo test --release --bins a_constrained_search_holds -- --ignored --nocapture
+    /// ```
+    #[test]
+    #[ignore = "a constrained search takes minutes"]
+    fn a_constrained_search_holds_its_coordinates() {
+        use crate::conformer::constraints::{measure_bond, ActiveSiteLevel};
+
+        let butane = molecule(BUTANE);
+        let coords_bohr: Vec<f64> = butane
+            .pos
+            .iter()
+            .flat_map(|p| {
+                [
+                    p.x as f64 / BOHR_TO_ANGSTROM,
+                    p.y as f64 / BOHR_TO_ANGSTROM,
+                    p.z as f64 / BOHR_TO_ANGSTROM,
+                ]
+            })
+            .collect();
+        let adjacency = {
+            let mut adjacency = vec![Vec::new(); butane.atoms.len()];
+            for &(i, j, _) in &butane.bonds {
+                adjacency[i].push(j);
+                adjacency[j].push(i);
+            }
+            adjacency
+        };
+        let held =
+            constraints::active_site(&coords_bohr, 0, 1, 2, ActiveSiteLevel::Bonds, &adjacency);
+        let wanted = measure_bond(&coords_bohr, 0, 1);
+
+        let outcome = search(
+            &butane,
+            ConformerSettings {
+                constraints: held,
+                ..test_settings()
+            },
+        )
+        .expect("a constrained butane is searchable");
+        assert_eq!(outcome.constrained, 2);
+        println!(
+            "  {} conformers in {:.1} s",
+            outcome.conformers.len(),
+            outcome.elapsed.as_secs_f64()
+        );
+        for conformer in &outcome.conformers {
+            let bohr: Vec<f64> = conformer
+                .positions_angstrom
+                .iter()
+                .map(|a| a / BOHR_TO_ANGSTROM)
+                .collect();
+            assert!((measure_bond(&bohr, 0, 1) - wanted).abs() < 0.02);
+        }
+    }
+
+    /// A constraint that names the same coordinate twice must be refused with a message, not sent
+    /// to a linear solve that reports a singular system.
+    #[test]
+    fn a_duplicated_constraint_is_refused_before_searching() {
+        let butane = molecule(BUTANE);
+        let one = constraints::Constraint {
+            coordinate: crate::optimizer::constrained::ConstraintCoordinate::Bond([0, 1]),
+            value: 2.9,
+        };
+        let error = search(
+            &butane,
+            ConformerSettings {
+                constraints: vec![one.clone(), one],
+                ..test_settings()
+            },
+        )
+        .expect_err("a duplicate must be refused");
+        match &error {
+            ConformerError::Constraints(message) => {
+                assert!(message.contains("fixed twice"), "{message}")
+            }
+            other => panic!("expected a constraint error, got {other:?}"),
         }
     }
 

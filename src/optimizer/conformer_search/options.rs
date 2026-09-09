@@ -1,4 +1,5 @@
 use super::local::LocalOptimizer;
+use crate::optimizer::constrained::ConstraintTarget;
 use crate::optimizer::GeomOptOptions;
 
 const EV_TO_HARTREE: f64 = 1.0 / 27.211_386_245_988;
@@ -67,6 +68,13 @@ pub struct ConformerSearchOptions {
     /// Which optimiser relaxes each candidate. See [`super::LocalOptimizer`] -- the choice sets
     /// the cost of the whole search, and depends on whether an energy is cheap or expensive.
     pub local_optimizer: LocalOptimizer,
+    /// Coordinates held fixed while every candidate is relaxed.
+    ///
+    /// This is what makes it possible to search the conformers of a *transition state*: a saddle
+    /// point cannot simply be relaxed, so the reacting part is held and the rest of the molecule
+    /// is sampled. When this is non-empty each candidate is relaxed by the constrained optimiser,
+    /// and any degree of freedom that would fight a constraint is dropped from the search.
+    pub constraints: Vec<ConstraintTarget>,
     pub verbosity: u8,
 }
 
@@ -103,6 +111,7 @@ impl Default for ConformerSearchOptions {
             random_seed: None,
             output_energy_window_hartree: 20.0 * KCAL_MOL_TO_HARTREE,
             local_optimizer: LocalOptimizer::default(),
+            constraints: Vec::new(),
             local_optimization: GeomOptOptions {
                 verbosity: 0,
                 ..GeomOptOptions::default()

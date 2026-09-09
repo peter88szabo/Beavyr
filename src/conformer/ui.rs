@@ -613,6 +613,7 @@ mod tests {
             elapsed: Duration::from_millis(1500),
             workers: 4,
             local_optimizer: LocalOptimizer::Cartesian,
+            constrained: 0,
             best_found_in_generation: 3,
             radical_warning: None,
             refined_with_xtb: false,
