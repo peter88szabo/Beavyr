@@ -14,7 +14,7 @@ use std::fs;
 use std::path::Path;
 
 use crate::forcefield::dreiding::objective::{
-    relax_angstrom, Relaxation, BOHR_TO_ANGSTROM, HARTREE_TO_KCAL,
+    relax_angstrom, Relaxation, HARTREE_TO_KCAL,
 };
 use crate::forcefield::dreiding::DreidingTopology;
 use crate::molecule::Molecule;

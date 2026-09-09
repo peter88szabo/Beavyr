@@ -40,36 +40,14 @@ pub enum LocalOptimizer {
     RedundantInternal,
     /// BFGS in Cartesian coordinates. More cycles, far less work per cycle.
     Cartesian,
-    /// Cartesian BFGS with the step extrapolated by GDIIS.
-    ///
-    /// The intent was to recover the cycle count that internal coordinates win -- 8 against 25 on
-    /// n-decane -- while keeping the cheap Cartesian cycle. **Measured, it does not**: 26 cycles
-    /// against 25.
-    ///
-    /// The reason is structural rather than a matter of tuning. `minimize_cartesian` is a
-    /// backtracking line-search driver, so a step must be a descent direction; a GDIIS point is an
-    /// interpolation among predicted minima and need not be downhill from where the optimiser
-    /// currently stands. Instrumenting it showed 22 of 26 proposed steps rejected on exactly that
-    /// test. Driving GDIIS properly means accepting its geometry outright and judging it by
-    /// energy, which is a different control flow from the one the imported optimiser has.
-    ///
-    /// Kept and selectable rather than removed: the implementation is correct, and it may pay on
-    /// stiffer surfaces than a force field's.
-    CartesianGdiis,
 }
 
 impl LocalOptimizer {
-    /// The choices offered in the interface.
-    ///
-    /// [`Self::CartesianGdiis`] is deliberately absent. It exists, it is correct, and it is
-    /// measurably never better -- 26 cycles against 25 -- so offering it only invites a slower
-    /// choice. It stays reachable in code for anyone re-testing it on a stiffer surface.
     pub const ALL: [LocalOptimizer; 2] =
         [LocalOptimizer::Cartesian, LocalOptimizer::RedundantInternal];
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::CartesianGdiis => "Cartesian GDIIS",
             Self::Cartesian => "Cartesian BFGS",
             Self::RedundantInternal => "Internal coordinates",
         }
@@ -77,10 +55,6 @@ impl LocalOptimizer {
 
     pub fn description(self) -> &'static str {
         match self {
-            Self::CartesianGdiis => {
-                "Extrapolates the step from previous ones. Measured no better than plain \
-                 Cartesian BFGS here -- kept because it may help on other systems."
-            }
             Self::Cartesian => {
                 "Far faster with a force field, where an energy is nearly free and the \
                  coordinate algebra is the whole cost."
@@ -144,9 +118,6 @@ fn dispatch<O: Objective>(
         }
         LocalOptimizer::Cartesian => {
             cartesian(CartesianMinimumMethod::Bfgs, coordinates, objective, options)
-        }
-        LocalOptimizer::CartesianGdiis => {
-            cartesian(CartesianMinimumMethod::GdiisBfgs, coordinates, objective, options)
         }
     }
 }
@@ -234,7 +205,8 @@ mod tests {
     fn the_cartesian_route_finds_the_minimum() {
         let mut bowl = Bowl { calls: 0 };
         let start = vec![0.3, -0.2, 0.1, 0.25, -0.15, 0.05];
-        let result = cartesian(CartesianMinimumMethod::GdiisBfgs, start, &mut bowl, options()).expect("a bowl is minimisable");
+        let result = cartesian(CartesianMinimumMethod::Bfgs, start, &mut bowl, options())
+            .expect("a bowl is minimisable");
 
         assert!(result.converged, "did not converge");
         for value in &result.x {
@@ -272,17 +244,10 @@ mod tests {
     #[test]
     fn both_routes_are_offered_and_described() {
         assert_eq!(LocalOptimizer::ALL.len(), 2);
-        // Every variant needs a label and a description, offered or not.
-        for method in [
-            LocalOptimizer::Cartesian,
-            LocalOptimizer::CartesianGdiis,
-            LocalOptimizer::RedundantInternal,
-        ] {
+        for method in LocalOptimizer::ALL {
             assert!(!method.label().is_empty());
             assert!(!method.description().is_empty());
         }
-        // GDIIS is not offered: it is never better, so it would only be a slower choice.
-        assert!(!LocalOptimizer::ALL.contains(&LocalOptimizer::CartesianGdiis));
         // Behemoth's behaviour is the default, so importing the search changes nothing by itself.
         assert_eq!(LocalOptimizer::default(), LocalOptimizer::RedundantInternal);
     }
