@@ -57,7 +57,7 @@ pub fn conformer_panel(
 
     ui.label(
         egui::RichText::new(
-            "Once a search has finished you can re-rank its results with xTB's GFN-FF, which is \
+            "Once a search has finished you can re-rank its results with xTB's GFN2, which is \
              offered below the results.",
         )
         .small()
@@ -235,8 +235,8 @@ fn results_section(
         egui::RichText::new(format!(
             "Local optimiser: {}. Energies from {}.",
             outcome.local_optimizer.label(),
-            if outcome.refined_with_gfnff {
-                "xTB GFN-FF"
+            if outcome.refined_with_xtb {
+                "xTB GFN2"
             } else {
                 "the DREIDING force field"
             }
@@ -415,7 +415,7 @@ doi:10.1021/acs.jcim.5b00243\n\
 S. L. Mayo, B. D. Olafson, W. A. Goddard III, \"DREIDING: A Generic Force Field for Molecular \
 Simulations\", J. Phys. Chem. 1990, 94, 8897-8909. doi:10.1021/j100389a010";
 
-/// The GFN-FF re-ranking: the button, and what the last one did.
+/// The GFN2 re-ranking: the button, and what the last one did.
 ///
 /// Offered on the results rather than as a search setting, because it is a different kind of
 /// wait. The search is seconds; this is minutes of process launches, so it is started
@@ -435,14 +435,14 @@ fn refinement_row(ui: &mut egui::Ui, run: &mut ConformerRun, outcome: &Conformer
 
     ui.horizontal(|ui| {
         let count = outcome.conformers.len().min(super::refine::MAX_REFINED);
-        let can_refine = resolved.is_ok() && !run.is_refining() && !outcome.refined_with_gfnff;
+        let can_refine = resolved.is_ok() && !run.is_refining() && !outcome.refined_with_xtb;
         if ui
             .add_enabled(
                 can_refine,
-                egui::Button::new(format!("Re-rank top {count} with xTB GFN-FF")),
+                egui::Button::new(format!("Re-rank top {count} with xTB GFN2")),
             )
             .on_hover_text(
-                "Re-optimises the leading conformers with GFN-FF and re-orders them. Relative \
+                "Re-optimises the leading conformers with GFN2 and re-orders them. Relative \
                  conformer energies are where a generic force field is weakest, so this is \
                  usually worth the wait.",
             )
@@ -491,11 +491,11 @@ fn refinement_row(ui: &mut egui::Ui, run: &mut ConformerRun, outcome: &Conformer
         None => {}
     }
 
-    if outcome.refined_with_gfnff && outcome.conformers.len() > super::refine::MAX_REFINED {
+    if outcome.refined_with_xtb && outcome.conformers.len() > super::refine::MAX_REFINED {
         // The list is honestly mixed, so say so rather than let the numbers look comparable.
         ui.label(
             egui::RichText::new(format!(
-                "The first {} energies are GFN-FF; the rest are still DREIDING and are only \
+                "The first {} energies are GFN2; the rest are still DREIDING and are only \
                  placed after them.",
                 super::refine::MAX_REFINED
             ))
@@ -615,7 +615,7 @@ mod tests {
             local_optimizer: LocalOptimizer::Cartesian,
             best_found_in_generation: 3,
             radical_warning: None,
-            refined_with_gfnff: false,
+            refined_with_xtb: false,
             atoms: vec!["C".into(), "H".into()],
         }
     }

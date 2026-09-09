@@ -12,7 +12,7 @@
 //! A genetic search runs thousands of local optimisations, each needing tens of gradient
 //! evaluations -- so 10⁴ to 10⁵ energy calls for a molecule with a handful of rotors. The DREIDING
 //! force field answers each in microseconds, in this process. An external program answers each in
-//! a process launch: xTB's GFN-FF is fast once running, but at ~100 ms of startup per call the
+//! a process launch: xTB's GFN2 is fast once running, but at ~100 ms of startup per call the
 //! same search would take hours to days rather than seconds.
 //!
 //! That is why the search runs on DREIDING, and why xTB is offered as a *refinement* of the
@@ -180,11 +180,11 @@ pub struct ConformerOutcome {
     pub atoms: Vec<String>,
     /// Set when the structure looks open-shell, saying what that means for the result.
     pub radical_warning: Option<String>,
-    /// Set once the leading conformers have been re-optimised and re-ranked with GFN-FF.
+    /// Set once the leading conformers have been re-optimised and re-ranked with GFN2.
     ///
-    /// When set, the energies of the refined conformers are GFN-FF and any beyond the refinement
+    /// When set, the energies of the refined conformers are GFN2 and any beyond the refinement
     /// cap are still DREIDING -- so the list is honestly mixed, and says so.
-    pub refined_with_gfnff: bool,
+    pub refined_with_xtb: bool,
 }
 
 /// How many cores the machine has, as the default worker count.
@@ -270,7 +270,7 @@ fn single_conformer(
         best_found_in_generation: 0,
         atoms: atoms.to_vec(),
         radical_warning: topology.radical_warning(),
-        refined_with_gfnff: false,
+        refined_with_xtb: false,
     })
 }
 
@@ -523,7 +523,7 @@ fn assemble(
         workers,
         local_optimizer,
         radical_warning: None,
-        refined_with_gfnff: false,
+        refined_with_xtb: false,
         best_found_in_generation: result
             .conformers
             .iter()
@@ -582,7 +582,7 @@ impl std::fmt::Display for ConformerError {
 #[derive(Resource, Default)]
 pub struct ConformerRun {
     task: Option<Task<Result<ConformerOutcome, ConformerError>>>,
-    /// The GFN-FF re-ranking, which runs after a search rather than inside it.
+    /// The GFN2 re-ranking, which runs after a search rather than inside it.
     ///
     /// Separate because it is a different kind of wait: a search is seconds and a refinement is
     /// minutes of external process launches, so the user starts it deliberately and watches the
@@ -607,7 +607,7 @@ impl ConformerRun {
         self.refine_task.is_some()
     }
 
-    /// Starts re-ranking the current conformers with xTB's GFN-FF.
+    /// Starts re-ranking the current conformers with xTB's GFN2.
     ///
     /// `binary` comes from the path the Geometry Optimization panel already keeps for xTB, so
     /// there is no second place to configure it.
@@ -624,7 +624,7 @@ impl ConformerRun {
             .join(format!("conformers_{}", std::process::id()));
         self.refine_task = Some(AsyncComputeTaskPool::get().spawn(async move {
             let mut outcome = outcome;
-            match refine::refine_with_gfnff(&mut outcome, &binary, &scratch, 0, 1) {
+            match refine::refine_with_xtb(&mut outcome, &binary, &scratch, 0, 1) {
                 Ok(report) => {
                     // The scratch tree holds one directory per conformer and is of no further
                     // use once the energies are read back.

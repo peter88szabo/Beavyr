@@ -1,4 +1,4 @@
-//! Re-ranking conformers with xTB's GFN-FF.
+//! Re-ranking conformers with xTB's GFN2.
 //!
 //! The search itself has to run on DREIDING: it needs tens of thousands of energies, and an
 //! external program costs a process launch for each. Re-ranking is the opposite shape of problem.
@@ -6,6 +6,12 @@
 //! minutes -- and that is worth doing, because relative conformer energies are precisely where a
 //! generic force field is weakest. DREIDING is reliable about which shapes *exist* and much less
 //! so about their order.
+//!
+//! GFN2-xTB does the re-ranking. It is a semiempirical tight-binding method with a self-consistent
+//! charge treatment, so unlike any force field it accounts for polarisation and for dispersion
+//! from the electronic structure rather than from fitted pair terms. That is exactly what decides
+//! conformer energies: an intramolecular hydrogen bond, a stacked pair of rings, a dipole that
+//! prefers one torsion over another.
 //!
 //! Each conformer is optimised in its own scratch directory, so they can run at the same time.
 //! That is what [`crate::qchem_interfaces::xtbrun::call_xtb_in`] exists for.
@@ -84,7 +90,7 @@ impl Objective for XtbObjective<'_> {
 /// Convergence for a refinement.
 ///
 /// Looser than a publication geometry and deliberately so: the conformers arrive already relaxed
-/// on DREIDING, so this only has to move them to the nearest GFN-FF minimum and report its energy.
+/// on DREIDING, so this only has to move them to the nearest GFN2 minimum and report its energy.
 /// Every extra cycle is another process launch.
 fn refine_options() -> CartesianMinimumOptions {
     CartesianMinimumOptions {
@@ -108,12 +114,12 @@ pub struct Refinement {
     pub reordered: usize,
 }
 
-/// Re-optimises the leading conformers with GFN-FF and re-ranks the set.
+/// Re-optimises the leading conformers with GFN2-xTB and re-ranks the set.
 ///
 /// `binary` is the xTB executable. Conformers past [`MAX_REFINED`] are left where they are, after
 /// the refined ones, and keep their DREIDING energies -- which is why the outcome records that the
 /// energies are mixed rather than pretending otherwise.
-pub fn refine_with_gfnff(
+pub fn refine_with_xtb(
     outcome: &mut ConformerOutcome,
     binary: &Path,
     scratch: &Path,
@@ -133,10 +139,17 @@ pub fn refine_with_gfnff(
         functional: String::new(),
         charge,
         multiplicity,
-        // GFN-FF, and one thread each. The force field is what makes re-ranking a minute rather
-        // than an hour; the thread limit is so that running several conformers at once -- which
-        // is the obvious next step here -- does not oversubscribe the machine.
-        additional: "--gfnff -P 1".to_string(),
+        // GFN2-xTB, one thread each.
+        //
+        // GFN2 rather than GFN-FF: it is a semiempirical tight-binding method with an SCF, not a
+        // force field, so it describes polarisation and dispersion properly -- which is the whole
+        // reason to re-rank at all. It costs more per structure than GFN-FF, but the count is
+        // dozens of conformers rather than the tens of thousands the search itself needs, so the
+        // cost lands in minutes either way.
+        //
+        // The thread limit is so that running several conformers at once does not oversubscribe
+        // the machine.
+        additional: "--gfn 2 -P 1".to_string(),
         wfu: false,
     };
 
@@ -164,7 +177,7 @@ pub fn refine_with_gfnff(
         energies.push((index, result.energy, result.x));
     }
 
-    // Re-rank on the GFN-FF energies, lowest first.
+    // Re-rank on the GFN2 energies, lowest first.
     let mut order: Vec<usize> = (0..take).collect();
     order.sort_by(|a, b| energies[*a].1.total_cmp(&energies[*b].1));
     let reordered = order.iter().enumerate().filter(|(at, was)| *at != **was).count();
@@ -218,7 +231,7 @@ pub fn refine_with_gfnff(
     {
         conformer.population_fraction = fraction;
     }
-    outcome.refined_with_gfnff = true;
+    outcome.refined_with_xtb = true;
 
     Ok(Refinement {
         refined: take,
@@ -288,19 +301,19 @@ mod tests {
         }
 
         let scratch = std::env::temp_dir().join(format!("beavyr_refine_{}", std::process::id()));
-        let report = refine_with_gfnff(&mut outcome, &binary, &scratch, 0, 1)
+        let report = refine_with_xtb(&mut outcome, &binary, &scratch, 0, 1)
             .expect("the refinement runs");
         let _ = std::fs::remove_dir_all(&scratch);
 
         println!(
-            "  GFN-FF ({} conformers, {} xTB calls, {} moved):",
+            "  GFN2 ({} conformers, {} xTB calls, {} moved):",
             report.refined, report.xtb_calls, report.reordered
         );
         for (index, c) in outcome.conformers.iter().enumerate() {
             println!("    {}: {:>6.2} kcal/mol", index + 1, c.relative_energy_kcal);
         }
 
-        assert!(outcome.refined_with_gfnff);
+        assert!(outcome.refined_with_xtb);
         assert!(report.xtb_calls > 0, "no xTB call was made");
         // The lowest is still the reference, and populations still sum to one.
         assert_eq!(outcome.conformers[0].relative_energy_kcal, 0.0);
@@ -337,9 +350,9 @@ mod tests {
             best_found_in_generation: 0,
             atoms: Vec::new(),
             radical_warning: None,
-            refined_with_gfnff: false,
+            refined_with_xtb: false,
         };
-        let report = refine_with_gfnff(
+        let report = refine_with_xtb(
             &mut outcome,
             Path::new("/nonexistent/xtb"),
             Path::new("/tmp"),
@@ -348,6 +361,6 @@ mod tests {
         )
         .expect("an empty set is a no-op");
         assert_eq!(report.refined, 0);
-        assert!(!outcome.refined_with_gfnff);
+        assert!(!outcome.refined_with_xtb);
     }
 }
