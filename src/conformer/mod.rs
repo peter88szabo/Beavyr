@@ -28,13 +28,13 @@ use bevy::prelude::*;
 use bevy::tasks::{block_on, futures_lite::future, AsyncComputeTaskPool, Task};
 
 use crate::forcefield::dreiding::objective::{
-    DreidingObjective, BOHR_TO_ANGSTROM, HARTREE_TO_KCAL,
+    cleanup_options, relax_angstrom, DreidingObjective, BOHR_TO_ANGSTROM, HARTREE_TO_KCAL,
 };
 use crate::forcefield::dreiding::{BuildError, DreidingTopology};
 use crate::molecule::{covalent_radius_angstrom, Molecule};
 use crate::optimizer::conformer_search::{
     discover_torsions, genetic_conformer_search_parallel, ConformerSearchOptions,
-    ConformerSearchResult, LocalOptimizer,
+    ConformerSearchResult, LocalOptimizer, PreparedTorsion, TorsionKind,
 };
 use crate::optimizer::internal_coords::ConnectivityModel;
 
@@ -170,6 +170,8 @@ pub struct ConformerOutcome {
     pub conformers: Vec<Conformer>,
     /// Rotatable bonds the search detected and sampled.
     pub rotors: usize,
+    /// Rings whose pucker the search sampled, five- and six-membered.
+    pub rings: usize,
     pub generations: usize,
     pub structures_tried: usize,
     pub local_optimizations: usize,
@@ -200,11 +202,86 @@ pub fn available_cores() -> usize {
         .max(1)
 }
 
+/// Roughly how many distinct shapes the sampled degrees of freedom can make between them.
+///
+/// Used only to cap the population: the search needs that many *distinct* starting minima, and
+/// asking for more than exist cannot be satisfied.
+///
+/// Each kind of degree of freedom contributes what it actually offers. A rotatable bond has about
+/// three staggered minima and a cis/trans bond two, but a ring has as many canonical conformers as
+/// its size allows -- 38 for a six-ring, 20 for a five-ring. Treating a ring as though it had
+/// three, which an earlier version did, capped methylcyclohexane's population at three and found
+/// one chair where there are two.
+fn search_space(degrees_of_freedom: &[PreparedTorsion]) -> usize {
+    // Capped so a floppy molecule does not overflow or ask for an absurd population; the
+    // thoroughness budget is the real limit on size.
+    const CEILING: usize = 100_000;
+    degrees_of_freedom
+        .iter()
+        .fold(1usize, |total, dof| {
+            let multiplicity = match dof.kind {
+                TorsionKind::Rotatable => 3,
+                TorsionKind::CisTrans => 2,
+                TorsionKind::RingPucker => dof
+                    .ring
+                    .as_ref()
+                    .map(|ring| ring.conformers.len())
+                    .unwrap_or(1),
+            };
+            total.saturating_mul(multiplicity.max(1))
+        })
+        .min(CEILING)
+}
+
+/// The result for a molecule that turns out to have exactly one minimum.
+///
+/// Reached when the search cannot assemble two distinct starting minima to breed from. The
+/// molecule is flexible on paper -- it has rotors or a ring -- but every trial geometry relaxes to
+/// the same place, so there is one conformer and this reports it rather than an error.
+fn single_conformer(
+    topology: &DreidingTopology,
+    mol: &Molecule,
+    atoms: &[String],
+    elapsed: Duration,
+    workers: usize,
+    rotors: usize,
+    rings: usize,
+) -> Result<ConformerOutcome, ConformerError> {
+    let start: Vec<f64> = mol
+        .pos
+        .iter()
+        .flat_map(|p| [p.x as f64, p.y as f64, p.z as f64])
+        .collect();
+    let (relaxed, _) = relax_angstrom(topology, &start, cleanup_options())
+        .map_err(|e| ConformerError::Search(e.to_string()))?;
+
+    Ok(ConformerOutcome {
+        conformers: vec![Conformer {
+            positions_angstrom: relaxed,
+            relative_energy_kcal: 0.0,
+            population_fraction: 1.0,
+        }],
+        rotors,
+        rings,
+        generations: 0,
+        structures_tried: 0,
+        local_optimizations: 1,
+        termination: "only one distinct minimum".into(),
+        elapsed,
+        workers,
+        local_optimizer: LocalOptimizer::Cartesian,
+        best_found_in_generation: 0,
+        atoms: atoms.to_vec(),
+    })
+}
+
 /// Why a molecule offered no torsion to sample: genuinely rigid, or flexible only in a ring.
 ///
 /// The distinction matters to the user. "One conformer" is right for water and wrong for
 /// cyclohexane, and a chemist told the latter would rightly not believe the tool.
 fn nothing_to_rotate(topology: &DreidingTopology) -> ConformerError {
+    // Reaching here with ring bonds present means none of the rings was five- or six-membered,
+    // since those would have become degrees of freedom in their own right.
     let rings = topology.ring_bond_count();
     if rings > 0 {
         ConformerError::RingOnly { rings }
@@ -265,23 +342,26 @@ pub fn search(
     // bond, while the search excludes methyl rotors, whose rotation returns the same shape. For
     // butane that is three bonds against one -- and budgeting from the larger number asks for a
     // population bigger than the molecule has distinct conformers.
-    let rotors = match discover_torsions(&coordinates_bohr, &atoms, &connectivity, &[], &[], true) {
-        Ok((_bonds, torsions)) => torsions.len(),
-        // Perception only refuses when nothing can rotate. Whether that is because the molecule
-        // is genuinely rigid or because its flexibility is all inside a ring changes what the
-        // user should be told, so the two are separated here.
-        Err(_) => return Err(nothing_to_rotate(&topology)),
-    };
-    if rotors == 0 {
+    let degrees_of_freedom =
+        match discover_torsions(&coordinates_bohr, &atoms, &connectivity, &[], &[], true) {
+            Ok((_bonds, torsions)) => torsions,
+            // Perception only refuses when there is nothing to sample at all. Whether that is
+            // because the molecule is genuinely rigid or because its flexibility is in a ring too
+            // large for the pucker treatment changes what the user should be told.
+            Err(_) => return Err(nothing_to_rotate(&topology)),
+        };
+    let rings = degrees_of_freedom
+        .iter()
+        .filter(|dof| dof.kind == TorsionKind::RingPucker)
+        .count();
+    let rotors = degrees_of_freedom.len() - rings;
+    if degrees_of_freedom.is_empty() {
         return Err(nothing_to_rotate(&topology));
     }
 
-    let (requested_population, max_generations) = settings.thoroughness.budget(rotors);
-    // Each rotor contributes roughly three staggered minima, so the whole torsion space is about
-    // 3^rotors. Asking for a population larger than that cannot be satisfied: the search needs
-    // distinct starting minima and there are only so many to find. Butane has one rotor and, with
-    // its two gauche forms treated as equivalent, just two conformers.
-    let space = 3usize.saturating_pow(rotors.min(10) as u32);
+    let (requested_population, max_generations) =
+        settings.thoroughness.budget(degrees_of_freedom.len());
+    let space = search_space(&degrees_of_freedom);
     let population_size = requested_population.min(space).max(2);
 
     // A small molecule can still have fewer distinct minima than even that estimate -- symmetry
@@ -325,6 +405,7 @@ pub fn search(
                     started.elapsed(),
                     workers,
                     settings.local_optimizer,
+                    rings,
                 ))
             }
             Err(error) => {
@@ -337,6 +418,21 @@ pub fn search(
         }
     }
 
+    // A genetic search needs two distinct minima to breed from. Failing at a population of two
+    // means the molecule has only one -- true of unsubstituted cyclohexane, whose chair is the
+    // only minimum this force field keeps -- and that is an answer, not a failure. Relax the given
+    // structure and report it as the single conformer.
+    if last_error.contains("distinct converged minima") {
+        return single_conformer(
+            &topology,
+            mol,
+            &atoms,
+            started.elapsed(),
+            workers,
+            rotors,
+            rings,
+        );
+    }
     Err(ConformerError::Search(last_error))
 }
 
@@ -383,6 +479,7 @@ fn assemble(
     elapsed: Duration,
     workers: usize,
     local_optimizer: LocalOptimizer,
+    rings: usize,
 ) -> ConformerOutcome {
     let lowest = result
         .conformers
@@ -415,7 +512,8 @@ fn assemble(
 
     ConformerOutcome {
         conformers,
-        rotors: result.torsions.len(),
+        rotors: result.torsions.len().saturating_sub(rings),
+        rings,
         generations: result.generations,
         structures_tried: result.statistics.attempted_structures,
         local_optimizations: result.statistics.local_optimizations,
@@ -440,12 +538,14 @@ pub enum ConformerError {
     ForceField(BuildError),
     /// Nothing to search: no rotatable bond, so the molecule has one shape.
     Rigid,
-    /// The molecule is flexible, but only in ways this search cannot sample.
+    /// The molecule's only flexibility is in a ring of a size this search does not pucker.
     ///
-    /// Ring bonds are excluded from the torsion set on purpose: turning one ring dihedral does not
-    /// give another conformer, it prises the ring open. So a ring's own conformers -- cyclohexane's
-    /// chair and twist-boat, a sugar's puckers -- need moves that deform the whole ring at once,
-    /// which this search has no notion of. Saying "one conformer" here would be simply wrong.
+    /// Five- and six-membered rings *are* sampled, through their Cremer-Pople puckering
+    /// coordinates -- see [`crate::optimizer::conformer_search::rings`]. Other sizes are not:
+    /// three- and four-rings are effectively rigid, and a larger ring's conformational space is
+    /// not the small sphere or circle that treatment relies on. Since no ring bond can be turned
+    /// on its own without prising the ring open, such a molecule has flexibility that goes
+    /// unsampled, and saying "one conformer" would be wrong.
     RingOnly { rings: usize },
     Search(String),
 }
@@ -462,11 +562,12 @@ impl std::fmt::Display for ConformerError {
             ),
             Self::RingOnly { rings } => write!(
                 f,
-                "this molecule's only flexibility is in its {}, which this search cannot \
-                 explore. Turning a single ring bond would prise the ring open rather than \
-                 give another conformer, so ring shapes -- a chair against a twist-boat, or a \
-                 sugar's puckers -- need a different kind of search. Anything outside the \
-                 ring would have been sampled; here there is nothing.",
+                "this molecule's only flexibility is in its {}, and not of a size this search \
+                 can pucker. Five- and six-membered rings are sampled -- chair against \
+                 twist-boat, or a sugar's puckers -- but a three- or four-ring is effectively \
+                 rigid, and a larger ring needs a different treatment. Turning a single ring \
+                 bond is not an option: it would prise the ring open rather than give another \
+                 conformer.",
                 if *rings == 1 { "ring" } else { "rings" }
             ),
             Self::Search(message) => write!(f, "the conformer search failed: {message}"),
@@ -951,36 +1052,217 @@ mod tests {
         H 0.7300 -1.2644 -1.3400\n\
         H 1.2000 -2.0785 0.3000\n";
 
-    /// **Ring conformers are not searched.** Every bond in a ring is excluded from the torsion
-    /// set, because turning a ring dihedral on its own does not give another conformer -- it
-    /// stretches the ring open. Cyclohexane therefore has no rotatable bond by this definition and
-    /// is reported as having one shape, when in fact it has the chair, the twist-boat and the rest.
-    ///
-    /// Pinned as a test because it is a real limitation and the message a user gets is
-    /// misleading: sampling ring pucker needs moves that deform the whole ring at once, which this
-    /// search has no notion of.
+    /// Cyclohexane's ring is a searchable degree of freedom, even though not one of its bonds
+    /// rotates. This is the whole point of the pucker coordinates: a torsion-space search alone
+    /// would call the molecule rigid.
     #[test]
-    fn ring_conformers_are_not_searched() {
+    fn a_ring_is_a_searchable_degree_of_freedom() {
         let cyclohexane = molecule(CYCLOHEXANE);
         let topology = DreidingTopology::build(&cyclohexane).expect("cyclohexane types fine");
+        // No rotatable bond: every C-C is in the ring.
+        assert!(topology.rotatable_bonds().is_empty());
+
+        let outcome = search(&cyclohexane, test_settings()).expect("the ring is searchable");
+        // Counted as a ring, not a rotatable bond: none of its bonds turns.
+        assert_eq!(outcome.rotors, 0);
+        assert_eq!(outcome.rings, 1, "the ring itself is the degree of freedom");
+        assert!(!outcome.conformers.is_empty());
+        for conformer in &outcome.conformers {
+            assert_eq!(
+                conformer.positions_angstrom.len(),
+                cyclohexane.atoms.len() * 3
+            );
+        }
+    }
+
+    /// Cyclohexane's conformers: the chair lowest, twist-boats well above it. Getting the
+    /// *ordering* right is the chemistry that matters -- a search that put a boat below the chair
+    /// would be worthless.
+    #[test]
+    fn cyclohexane_puts_the_chair_below_the_boats() {
+        use crate::optimizer::conformer_search::rings;
+
+        let outcome = search(&molecule(CYCLOHEXANE), test_settings()).expect("searchable");
+        assert!(!outcome.conformers.is_empty());
+
+        let ring = [0usize, 1, 2, 3, 4, 5];
+        let pucker_of = |conformer: &Conformer| {
+            let bohr: Vec<f64> = conformer
+                .positions_angstrom
+                .iter()
+                .map(|a| a / BOHR_TO_ANGSTROM)
+                .collect();
+            rings::measure(&bohr, &ring).expect("six-ring")
+        };
+
+        // The global minimum is a chair, at a pole of the puckering sphere.
+        let lowest = pucker_of(&outcome.conformers[0]);
         assert!(
-            topology.rotatable_bonds().is_empty(),
-            "every C-C bond is in the ring, so none is rotatable"
+            lowest.theta_deg < 25.0 || lowest.theta_deg > 155.0,
+            "the lowest conformer is not a chair: θ = {:.1}°",
+            lowest.theta_deg
+        );
+        // And properly puckered rather than flattened: planar cyclohexane is a maximum.
+        assert!(
+            lowest.amplitude > 0.7,
+            "the ring came back nearly flat, amplitude {:.2} bohr",
+            lowest.amplitude
         );
 
-        // And the refusal must say *why*: "one conformer" is right for water and wrong here.
-        let error = search(&cyclohexane, test_settings())
-            .expect_err("no torsion to sample, so nothing to search");
-        match &error {
-            ConformerError::RingOnly { rings } => assert_eq!(*rings, 6),
-            other => panic!("expected a ring-only refusal, got {other:?}"),
+        // Anything that is not a chair must cost real energy. The experimental chair-to-twist-boat
+        // gap is about 5.5 kcal/mol; a generic force field overshoots, but the sign is not in
+        // doubt.
+        for (conformer, pucker) in outcome.conformers.iter().zip(outcome.conformers.iter().map(pucker_of)) {
+            let is_chair = pucker.theta_deg < 25.0 || pucker.theta_deg > 155.0;
+            if !is_chair {
+                assert!(
+                    conformer.relative_energy_kcal > 3.0,
+                    "a boat at only {:.2} kcal/mol above the chair",
+                    conformer.relative_energy_kcal
+                );
+            }
         }
-        let text = error.to_string();
-        assert!(text.contains("ring"), "{text}");
+    }
+
+    /// Methylcyclohexane, equatorial chair. C7H14, 21 atoms.
+    const METHYLCYCLOHEXANE: &str = "21\n\
+        methylcyclohexane, equatorial chair\n\
+        C 1.4600 0.0000 0.2500\n\
+        C 0.7300 1.2644 -0.2500\n\
+        C -0.7300 1.2644 0.2500\n\
+        C -1.4600 0.0000 -0.2500\n\
+        C -0.7300 -1.2644 0.2500\n\
+        C 0.7300 -1.2644 -0.2500\n\
+        H 1.4600 0.0000 1.3400\n\
+        H 0.7300 1.2644 -1.3400\n\
+        H 1.2000 2.0785 0.3000\n\
+        H -0.7300 1.2644 1.3400\n\
+        H -1.2000 2.0785 -0.3000\n\
+        H -1.4600 0.0000 -1.3400\n\
+        H -2.4000 0.0000 0.3000\n\
+        H -0.7300 -1.2644 1.3400\n\
+        H -1.2000 -2.0785 -0.3000\n\
+        H 0.7300 -1.2644 -1.3400\n\
+        H 1.2000 -2.0785 0.3000\n\
+        C 2.7806 0.0000 -0.5227\n\
+        H 3.0938 -1.0278 -0.7060\n\
+        H 3.5433 0.5139 0.0623\n\
+        H 2.6443 0.5139 -1.4742\n";
+
+    /// The textbook ring case. Methylcyclohexane has two chairs -- methyl equatorial and methyl
+    /// axial, about 1.8 kcal/mol apart experimentally -- and, higher up, twist-boats. Finding them
+    /// is the proof that ring puckering works on real chemistry: no bond in the ring rotates, so a
+    /// torsion-space search would find only the methyl spinning and call the molecule solved.
+    #[test]
+    fn methylcyclohexane_finds_both_chairs() {
+        let mecy = molecule(METHYLCYCLOHEXANE);
+        let outcome = search(&mecy, test_settings()).expect("methylcyclohexane is searchable");
+        // The ring puckers; the methyl's own rotation is excluded as redundant.
+        assert_eq!(outcome.rings, 1, "the ring should be sampled");
+
+        let ring = [0usize, 1, 2, 3, 4, 5];
+        let pucker_of = |conformer: &Conformer| {
+            let bohr: Vec<f64> = conformer
+                .positions_angstrom
+                .iter()
+                .map(|a| a / BOHR_TO_ANGSTROM)
+                .collect();
+            crate::optimizer::conformer_search::rings::measure(&bohr, &ring).expect("six-ring")
+        };
+        let is_chair = |p: &crate::optimizer::conformer_search::rings::Pucker| {
+            p.theta_deg < 30.0 || p.theta_deg > 150.0
+        };
+
+        let puckers: Vec<_> = outcome.conformers.iter().map(pucker_of).collect();
+        for (index, p) in puckers.iter().enumerate() {
+            println!(
+                "  conformer {}: dE {:>6.2} kcal/mol, θ {:>6.1}°, φ {:>6.1}°, Q {:.2} Å  {}",
+                index + 1,
+                outcome.conformers[index].relative_energy_kcal,
+                p.theta_deg,
+                p.phi_deg,
+                p.amplitude,
+                if is_chair(p) { "chair" } else { "boat/twist" }
+            );
+        }
+
+        // The global minimum must be a chair. Getting that wrong would be a real error.
         assert!(
-            !text.contains("only one conformer"),
-            "must not claim cyclohexane has one shape: {text}"
+            is_chair(&puckers[0]),
+            "the lowest conformer is not a chair: θ = {:.1}°",
+            puckers[0].theta_deg
         );
+
+        // And both chairs must be there -- that is the axial/equatorial pair.
+        let chairs: Vec<usize> = puckers
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| is_chair(p))
+            .map(|(index, _)| index)
+            .collect();
+        assert!(
+            chairs.len() >= 2,
+            "found {} chair(s) among {} conformers; axial and equatorial should both be there",
+            chairs.len(),
+            puckers.len()
+        );
+
+        // The two chairs differ by where the methyl sits, so a couple of kcal/mol, not tens.
+        let gap = outcome.conformers[chairs[1]].relative_energy_kcal;
+        assert!(
+            gap > 0.0 && gap < 8.0,
+            "the two chairs are {gap:.2} kcal/mol apart"
+        );
+    }
+
+    /// Cyclopentane. C5H10, 15 atoms.
+    const CYCLOPENTANE: &str = "15\n\
+        cyclopentane\n\
+        C 1.2500 0.0000 0.2000\n\
+        C 0.3863 1.1888 0.0000\n\
+        C -1.0113 0.7347 0.0000\n\
+        C -1.0113 -0.7347 0.0000\n\
+        C 0.3863 -1.1888 0.0000\n\
+        H 1.8500 0.0000 1.1100\n\
+        H 1.8500 0.0000 -0.7100\n\
+        H 0.5717 1.7595 0.9100\n\
+        H 0.5717 1.7595 -0.9100\n\
+        H -1.4967 1.0874 0.9100\n\
+        H -1.4967 1.0874 -0.9100\n\
+        H -1.4967 -1.0874 0.9100\n\
+        H -1.4967 -1.0874 -0.9100\n\
+        H 0.5717 -1.7595 0.9100\n\
+        H 0.5717 -1.7595 -0.9100\n";
+
+    /// Five-rings pucker on a circle rather than a sphere -- the pseudorotation itinerary of
+    /// envelopes and twists -- which is the coordinate sugars are described in. Checked separately
+    /// from the six-ring because it is a different expansion, with one puckering coordinate
+    /// instead of two.
+    #[test]
+    fn a_five_ring_is_searched_on_its_pseudorotation_itinerary() {
+        use crate::optimizer::conformer_search::rings;
+
+        let cyclopentane = molecule(CYCLOPENTANE);
+        let outcome = search(&cyclopentane, test_settings()).expect("the ring is searchable");
+        assert_eq!(outcome.rotors, 0);
+        assert_eq!(outcome.rings, 1, "the ring is the degree of freedom");
+        assert!(!outcome.conformers.is_empty());
+
+        // Every conformer must be a genuinely puckered five-ring, not a flattened one: a planar
+        // cyclopentane is the maximum, not a minimum.
+        for conformer in &outcome.conformers {
+            let bohr: Vec<f64> = conformer
+                .positions_angstrom
+                .iter()
+                .map(|a| a / BOHR_TO_ANGSTROM)
+                .collect();
+            let pucker = rings::measure(&bohr, &[0, 1, 2, 3, 4]).expect("five-ring");
+            assert!(
+                pucker.amplitude > 0.3,
+                "ring came back nearly planar, amplitude {:.2} bohr",
+                pucker.amplitude
+            );
+        }
     }
 
     /// Water really is rigid, so it must still get the plain message rather than the ring one.

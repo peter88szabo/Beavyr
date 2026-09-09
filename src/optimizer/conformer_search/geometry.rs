@@ -1,5 +1,6 @@
-use anyhow::{bail, ensure, Result};
+use anyhow::{bail, ensure, Context, Result};
 
+use super::rings;
 use super::topology::{PreparedTorsion, TorsionKind};
 
 const ANGSTROM_TO_BOHR: f64 = 1.0 / 0.529_177_210_903;
@@ -141,8 +142,31 @@ pub(crate) fn coordinates_from_genome(
         torsions.len()
     );
     let mut coordinates = template.to_vec();
+    // Torsions first, then rings. A ring's pucker is defined against its own mean plane, so it
+    // does not matter which order the two kinds are applied in -- but doing torsions first means
+    // the ring is reshaped in the geometry the substituents have actually been moved to.
     for (torsion, &target) in torsions.iter().zip(genome) {
+        if torsion.kind == TorsionKind::RingPucker {
+            continue;
+        }
         set_dihedral(&mut coordinates, torsion, target)?;
+    }
+    for (torsion, &target) in torsions.iter().zip(genome) {
+        if torsion.kind != TorsionKind::RingPucker {
+            continue;
+        }
+        let ring = torsion
+            .ring
+            .as_ref()
+            .context("a ring-pucker gene without a ring")?;
+        // The gene is an index into the ring's canonical conformers.
+        let choice = (target.max(0.0) as usize).min(ring.conformers.len().saturating_sub(1));
+        let pucker = ring.conformers[choice];
+        ensure!(
+            rings::apply_pucker(&mut coordinates, &ring.atoms, &ring.branches, &pucker),
+            "could not reshape a {}-membered ring",
+            ring.atoms.len()
+        );
     }
     Ok(coordinates)
 }
@@ -163,6 +187,20 @@ pub(crate) fn genome_from_coordinates(
                     std::f64::consts::PI
                 }
             }
+            // Read the ring's actual pucker and record which canonical conformer it is nearest.
+            // A relaxed ring drifts from the idealised geometry it was generated at, so this has
+            // to measure rather than remember.
+            TorsionKind::RingPucker => torsion
+                .ring
+                .as_ref()
+                .and_then(|ring| {
+                    rings::measure(coordinates, &ring.atoms)
+                        .map(|measured| (ring, measured))
+                })
+                .map(|(ring, measured)| {
+                    rings::nearest_conformer(ring.atoms.len(), &measured, &ring.conformers) as f64
+                })
+                .unwrap_or(0.0),
         })
         .collect()
 }

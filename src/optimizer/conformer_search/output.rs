@@ -51,6 +51,7 @@ pub(crate) fn print_search_header(
         let kind = match torsion.kind {
             TorsionKind::Rotatable => "rotatable",
             TorsionKind::CisTrans => "cis/trans",
+            TorsionKind::RingPucker => "ring pucker",
         };
         let selection = if torsion.user_selected {
             "user-selected"

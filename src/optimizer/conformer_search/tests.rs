@@ -37,6 +37,7 @@ fn torsion_builder_sets_the_requested_angle() {
         central_bond: [1, 2],
         moving_atoms: vec![2, 3],
         kind: TorsionKind::Rotatable,
+        ring: None,
         user_selected: true,
     };
     let target = -1.2;

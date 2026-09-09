@@ -2,12 +2,20 @@ use std::collections::{HashSet, VecDeque};
 
 use anyhow::{bail, ensure, Result};
 
+use super::rings::{self, Pucker};
 use crate::optimizer::internal_coords::{analyze_structure, ConnectivityModel};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TorsionKind {
     Rotatable,
     CisTrans,
+    /// A five- or six-membered ring's pucker.
+    ///
+    /// Not a torsion at all, but it is a degree of freedom the search samples the same way -- one
+    /// gene, mutated and crossed over like any other -- so it rides in the same list. Turning a
+    /// single ring bond would prise the ring open; a ring changes shape by moving its atoms out of
+    /// their mean plane, which is what [`super::rings`] does.
+    RingPucker,
 }
 
 #[derive(Debug, Clone)]
@@ -16,7 +24,20 @@ pub struct PreparedTorsion {
     pub central_bond: [usize; 2],
     pub moving_atoms: Vec<usize>,
     pub kind: TorsionKind,
+    /// Set only for [`TorsionKind::RingPucker`]: the ring this gene reshapes.
+    pub ring: Option<PreparedRing>,
     pub user_selected: bool,
+}
+
+/// A ring the search can reshape, with everything needed to do it.
+#[derive(Debug, Clone)]
+pub struct PreparedRing {
+    /// Ring atoms in connected order.
+    pub atoms: Vec<usize>,
+    /// For each ring atom, the substituent atoms that move with it.
+    pub branches: Vec<Vec<usize>>,
+    /// The canonical conformers this ring can take, which the gene indexes.
+    pub conformers: Vec<Pucker>,
 }
 
 fn adjacency(natoms: usize, bonds: &[[usize; 2]]) -> Vec<Vec<usize>> {
@@ -129,6 +150,7 @@ fn prepare_explicit(
         atoms,
         central_bond: central,
         moving_atoms,
+        ring: None,
         kind,
         user_selected: true,
     })
@@ -216,10 +238,35 @@ pub fn discover_torsions(
                 central_bond: [left, right],
                 moving_atoms: component_without_edge(&graph, right, [left, right]),
                 kind: TorsionKind::Rotatable,
+                ring: None,
                 user_selected: false,
             });
             central_bonds.insert(key);
         }
+    }
+
+    // Rings are degrees of freedom too, and ones no rotatable bond can reach. Appended after the
+    // torsions so a genome reads torsions-then-rings.
+    for ring in rings::find_rings(natoms, &internals.bonds) {
+        let conformers = rings::canonical_conformers(ring.size());
+        if conformers.is_empty() {
+            continue;
+        }
+        let branches = rings::substituent_branches(natoms, &internals.bonds, &ring.atoms);
+        torsions.push(PreparedTorsion {
+            // A ring has no single dihedral or central bond; these fields go unused for this kind
+            // and are filled from the ring so they stay in range.
+            atoms: [ring.atoms[0], ring.atoms[1], ring.atoms[2], ring.atoms[3]],
+            central_bond: [ring.atoms[0], ring.atoms[1]],
+            moving_atoms: Vec::new(),
+            kind: TorsionKind::RingPucker,
+            ring: Some(PreparedRing {
+                atoms: ring.atoms,
+                branches,
+                conformers,
+            }),
+            user_selected: false,
+        });
     }
 
     if torsions.is_empty() {

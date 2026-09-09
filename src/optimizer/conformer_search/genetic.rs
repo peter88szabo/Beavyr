@@ -91,8 +91,22 @@ pub(super) fn random_genome(rng: &mut StdRng, torsions: &[PreparedTorsion]) -> V
                     std::f64::consts::PI
                 }
             }
+            // A ring gene is an index into its canonical conformers, carried as a float so the
+            // genome stays one flat vector.
+            TorsionKind::RingPucker => ring_gene(rng, torsion),
         })
         .collect()
+}
+
+/// A random conformer index for a ring, as a gene value.
+fn ring_gene(rng: &mut StdRng, torsion: &PreparedTorsion) -> f64 {
+    let count = torsion
+        .ring
+        .as_ref()
+        .map(|ring| ring.conformers.len())
+        .unwrap_or(1)
+        .max(1);
+    rng.gen_range(0..count) as f64
 }
 
 fn roulette_index(rng: &mut StdRng, weights: &[f64]) -> usize {
@@ -226,6 +240,9 @@ fn mutate_positions(
                     0.0
                 }
             }
+            // Ring conformers are discrete basins, so a mutation jumps to another one outright
+            // rather than nudging -- there is no useful geometry between a chair and a boat.
+            TorsionKind::RingPucker => ring_gene(rng, &torsions[index]),
         };
     }
     true

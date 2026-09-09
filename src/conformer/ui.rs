@@ -32,7 +32,8 @@ pub fn conformer_panel(
     ui.label(
         egui::RichText::new(
             "Finds the low-energy shapes a flexible molecule can take, by searching over its \
-             rotatable bonds.",
+             rotatable bonds and the pucker of any five- or six-membered ring -- chair against \
+             twist-boat, or a sugar's envelopes and twists.",
         )
         .small(),
     );
@@ -219,12 +220,25 @@ fn results_section(
     let mut loaded = false;
 
     ui.label(egui::RichText::new("Results").strong());
+    // Rings and rotatable bonds are both degrees of freedom but they are not the same thing, and
+    // calling a ring a "rotatable bond" would be wrong in a way a chemist would notice.
+    let freedom = match (outcome.rotors, outcome.rings) {
+        (0, 1) => "1 ring".to_string(),
+        (0, rings) => format!("{rings} rings"),
+        (rotors, 0) => format!(
+            "{rotors} rotatable bond{}",
+            if rotors == 1 { "" } else { "s" }
+        ),
+        (rotors, rings) => format!(
+            "{rotors} rotatable bond{} and {rings} ring{}",
+            if rotors == 1 { "" } else { "s" },
+            if rings == 1 { "" } else { "s" }
+        ),
+    };
     ui.label(format!(
-        "{} conformer{} from {} rotatable bond{}, in {:.1} s on {} core{}.",
+        "{} conformer{} from {freedom}, in {:.1} s on {} core{}.",
         outcome.conformers.len(),
         if outcome.conformers.len() == 1 { "" } else { "s" },
-        outcome.rotors,
-        if outcome.rotors == 1 { "" } else { "s" },
         outcome.elapsed.as_secs_f64(),
         outcome.workers,
         if outcome.workers == 1 { "" } else { "s" }
@@ -494,6 +508,7 @@ mod tests {
                 },
             ],
             rotors: 1,
+            rings: 0,
             generations: 4,
             structures_tried: 40,
             local_optimizations: 30,

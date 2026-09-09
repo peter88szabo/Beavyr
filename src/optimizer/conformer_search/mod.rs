@@ -11,6 +11,7 @@ mod geometry;
 mod options;
 mod output;
 mod parallel;
+pub(crate) mod rings;
 mod rmsd;
 mod topology;
 
