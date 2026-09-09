@@ -55,22 +55,10 @@ pub fn conformer_panel(
         .weak(),
     );
 
-    ui.add_space(6.0);
-    // Shown but not yet available, rather than hidden: the plan is visible, and the checkbox
-    // cannot mislead by appearing to do something. See `conformer::mod` for what it needs.
-    ui.add_enabled_ui(false, |ui| {
-        ui.checkbox(
-            &mut run.settings.refine_with_gfnff,
-            "Re-rank the results with xTB GFN-FF",
-        );
-    });
     ui.label(
         egui::RichText::new(
-            "Not yet available. Re-optimising only the surviving conformers would be a few \
-             hundred xTB calls rather than tens of thousands, and relative conformer energies \
-             are where a generic force field is weakest -- so it is worth doing, but xTB is \
-             currently driven through a path that writes fixed filenames into the working \
-             directory and cannot safely be called in a loop.",
+            "Once a search has finished you can re-rank its results with xTB's GFN-FF, which is \
+             offered below the results.",
         )
         .small()
         .weak(),
@@ -244,9 +232,17 @@ fn results_section(
         if outcome.workers == 1 { "" } else { "s" }
     ));
     ui.label(
-        egui::RichText::new(format!("Local optimiser: {}.", outcome.local_optimizer.label()))
-            .small()
-            .weak(),
+        egui::RichText::new(format!(
+            "Local optimiser: {}. Energies from {}.",
+            outcome.local_optimizer.label(),
+            if outcome.refined_with_gfnff {
+                "xTB GFN-FF"
+            } else {
+                "the DREIDING force field"
+            }
+        ))
+        .small()
+        .weak(),
     );
     ui.label(
         egui::RichText::new(format!(
@@ -280,6 +276,8 @@ fn results_section(
                 .color(egui::Color32::from_rgb(200, 160, 70)),
         );
     }
+
+    refinement_row(ui, run, outcome);
 
     ui.add_space(8.0);
     ui.horizontal(|ui| {
@@ -417,6 +415,96 @@ doi:10.1021/acs.jcim.5b00243\n\
 S. L. Mayo, B. D. Olafson, W. A. Goddard III, \"DREIDING: A Generic Force Field for Molecular \
 Simulations\", J. Phys. Chem. 1990, 94, 8897-8909. doi:10.1021/j100389a010";
 
+/// The GFN-FF re-ranking: the button, and what the last one did.
+///
+/// Offered on the results rather than as a search setting, because it is a different kind of
+/// wait. The search is seconds; this is minutes of process launches, so it is started
+/// deliberately and the results already on screen stay readable while it runs.
+fn refinement_row(ui: &mut egui::Ui, run: &mut ConformerRun, outcome: &ConformerOutcome) {
+    ui.add_space(8.0);
+    ui.separator();
+    ui.add_space(6.0);
+
+    let configured = crate::qchem_interfaces::config::load_path(
+        crate::qchem_interfaces::program::QcProgram::Xtb,
+    );
+    let resolved = crate::qchem_interfaces::xtb_optimize::resolve_program_executable(
+        crate::qchem_interfaces::program::QcProgram::Xtb,
+        &configured,
+    );
+
+    ui.horizontal(|ui| {
+        let count = outcome.conformers.len().min(super::refine::MAX_REFINED);
+        let can_refine = resolved.is_ok() && !run.is_refining() && !outcome.refined_with_gfnff;
+        if ui
+            .add_enabled(
+                can_refine,
+                egui::Button::new(format!("Re-rank top {count} with xTB GFN-FF")),
+            )
+            .on_hover_text(
+                "Re-optimises the leading conformers with GFN-FF and re-orders them. Relative \
+                 conformer energies are where a generic force field is weakest, so this is \
+                 usually worth the wait.",
+            )
+            .clicked()
+        {
+            if let Ok(binary) = &resolved {
+                run.start_refinement(binary.clone());
+            }
+        }
+        if run.is_refining() {
+            ui.spinner();
+            ui.label("running xTB…");
+        }
+    });
+
+    if let Err(problem) = &resolved {
+        ui.label(
+            egui::RichText::new(format!(
+                "{problem} Set it in the Geometry Optimization panel; this uses the same path."
+            ))
+            .small()
+            .weak(),
+        );
+    }
+
+    match &run.refinement {
+        Some(Ok(report)) => {
+            ui.label(
+                egui::RichText::new(format!(
+                    "Re-ranked {} conformer{} with {} xTB calls; {} changed place{}.",
+                    report.refined,
+                    if report.refined == 1 { "" } else { "s" },
+                    report.xtb_calls,
+                    report.reordered,
+                    if report.reordered == 1 { "" } else { "s" }
+                ))
+                .small(),
+            );
+        }
+        Some(Err(problem)) => {
+            ui.colored_label(
+                egui::Color32::from_rgb(220, 120, 90),
+                egui::RichText::new(format!("xTB re-ranking failed: {problem}")).small(),
+            );
+        }
+        None => {}
+    }
+
+    if outcome.refined_with_gfnff && outcome.conformers.len() > super::refine::MAX_REFINED {
+        // The list is honestly mixed, so say so rather than let the numbers look comparable.
+        ui.label(
+            egui::RichText::new(format!(
+                "The first {} energies are GFN-FF; the rest are still DREIDING and are only \
+                 placed after them.",
+                super::refine::MAX_REFINED
+            ))
+            .small()
+            .weak(),
+        );
+    }
+}
+
 /// Puts the conformers into the Trajectory tool, lowest energy first.
 fn load_as_trajectory(
     outcome: &ConformerOutcome,
@@ -527,6 +615,7 @@ mod tests {
             local_optimizer: LocalOptimizer::Cartesian,
             best_found_in_generation: 3,
             radical_warning: None,
+            refined_with_gfnff: false,
             atoms: vec!["C".into(), "H".into()],
         }
     }

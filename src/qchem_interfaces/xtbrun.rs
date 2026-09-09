@@ -17,14 +17,29 @@ pub struct QcInput {
     pub wfu: bool,
 }
 
+/// Reads the total energy, in Hartree, from xTB's standard output.
+///
+/// xTB prints it twice and boxes both, so the number is never the last thing on its line:
+///
+/// ```text
+///          :: total energy              -0.327368812180 Eh    ::
+///           | TOTAL ENERGY               -0.327368812180 Eh   |
+/// ```
+///
+/// Taking the last whitespace token therefore yields `::` or `|`. The number is the first token
+/// on the line that parses as one, which holds for both layouts and survives whatever decoration
+/// a future version puts around them.
 pub fn parse_xtb_energy(output: &str) -> Result<f64, String> {
     for line in output.lines() {
-        if line.contains("TOTAL ENERGY") {
-            if let Some(tok) = line.split_whitespace().last() {
-                return tok
-                    .parse::<f64>()
-                    .map_err(|e| format!("Failed to parse energy token '{tok}': {e}"));
-            }
+        if !line.to_ascii_uppercase().contains("TOTAL ENERGY") {
+            continue;
+        }
+        if let Some(energy) = line
+            .split_whitespace()
+            .filter_map(|token| token.parse::<f64>().ok())
+            .next()
+        {
+            return Ok(energy);
         }
     }
     Err("Total energy not found in XTB output".to_string())
@@ -129,7 +144,15 @@ fn build_command_args(
     args
 }
 
-pub fn call_xtb(
+/// Runs xTB once, in `workdir`.
+///
+/// The directory is a parameter rather than the process's own, and has to be: xTB is given a fixed
+/// input file name and writes its gradient to a fixed name beside it, so two calls sharing a
+/// directory overwrite each other's files. Passing one in means a caller can give every
+/// calculation its own -- which is what makes it safe to drive xTB in a loop, or from several
+/// threads at once, as re-ranking a set of conformers does.
+pub fn call_xtb_in(
+    workdir: &Path,
     q_bohr: &[f64],
     atoms: &[String],
     qcinput: &QcInput,
@@ -138,11 +161,15 @@ pub fn call_xtb(
     if qcinput.path.as_os_str().is_empty() {
         return Err("XTB path is empty".to_string());
     }
+    fs::create_dir_all(workdir)
+        .map_err(|e| format!("Failed to create {}: {e}", workdir.display()))?;
 
+    // Named relative to `workdir`, which is also the process's working directory, so xTB reads
+    // and writes inside it.
     let inputfile = "xtb_geom_file_for_abinitioMD.xyz";
-    let gradfile = Path::new("gradient");
+    let gradfile = workdir.join("gradient");
 
-    print_structure(atoms, q_bohr, Path::new(inputfile))?;
+    print_structure(atoms, q_bohr, &workdir.join(inputfile))?;
 
     let base_args = build_command_args(
         inputfile,
@@ -153,6 +180,7 @@ pub fn call_xtb(
         false,
     );
     let output = Command::new(&qcinput.path)
+        .current_dir(workdir)
         .args(&base_args)
         .output()
         .map_err(|e| format!("Failed to run XTB: {e}"))?;
@@ -169,6 +197,7 @@ pub fn call_xtb(
             true,
         );
         let restart = Command::new(&qcinput.path)
+            .current_dir(workdir)
             .args(&restart_args)
             .output()
             .map_err(|e| format!("Failed to run XTB restart: {e}"))?;
@@ -182,12 +211,25 @@ pub fn call_xtb(
 
     let energy = parse_xtb_energy(&stdout)?;
     let grad = if arg == "--grad" {
-        parse_xtb_grad(gradfile, atoms.len())?
+        parse_xtb_grad(&gradfile, atoms.len())?
     } else {
         vec![0.0; atoms.len() * 3]
     };
 
     Ok((energy, grad))
+}
+
+/// Runs xTB in the process's own working directory.
+///
+/// Kept for the imported code that expects it. Prefer [`call_xtb_in`]: this one cannot be used
+/// twice concurrently, and leaves its scratch files wherever Beavyr happens to be running.
+pub fn call_xtb(
+    q_bohr: &[f64],
+    atoms: &[String],
+    qcinput: &QcInput,
+    arg: &str,
+) -> Result<(f64, Vec<f64>), String> {
+    call_xtb_in(Path::new("."), q_bohr, atoms, qcinput, arg)
 }
 
 pub fn xtb_force(q_bohr: &[f64], atoms: &[String], qcinput: &QcInput) -> Result<Vec<f64>, String> {
@@ -236,4 +278,37 @@ pub fn xtb_hessian(
     }
 
     Ok(hess)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Both layouts xTB prints, taken verbatim from its output. The number is never last on the
+    /// line, so a parser that takes the last token reads `::` or `|` and fails.
+    #[test]
+    fn the_total_energy_is_read_from_either_layout() {
+        let boxed = concat!(
+            "         :::::::::::::::::::::::::::::::::::::::::::::::::::::\n",
+            "         :: total energy              -0.327368812180 Eh    ::\n",
+            "         :: gradient norm              0.017706027413 Eh/a0 ::\n"
+        );
+        assert_eq!(parse_xtb_energy(boxed).unwrap(), -0.327_368_812_180);
+
+        let summary = concat!(
+            "           -------------------------------------------------\n",
+            "          | TOTAL ENERGY               -0.327368812180 Eh   |\n",
+            "          | GRADIENT NORM               0.017706027413 Eh/a |\n"
+        );
+        assert_eq!(parse_xtb_energy(summary).unwrap(), -0.327_368_812_180);
+    }
+
+    /// Output with no energy must be an error, not a zero -- which would quietly rank a conformer
+    /// far below every other and look like a discovery.
+    #[test]
+    fn output_without_an_energy_is_an_error() {
+        assert!(parse_xtb_energy("normal termination of xtb\n").is_err());
+        assert!(parse_xtb_energy("| TOTAL ENERGY  not available |\n").is_err());
+        assert!(parse_xtb_energy("").is_err());
+    }
 }

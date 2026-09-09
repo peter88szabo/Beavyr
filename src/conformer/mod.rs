@@ -20,6 +20,7 @@
 //! a minute or two -- and it buys a markedly better energy ordering than a generic force field
 //! gives, because relative conformer energies are where a generic force field is weakest.
 
+pub mod refine;
 pub mod ui;
 
 use std::time::{Duration, Instant};
@@ -104,16 +105,6 @@ pub const OFFSPRING_PER_GENERATION: usize = 8;
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ConformerSettings {
     pub thoroughness: Thoroughness,
-    /// Re-optimise the surviving conformers with xTB's GFN-FF and re-rank them.
-    ///
-    /// **Not yet implemented**, and disabled in the panel accordingly. The blocker is not the
-    /// cost -- refining a few dozen survivors is a few hundred xTB calls, minutes, and well worth
-    /// it since relative conformer energies are exactly where a generic force field is weakest.
-    /// It is that `qchem_interfaces::xtbrun::call_xtb` writes `xtb_geom_file_for_abinitioMD.xyz`
-    /// and reads `gradient` from the *current working directory*, so calling it in a loop would
-    /// litter the user's directory and could not be made concurrent. Driving it needs a
-    /// scratch-directory-aware variant first; `xtb_scratch_dir()` already exists for that.
-    pub refine_with_gfnff: bool,
     /// Fix the random seed, so a search can be repeated exactly.
     pub reproducible: bool,
     /// Which optimiser relaxes each candidate conformer.
@@ -139,7 +130,6 @@ impl Default for ConformerSettings {
     fn default() -> Self {
         Self {
             thoroughness: Thoroughness::default(),
-            refine_with_gfnff: false,
             reproducible: true,
             // Not Behemoth's default. Its internal-coordinate optimiser is right when an energy
             // costs seconds; here an energy costs microseconds and the trade inverts.
@@ -190,6 +180,11 @@ pub struct ConformerOutcome {
     pub atoms: Vec<String>,
     /// Set when the structure looks open-shell, saying what that means for the result.
     pub radical_warning: Option<String>,
+    /// Set once the leading conformers have been re-optimised and re-ranked with GFN-FF.
+    ///
+    /// When set, the energies of the refined conformers are GFN-FF and any beyond the refinement
+    /// cap are still DREIDING -- so the list is honestly mixed, and says so.
+    pub refined_with_gfnff: bool,
 }
 
 /// How many cores the machine has, as the default worker count.
@@ -275,6 +270,7 @@ fn single_conformer(
         best_found_in_generation: 0,
         atoms: atoms.to_vec(),
         radical_warning: topology.radical_warning(),
+        refined_with_gfnff: false,
     })
 }
 
@@ -305,7 +301,7 @@ const ROOM_TEMPERATURE_K: f64 = 298.15;
 const R_KCAL: f64 = 0.001_987_204_1;
 
 /// Boltzmann populations from relative energies at room temperature.
-fn populations(relative_kcal: &[f64]) -> Vec<f64> {
+pub(crate) fn populations(relative_kcal: &[f64]) -> Vec<f64> {
     let weights: Vec<f64> = relative_kcal
         .iter()
         .map(|e| (-e / (R_KCAL * ROOM_TEMPERATURE_K)).exp())
@@ -527,6 +523,7 @@ fn assemble(
         workers,
         local_optimizer,
         radical_warning: None,
+        refined_with_gfnff: false,
         best_found_in_generation: result
             .conformers
             .iter()
@@ -585,6 +582,14 @@ impl std::fmt::Display for ConformerError {
 #[derive(Resource, Default)]
 pub struct ConformerRun {
     task: Option<Task<Result<ConformerOutcome, ConformerError>>>,
+    /// The GFN-FF re-ranking, which runs after a search rather than inside it.
+    ///
+    /// Separate because it is a different kind of wait: a search is seconds and a refinement is
+    /// minutes of external process launches, so the user starts it deliberately and watches the
+    /// results they already have while it runs.
+    refine_task: Option<Task<Result<(ConformerOutcome, refine::Refinement), String>>>,
+    /// What the last refinement did, or why it could not run.
+    pub refinement: Option<Result<refine::Refinement, String>>,
     pub settings: ConformerSettings,
     pub outcome: Option<ConformerOutcome>,
     pub error: Option<String>,
@@ -596,6 +601,42 @@ pub struct ConformerRun {
 impl ConformerRun {
     pub fn is_running(&self) -> bool {
         self.task.is_some()
+    }
+
+    pub fn is_refining(&self) -> bool {
+        self.refine_task.is_some()
+    }
+
+    /// Starts re-ranking the current conformers with xTB's GFN-FF.
+    ///
+    /// `binary` comes from the path the Geometry Optimization panel already keeps for xTB, so
+    /// there is no second place to configure it.
+    pub fn start_refinement(&mut self, binary: std::path::PathBuf) {
+        if self.is_running() || self.is_refining() {
+            return;
+        }
+        let Some(outcome) = self.outcome.clone() else {
+            return;
+        };
+        self.refinement = None;
+
+        let scratch = crate::qchem_interfaces::xtb_optimize::xtb_scratch_dir()
+            .join(format!("conformers_{}", std::process::id()));
+        self.refine_task = Some(AsyncComputeTaskPool::get().spawn(async move {
+            let mut outcome = outcome;
+            match refine::refine_with_gfnff(&mut outcome, &binary, &scratch, 0, 1) {
+                Ok(report) => {
+                    // The scratch tree holds one directory per conformer and is of no further
+                    // use once the energies are read back.
+                    let _ = std::fs::remove_dir_all(&scratch);
+                    Ok((outcome, report))
+                }
+                Err(e) => {
+                    let _ = std::fs::remove_dir_all(&scratch);
+                    Err(e.to_string())
+                }
+            }
+        }));
     }
 
     pub fn elapsed(&self) -> Option<Duration> {
@@ -624,16 +665,29 @@ impl ConformerRun {
 
 /// Collects a finished search. Registered by [`crate::conformer::ui`].
 pub fn poll_conformer_search(mut run: ResMut<ConformerRun>) {
-    let Some(task) = run.task.as_mut() else {
-        return;
-    };
-    let Some(result) = block_on(future::poll_once(task)) else {
-        return;
-    };
-    run.task = None;
-    match result {
-        Ok(outcome) => run.outcome = Some(outcome),
-        Err(error) => run.error = Some(error.to_string()),
+    if let Some(task) = run.task.as_mut() {
+        if let Some(result) = block_on(future::poll_once(task)) {
+            run.task = None;
+            match result {
+                Ok(outcome) => run.outcome = Some(outcome),
+                Err(error) => run.error = Some(error.to_string()),
+            }
+        }
+    }
+    if let Some(task) = run.refine_task.as_mut() {
+        if let Some(result) = block_on(future::poll_once(task)) {
+            run.refine_task = None;
+            match result {
+                Ok((outcome, report)) => {
+                    run.outcome = Some(outcome);
+                    run.refinement = Some(Ok(report));
+                    // The ranking changed, so whichever conformer was on screen may no longer be
+                    // the row the user is looking at.
+                    run.previewing = None;
+                }
+                Err(error) => run.refinement = Some(Err(error)),
+            }
+        }
     }
 }
 
