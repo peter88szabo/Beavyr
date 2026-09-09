@@ -865,7 +865,13 @@ mod tests {
 
         println!("  n-decane, {} atoms", decane.atoms.len());
         let mut timings = Vec::new();
-        for method in LocalOptimizer::ALL {
+        // All three, including the one not offered in the panel, since this is what measured it.
+        const MEASURED: [LocalOptimizer; 3] = [
+            LocalOptimizer::Cartesian,
+            LocalOptimizer::CartesianGdiis,
+            LocalOptimizer::RedundantInternal,
+        ];
+        for method in MEASURED {
             let mut objective = DreidingObjective::new(&topology);
             let started = Instant::now();
             let result = local_optimize(
@@ -889,7 +895,7 @@ mod tests {
         }
         println!();
         let slowest = timings.iter().copied().fold(0.0_f64, f64::max);
-        for (method, elapsed) in LocalOptimizer::ALL.iter().zip(&timings) {
+        for (method, elapsed) in MEASURED.iter().zip(&timings) {
             println!(
                 "  {:<22} {:>6.0}x faster than the slowest",
                 method.label(),
