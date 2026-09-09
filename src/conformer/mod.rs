@@ -618,7 +618,7 @@ impl std::fmt::Display for ConformerError {
 }
 
 /// The running search, and the last result. A Bevy resource so the panel can poll it.
-#[derive(Resource, Default)]
+#[derive(Resource)]
 pub struct ConformerRun {
     task: Option<Task<Result<ConformerOutcome, ConformerError>>>,
     /// The GFN2 re-ranking, which runs after a search rather than inside it.
@@ -629,12 +629,43 @@ pub struct ConformerRun {
     refine_task: Option<Task<Result<(ConformerOutcome, refine::Refinement), String>>>,
     /// What the last refinement did, or why it could not run.
     pub refinement: Option<Result<refine::Refinement, String>>,
+    /// The TStrail pathway search, which is a separate and much longer run.
+    trail_task: Option<Task<Result<tstrail::TrailOutcome, String>>>,
+    /// Settings for the pathway search, including the active bonds.
+    pub trail: tstrail::TrailSettings,
+    /// The atom pair being entered as an active bond, one-based as the user sees them.
+    pub pending_active: (usize, usize),
+    pub trail_outcome: Option<tstrail::TrailOutcome>,
+    pub trail_error: Option<String>,
+    started_trail: Option<Instant>,
     pub settings: ConformerSettings,
     pub outcome: Option<ConformerOutcome>,
     pub error: Option<String>,
     /// Which conformer is currently shown in the viewer, if any.
     pub previewing: Option<usize>,
     started: Option<Instant>,
+}
+
+impl Default for ConformerRun {
+    fn default() -> Self {
+        Self {
+            task: None,
+            refine_task: None,
+            refinement: None,
+            trail_task: None,
+            trail: tstrail::TrailSettings::default(),
+            // One-based, and a pair rather than (0, 0) which names no atom.
+            pending_active: (1, 2),
+            trail_outcome: None,
+            trail_error: None,
+            started_trail: None,
+            settings: ConformerSettings::default(),
+            outcome: None,
+            error: None,
+            previewing: None,
+            started: None,
+        }
+    }
 }
 
 impl ConformerRun {
@@ -644,6 +675,48 @@ impl ConformerRun {
 
     pub fn is_refining(&self) -> bool {
         self.refine_task.is_some()
+    }
+
+    pub fn is_trailing(&self) -> bool {
+        self.trail_task.is_some()
+    }
+
+    pub fn trail_elapsed(&self) -> Option<Duration> {
+        self.started_trail.map(|t| t.elapsed())
+    }
+
+    /// Starts a TStrail pathway search from the molecule on screen.
+    ///
+    /// The molecule is copied: this runs for minutes and the user is free to keep working.
+    pub fn start_trail(&mut self, mol: &Molecule, binary: std::path::PathBuf) {
+        if self.is_running() || self.is_refining() || self.is_trailing() {
+            return;
+        }
+        self.trail_error = None;
+        self.trail_outcome = None;
+        self.started_trail = Some(Instant::now());
+
+        let reactant = mol.clone();
+        let trail = self.trail.clone();
+        // The reactant conformer search runs on DREIDING and can be generous; the pathways are
+        // what cost, and their number is capped separately.
+        let conformer_settings = self.settings.clone();
+        let scratch = crate::qchem_interfaces::xtb_optimize::xtb_scratch_dir()
+            .join(format!("tstrail_{}", std::process::id()));
+
+        self.trail_task = Some(AsyncComputeTaskPool::get().spawn(async move {
+            let result = tstrail::run(
+                &reactant,
+                &trail,
+                &conformer_settings,
+                &binary,
+                &scratch,
+            )
+            .map_err(|e| e.to_string());
+            // One directory per pathway, of no use once the geometries are read back.
+            let _ = std::fs::remove_dir_all(&scratch);
+            result
+        }));
     }
 
     /// Starts re-ranking the current conformers with xTB's GFN2.
@@ -710,6 +783,15 @@ pub fn poll_conformer_search(mut run: ResMut<ConformerRun>) {
             match result {
                 Ok(outcome) => run.outcome = Some(outcome),
                 Err(error) => run.error = Some(error.to_string()),
+            }
+        }
+    }
+    if let Some(task) = run.trail_task.as_mut() {
+        if let Some(result) = block_on(future::poll_once(task)) {
+            run.trail_task = None;
+            match result {
+                Ok(outcome) => run.trail_outcome = Some(outcome),
+                Err(error) => run.trail_error = Some(error),
             }
         }
     }

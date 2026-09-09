@@ -340,6 +340,141 @@ mod tests {
         H -2.10 -0.42 0.00\nH -1.24 0.84 0.89\nH -1.24 0.84 -0.89\n\
         H 0.04 -1.25 0.88\nH 0.04 -1.25 -0.88\nH 1.90 -0.36 0.00\n";
 
+    /// A bimolecular reactant -- two fragments not bonded to each other -- has no torsion
+    /// connecting them, so the conformer search has nothing to sample and refuses.
+    ///
+    /// This is a real limitation of doing it this way, not a bug: what varies between conformers
+    /// of a two-fragment complex is the fragments' relative position and orientation, which is a
+    /// rigid-body degree of freedom the torsion-space search has no notion of. TStrail's own
+    /// examples start from associated reactant complexes with internal flexibility.
+    ///
+    /// Pinned so the behaviour is known and the message is checked, rather than discovered by a
+    /// user with an SN2 in front of them.
+    #[test]
+    fn a_two_fragment_reactant_has_nothing_to_sample() {
+        // Methane and a hydroxyl radical, 3 Å apart: the atmospheric H-abstraction reactant.
+        let mol = molecule(
+            "7\n\n\
+             C  0.000  0.000  0.000\n\
+             H  0.630  0.890  0.000\n\
+             H  0.630 -0.890  0.000\n\
+             H -0.630  0.890  0.000\n\
+             H -0.630 -0.890  0.000\n\
+             O  3.000  0.000  0.000\n\
+             H  3.970  0.000  0.000\n",
+        );
+        // Beavyr sees two separate molecules.
+        assert_eq!(mol.bonds.len(), 5, "four C-H and one O-H, nothing between them");
+
+        let error = run(
+            &mol,
+            &TrailSettings {
+                // Pull the hydroxyl oxygen onto one of methane's hydrogens.
+                active: vec![ActiveBond { a: 5, b: 1 }],
+                ..TrailSettings::default()
+            },
+            &ConformerSettings::default(),
+            Path::new("/nonexistent/xtb"),
+            Path::new("/tmp"),
+        )
+        .expect_err("two rigid fragments have no conformers");
+        let text = error.to_string();
+        assert!(
+            text.contains("conformer search failed"),
+            "the message should point at the conformer search: {text}"
+        );
+    }
+
+    /// The whole pipeline against the real xTB: reactant conformers, filtering, one AFIR pathway
+    /// per conformer, de-duplication, and the spread of active bond lengths.
+    ///
+    /// Ignored: it needs the configured xTB and takes tens of seconds.
+    ///
+    /// ```text
+    /// cargo test --release --bins tstrail_against_real_xtb -- --ignored --nocapture
+    /// ```
+    #[test]
+    #[ignore = "needs the configured xTB executable"]
+    fn tstrail_against_real_xtb() {
+        use crate::conformer::Thoroughness;
+        use crate::qchem_interfaces::program::QcProgram;
+
+        let configured = crate::qchem_interfaces::config::load_path(QcProgram::Xtb);
+        let Ok(binary) = crate::qchem_interfaces::xtb_optimize::resolve_program_executable(
+            QcProgram::Xtb,
+            &configured,
+        ) else {
+            println!("  no xTB configured; nothing to test against");
+            return;
+        };
+        println!("  xTB: {}", binary.display());
+
+        // Ethanol, pulling the hydroxyl oxygen onto a methyl hydrogen: a strained 1,3-shift, and
+        // a small enough system to exercise the whole pipeline quickly. The chemistry is beside
+        // the point here -- what is being tested is that pathways run, produce maxima, and give a
+        // spread of active bond lengths.
+        let mol = molecule(ETHANOL);
+        println!("  reactant: {} atoms, {} bonds", mol.atoms.len(), mol.bonds.len());
+
+        let scratch = std::env::temp_dir().join(format!("beavyr_tstrail_{}", std::process::id()));
+        let outcome = run(
+            &mol,
+            &TrailSettings {
+                // Oxygen is atom index 2, a methyl hydrogen index 3.
+                active: vec![ActiveBond { a: 2, b: 3 }],
+                cycles: 25,
+                max_pathways: 4,
+                ..TrailSettings::default()
+            },
+            &ConformerSettings {
+                thoroughness: Thoroughness::Quick,
+                ncore: 2,
+                ..ConformerSettings::default()
+            },
+            &binary,
+            &scratch,
+        );
+        let _ = std::fs::remove_dir_all(&scratch);
+        let outcome = outcome.expect("the pipeline runs");
+
+        println!(
+            "  {} reactant conformers, {} discarded, {} pathways, {} failed, {} xTB calls",
+            outcome.reactant_conformers,
+            outcome.discarded_broken,
+            outcome.pathways,
+            outcome.failed,
+            outcome.xtb_calls
+        );
+        for (index, guess) in outcome.guesses.iter().enumerate() {
+            println!(
+                "    guess {}: dE {:>6.2} kcal/mol, active {:.2} Å, crossed {}",
+                index + 1,
+                guess.relative_energy_kcal,
+                guess.active_lengths[0],
+                guess.crossed
+            );
+        }
+        for (which, (lo, hi)) in outcome.active_length_range().iter().enumerate() {
+            println!("  active bond {} spans {lo:.2} to {hi:.2} Å", which + 1);
+        }
+
+        assert!(!outcome.guesses.is_empty(), "no transition-state guess came back");
+        assert!(outcome.xtb_calls > 0, "xTB was never called");
+        // The pull must have shortened the active bond from its reactant value.
+        let start = (mol.pos[2] - mol.pos[3]).length() as f64;
+        for guess in &outcome.guesses {
+            assert!(
+                guess.active_lengths[0] < start,
+                "the active bond went from {start:.2} to {:.2} Å; the force did not pull",
+                guess.active_lengths[0]
+            );
+        }
+        // Ordered by energy, since the table shows them ranked.
+        for pair in outcome.guesses.windows(2) {
+            assert!(pair[0].relative_energy_kcal <= pair[1].relative_energy_kcal + 1e-9);
+        }
+    }
+
     #[test]
     fn a_run_without_active_bonds_is_refused() {
         let mol = molecule(ETHANOL);
