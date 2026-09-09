@@ -27,6 +27,91 @@ pub const TRAJECTORY_FILE: &str = "optimization_trajectory.xyz";
 
 
 /// A geometry optimization, run in `run_dir`.
+/// A single-point energy and nuclear gradient.
+///
+/// The command a conformer search needs: one call per gradient, with the geometry written into
+/// `run_dir` beforehand. Behemoth is fast enough for this to be practical -- a TASI gradient on
+/// water is nine milliseconds of compute, so the process launch dominates -- which is why driving
+/// Beavyr's own search with Behemoth gradients is worth doing rather than delegating the search.
+pub fn gradient_command(
+    binary: &Path,
+    run_dir: &Path,
+    xyz_file: &str,
+    charge: i32,
+    multiplicity: i32,
+    method: &MethodConfig,
+) -> Command {
+    let mut command = base_command(binary, run_dir, xyz_file, charge, multiplicity, method);
+    command.arg("--gradient");
+    command
+}
+
+/// Reads the energy and Cartesian gradient from a `--gradient` run's output.
+///
+/// The block looks like this, whichever method produced it:
+///
+/// ```text
+/// Analytical TASI nuclear gradient
+/// Units: Hartree/bohr
+/// Energy:     -68.4051345926 Hartree
+///      1     -0.0020104     -0.0021028     -0.0000000
+///      2     -0.0026798      0.0040516      0.0000000
+///      3      0.0046902     -0.0019488     -0.0000000
+/// ```
+///
+/// Located by the "nuclear gradient" heading rather than by a method name, so a method whose
+/// heading reads differently still parses. Energies are Hartree and gradients Hartree/bohr, which
+/// is what the optimiser wants, so nothing is converted.
+pub fn parse_gradient(stdout: &str, natoms: usize) -> Result<(f64, Vec<f64>), String> {
+    let lines: Vec<&str> = stdout.lines().collect();
+    let heading = lines
+        .iter()
+        .rposition(|line| line.to_ascii_lowercase().contains("nuclear gradient"))
+        .ok_or_else(|| "Behemoth printed no nuclear gradient".to_string())?;
+
+    let mut energy = None;
+    let mut gradient = Vec::with_capacity(natoms * 3);
+    for line in &lines[heading + 1..] {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("Energy:") {
+            energy = rest
+                .split_whitespace()
+                .next()
+                .and_then(|token| token.parse::<f64>().ok());
+            continue;
+        }
+        // An atom row: an index followed by three components. Anything else ends the block, but
+        // only once rows have started -- the heading is followed by a units line first.
+        let fields: Vec<&str> = trimmed.split_whitespace().collect();
+        if fields.len() == 4 {
+            if let (Ok(_index), Ok(x), Ok(y), Ok(z)) = (
+                fields[0].parse::<usize>(),
+                fields[1].parse::<f64>(),
+                fields[2].parse::<f64>(),
+                fields[3].parse::<f64>(),
+            ) {
+                gradient.extend_from_slice(&[x, y, z]);
+                if gradient.len() == natoms * 3 {
+                    break;
+                }
+                continue;
+            }
+        }
+        if !gradient.is_empty() {
+            break;
+        }
+    }
+
+    let energy = energy.ok_or_else(|| "Behemoth printed no gradient energy".to_string())?;
+    if gradient.len() != natoms * 3 {
+        return Err(format!(
+            "Behemoth printed {} gradient components for {natoms} atoms",
+            gradient.len()
+        ));
+    }
+    Ok((energy, gradient))
+}
+
 pub fn optimize_command(
     binary: &Path,
     run_dir: &Path,
@@ -383,6 +468,48 @@ pub fn parse_hessian_for(stdout: &str, symbols: &[String]) -> Result<Array2<f64>
 
 #[cfg(test)]
 mod tests {
+    /// Behemoth's own output, verbatim from a TASI gradient run on water.
+    ///
+    /// The energy is not the last thing on its line and the atom rows carry an index, so both are
+    /// easy to get wrong; this is the real text rather than a reconstruction.
+    #[test]
+    fn a_gradient_block_is_read_from_real_output() {
+        let stdout = concat!(
+            "TASI SEOEM energy\n",
+            "Total energy (all terms):        -68.4051345926 Hartree\n",
+            "\n",
+            "Analytical TASI nuclear gradient\n",
+            "Units: Hartree/bohr\n",
+            "Energy:     -68.4051345926 Hartree\n",
+            "     1     -0.0020104     -0.0021028     -0.0000000\n",
+            "     2     -0.0026798      0.0040516      0.0000000\n",
+            "     3      0.0046902     -0.0019488     -0.0000000\n",
+            "\n",
+            "Total run time (s): 0.009\n"
+        );
+        let (energy, gradient) = parse_gradient(stdout, 3).expect("the block parses");
+        assert!((energy + 68.405_134_592_6).abs() < 1.0e-10);
+        assert_eq!(gradient.len(), 9);
+        assert!((gradient[0] + 0.002_010_4).abs() < 1.0e-9);
+        assert!((gradient[4] - 0.004_051_6).abs() < 1.0e-9);
+        assert!((gradient[6] - 0.004_690_2).abs() < 1.0e-9);
+    }
+
+    /// A run that printed no gradient must be an error, not a zero gradient -- which the optimiser
+    /// would read as a converged structure and accept.
+    #[test]
+    fn output_without_a_gradient_is_an_error() {
+        assert!(parse_gradient("Total energy: -1.0 Hartree\n", 3).is_err());
+        // A truncated block is an error too, rather than a short gradient.
+        let truncated = concat!(
+            "Analytical TASI nuclear gradient\n",
+            "Units: Hartree/bohr\n",
+            "Energy:     -68.4051345926 Hartree\n",
+            "     1     -0.0020104     -0.0021028     -0.0000000\n"
+        );
+        assert!(parse_gradient(truncated, 3).is_err());
+    }
+
     use super::*;
     use super::super::method::{BehemothMethod, Dispersion};
 

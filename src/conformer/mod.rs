@@ -51,6 +51,7 @@ use crate::optimizer::internal_coords::ConnectivityModel;
 enum SearchObjective<'a> {
     Dreiding(DreidingObjective<'a>),
     Xtb(refine::XtbObjective<'a>),
+    Behemoth(refine::BehemothObjective<'a>),
 }
 
 impl crate::optimizer::traits::Objective for SearchObjective<'_> {
@@ -58,6 +59,7 @@ impl crate::optimizer::traits::Objective for SearchObjective<'_> {
         match self {
             Self::Dreiding(o) => o.energy(x),
             Self::Xtb(o) => o.energy(x),
+            Self::Behemoth(o) => o.energy(x),
         }
     }
 
@@ -65,6 +67,7 @@ impl crate::optimizer::traits::Objective for SearchObjective<'_> {
         match self {
             Self::Dreiding(o) => o.gradient(x, grad),
             Self::Xtb(o) => o.gradient(x, grad),
+            Self::Behemoth(o) => o.gradient(x, grad),
         }
     }
 
@@ -72,6 +75,7 @@ impl crate::optimizer::traits::Objective for SearchObjective<'_> {
         match self {
             Self::Dreiding(o) => o.energy_gradient(x, grad),
             Self::Xtb(o) => o.energy_gradient(x, grad),
+            Self::Behemoth(o) => o.energy_gradient(x, grad),
         }
     }
 }
@@ -94,14 +98,17 @@ pub enum SearchEngine {
     Gfn1,
     /// GFN2-xTB.
     Gfn2,
+    /// Behemoth's TASI, a semiempirical orbital model.
+    Tasi,
 }
 
 impl SearchEngine {
-    pub const ALL: [SearchEngine; 4] = [
+    pub const ALL: [SearchEngine; 5] = [
         SearchEngine::Dreiding,
         SearchEngine::GfnFf,
         SearchEngine::Gfn1,
         SearchEngine::Gfn2,
+        SearchEngine::Tasi,
     ];
 
     pub fn label(self) -> &'static str {
@@ -110,21 +117,27 @@ impl SearchEngine {
             Self::GfnFf => "GFN-FF",
             Self::Gfn1 => "GFN1-xTB",
             Self::Gfn2 => "GFN2-xTB",
+            Self::Tasi => "TASI (Behemoth)",
         }
     }
 
     /// Whether this needs the xTB executable.
     pub fn needs_xtb(self) -> bool {
-        !matches!(self, Self::Dreiding)
+        matches!(self, Self::GfnFf | Self::Gfn1 | Self::Gfn2)
+    }
+
+    /// Whether this needs the Behemoth executable.
+    pub fn needs_behemoth(self) -> bool {
+        matches!(self, Self::Tasi)
     }
 
     /// The xTB command-line arguments, or `None` for the built-in engine.
     pub fn xtb_args(self) -> Option<&'static str> {
         match self {
-            Self::Dreiding => None,
             Self::GfnFf => Some("--gfnff -P 1"),
             Self::Gfn1 => Some("--gfn 1 -P 1"),
             Self::Gfn2 => Some("--gfn 2 -P 1"),
+            Self::Dreiding | Self::Tasi => None,
         }
     }
 
@@ -134,6 +147,7 @@ impl SearchEngine {
             Self::Dreiding => "In process: seconds.",
             Self::GfnFf => "External: a minute or two.",
             Self::Gfn1 | Self::Gfn2 => "External: minutes.",
+            Self::Tasi => "External: minutes.",
         }
     }
 }
@@ -225,10 +239,12 @@ pub struct ConformerSettings {
     pub energy_window_kcal: f64,
     /// Where the energies come from.
     pub engine: SearchEngine,
-    /// The xTB executable, needed by every engine except DREIDING.
+    /// The xTB executable, needed by the GFN engines.
     ///
     /// Resolved by the caller, so this module never has to know how paths are configured.
     pub xtb_binary: Option<std::path::PathBuf>,
+    /// The Behemoth executable, needed by TASI.
+    pub behemoth_binary: Option<std::path::PathBuf>,
     pub charge: i32,
     pub multiplicity: i32,
     /// Coordinates held fixed, for searching the conformers of a transition state.
@@ -253,6 +269,7 @@ impl Default for ConformerSettings {
             energy_window_kcal: 10.0,
             engine: SearchEngine::default(),
             xtb_binary: None,
+            behemoth_binary: None,
             charge: 0,
             multiplicity: 1,
             constraints: Vec::new(),
@@ -544,27 +561,47 @@ pub fn search(
             &atoms,
             connectivity.clone(),
             || {
-                Ok(match settings.engine.xtb_args() {
-                    None => SearchObjective::Dreiding(DreidingObjective::new(&topology)),
-                    Some(args) => {
-                        let binary = settings.xtb_binary.as_ref().ok_or_else(|| {
-                            anyhow::anyhow!(
-                                "{} needs the xTB executable, which is not set",
-                                settings.engine.label()
-                            )
-                        })?;
-                        let slot =
-                            worker.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        SearchObjective::Xtb(refine::XtbObjective::new(
-                            external_scratch().join(format!("worker_{slot:03}")),
-                            &atoms,
-                            binary,
-                            args,
-                            settings.charge,
-                            settings.multiplicity,
-                        ))
-                    }
-                })
+                let slot = || worker.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                if let Some(args) = settings.engine.xtb_args() {
+                    let binary = settings.xtb_binary.as_ref().ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "{} needs the xTB executable, which is not set",
+                            settings.engine.label()
+                        )
+                    })?;
+                    return Ok(SearchObjective::Xtb(refine::XtbObjective::new(
+                        external_scratch().join(format!("worker_{:03}", slot())),
+                        &atoms,
+                        binary,
+                        args,
+                        settings.charge,
+                        settings.multiplicity,
+                    )));
+                }
+                if settings.engine.needs_behemoth() {
+                    let binary = settings.behemoth_binary.as_ref().ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "{} needs the Behemoth executable, which is not set",
+                            settings.engine.label()
+                        )
+                    })?;
+                    // TASI takes no functional or basis of its own, and one thread each so that
+                    // several workers do not oversubscribe the machine.
+                    let method = crate::qchem_interfaces::method::MethodConfig {
+                        behemoth: crate::qchem_interfaces::method::BehemothMethod::Tasi,
+                        nproc: 1,
+                        ..crate::qchem_interfaces::method::MethodConfig::default()
+                    };
+                    return Ok(SearchObjective::Behemoth(refine::BehemothObjective::new(
+                        external_scratch().join(format!("worker_{:03}", slot())),
+                        &atoms,
+                        binary,
+                        method,
+                        settings.charge,
+                        settings.multiplicity,
+                    )));
+                }
+                Ok(SearchObjective::Dreiding(DreidingObjective::new(&topology)))
             },
             options,
         ) {
@@ -776,6 +813,8 @@ pub struct ConformerRun {
     /// external engine is no use without this, and sending the user to another panel to type it
     /// would be a dead end.
     pub xtb_path: String,
+    /// The Behemoth executable path, as the user is editing it. Seeded and shared the same way.
+    pub behemoth_path: String,
     /// How many of the lowest conformers to re-rank with xTB.
     ///
     /// A choice rather than a fixed cap: the cost is roughly linear in this, so whether it is
@@ -808,6 +847,9 @@ impl Default for ConformerRun {
             // Read once at startup, as the optimizer panel does with its own paths.
             xtb_path: crate::qchem_interfaces::config::load_path(
                 crate::qchem_interfaces::program::QcProgram::Xtb,
+            ),
+            behemoth_path: crate::qchem_interfaces::config::load_path(
+                crate::qchem_interfaces::program::QcProgram::Behemoth,
             ),
             refine_top: refine::DEFAULT_REFINE_TOP,
             trail_task: None,
@@ -1603,16 +1645,40 @@ mod tests {
     }
 
     #[test]
-    fn every_engine_is_labelled_and_knows_whether_it_needs_xtb() {
-        assert_eq!(SearchEngine::ALL.len(), 4);
+    fn every_engine_is_labelled_and_names_the_program_it_needs() {
+        assert_eq!(SearchEngine::ALL.len(), 5);
         for engine in SearchEngine::ALL {
             assert!(!engine.label().is_empty());
             assert!(!engine.speed_note().is_empty());
             // Needing xTB and having xTB arguments are the same question.
             assert_eq!(engine.needs_xtb(), engine.xtb_args().is_some());
+            // No engine needs both, and only DREIDING needs neither.
+            assert!(!(engine.needs_xtb() && engine.needs_behemoth()));
+            assert_eq!(
+                engine == SearchEngine::Dreiding,
+                !engine.needs_xtb() && !engine.needs_behemoth()
+            );
         }
         assert_eq!(SearchEngine::default(), SearchEngine::Dreiding);
-        assert!(!SearchEngine::Dreiding.needs_xtb());
+        assert!(SearchEngine::Tasi.needs_behemoth());
+    }
+
+    /// TASI without the Behemoth executable must say so, naming both.
+    #[test]
+    fn tasi_without_behemoth_is_reported() {
+        let butane = molecule(BUTANE);
+        let error = search(
+            &butane,
+            ConformerSettings {
+                engine: SearchEngine::Tasi,
+                behemoth_binary: None,
+                ..test_settings()
+            },
+        )
+        .expect_err("TASI needs Behemoth");
+        let text = error.to_string();
+        assert!(text.contains("Behemoth"), "{text}");
+        assert!(text.contains("TASI"), "{text}");
     }
 
     /// A whole search driven by xTB rather than the force field. Ignored: it needs the configured
@@ -1635,14 +1701,21 @@ mod tests {
             return;
         };
 
+        let behemoth = crate::qchem_interfaces::xtb_optimize::resolve_program_executable(
+            QcProgram::Behemoth,
+            &crate::qchem_interfaces::config::load_path(QcProgram::Behemoth),
+        )
+        .ok();
+
         let butane = molecule(BUTANE);
-        for engine in [SearchEngine::Dreiding, SearchEngine::GfnFf, SearchEngine::Gfn2] {
+        for engine in SearchEngine::ALL {
             let started = Instant::now();
             let outcome = search(
                 &butane,
                 ConformerSettings {
                     engine,
                     xtb_binary: Some(binary.clone()),
+                    behemoth_binary: behemoth.clone(),
                     ..test_settings()
                 },
             );

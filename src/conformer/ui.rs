@@ -15,6 +15,7 @@ use crate::settings::MolSettings;
 use crate::trajectory::{TrajectoryFrame, TrajectoryState};
 
 use crate::optimizer::conformer_search::LocalOptimizer;
+use crate::qchem_interfaces::program::QcProgram;
 
 use super::{available_cores, ConformerOutcome, ConformerRun, SearchEngine, Thoroughness};
 
@@ -46,8 +47,8 @@ pub fn conformer_panel(
         );
     });
 
-    if run.settings.engine.needs_xtb() {
-        xtb_path_row(ui, run);
+    engine_path_rows(ui, run);
+    if run.settings.engine.needs_xtb() || run.settings.engine.needs_behemoth() {
         ui.horizontal(|ui| {
             ui.label("Charge");
             ui.add_enabled(
@@ -144,18 +145,32 @@ pub fn conformer_panel(
     // An external engine needs the xTB executable. Resolved here rather than inside the search, so
     // that module never has to know how paths are configured, and so the button can simply be
     // disabled with the reason shown when it is missing.
-    let xtb = run
-        .settings
-        .engine
-        .needs_xtb()
-        .then(|| resolve_xtb(&run.xtb_path));
-    run.settings.xtb_binary = match &xtb {
+    let engine_binary = if run.settings.engine.needs_xtb() {
+        Some(resolve_xtb(&run.xtb_path))
+    } else if run.settings.engine.needs_behemoth() {
+        Some(resolve(QcProgram::Behemoth, &run.behemoth_path))
+    } else {
+        None
+    };
+    let resolved_binary = match &engine_binary {
         Some(Ok(path)) => Some(path.clone()),
         _ => None,
     };
+    run.settings.xtb_binary = run
+        .settings
+        .engine
+        .needs_xtb()
+        .then(|| resolved_binary.clone())
+        .flatten();
+    run.settings.behemoth_binary = run
+        .settings
+        .engine
+        .needs_behemoth()
+        .then(|| resolved_binary.clone())
+        .flatten();
 
     ui.horizontal(|ui| {
-        let have_engine = !run.settings.engine.needs_xtb() || run.settings.xtb_binary.is_some();
+        let have_engine = engine_binary.is_none() || resolved_binary.is_some();
         let can_run = !run.is_running() && !mol.atoms.is_empty() && have_engine;
         if ui
             .add_enabled(can_run, egui::Button::new("Search for conformers"))
@@ -178,7 +193,7 @@ pub fn conformer_panel(
                 .weak(),
         );
     }
-    if let Some(Err(problem)) = &xtb {
+    if let Some(Err(problem)) = &engine_binary {
         ui.label(egui::RichText::new(problem).small().weak());
     }
 
@@ -417,54 +432,65 @@ doi:10.1021/acs.jcim.5b00243\n\
 S. L. Mayo, B. D. Olafson, W. A. Goddard III, \"DREIDING: A Generic Force Field for Molecular \
 Simulations\", J. Phys. Chem. 1990, 94, 8897-8909. doi:10.1021/j100389a010";
 
-/// The xTB executable path, editable here as well as in the optimizer panel.
+/// An external program's path, editable here as well as in the optimizer panel.
 ///
 /// Both read and write the same configuration file, so a path set in either -- or in an earlier
 /// session -- is found by the other. Offering it here matters because an external engine simply
 /// does not run without it, and being told to go and set it somewhere else is a dead end.
-fn xtb_path_row(ui: &mut egui::Ui, run: &mut ConformerRun) {
-    use crate::qchem_interfaces::program::QcProgram;
-
+fn program_path_row(ui: &mut egui::Ui, running: bool, program: QcProgram, path: &mut String) {
     ui.horizontal(|ui| {
-        ui.label("xTB path");
+        ui.label(format!("{} path", program.label()));
         let response = ui.add_enabled(
-            !run.is_running(),
-            egui::TextEdit::singleline(&mut run.xtb_path)
+            !running,
+            egui::TextEdit::singleline(path)
                 .desired_width(200.0)
-                .hint_text("xtb"),
+                .hint_text(program.binary_hint()),
         );
         if response.lost_focus() {
-            crate::qchem_interfaces::config::save_path(QcProgram::Xtb, &run.xtb_path);
+            crate::qchem_interfaces::config::save_path(program, path);
         }
         if ui
-            .add_enabled(!run.is_running(), egui::Button::new("Browse…"))
+            .add_enabled(!running, egui::Button::new("Browse…"))
             .clicked()
         {
             let mut dialog = rfd::FileDialog::new();
-            if let Some(directory) = std::path::Path::new(&run.xtb_path)
+            if let Some(directory) = std::path::Path::new(path.as_str())
                 .parent()
                 .filter(|p| p.is_dir())
             {
                 dialog = dialog.set_directory(directory);
             }
-            if let Some(path) = crate::recent_dir::pick_file(dialog) {
-                run.xtb_path = path.display().to_string();
-                crate::qchem_interfaces::config::save_path(QcProgram::Xtb, &run.xtb_path);
+            if let Some(picked) = crate::recent_dir::pick_file(dialog) {
+                *path = picked.display().to_string();
+                crate::qchem_interfaces::config::save_path(program, path);
             }
         }
-        // A tick as soon as it resolves, so there is no need to press Search to find out.
-        if resolve_xtb(&run.xtb_path).is_ok() {
+        // A marker as soon as it resolves, so there is no need to press Search to find out.
+        if resolve(program, path).is_ok() {
             ui.label(egui::RichText::new("found").small().weak());
         }
     });
 }
 
-/// Resolves an xTB path the way the optimizer panel does, so both agree on what counts as set.
+/// The path rows an engine needs, if any.
+fn engine_path_rows(ui: &mut egui::Ui, run: &mut ConformerRun) {
+    let running = run.is_running();
+    if run.settings.engine.needs_xtb() {
+        program_path_row(ui, running, QcProgram::Xtb, &mut run.xtb_path);
+    }
+    if run.settings.engine.needs_behemoth() {
+        program_path_row(ui, running, QcProgram::Behemoth, &mut run.behemoth_path);
+    }
+}
+
+/// Resolves a program path the way the optimizer panel does, so both agree on what counts as set.
+fn resolve(program: QcProgram, path: &str) -> Result<std::path::PathBuf, String> {
+    crate::qchem_interfaces::xtb_optimize::resolve_program_executable(program, path)
+}
+
+/// Shorthand for xTB, which three places here need.
 fn resolve_xtb(path: &str) -> Result<std::path::PathBuf, String> {
-    crate::qchem_interfaces::xtb_optimize::resolve_program_executable(
-        crate::qchem_interfaces::program::QcProgram::Xtb,
-        path,
-    )
+    resolve(QcProgram::Xtb, path)
 }
 
 /// Transition-state conformers, by TStrail.
@@ -534,7 +560,7 @@ fn trail_section(ui: &mut egui::Ui, run: &mut ConformerRun, mol: &Molecule) {
                 );
             });
 
-            xtb_path_row(ui, run);
+            program_path_row(ui, run.is_running(), QcProgram::Xtb, &mut run.xtb_path);
             let resolved = resolve_xtb(&run.xtb_path);
 
             ui.add_space(6.0);
@@ -856,7 +882,7 @@ fn refinement_row(ui: &mut egui::Ui, run: &mut ConformerRun, outcome: &Conformer
         ui.horizontal(|ui| {
             ui.label(egui::RichText::new(problem).small().weak());
         });
-        xtb_path_row(ui, run);
+        program_path_row(ui, run.is_refining(), QcProgram::Xtb, &mut run.xtb_path);
     }
 
     match &run.refinement {

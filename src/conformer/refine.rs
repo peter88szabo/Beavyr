@@ -24,6 +24,7 @@ use crate::optimizer::minimum_cartesian::{
     minimize_cartesian, CartesianMinimumMethod, CartesianMinimumOptions,
 };
 use crate::optimizer::traits::Objective;
+use crate::forcefield::dreiding::objective::BOHR_TO_ANGSTROM;
 use crate::qchem_interfaces::xtbrun::{call_xtb_in, QcInput};
 
 use super::{Conformer, ConformerOutcome};
@@ -82,6 +83,129 @@ impl<'a> XtbObjective<'a> {
 
 /// xTB arguments for GFN2 on a single thread, the level TStrail uses for pathway searches.
 pub const GFN2_SINGLE_THREAD: &str = "--gfn 2 -P 1";
+
+/// A Behemoth calculation presented as an optimisable objective.
+///
+/// The same shape as [`XtbObjective`], and for the same reason: Behemoth speaks bohr and Hartree,
+/// so there is nothing to convert, and one call gives both the energy and the gradient.
+///
+/// Behemoth also has a conformer search of its own, which would be one process for the whole job
+/// rather than one per gradient. Beavyr drives its own search instead because Beavyr's has since
+/// gained ring puckering, wider generations and the Cartesian local optimiser -- so the extra
+/// process launches buy a better search. Behemoth is fast enough for that to be affordable: a
+/// TASI gradient on water is nine milliseconds of compute, so the launch dominates either way.
+pub struct BehemothObjective<'a> {
+    workdir: PathBuf,
+    atoms: &'a [String],
+    binary: PathBuf,
+    method: crate::qchem_interfaces::method::MethodConfig,
+    charge: i32,
+    multiplicity: i32,
+    /// Counted so a caller can report how much external work something cost.
+    pub calls: usize,
+}
+
+impl<'a> BehemothObjective<'a> {
+    pub fn new(
+        workdir: PathBuf,
+        atoms: &'a [String],
+        binary: &Path,
+        method: crate::qchem_interfaces::method::MethodConfig,
+        charge: i32,
+        multiplicity: i32,
+    ) -> Self {
+        Self {
+            workdir,
+            atoms,
+            binary: binary.to_path_buf(),
+            method,
+            charge,
+            multiplicity,
+            calls: 0,
+        }
+    }
+
+    /// One call, returning the energy and gradient together.
+    fn evaluate(&mut self, x: &[f64]) -> Result<(f64, Vec<f64>)> {
+        use crate::qchem_interfaces::behemoth::{gradient_command, parse_gradient};
+
+        self.calls += 1;
+        std::fs::create_dir_all(&self.workdir)
+            .map_err(|e| anyhow!("could not create {}: {e}", self.workdir.display()))?;
+
+        // Behemoth reads Å from an xyz file; the optimiser works in bohr.
+        let angstrom: Vec<bevy::prelude::Vec3> = x
+            .chunks_exact(3)
+            .map(|c| {
+                bevy::prelude::Vec3::new(
+                    (c[0] * BOHR_TO_ANGSTROM) as f32,
+                    (c[1] * BOHR_TO_ANGSTROM) as f32,
+                    (c[2] * BOHR_TO_ANGSTROM) as f32,
+                )
+            })
+            .collect();
+        let name = "geometry.xyz";
+        std::fs::write(
+            self.workdir.join(name),
+            crate::qchem_interfaces::xtb_optimize::write_xyz_string(self.atoms, &angstrom),
+        )
+        .map_err(|e| anyhow!("could not write the geometry: {e}"))?;
+
+        let output = gradient_command(
+            &self.binary,
+            &self.workdir,
+            name,
+            self.charge,
+            self.multiplicity,
+            &self.method,
+        )
+        .output()
+        .map_err(|e| anyhow!("could not run Behemoth: {e}"))?;
+        if !output.status.success() {
+            return Err(anyhow!(
+                "Behemoth failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+                    .lines()
+                    .last()
+                    .unwrap_or("no message")
+            ));
+        }
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        parse_gradient(&stdout, self.atoms.len()).map_err(|e| anyhow!("{e}"))
+    }
+}
+
+impl Objective for BehemothObjective<'_> {
+    fn energy(&mut self, x: &[f64]) -> Result<f64> {
+        self.evaluate(x).map(|(energy, _)| energy)
+    }
+
+    fn gradient(&mut self, x: &[f64], grad: &mut [f64]) -> Result<()> {
+        let (_, gradient) = self.evaluate(x)?;
+        if gradient.len() != grad.len() {
+            return Err(anyhow!(
+                "Behemoth returned {} gradient components for {} coordinates",
+                gradient.len(),
+                grad.len()
+            ));
+        }
+        grad.copy_from_slice(&gradient);
+        Ok(())
+    }
+
+    fn energy_gradient(&mut self, x: &[f64], grad: &mut [f64]) -> Result<f64> {
+        let (energy, gradient) = self.evaluate(x)?;
+        if gradient.len() != grad.len() {
+            return Err(anyhow!(
+                "Behemoth returned {} gradient components for {} coordinates",
+                gradient.len(),
+                grad.len()
+            ));
+        }
+        grad.copy_from_slice(&gradient);
+        Ok(energy)
+    }
+}
 
 impl Objective for XtbObjective<'_> {
     fn energy(&mut self, x: &[f64]) -> Result<f64> {
