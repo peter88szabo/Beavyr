@@ -200,6 +200,19 @@ pub fn available_cores() -> usize {
         .max(1)
 }
 
+/// Why a molecule offered no torsion to sample: genuinely rigid, or flexible only in a ring.
+///
+/// The distinction matters to the user. "One conformer" is right for water and wrong for
+/// cyclohexane, and a chemist told the latter would rightly not believe the tool.
+fn nothing_to_rotate(topology: &DreidingTopology) -> ConformerError {
+    let rings = topology.ring_bond_count();
+    if rings > 0 {
+        ConformerError::RingOnly { rings }
+    } else {
+        ConformerError::Rigid
+    }
+}
+
 /// The worker count a request resolves to: never more than the machine has, never fewer than one.
 pub fn resolve_workers(requested: usize) -> usize {
     requested.clamp(1, available_cores())
@@ -254,11 +267,13 @@ pub fn search(
     // population bigger than the molecule has distinct conformers.
     let rotors = match discover_torsions(&coordinates_bohr, &atoms, &connectivity, &[], &[], true) {
         Ok((_bonds, torsions)) => torsions.len(),
-        // The only reason perception refuses is that nothing can rotate.
-        Err(_) => return Err(ConformerError::Rigid),
+        // Perception only refuses when nothing can rotate. Whether that is because the molecule
+        // is genuinely rigid or because its flexibility is all inside a ring changes what the
+        // user should be told, so the two are separated here.
+        Err(_) => return Err(nothing_to_rotate(&topology)),
     };
     if rotors == 0 {
-        return Err(ConformerError::Rigid);
+        return Err(nothing_to_rotate(&topology));
     }
 
     let (requested_population, max_generations) = settings.thoroughness.budget(rotors);
@@ -425,6 +440,13 @@ pub enum ConformerError {
     ForceField(BuildError),
     /// Nothing to search: no rotatable bond, so the molecule has one shape.
     Rigid,
+    /// The molecule is flexible, but only in ways this search cannot sample.
+    ///
+    /// Ring bonds are excluded from the torsion set on purpose: turning one ring dihedral does not
+    /// give another conformer, it prises the ring open. So a ring's own conformers -- cyclohexane's
+    /// chair and twist-boat, a sugar's puckers -- need moves that deform the whole ring at once,
+    /// which this search has no notion of. Saying "one conformer" here would be simply wrong.
+    RingOnly { rings: usize },
     Search(String),
 }
 
@@ -435,8 +457,17 @@ impl std::fmt::Display for ConformerError {
             Self::Rigid => write!(
                 f,
                 "this molecule has no rotatable bonds, so it has only one conformer. \
-                 Rings and double bonds do not rotate, and a methyl group's rotation \
-                 gives the same shape back."
+                 Double bonds do not rotate, and a methyl group's rotation gives the same \
+                 shape back."
+            ),
+            Self::RingOnly { rings } => write!(
+                f,
+                "this molecule's only flexibility is in its {}, which this search cannot \
+                 explore. Turning a single ring bond would prise the ring open rather than \
+                 give another conformer, so ring shapes -- a chair against a twist-boat, or a \
+                 sugar's puckers -- need a different kind of search. Anything outside the \
+                 ring would have been sampled; here there is nothing.",
+                if *rings == 1 { "ring" } else { "rings" }
             ),
             Self::Search(message) => write!(f, "the conformer search failed: {message}"),
         }
@@ -896,6 +927,69 @@ mod tests {
                 slowest / elapsed.max(1e-9)
             );
         }
+    }
+
+    /// Cyclohexane, chair. 18 atoms, six C-C bonds -- every one of them in the ring.
+    const CYCLOHEXANE: &str = "18\n\
+        cyclohexane chair\n\
+        C 1.4600 0.0000 0.2500\n\
+        C 0.7300 1.2644 -0.2500\n\
+        C -0.7300 1.2644 0.2500\n\
+        C -1.4600 0.0000 -0.2500\n\
+        C -0.7300 -1.2644 0.2500\n\
+        C 0.7300 -1.2644 -0.2500\n\
+        H 1.4600 0.0000 1.3400\n\
+        H 2.4000 0.0000 -0.3000\n\
+        H 0.7300 1.2644 -1.3400\n\
+        H 1.2000 2.0785 0.3000\n\
+        H -0.7300 1.2644 1.3400\n\
+        H -1.2000 2.0785 -0.3000\n\
+        H -1.4600 0.0000 -1.3400\n\
+        H -2.4000 0.0000 0.3000\n\
+        H -0.7300 -1.2644 1.3400\n\
+        H -1.2000 -2.0785 -0.3000\n\
+        H 0.7300 -1.2644 -1.3400\n\
+        H 1.2000 -2.0785 0.3000\n";
+
+    /// **Ring conformers are not searched.** Every bond in a ring is excluded from the torsion
+    /// set, because turning a ring dihedral on its own does not give another conformer -- it
+    /// stretches the ring open. Cyclohexane therefore has no rotatable bond by this definition and
+    /// is reported as having one shape, when in fact it has the chair, the twist-boat and the rest.
+    ///
+    /// Pinned as a test because it is a real limitation and the message a user gets is
+    /// misleading: sampling ring pucker needs moves that deform the whole ring at once, which this
+    /// search has no notion of.
+    #[test]
+    fn ring_conformers_are_not_searched() {
+        let cyclohexane = molecule(CYCLOHEXANE);
+        let topology = DreidingTopology::build(&cyclohexane).expect("cyclohexane types fine");
+        assert!(
+            topology.rotatable_bonds().is_empty(),
+            "every C-C bond is in the ring, so none is rotatable"
+        );
+
+        // And the refusal must say *why*: "one conformer" is right for water and wrong here.
+        let error = search(&cyclohexane, test_settings())
+            .expect_err("no torsion to sample, so nothing to search");
+        match &error {
+            ConformerError::RingOnly { rings } => assert_eq!(*rings, 6),
+            other => panic!("expected a ring-only refusal, got {other:?}"),
+        }
+        let text = error.to_string();
+        assert!(text.contains("ring"), "{text}");
+        assert!(
+            !text.contains("only one conformer"),
+            "must not claim cyclohexane has one shape: {text}"
+        );
+    }
+
+    /// Water really is rigid, so it must still get the plain message rather than the ring one.
+    #[test]
+    fn a_genuinely_rigid_molecule_still_says_so() {
+        let water = molecule("3\n\nO 0.000 0.000 0.000\nH 0.960 0.000 0.000\nH -0.240 0.929 0.000\n");
+        let error = search(&water, test_settings()).expect_err("water has one shape");
+        assert!(matches!(error, ConformerError::Rigid), "{error:?}");
+        assert!(error.to_string().contains("only one conformer"));
     }
 
     #[test]

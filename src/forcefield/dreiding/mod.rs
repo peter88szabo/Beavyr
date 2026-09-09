@@ -268,6 +268,7 @@ pub struct DreidingTopology {
     hbonds: Vec<HBondTerm>,
     exclusions: Exclusions,
     rotatable: Vec<RotatableBond>,
+    ring_bonds: usize,
 }
 
 impl DreidingTopology {
@@ -291,6 +292,15 @@ impl DreidingTopology {
     /// Rotatable bonds and the atoms each one moves. For conformational search.
     pub fn rotatable_bonds(&self) -> &[RotatableBond] {
         &self.rotatable
+    }
+
+    /// How many bonds lie in a ring.
+    ///
+    /// Used to tell a genuinely rigid molecule from one whose only flexibility is ring pucker,
+    /// which a torsion-space conformer search cannot sample. Counted at build time, where the
+    /// adjacency is already in hand.
+    pub fn ring_bond_count(&self) -> usize {
+        self.ring_bonds
     }
 
     /// Writes `-dE/dx` (kcal/mol/Å) into `forces` and returns the energy (kcal/mol).
@@ -554,6 +564,7 @@ impl DreidingTopology {
             hbonds: Vec::new(),
             exclusions: Exclusions::default(),
             rotatable: Vec::new(),
+            ring_bonds: 0,
         };
         me.resolve_bonds(&topology);
         me.resolve_angles(&topology);
@@ -562,6 +573,11 @@ impl DreidingTopology {
         me.resolve_vdw(&topology);
         me.resolve_hbonds(&topology, &adjacency);
         me.rotatable = rotatable_bonds(&topology, &adjacency);
+        me.ring_bonds = topology
+            .bonds
+            .iter()
+            .filter(|b| bond_is_in_ring(&adjacency, b.atom_ids.0, b.atom_ids.1))
+            .count();
         Ok(me)
     }
 
