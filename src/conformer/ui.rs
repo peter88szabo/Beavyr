@@ -272,6 +272,15 @@ fn results_section(
         );
     }
 
+    if let Some(warning) = &outcome.radical_warning {
+        ui.add_space(4.0);
+        ui.label(
+            egui::RichText::new(warning)
+                .small()
+                .color(egui::Color32::from_rgb(200, 160, 70)),
+        );
+    }
+
     ui.add_space(8.0);
     ui.horizontal(|ui| {
         if ui
@@ -517,6 +526,7 @@ mod tests {
             workers: 4,
             local_optimizer: LocalOptimizer::Cartesian,
             best_found_in_generation: 3,
+            radical_warning: None,
             atoms: vec!["C".into(), "H".into()],
         }
     }

@@ -192,6 +192,11 @@ fn summary_log(topology: &DreidingTopology, relaxation: &Relaxation) -> String {
     for (index, atom_type) in topology.atom_types().iter().enumerate() {
         log += &format!("  {:>4}  {}\n", index + 1, atom_type);
     }
+    if let Some(warning) = topology.radical_warning() {
+        log += "\nOpen shell\n";
+        log += &format!("  {warning}\n");
+    }
+
     log += "\nMayo, Olafson & Goddard, J. Phys. Chem. 1990, 94, 8897.\n";
     log
 }

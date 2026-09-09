@@ -45,8 +45,8 @@ pub mod neighbors;
 use std::collections::HashSet;
 use std::fmt;
 
-use crate::bond_order::estimate_bond_order;
-use crate::molecule::{atomic_mass_amu, Molecule};
+use crate::bond_order::{classify_valence, estimate_bond_order, total_bond_orders, ValenceVerdict};
+use crate::molecule::{atomic_mass_amu, atomic_number, Molecule};
 
 use self::typer::{
     assign_topology, Element, GraphBondOrder, MolecularGraph, MolecularTopology,
@@ -269,6 +269,35 @@ pub struct DreidingTopology {
     exclusions: Exclusions,
     rotatable: Vec<RotatableBond>,
     ring_bonds: usize,
+    open_shell: OpenShell,
+}
+
+/// What the structure suggests about unpaired electrons.
+///
+/// DREIDING has no radical parameters -- the paper does not mention them -- so a radical centre is
+/// typed as whatever closed-shell type matches its coordination number. A peroxy radical's
+/// terminal oxygen has one bond, so it types as `O_2`, the carbonyl oxygen, and the O-O length
+/// that follows is roughly 0.1 Å short of the real 1.32 Å.
+///
+/// That cannot be fixed by inventing parameters. It can be *reported*, which is what this is for:
+/// a chemist who knows the geometry at the radical centre is approximate can decide whether it
+/// matters, and will know to set the spin multiplicity on whatever quantum-chemical job follows.
+#[derive(Debug, Clone, Default)]
+pub struct OpenShell {
+    /// Atoms whose perceived bond orders fall short of any common valence for the element.
+    ///
+    /// Ambiguous on its own -- a missing hydrogen looks the same -- which is what
+    /// [`Self::odd_electron_count`] resolves.
+    pub short_valence: Vec<usize>,
+    /// Whether the neutral molecule has an odd number of electrons, and so must be open-shell.
+    pub odd_electron_count: bool,
+}
+
+impl OpenShell {
+    /// Whether anything about the structure suggests an unpaired electron.
+    pub fn suspected(&self) -> bool {
+        self.odd_electron_count || !self.short_valence.is_empty()
+    }
 }
 
 impl DreidingTopology {
@@ -292,6 +321,57 @@ impl DreidingTopology {
     /// Rotatable bonds and the atoms each one moves. For conformational search.
     pub fn rotatable_bonds(&self) -> &[RotatableBond] {
         &self.rotatable
+    }
+
+    /// What the structure suggests about unpaired electrons. See [`OpenShell`].
+    pub fn open_shell(&self) -> &OpenShell {
+        &self.open_shell
+    }
+
+    /// A sentence to show the user when the structure looks open-shell, or `None`.
+    ///
+    /// Worth surfacing wherever a DREIDING geometry is handed over, because the limitation is
+    /// invisible in the result: the structure comes back looking perfectly reasonable, with the
+    /// radical centre's bond lengths quietly wrong.
+    pub fn radical_warning(&self) -> Option<String> {
+        if !self.open_shell.suspected() {
+            return None;
+        }
+        let mut message = String::new();
+        if self.open_shell.odd_electron_count {
+            message.push_str(
+                "This molecule has an odd number of electrons, so it is a radical. ",
+            );
+        } else if !self.open_shell.short_valence.is_empty() {
+            message.push_str(
+                "Some atoms have fewer bonds than their usual valence -- either a radical or a \
+                 missing hydrogen. ",
+            );
+        }
+        if !self.open_shell.short_valence.is_empty() {
+            let named: Vec<String> = self
+                .open_shell
+                .short_valence
+                .iter()
+                .take(6)
+                .map(|index| format!("{}{}", self.atom_types[*index], index + 1))
+                .collect();
+            message.push_str(&format!("Affected: {}", named.join(", ")));
+            if self.open_shell.short_valence.len() > 6 {
+                message.push_str(&format!(
+                    " and {} more",
+                    self.open_shell.short_valence.len() - 6
+                ));
+            }
+            message.push_str(". ");
+        }
+        message.push_str(
+            "DREIDING has no radical parameters, so such a centre is given the closed-shell type \
+             for its number of bonds and the bond lengths around it are approximate -- a peroxy \
+             O-O comes out about 0.1 Å short. Use this to clean up or to rank shapes, and let a \
+             quantum-chemical method with the right spin multiplicity settle the geometry.",
+        );
+        Some(message)
     }
 
     /// How many bonds lie in a ring.
@@ -515,10 +595,21 @@ impl DreidingTopology {
             })?;
             graph.add_atom(element);
         }
+        // Whether a bond lies in a ring decides how a perceived order of about 1.5 is read, so
+        // the connectivity is needed before the orders are assigned.
+        let geometry_adjacency = {
+            let mut adjacency = vec![Vec::new(); natoms];
+            for &(i, j, _) in &mol.bonds {
+                adjacency[i].push(j);
+                adjacency[j].push(i);
+            }
+            adjacency
+        };
         for &(i, j, distance) in &mol.bonds {
             let order = estimate_bond_order(&mol.atoms[i], &mol.atoms[j], distance);
+            let in_ring = bond_is_in_ring(&geometry_adjacency, i, j);
             graph
-                .add_bond(i, j, discrete_order(order))
+                .add_bond(i, j, discrete_order(order, in_ring))
                 .map_err(|e| BuildError::Typing(e.to_string()))?;
         }
 
@@ -565,6 +656,7 @@ impl DreidingTopology {
             exclusions: Exclusions::default(),
             rotatable: Vec::new(),
             ring_bonds: 0,
+            open_shell: OpenShell::default(),
         };
         me.resolve_bonds(&topology);
         me.resolve_angles(&topology);
@@ -578,6 +670,7 @@ impl DreidingTopology {
             .iter()
             .filter(|b| bond_is_in_ring(&adjacency, b.atom_ids.0, b.atom_ids.1))
             .count();
+        me.open_shell = detect_open_shell(mol);
         Ok(me)
     }
 
@@ -757,6 +850,40 @@ impl DreidingTopology {
     }
 }
 
+/// Looks for signs of unpaired electrons: atoms short of their valence, and an odd electron count.
+///
+/// The electron count is what makes the first signal useful. An atom one bond short of its usual
+/// valence is either a radical centre or missing a hydrogen, and geometry alone cannot tell those
+/// apart -- but a neutral molecule with an odd number of electrons *must* have an unpaired one, so
+/// the two together are decisive.
+///
+/// The parity test assumes a neutral molecule, which is all the structure says. A charged radical
+/// -- and a triplet with an even count, like O2 -- is not caught by parity, so the valence signal
+/// carries those.
+fn detect_open_shell(mol: &Molecule) -> OpenShell {
+    let totals = total_bond_orders(mol);
+    let short_valence = mol
+        .atoms
+        .iter()
+        .zip(&totals)
+        .enumerate()
+        .filter(|(_, (symbol, total))| {
+            matches!(classify_valence(symbol, **total).0, ValenceVerdict::Short)
+        })
+        .map(|(index, _)| index)
+        .collect();
+
+    let electrons: u32 = mol
+        .atoms
+        .iter()
+        .filter_map(|symbol| atomic_number(symbol))
+        .sum();
+    OpenShell {
+        short_valence,
+        odd_electron_count: electrons % 2 == 1,
+    }
+}
+
 /// Rejects a bond list that cannot be right, before it can quietly mistype every atom.
 ///
 /// Only hydrogen is checked, because hydrogen is where a slightly generous distance threshold
@@ -797,13 +924,28 @@ fn check_connectivity_is_plausible(mol: &Molecule) -> Result<(), BuildError> {
 ///
 /// A partial order (0.5, from `bond_order::PARTIAL_BOND_ORDER`) has no discrete equivalent and is
 /// treated as single, which is the conservative reading.
-fn discrete_order(order: f64) -> GraphBondOrder {
+///
+/// `in_ring` matters, and only for the intermediate orders. An aromatic bond is by definition part
+/// of a delocalised ring, so calling an acyclic bond aromatic is a contradiction -- and one that
+/// does real damage: perception then fails at kekulisation with "aromatic bond found with at least
+/// one atom not in a ring", which tells a chemist nothing about the structure they drew.
+///
+/// It is easy to hit. Orders come from bond *lengths*, and a short bond in an ordinary acyclic
+/// molecule reads as 1.5 without being anything of the kind: a peroxy radical's O-O is near
+/// 1.32 Å against 1.45 Å in a hydroperoxide, which is exactly the range that trips it. Outside a
+/// ring such a bond is read as double instead, which is the nearer truth for a shortened bond and
+/// keeps perception on its feet.
+fn discrete_order(order: f64, in_ring: bool) -> GraphBondOrder {
     if order >= 2.5 {
         GraphBondOrder::Triple
     } else if order >= 1.75 {
         GraphBondOrder::Double
     } else if order >= 1.25 {
-        GraphBondOrder::Aromatic
+        if in_ring {
+            GraphBondOrder::Aromatic
+        } else {
+            GraphBondOrder::Double
+        }
     } else {
         GraphBondOrder::Single
     }

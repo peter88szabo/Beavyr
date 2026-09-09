@@ -124,6 +124,22 @@ pub fn estimate_bond_order(symbol_a: &str, symbol_b: &str, distance: f32) -> f64
         return 1.0;
     }
     let ratio = distance / single_bond_length;
+
+    // Hydrogen has one electron and forms one bond, so no distance makes a bond to it a double.
+    // The cap is only from above: a *stretched* H bond is still partial, which is how a hydrogen
+    // in flight at a proton-transfer transition state gets its two half-bonds summing to one.
+    //
+    // Without the cap, a drawn O-H a few hundredths short -- 0.93 Å against 0.97 -- is promoted to
+    // 1.5, and the error does not stay local: the oxygen types as a carbonyl, its neighbour picks
+    // up resonance from it, and a hydroperoxide comes out `O_R, O_2` instead of `O_3, O_3`.
+    if symbol_a == "H" || symbol_b == "H" {
+        return if ratio <= single_max_ratio(symbol_a, symbol_b) {
+            1.0
+        } else {
+            PARTIAL_BOND_ORDER
+        };
+    }
+
     if ratio <= TRIPLE_MAX {
         3.0
     } else if ratio <= DOUBLE_MAX {
@@ -281,6 +297,30 @@ pub fn classify_valence(symbol: &str, total: f64) -> (ValenceVerdict, Option<f64
 
 #[cfg(test)]
 mod tests {
+    /// A bond to hydrogen is never *more* than single, however short it is drawn. Hydrogen has
+    /// one electron; no distance makes it form two bonds.
+    ///
+    /// The cap is one-sided on purpose. A stretched H bond stays partial, which is what gives a
+    /// hydrogen in flight at a proton-transfer transition state two half-bonds -- see
+    /// `two_partial_bonds_sum_to_one_valence`.
+    #[test]
+    fn a_bond_to_hydrogen_is_never_more_than_single() {
+        // Short of the normal length, and well short of it: still single, never promoted.
+        for distance in [0.60_f32, 0.80, 0.93, 0.97] {
+            assert_eq!(
+                estimate_bond_order("O", "H", distance),
+                1.0,
+                "O-H at {distance} Å"
+            );
+        }
+        for distance in [0.70_f32, 0.90, 1.09] {
+            assert_eq!(estimate_bond_order("H", "C", distance), 1.0);
+        }
+        // And a stretched one is still partial, not forced to single.
+        assert_eq!(estimate_bond_order("O", "H", 1.30), PARTIAL_BOND_ORDER);
+        assert_eq!(estimate_bond_order("C", "H", 1.30), PARTIAL_BOND_ORDER);
+    }
+
     use super::*;
 
     /// The calibrated reference lengths for a C-C bond, radius sum 1.52 A.

@@ -188,6 +188,8 @@ pub struct ConformerOutcome {
     pub best_found_in_generation: usize,
     /// Atom symbols, so a conformer can be written out or loaded back.
     pub atoms: Vec<String>,
+    /// Set when the structure looks open-shell, saying what that means for the result.
+    pub radical_warning: Option<String>,
 }
 
 /// How many cores the machine has, as the default worker count.
@@ -272,6 +274,7 @@ fn single_conformer(
         local_optimizer: LocalOptimizer::Cartesian,
         best_found_in_generation: 0,
         atoms: atoms.to_vec(),
+        radical_warning: topology.radical_warning(),
     })
 }
 
@@ -399,14 +402,16 @@ pub fn search(
             options,
         ) {
             Ok(result) => {
-                return Ok(assemble(
+                let mut outcome = assemble(
                     result,
                     atoms,
                     started.elapsed(),
                     workers,
                     settings.local_optimizer,
                     rings,
-                ))
+                );
+                outcome.radical_warning = topology.radical_warning();
+                return Ok(outcome);
             }
             Err(error) => {
                 last_error = error.to_string();
@@ -521,6 +526,7 @@ fn assemble(
         elapsed,
         workers,
         local_optimizer,
+        radical_warning: None,
         best_found_in_generation: result
             .conformers
             .iter()
@@ -1263,6 +1269,201 @@ mod tests {
                 pucker.amplitude
             );
         }
+    }
+
+    /// The species atmospheric and carbohydrate chemistry actually brings: radicals, peroxides,
+    /// and rings with an ether or ester oxygen in them.
+    ///
+    /// Typing these correctly is what everything downstream rests on -- a peroxy oxygen typed as a
+    /// carbonyl would be given a bond about 0.2 Å too short -- and the failures are silent, so the
+    /// expectations are pinned here rather than left to a probe.
+    #[test]
+    fn the_species_of_atmospheric_and_sugar_chemistry_type_correctly() {
+        struct Case {
+            name: &'static str,
+            xyz: &'static str,
+            /// Types expected at particular atoms.
+            expect: &'static [(usize, &'static str)],
+            radical: bool,
+        }
+
+        let cases = [
+            Case {
+                name: "CH3OO* peroxy radical",
+                xyz: "6\n\nC 0.000 0.000 0.000\nH 0.630 0.890 0.100\nH 0.630 -0.890 0.100\nH -0.500 0.000 -0.970\nO -1.030 0.000 1.010\nO -0.430 0.000 2.230\n",
+                // Both oxygens sp3: a peroxy O typed as a carbonyl would want an O-O near 1.11 Å
+                // against the real 1.32.
+                expect: &[(0, "C_3"), (4, "O_3"), (5, "O_3")],
+                radical: true,
+            },
+            Case {
+                name: "CH3OOH hydroperoxide",
+                xyz: "7\n\nC 0.000 0.000 0.000\nH 0.630 0.890 0.100\nH 0.630 -0.890 0.100\nH -0.500 0.000 -0.970\nO -1.030 0.000 1.010\nO -0.430 0.000 2.230\nH 0.070 0.760 2.430\n",
+                expect: &[(4, "O_3"), (5, "O_3"), (6, "H_HB")],
+                radical: false,
+            },
+            Case {
+                name: "OH* hydroxyl radical",
+                xyz: "2\n\nO 0.000 0.000 0.000\nH 0.970 0.000 0.000\n",
+                expect: &[(0, "O_3")],
+                radical: true,
+            },
+            Case {
+                name: "(CH3)3CO* alkoxy radical",
+                xyz: "14\n\
+            tert-butoxy radical\n\
+            C 0.0000 0.0000 0.0000\n\
+            O 0.0000 0.0000 1.3800\n\
+            C 1.4428 0.0000 -0.5095\n\
+            H 1.4428 0.0000 -1.5995\n\
+            H 1.9562 -0.8901 -0.1458\n\
+            H 1.9562 0.8901 -0.1458\n\
+            C -0.7206 1.2485 -0.5095\n\
+            H -0.7205 1.2482 -1.5995\n\
+            H -0.2061 2.1380 -0.1461\n\
+            H -1.7483 1.2479 -0.1461\n\
+            C -0.7206 -1.2485 -0.5095\n\
+            H -0.7205 -1.2482 -1.5995\n\
+            H -1.7483 -1.2479 -0.1461\n\
+            H -0.2061 -2.1380 -0.1461\n",
+                expect: &[(0, "C_3"), (1, "O_3")],
+                radical: true,
+            },
+            Case {
+                name: "1,2-dioxane, ring -O-O-",
+                xyz: "14\n\
+            1,2-dioxane (cyclic peroxide)\n\
+            O 1.4600 0.0000 0.2500\n\
+            O 0.7300 1.2644 -0.2500\n\
+            C -0.7300 1.2644 0.2500\n\
+            C -1.4600 0.0000 -0.2500\n\
+            C -0.7300 -1.2644 0.2500\n\
+            C 0.7300 -1.2644 -0.2500\n\
+            H -0.7300 1.2644 1.3400\n\
+            H -1.2000 2.0785 -0.3000\n\
+            H -1.4600 0.0000 -1.3400\n\
+            H -2.4000 0.0000 0.3000\n\
+            H -0.7300 -1.2644 1.3400\n\
+            H -1.2000 -2.0785 -0.3000\n\
+            H 0.7300 -1.2644 -1.3400\n\
+            H 1.2000 -2.0785 0.3000\n",
+                // A peroxide O-O is a single bond even inside a ring: never aromatic.
+                expect: &[(0, "O_3"), (1, "O_3"), (2, "C_3")],
+                radical: false,
+            },
+            Case {
+                name: "tetrahydropyran, the pyranose ring",
+                xyz: "16\n\
+            thp\n\
+            O 1.4400 0.0000 0.2400\n\
+            C 0.7200 1.2471 -0.2400\n\
+            C -0.7200 1.2471 0.2400\n\
+            C -1.4400 0.0000 -0.2400\n\
+            C -0.7200 -1.2471 0.2400\n\
+            C 0.7200 -1.2471 -0.2400\n\
+            H 0.7200 1.2471 -1.3300\n\
+            H 1.1900 2.0611 0.3100\n\
+            H -0.7200 1.2471 1.3300\n\
+            H -1.1900 2.0611 -0.3100\n\
+            H -1.4400 0.0000 -1.3300\n\
+            H -2.3800 0.0000 0.3100\n\
+            H -0.7200 -1.2471 1.3300\n\
+            H -1.1900 -2.0611 -0.3100\n\
+            H 0.7200 -1.2471 -1.3300\n\
+            H 1.1900 -2.0611 0.3100\n",
+                expect: &[(0, "O_3"), (1, "C_3")],
+                radical: false,
+            },
+            Case {
+                name: "tetrahydrofuran, the furanose ring",
+                xyz: "13\n\
+            thf\n\
+            O 1.2300 0.0000 0.2000\n\
+            C 0.3801 1.1698 -0.2000\n\
+            C -0.9951 0.7230 0.2000\n\
+            C -0.9951 -0.7230 -0.2000\n\
+            C 0.3801 -1.1698 0.2000\n\
+            H 0.3801 1.1698 -1.2900\n\
+            H 0.6706 2.0638 0.3500\n\
+            H -0.9951 0.7230 1.2900\n\
+            H -1.7556 1.2755 -0.3500\n\
+            H -0.9951 -0.7230 -1.2900\n\
+            H -1.7556 -1.2755 0.3500\n\
+            H 0.3801 -1.1698 1.2900\n\
+            H 0.6706 -2.0638 -0.3500\n",
+                expect: &[(0, "O_3"), (1, "C_3")],
+                radical: false,
+            },
+        ];
+
+        for case in cases {
+            let mol = molecule(case.xyz);
+            let topology = match DreidingTopology::build(&mol) {
+                Ok(t) => t,
+                Err(e) => panic!("{}: {e}", case.name),
+            };
+            let types = topology.atom_types();
+            for (index, wanted) in case.expect {
+                assert_eq!(
+                    &types[*index], wanted,
+                    "{}: atom {} typed {} but should be {wanted}. All: {types:?}",
+                    case.name,
+                    index + 1,
+                    types[*index]
+                );
+            }
+            assert_eq!(
+                topology.open_shell().odd_electron_count,
+                case.radical,
+                "{}: electron parity",
+                case.name
+            );
+            // A radical must produce a warning; a closed-shell molecule must not be told it has
+            // an odd electron count.
+            if case.radical {
+                let warning = topology
+                    .radical_warning()
+                    .unwrap_or_else(|| panic!("{}: no radical warning", case.name));
+                assert!(warning.contains("radical"), "{}: {warning}", case.name);
+            }
+        }
+    }
+
+    /// A lactone's ring carbonyl must come out as a carbonyl -- sp2 carbon and sp2 oxygen -- while
+    /// the ester oxygen in the ring stays sp3. Getting this wrong would put the ring in the wrong
+    /// shape entirely.
+    #[test]
+    fn a_ring_ester_types_as_a_carbonyl_and_an_ether() {
+        let mol = molecule("15\n\
+            delta-valerolactone\n\
+            O 1.4400 0.0000 0.1000\n\
+            C 0.7200 1.2471 -0.1000\n\
+            C -0.7200 1.2471 0.1000\n\
+            C -1.4400 0.0000 -0.1000\n\
+            C -0.7200 -1.2471 0.1000\n\
+            C 0.7200 -1.2471 -0.1000\n\
+            O 1.3250 2.2950 -0.1000\n\
+            H -0.7200 1.2471 1.1900\n\
+            H -1.1900 2.0611 -0.4500\n\
+            H -1.4400 0.0000 -1.1900\n\
+            H -2.3800 0.0000 0.4500\n\
+            H -0.7200 -1.2471 1.1900\n\
+            H -1.1900 -2.0611 -0.4500\n\
+            H 0.7200 -1.2471 -1.1900\n\
+            H 1.1900 -2.0611 0.4500\n");
+        let topology = DreidingTopology::build(&mol).expect("a lactone types");
+        let types = topology.atom_types();
+        // Atom 1 is the ester carbon, atom 7 its carbonyl oxygen, atom 0 the ring ether oxygen.
+        assert!(
+            types[1] == "C_2" || types[1] == "C_R",
+            "the ester carbon typed {} -- expected sp2 or resonant. All: {types:?}",
+            types[1]
+        );
+        assert!(
+            types[6] == "O_2" || types[6] == "O_R",
+            "the carbonyl oxygen typed {} -- expected sp2 or resonant. All: {types:?}",
+            types[6]
+        );
     }
 
     /// Water really is rigid, so it must still get the plain message rather than the ring one.

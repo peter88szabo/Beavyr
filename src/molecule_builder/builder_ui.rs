@@ -2222,6 +2222,12 @@ fn run_cleanup(mol: &mut Molecule, settings: &mut MolSettings) -> Result<String,
     settings.bond_topology_dirty = true;
 
     let dropped = report.initial_energy - report.final_energy;
+    // A radical's geometry comes back looking perfectly reasonable with the bond lengths at the
+    // radical centre quietly wrong, so the caveat travels with the result.
+    let radical = topology
+        .radical_warning()
+        .map(|warning| format!(" {warning}"))
+        .unwrap_or_default();
     Ok(format!(
         "Cleaned up in {} cycles: energy fell {dropped:.1} kcal/mol to {:.1}, largest remaining \
          force {:.2} kcal/mol/Å.{}",
@@ -2233,7 +2239,7 @@ fn run_cleanup(mol: &mut Molecule, settings: &mut MolSettings) -> Result<String,
         } else {
             " Stopped before converging -- run it again, or hand it to an optimiser."
         }
-    ))
+    ) + &radical)
 }
 
 pub fn builder_ui_contents(
