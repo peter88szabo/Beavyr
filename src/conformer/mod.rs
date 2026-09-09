@@ -33,7 +33,8 @@ use crate::forcefield::dreiding::objective::{
 use crate::forcefield::dreiding::{BuildError, DreidingTopology};
 use crate::molecule::{covalent_radius_angstrom, Molecule};
 use crate::optimizer::conformer_search::{
-    discover_torsions, genetic_conformer_search, ConformerSearchOptions, ConformerSearchResult,
+    discover_torsions, genetic_conformer_search_parallel, ConformerSearchOptions,
+    ConformerSearchResult,
 };
 use crate::optimizer::internal_coords::ConnectivityModel;
 
@@ -72,15 +73,31 @@ impl Thoroughness {
     }
 
     /// Population size and generation count, given how many rotors were found.
+    ///
+    /// Each generation breeds [`OFFSPRING_PER_GENERATION`] children, so the total number of local
+    /// optimisations is roughly `population + generations × offspring`.
     fn budget(self, rotors: usize) -> (usize, usize) {
         let rotors = rotors.max(1);
         match self {
-            Self::Quick => ((6 * rotors).clamp(12, 40), 30),
-            Self::Normal => ((10 * rotors).clamp(20, 80), 80),
-            Self::Thorough => ((16 * rotors).clamp(32, 150), 200),
+            Self::Quick => ((6 * rotors).clamp(12, 40), 12),
+            Self::Normal => ((10 * rotors).clamp(20, 80), 30),
+            Self::Thorough => ((16 * rotors).clamp(32, 150), 60),
         }
     }
 }
+
+/// How many children each generation breeds, and so how wide the search can run.
+///
+/// Behemoth breeds one crossover pair -- two children -- per generation, which caps the
+/// generation loop at two concurrent optimisations no matter how many cores are available. Eight
+/// keeps a machine of that size busy while leaving enough generations for selection to actually
+/// work: a genetic algorithm that is all width and no depth is just random sampling.
+///
+/// Deliberately a constant rather than the core count. If the generation width followed `ncore`,
+/// the same molecule and seed would breed differently on different machines, and a conformer
+/// someone found could not be reproduced. This way `ncore` changes only how fast the generation
+/// is worked through.
+pub const OFFSPRING_PER_GENERATION: usize = 8;
 
 /// What the user chooses. Deliberately short: rotors, population and generations are all worked
 /// out from the structure rather than asked for.
@@ -99,6 +116,14 @@ pub struct ConformerSettings {
     pub refine_with_gfnff: bool,
     /// Fix the random seed, so a search can be repeated exactly.
     pub reproducible: bool,
+    /// How many structures to optimise at once.
+    ///
+    /// A conformer search is embarrassingly parallel: every local optimisation is independent, so
+    /// this scales almost linearly until it runs out of cores. It does **not** change the answer
+    /// -- the search reserves each starting structure before handing it out and collects results
+    /// in the order it dispatched them, so a run with a fixed seed gives the same conformers on
+    /// any number of cores.
+    pub ncore: usize,
     /// Keep conformers within this window of the lowest, in kcal/mol.
     pub energy_window_kcal: f64,
 }
@@ -109,6 +134,7 @@ impl Default for ConformerSettings {
             thoroughness: Thoroughness::default(),
             refine_with_gfnff: false,
             reproducible: true,
+            ncore: available_cores(),
             // Wide enough to keep everything thermally accessible, and then some: at room
             // temperature 10 kcal/mol is already a population of ~1e-7.
             energy_window_kcal: 10.0,
@@ -139,6 +165,8 @@ pub struct ConformerOutcome {
     pub local_optimizations: usize,
     pub termination: String,
     pub elapsed: Duration,
+    /// How many structures were optimised at once.
+    pub workers: usize,
     /// The generation that produced the lowest-energy conformer.
     ///
     /// Worth showing: if the best structure only turned up in the last generation, the search was
@@ -146,6 +174,18 @@ pub struct ConformerOutcome {
     pub best_found_in_generation: usize,
     /// Atom symbols, so a conformer can be written out or loaded back.
     pub atoms: Vec<String>,
+}
+
+/// How many cores the machine has, as the default worker count.
+///
+/// A search is the one thing in Beavyr worth taking the whole machine for -- it is pure compute
+/// with no interface to keep responsive, and it finishes sooner the more it is given. The field in
+/// the panel is there to give some back when something else needs it.
+pub fn available_cores() -> usize {
+    std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1)
+        .max(1)
 }
 
 /// Room temperature, for the population estimate.
@@ -216,28 +256,39 @@ pub fn search(
     // makes conformers coincide. Rather than report the search's "could not fill the population"
     // as a failure, come down to what the molecule actually has. Halving converges in a few
     // steps and each attempt on a small molecule is milliseconds.
+    // Resolved once, so the report cannot claim a different number from the one used. The search
+    // clamps to what the machine has, and never below one.
+    let workers = settings.ncore.clamp(1, available_cores());
+
     let mut population = population_size;
     let mut last_error;
     loop {
         let options = ConformerSearchOptions {
             population_size: population,
             max_generations,
+            offspring_per_generation: OFFSPRING_PER_GENERATION,
             random_seed: settings.reproducible.then_some(FIXED_SEED),
+            parallel_workers: Some(workers),
             output_energy_window_hartree: settings.energy_window_kcal / HARTREE_TO_KCAL,
             // Methyl rotation does not make a distinct conformer, only a redundant copy.
             exclude_methyl_rotors: true,
             verbosity: 0,
             ..ConformerSearchOptions::default()
         };
-        let mut objective = DreidingObjective::new(&topology);
-        match genetic_conformer_search(
+        // One objective per worker, each borrowing the one shared topology. This is exactly what
+        // the topology/workspace split was for: the parameters and term lists are immutable and
+        // shared, while the neighbour list and scratch buffers live per worker, so N threads
+        // optimise N structures without contending on anything.
+        match genetic_conformer_search_parallel(
             coordinates_bohr.clone(),
             &atoms,
             connectivity.clone(),
-            &mut objective,
+            || Ok(DreidingObjective::new(&topology)),
             options,
         ) {
-            Ok(result) => return Ok(assemble(result, atoms, started.elapsed())),
+            Ok(result) => {
+                return Ok(assemble(result, atoms, started.elapsed(), workers))
+            }
             Err(error) => {
                 last_error = error.to_string();
                 if population <= 2 {
@@ -292,6 +343,7 @@ fn assemble(
     result: ConformerSearchResult,
     atoms: Vec<String>,
     elapsed: Duration,
+    workers: usize,
 ) -> ConformerOutcome {
     let lowest = result
         .conformers
@@ -330,6 +382,7 @@ fn assemble(
         local_optimizations: result.statistics.local_optimizations,
         termination: format!("{:?}", result.termination),
         elapsed,
+        workers,
         best_found_in_generation: result
             .conformers
             .iter()
@@ -574,6 +627,149 @@ mod tests {
         }
     }
 
+    /// The core count must not change the answer. The panel says so, and it is the whole reason
+    /// parallelising a search is safe: the search reserves each starting structure before handing
+    /// it to a worker, and collects results in the order it dispatched them, so nothing depends on
+    /// which thread finished first.
+    ///
+    /// Kept to three workers rather than the whole machine so the test itself stays polite.
+    #[test]
+    fn the_core_count_does_not_change_the_result() {
+        let butane = molecule(BUTANE);
+        let run = |ncore: usize| {
+            search(
+                &butane,
+                ConformerSettings {
+                    thoroughness: Thoroughness::Quick,
+                    reproducible: true,
+                    ncore,
+                    ..ConformerSettings::default()
+                },
+            )
+            .expect("butane is searchable")
+        };
+
+        let serial = run(1);
+        let parallel = run(3);
+
+        assert_eq!(serial.workers, 1);
+        assert_eq!(parallel.workers, 3.min(available_cores()));
+        assert_eq!(
+            serial.conformers.len(),
+            parallel.conformers.len(),
+            "different number of conformers on a different core count"
+        );
+        for (a, b) in serial.conformers.iter().zip(&parallel.conformers) {
+            assert!(
+                (a.relative_energy_kcal - b.relative_energy_kcal).abs() < 1.0e-9,
+                "energies differ: {} vs {}",
+                a.relative_energy_kcal,
+                b.relative_energy_kcal
+            );
+        }
+    }
+
+    /// A request for more cores than the machine has must be clamped rather than oversubscribing,
+    /// and zero must not mean "no workers".
+    #[test]
+    fn the_worker_count_is_clamped_to_the_machine() {
+        let butane = molecule(BUTANE);
+        let outcome = search(
+            &butane,
+            ConformerSettings {
+                thoroughness: Thoroughness::Quick,
+                ncore: 4096,
+                ..ConformerSettings::default()
+            },
+        )
+        .expect("butane is searchable");
+        assert_eq!(outcome.workers, available_cores());
+
+        let outcome = search(
+            &butane,
+            ConformerSettings {
+                thoroughness: Thoroughness::Quick,
+                ncore: 0,
+                ..ConformerSettings::default()
+            },
+        )
+        .expect("butane is searchable");
+        assert_eq!(outcome.workers, 1, "zero cores must still run");
+    }
+
+    /// n-Decane, all-anti: 32 atoms and seven rotatable bonds once the methyls are excluded, so
+    /// a genuinely flexible molecule rather than a toy.
+    const DECANE: &str = "32\n\
+        n-decane, all-anti\n\
+        C 0.0000 0.0000 0.0000\n\
+        C 1.2684 0.8556 0.0000\n\
+        C 2.5369 0.0000 0.0000\n\
+        C 3.8053 0.8556 0.0000\n\
+        C 5.0737 0.0000 0.0000\n\
+        C 6.3421 0.8556 0.0000\n\
+        C 7.6106 0.0000 0.0000\n\
+        C 8.8790 0.8556 0.0000\n\
+        C 10.1474 0.0000 0.0000\n\
+        C 11.4158 0.8556 0.0000\n\
+        H -0.8756 0.6491 0.0000\n\
+        H -0.0135 -0.6290 -0.8901\n\
+        H -0.0135 -0.6290 0.8901\n\
+        H 1.2684 1.4006 0.9439\n\
+        H 1.2684 1.4006 -0.9439\n\
+        H 2.5369 -0.5450 0.9439\n\
+        H 2.5369 -0.5450 -0.9439\n\
+        H 3.8053 1.4006 0.9439\n\
+        H 3.8053 1.4006 -0.9439\n\
+        H 5.0737 -0.5450 0.9439\n\
+        H 5.0737 -0.5450 -0.9439\n\
+        H 6.3421 1.4006 0.9439\n\
+        H 6.3421 1.4006 -0.9439\n\
+        H 7.6106 -0.5450 0.9439\n\
+        H 7.6106 -0.5450 -0.9439\n\
+        H 8.8790 1.4006 0.9439\n\
+        H 8.8790 1.4006 -0.9439\n\
+        H 10.1474 -0.5450 0.9439\n\
+        H 10.1474 -0.5450 -0.9439\n\
+        H 12.2915 0.2064 0.0000\n\
+        H 11.4294 1.4846 -0.8901\n\
+        H 11.4294 1.4846 0.8901\n";
+
+    /// Measures what the core count actually buys. Ignored by default -- it is a timing
+    /// measurement, which has no business failing a test suite on a loaded machine -- but kept in
+    /// the tree so the claim can be re-checked:
+    ///
+    /// ```text
+    /// cargo test --bins conformer_search_scales_with_cores -- --ignored --nocapture
+    /// ```
+    #[test]
+    #[ignore = "timing measurement, not a correctness check"]
+    fn conformer_search_scales_with_cores() {
+        let decane = molecule(DECANE);
+        let settings = |ncore: usize| ConformerSettings {
+            thoroughness: Thoroughness::Normal,
+            reproducible: true,
+            ncore,
+            ..ConformerSettings::default()
+        };
+
+        let serial = search(&decane, settings(1)).expect("decane is searchable");
+        let parallel = search(&decane, settings(4)).expect("decane is searchable");
+
+        println!(
+            "  rotors {}, {} local optimisations, {} conformers",
+            serial.rotors, serial.local_optimizations, serial.conformers.len()
+        );
+        println!("  1 core : {:.2} s", serial.elapsed.as_secs_f64());
+        println!("  4 cores: {:.2} s", parallel.elapsed.as_secs_f64());
+        println!(
+            "  speedup: {:.2}x",
+            serial.elapsed.as_secs_f64() / parallel.elapsed.as_secs_f64().max(1e-9)
+        );
+
+        // Same answer either way -- that is the part that must hold regardless of timing.
+        assert_eq!(serial.conformers.len(), parallel.conformers.len());
+    }
+
     #[test]
     fn populations_sum_to_one_and_favour_the_lowest() {
         let fractions = populations(&[0.0, 1.0, 2.0]);
@@ -595,6 +791,25 @@ mod tests {
             "ratio is {}",
             decade[0] / decade[1]
         );
+    }
+
+    /// A generation must be wide enough to keep several cores busy, or `ncore` buys nothing in
+    /// the main loop -- which is exactly the limitation this replaced.
+    #[test]
+    fn a_generation_is_wide_enough_to_parallelise() {
+        assert!(
+            OFFSPRING_PER_GENERATION >= 4,
+            "a generation of {OFFSPRING_PER_GENERATION} cannot fill a machine"
+        );
+        // And there must still be enough generations for selection to mean anything.
+        for level in [Thoroughness::Quick, Thoroughness::Normal, Thoroughness::Thorough] {
+            let (_, generations) = level.budget(3);
+            assert!(
+                generations >= 10,
+                "{} has only {generations} generations",
+                level.label()
+            );
+        }
     }
 
     /// The budget must grow with the rotor count and with thoroughness, and stay bounded so a

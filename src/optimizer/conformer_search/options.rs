@@ -28,6 +28,13 @@ pub struct ConformerSearchOptions {
     pub parallel_workers: Option<usize>,
     pub population_size: usize,
     pub max_generations: usize,
+    /// How many children to breed and optimise in each generation.
+    ///
+    /// Behemoth's default of 2 is one crossover pair, which caps the generation loop at two
+    /// concurrent optimisations however many cores are available. Widening it is what lets a
+    /// parallel search actually use a machine. It is a property of the search rather than of the
+    /// core count, so that the same seed gives the same answer on any number of cores.
+    pub offspring_per_generation: usize,
     pub stagnation_generations: usize,
     pub energy_convergence_hartree: f64,
     pub target_energy_hartree: Option<f64>,
@@ -65,6 +72,8 @@ impl Default for ConformerSearchOptions {
             parallel_workers: None,
             population_size: 5,
             max_generations: 10,
+            // Behemoth's own behaviour: a single crossover pair per generation.
+            offspring_per_generation: 2,
             stagnation_generations: 10,
             energy_convergence_hartree: 0.001 * EV_TO_HARTREE,
             target_energy_hartree: None,

@@ -35,6 +35,32 @@ where
     O: Objective + Send,
     F: Fn() -> Result<O> + Sync,
 {
+    // Behemoth relies on its callers to size each batch. Beavyr hands it a whole generation at
+    // once, so the cap lives here instead: the batch is worked through `workers` at a time, in
+    // dispatch order, which is what keeps the result independent of how many cores were used.
+    let workers = options.effective_parallel_workers();
+    let mut outcomes = Vec::with_capacity(starts.len());
+    let mut remaining = starts;
+    while !remaining.is_empty() {
+        let take = workers.min(remaining.len());
+        let chunk: Vec<(Vec<f64>, usize)> = remaining.drain(..take).collect();
+        let mut finished = optimize_chunk::<O, F>(chunk, connectivity, options, objective_factory)?;
+        outcomes.append(&mut finished);
+    }
+    Ok(outcomes)
+}
+
+/// One batch of at most `workers` structures, each on its own thread.
+fn optimize_chunk<O, F>(
+    starts: Vec<(Vec<f64>, usize)>,
+    connectivity: &ConnectivityModel,
+    options: &ConformerSearchOptions,
+    objective_factory: &F,
+) -> Result<Vec<LocalOutcome>>
+where
+    O: Objective + Send,
+    F: Fn() -> Result<O> + Sync,
+{
     std::thread::scope(|scope| {
         let handles = starts
             .into_iter()
@@ -241,33 +267,52 @@ where
                 break;
             }
         }
-        let (first, second) = select_parents(&mut rng, &population, &options);
-        let (base_a, base_b) = crossover(
-            &mut rng,
-            &template_coordinates_bohr,
-            &torsions,
-            &population[first].torsion_angles_radians,
-            &population[second].torsion_angles_radians,
-            &bonds,
-            &options,
-        );
-        let mut starts = Vec::with_capacity(2);
-        for base in [&base_a, &base_b] {
-            let Some((_genome, coordinates)) = mutated_candidate(
+        // Behemoth breeds one crossover pair per generation, which leaves at most two structures
+        // to optimise however many cores are available. `offspring_per_generation` widens that so
+        // a generation can actually fill a machine. It is a property of the search, deliberately
+        // not of the core count: children are bred from the RNG in sequence before any is
+        // dispatched, so the same seed breeds the same generation whatever `workers` is, and only
+        // the concurrency of the optimisations changes.
+        let wanted = options.offspring_per_generation.max(1);
+        let mut starts = Vec::with_capacity(wanted);
+        while starts.len() < wanted {
+            let (first, second) = select_parents(&mut rng, &population, &options);
+            let (base_a, base_b) = crossover(
                 &mut rng,
                 &template_coordinates_bohr,
                 &torsions,
-                base,
+                &population[first].torsion_angles_radians,
+                &population[second].torsion_angles_radians,
                 &bonds,
-                &blacklist,
-                &rmsd_atoms,
                 &options,
-                &mut statistics,
-            ) else {
-                continue;
-            };
-            blacklist.push(coordinates.clone());
-            starts.push((coordinates, generation));
+            );
+            let mut bred_any = false;
+            for base in [&base_a, &base_b] {
+                if starts.len() >= wanted {
+                    break;
+                }
+                let Some((_genome, coordinates)) = mutated_candidate(
+                    &mut rng,
+                    &template_coordinates_bohr,
+                    &torsions,
+                    base,
+                    &bonds,
+                    &blacklist,
+                    &rmsd_atoms,
+                    &options,
+                    &mut statistics,
+                ) else {
+                    continue;
+                };
+                blacklist.push(coordinates.clone());
+                starts.push((coordinates, generation));
+                bred_any = true;
+            }
+            // A crossover that yields nothing usable means the neighbourhood is exhausted; take
+            // whatever the generation managed rather than spinning.
+            if !bred_any {
+                break;
+            }
         }
         if starts.is_empty() {
             termination = TerminationReason::MutationAttemptsExhausted;

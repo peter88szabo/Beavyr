@@ -14,7 +14,7 @@ use crate::molecule::Molecule;
 use crate::settings::MolSettings;
 use crate::trajectory::{TrajectoryFrame, TrajectoryState};
 
-use super::{ConformerOutcome, ConformerRun, Thoroughness};
+use super::{available_cores, ConformerOutcome, ConformerRun, Thoroughness};
 
 /// Draws the panel. Returns `true` if the conformers were just loaded into the viewer, so the
 /// caller can announce the structure change.
@@ -108,6 +108,24 @@ pub fn conformer_panel(
         );
 
     ui.add_space(4.0);
+    let cores = available_cores();
+    ui.horizontal(|ui| {
+        ui.label("Cores");
+        ui.add_enabled(
+            !run.is_running(),
+            egui::DragValue::new(&mut run.settings.ncore)
+                .speed(1.0)
+                .range(1..=cores),
+        )
+        .on_hover_text(
+            "How many structures to optimise at once. Every local optimisation is independent, \
+             so this scales almost linearly. It does not change the answer: with a fixed seed the \
+             same conformers come back on any number of cores.",
+        );
+        ui.label(egui::RichText::new(format!("of {cores} available")).weak().small());
+    });
+
+    ui.add_space(4.0);
     ui.horizontal(|ui| {
         ui.label("Keep within");
         ui.add(
@@ -176,12 +194,14 @@ fn results_section(
 
     ui.label(egui::RichText::new("Results").strong());
     ui.label(format!(
-        "{} conformer{} from {} rotatable bond{}, in {:.1} s.",
+        "{} conformer{} from {} rotatable bond{}, in {:.1} s on {} core{}.",
         outcome.conformers.len(),
         if outcome.conformers.len() == 1 { "" } else { "s" },
         outcome.rotors,
         if outcome.rotors == 1 { "" } else { "s" },
-        outcome.elapsed.as_secs_f64()
+        outcome.elapsed.as_secs_f64(),
+        outcome.workers,
+        if outcome.workers == 1 { "" } else { "s" }
     ));
     ui.label(
         egui::RichText::new(format!(
@@ -448,6 +468,7 @@ mod tests {
             local_optimizations: 30,
             termination: "Converged".into(),
             elapsed: Duration::from_millis(1500),
+            workers: 4,
             best_found_in_generation: 3,
             atoms: vec!["C".into(), "H".into()],
         }
