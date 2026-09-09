@@ -1,3 +1,4 @@
+use super::local::LocalOptimizer;
 use crate::optimizer::GeomOptOptions;
 
 const EV_TO_HARTREE: f64 = 1.0 / 27.211_386_245_988;
@@ -63,6 +64,9 @@ pub struct ConformerSearchOptions {
     pub random_seed: Option<u64>,
     pub output_energy_window_hartree: f64,
     pub local_optimization: GeomOptOptions,
+    /// Which optimiser relaxes each candidate. See [`super::LocalOptimizer`] -- the choice sets
+    /// the cost of the whole search, and depends on whether an energy is cheap or expensive.
+    pub local_optimizer: LocalOptimizer,
     pub verbosity: u8,
 }
 
@@ -98,6 +102,7 @@ impl Default for ConformerSearchOptions {
             cis_trans_dihedrals: Vec::new(),
             random_seed: None,
             output_energy_window_hartree: 20.0 * KCAL_MOL_TO_HARTREE,
+            local_optimizer: LocalOptimizer::default(),
             local_optimization: GeomOptOptions {
                 verbosity: 0,
                 ..GeomOptOptions::default()

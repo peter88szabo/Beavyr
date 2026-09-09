@@ -6,7 +6,8 @@ use crate::optimizer::prng::StdRng;
 
 
 use crate::optimizer::internal_coords::ConnectivityModel;
-use crate::optimizer::{geom_opt_internal_bfgs, Objective};
+use super::local::local_optimize;
+use crate::optimizer::Objective;
 
 use super::geometry::{
     coordinates_from_genome, genome_from_coordinates, sensible_geometry, wrap_angle,
@@ -304,7 +305,8 @@ fn locally_optimize<O: Objective>(
 ) -> Result<Option<Conformer>> {
     blacklist.push(starting_coordinates.clone());
     statistics.local_optimizations += 1;
-    let result = geom_opt_internal_bfgs(
+    let result = local_optimize(
+        options.local_optimizer,
         starting_coordinates,
         connectivity.clone(),
         objective,

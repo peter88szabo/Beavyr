@@ -34,7 +34,7 @@ use crate::forcefield::dreiding::{BuildError, DreidingTopology};
 use crate::molecule::{covalent_radius_angstrom, Molecule};
 use crate::optimizer::conformer_search::{
     discover_torsions, genetic_conformer_search_parallel, ConformerSearchOptions,
-    ConformerSearchResult,
+    ConformerSearchResult, LocalOptimizer,
 };
 use crate::optimizer::internal_coords::ConnectivityModel;
 
@@ -116,6 +116,13 @@ pub struct ConformerSettings {
     pub refine_with_gfnff: bool,
     /// Fix the random seed, so a search can be repeated exactly.
     pub reproducible: bool,
+    /// Which optimiser relaxes each candidate conformer.
+    ///
+    /// Cartesian by default. The search's cost is almost entirely the coordinate algebra rather
+    /// than the force field -- for a 32-atom molecule an internal-coordinate cycle spends roughly
+    /// 6.7 Mflop building and inverting matrices against 0.01 Mflop on the energy -- so the
+    /// optimiser that does least per cycle wins by a wide margin, even needing more cycles.
+    pub local_optimizer: LocalOptimizer,
     /// How many structures to optimise at once.
     ///
     /// A conformer search is embarrassingly parallel: every local optimisation is independent, so
@@ -134,6 +141,9 @@ impl Default for ConformerSettings {
             thoroughness: Thoroughness::default(),
             refine_with_gfnff: false,
             reproducible: true,
+            // Not Behemoth's default. Its internal-coordinate optimiser is right when an energy
+            // costs seconds; here an energy costs microseconds and the trade inverts.
+            local_optimizer: LocalOptimizer::Cartesian,
             ncore: available_cores(),
             // Wide enough to keep everything thermally accessible, and then some: at room
             // temperature 10 kcal/mol is already a population of ~1e-7.
@@ -167,6 +177,8 @@ pub struct ConformerOutcome {
     pub elapsed: Duration,
     /// How many structures were optimised at once.
     pub workers: usize,
+    /// Which optimiser relaxed each candidate.
+    pub local_optimizer: LocalOptimizer,
     /// The generation that produced the lowest-energy conformer.
     ///
     /// Worth showing: if the best structure only turned up in the last generation, the search was
@@ -186,6 +198,11 @@ pub fn available_cores() -> usize {
         .map(|n| n.get())
         .unwrap_or(1)
         .max(1)
+}
+
+/// The worker count a request resolves to: never more than the machine has, never fewer than one.
+pub fn resolve_workers(requested: usize) -> usize {
+    requested.clamp(1, available_cores())
 }
 
 /// Room temperature, for the population estimate.
@@ -256,9 +273,8 @@ pub fn search(
     // makes conformers coincide. Rather than report the search's "could not fill the population"
     // as a failure, come down to what the molecule actually has. Halving converges in a few
     // steps and each attempt on a small molecule is milliseconds.
-    // Resolved once, so the report cannot claim a different number from the one used. The search
-    // clamps to what the machine has, and never below one.
-    let workers = settings.ncore.clamp(1, available_cores());
+    // Resolved once, so the report cannot claim a different number from the one used.
+    let workers = resolve_workers(settings.ncore);
 
     let mut population = population_size;
     let mut last_error;
@@ -267,6 +283,7 @@ pub fn search(
             population_size: population,
             max_generations,
             offspring_per_generation: OFFSPRING_PER_GENERATION,
+            local_optimizer: settings.local_optimizer,
             random_seed: settings.reproducible.then_some(FIXED_SEED),
             parallel_workers: Some(workers),
             output_energy_window_hartree: settings.energy_window_kcal / HARTREE_TO_KCAL,
@@ -287,7 +304,13 @@ pub fn search(
             options,
         ) {
             Ok(result) => {
-                return Ok(assemble(result, atoms, started.elapsed(), workers))
+                return Ok(assemble(
+                    result,
+                    atoms,
+                    started.elapsed(),
+                    workers,
+                    settings.local_optimizer,
+                ))
             }
             Err(error) => {
                 last_error = error.to_string();
@@ -344,6 +367,7 @@ fn assemble(
     atoms: Vec<String>,
     elapsed: Duration,
     workers: usize,
+    local_optimizer: LocalOptimizer,
 ) -> ConformerOutcome {
     let lowest = result
         .conformers
@@ -383,6 +407,7 @@ fn assemble(
         termination: format!("{:?}", result.termination),
         elapsed,
         workers,
+        local_optimizer,
         best_found_in_generation: result
             .conformers
             .iter()
@@ -484,6 +509,23 @@ mod tests {
         mol
     }
 
+    /// Cores a test search may use.
+    ///
+    /// `ConformerSettings::default()` takes the whole machine, which is right for the application
+    /// and wrong for a test suite: several searches running at once would each try to fill every
+    /// core. Tests take this instead, so the suite stays polite on a machine doing other work.
+    const TEST_CORES: usize = 2;
+
+    /// Settings for a test search: quick, repeatable, and modest about cores.
+    fn test_settings() -> ConformerSettings {
+        ConformerSettings {
+            thoroughness: Thoroughness::Quick,
+            reproducible: true,
+            ncore: TEST_CORES,
+            ..ConformerSettings::default()
+        }
+    }
+
     /// n-Butane: one central C-C rotor once the two methyls are excluded, and the textbook case
     /// of anti versus gauche.
     const BUTANE: &str = "14\n\n\
@@ -506,7 +548,7 @@ mod tests {
     fn a_rigid_molecule_is_reported_not_searched() {
         // Water has no rotatable bond at all.
         let water = molecule("3\n\nO 0.000 0.000 0.000\nH 0.960 0.000 0.000\nH -0.240 0.929 0.000\n");
-        let error = search(&water, ConformerSettings::default())
+        let error = search(&water, test_settings())
             .expect_err("water has one shape");
         assert!(matches!(error, ConformerError::Rigid), "{error:?}");
         // The message must explain why rather than just refuse.
@@ -518,7 +560,7 @@ mod tests {
     #[test]
     fn an_unparameterised_molecule_reports_the_force_field_error() {
         let lif = molecule("2\n\nLi 0.000 0.000 0.000\nF 0.000 0.000 1.564\n");
-        match search(&lif, ConformerSettings::default()) {
+        match search(&lif, test_settings()) {
             Err(ConformerError::ForceField(_)) => {}
             other => panic!("expected a force-field error, got {other:?}"),
         }
@@ -575,7 +617,7 @@ mod tests {
             &butane,
             ConformerSettings {
                 thoroughness: Thoroughness::Quick,
-                ..ConformerSettings::default()
+                ..test_settings()
             },
         )
         .expect("butane is searchable");
@@ -590,7 +632,7 @@ mod tests {
         let butane = molecule(BUTANE);
         let outcome = search(&butane, ConformerSettings {
             thoroughness: Thoroughness::Quick,
-            ..ConformerSettings::default()
+            ..test_settings()
         })
         .expect("butane is searchable");
 
@@ -616,7 +658,7 @@ mod tests {
         let settings = ConformerSettings {
             thoroughness: Thoroughness::Quick,
             reproducible: true,
-            ..ConformerSettings::default()
+            ..test_settings()
         };
         let first = search(&butane, settings).expect("searchable");
         let second = search(&butane, settings).expect("searchable");
@@ -632,7 +674,7 @@ mod tests {
     /// it to a worker, and collects results in the order it dispatched them, so nothing depends on
     /// which thread finished first.
     ///
-    /// Kept to three workers rather than the whole machine so the test itself stays polite.
+    /// Kept to a couple of workers rather than the whole machine so the test itself stays polite.
     #[test]
     fn the_core_count_does_not_change_the_result() {
         let butane = molecule(BUTANE);
@@ -643,7 +685,7 @@ mod tests {
                     thoroughness: Thoroughness::Quick,
                     reproducible: true,
                     ncore,
-                    ..ConformerSettings::default()
+                    ..test_settings()
                 },
             )
             .expect("butane is searchable")
@@ -671,30 +713,19 @@ mod tests {
 
     /// A request for more cores than the machine has must be clamped rather than oversubscribing,
     /// and zero must not mean "no workers".
+    ///
+    /// Tested on the resolver directly rather than by running a search: proving the clamp by
+    /// actually taking every core is the one thing the clamp exists to prevent, and a test suite
+    /// has no business doing it on a machine that is busy with something else.
     #[test]
     fn the_worker_count_is_clamped_to_the_machine() {
-        let butane = molecule(BUTANE);
-        let outcome = search(
-            &butane,
-            ConformerSettings {
-                thoroughness: Thoroughness::Quick,
-                ncore: 4096,
-                ..ConformerSettings::default()
-            },
-        )
-        .expect("butane is searchable");
-        assert_eq!(outcome.workers, available_cores());
-
-        let outcome = search(
-            &butane,
-            ConformerSettings {
-                thoroughness: Thoroughness::Quick,
-                ncore: 0,
-                ..ConformerSettings::default()
-            },
-        )
-        .expect("butane is searchable");
-        assert_eq!(outcome.workers, 1, "zero cores must still run");
+        let cores = available_cores();
+        assert_eq!(resolve_workers(4096), cores, "a huge request must be clamped");
+        assert_eq!(resolve_workers(0), 1, "zero cores must still run");
+        assert_eq!(resolve_workers(1), 1);
+        if cores > 1 {
+            assert_eq!(resolve_workers(cores - 1), cores - 1, "a modest request stands");
+        }
     }
 
     /// n-Decane, all-anti: 32 atoms and seven rotatable bonds once the methyls are excluded, so
@@ -734,40 +765,137 @@ mod tests {
         H 11.4294 1.4846 -0.8901\n\
         H 11.4294 1.4846 0.8901\n";
 
-    /// Measures what the core count actually buys. Ignored by default -- it is a timing
+    /// Measures what the two speed choices actually buy. Ignored by default -- it is a timing
     /// measurement, which has no business failing a test suite on a loaded machine -- but kept in
-    /// the tree so the claim can be re-checked:
+    /// the tree so the numbers can be re-checked, and **must be run in release**: a debug build
+    /// makes the matrix algebra look far worse than it is.
     ///
     /// ```text
-    /// cargo test --bins conformer_search_scales_with_cores -- --ignored --nocapture
+    /// cargo test --release --bins conformer_search_speed -- --ignored --nocapture
     /// ```
     #[test]
     #[ignore = "timing measurement, not a correctness check"]
-    fn conformer_search_scales_with_cores() {
+    fn conformer_search_speed() {
         let decane = molecule(DECANE);
-        let settings = |ncore: usize| ConformerSettings {
+        let settings = |method: LocalOptimizer, ncore: usize| ConformerSettings {
             thoroughness: Thoroughness::Normal,
             reproducible: true,
+            local_optimizer: method,
             ncore,
-            ..ConformerSettings::default()
+            ..test_settings()
         };
 
-        let serial = search(&decane, settings(1)).expect("decane is searchable");
-        let parallel = search(&decane, settings(4)).expect("decane is searchable");
+        let mut rows = Vec::new();
+        // Only the Cartesian route is timed end to end. A whole search on internal coordinates
+        // takes minutes on this molecule, and `one_local_optimisation_each_way` already measures
+        // that difference in isolation, which is the cleaner comparison anyway.
+        for (method, ncore) in [
+            (LocalOptimizer::Cartesian, 1),
+            (LocalOptimizer::Cartesian, 4),
+        ] {
+            crate::optimizer::conformer_search::local::reset_accounting();
+            let outcome = search(&decane, settings(method, ncore)).expect("decane is searchable");
+            let (in_optimiser, optimisations) =
+                crate::optimizer::conformer_search::local::accounting();
+            println!(
+                "  {:<22} {} core{}: {:>7.2} s   {} tried, {} optimised, {} conformers",
+                method.label(),
+                ncore,
+                if ncore == 1 { " " } else { "s" },
+                outcome.elapsed.as_secs_f64(),
+                outcome.structures_tried,
+                outcome.local_optimizations,
+                outcome.conformers.len()
+            );
+            // With several workers the optimiser time is a sum over threads, so divide by the
+            // worker count to compare it against wall-clock.
+            let optimiser_share = in_optimiser.as_secs_f64() / ncore as f64;
+            println!(
+                "  {:>28} {:.2} s in the optimiser ({:.0}% of wall-clock), {:.1} ms each over {} calls",
+                "",
+                optimiser_share,
+                100.0 * optimiser_share / outcome.elapsed.as_secs_f64().max(1e-9),
+                1000.0 * in_optimiser.as_secs_f64() / optimisations.max(1) as f64,
+                optimisations
+            );
+            rows.push((method, ncore, outcome.elapsed.as_secs_f64()));
+        }
 
-        println!(
-            "  rotors {}, {} local optimisations, {} conformers",
-            serial.rotors, serial.local_optimizations, serial.conformers.len()
-        );
-        println!("  1 core : {:.2} s", serial.elapsed.as_secs_f64());
-        println!("  4 cores: {:.2} s", parallel.elapsed.as_secs_f64());
-        println!(
-            "  speedup: {:.2}x",
-            serial.elapsed.as_secs_f64() / parallel.elapsed.as_secs_f64().max(1e-9)
-        );
+        println!();
+        for (_, ncore, elapsed) in &rows[1..] {
+            println!(
+                "  {ncore} cores vs 1: {:.2}x",
+                rows[0].2 / elapsed.max(1e-9)
+            );
+        }
+    }
 
-        // Same answer either way -- that is the part that must hold regardless of timing.
-        assert_eq!(serial.conformers.len(), parallel.conformers.len());
+    /// Times a single local optimisation each way, which is the claim that matters: the whole
+    /// search is thousands of these, so their ratio is the search's ratio. Ignored, and must be
+    /// run in release.
+    ///
+    /// ```text
+    /// cargo test --release --bins one_local_optimisation -- --ignored --nocapture
+    /// ```
+    #[test]
+    #[ignore = "timing measurement, not a correctness check"]
+    fn one_local_optimisation_each_way() {
+        use crate::forcefield::dreiding::objective::DreidingObjective;
+        use crate::optimizer::conformer_search::local::local_optimize;
+        use crate::optimizer::geom_opt::GeomOptOptions;
+
+        let decane = molecule(DECANE);
+        let topology = DreidingTopology::build(&decane).unwrap();
+        let coords: Vec<f64> = decane
+            .pos
+            .iter()
+            .flat_map(|p| {
+                [
+                    p.x as f64 / BOHR_TO_ANGSTROM,
+                    p.y as f64 / BOHR_TO_ANGSTROM,
+                    p.z as f64 / BOHR_TO_ANGSTROM,
+                ]
+            })
+            .collect();
+        let connectivity = connectivity_model(&decane.atoms);
+        let options = GeomOptOptions {
+            verbosity: 0,
+            ..GeomOptOptions::default()
+        };
+
+        println!("  n-decane, {} atoms", decane.atoms.len());
+        let mut timings = Vec::new();
+        for method in LocalOptimizer::ALL {
+            let mut objective = DreidingObjective::new(&topology);
+            let started = Instant::now();
+            let result = local_optimize(
+                method,
+                coords.clone(),
+                connectivity.clone(),
+                &mut objective,
+                options.clone(),
+            )
+            .expect("decane relaxes");
+            let elapsed = started.elapsed().as_secs_f64();
+            println!(
+                "  {:<22} {:>8.3} s  {:>4} cycles  converged {}  E = {:.6} Eh",
+                method.label(),
+                elapsed,
+                result.cycles,
+                result.converged,
+                result.energy
+            );
+            timings.push(elapsed);
+        }
+        println!();
+        let slowest = timings.iter().copied().fold(0.0_f64, f64::max);
+        for (method, elapsed) in LocalOptimizer::ALL.iter().zip(&timings) {
+            println!(
+                "  {:<22} {:>6.0}x faster than the slowest",
+                method.label(),
+                slowest / elapsed.max(1e-9)
+            );
+        }
     }
 
     #[test]

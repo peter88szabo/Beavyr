@@ -400,6 +400,50 @@ diagnosable rather than mysterious.
   all follow from the structure. Results load as a trajectory, save as
   multi-frame XYZ, and carry the citation for the algorithm.
 
+## Conformer search: what actually costs the time
+
+Measured on n-decane (32 atoms, seven rotatable bonds once the methyls are
+excluded), release build, `Thoroughness::Normal`.
+
+**One local optimisation, each way:**
+
+| local optimiser | time | cycles |
+|---|---|---|
+| Cartesian BFGS | **0.006 s** | 25 |
+| redundant internals | 1.018 s | 8 |
+
+Both converge to the same minimum -- 0.023352 against 0.023336 Hartree, a
+difference of 0.01 kcal/mol -- so this is 182x for nothing given up. Internal
+coordinates do need 3x fewer cycles, but each cycle costs roughly 570x more.
+
+The reason is a mismatch of assumptions. `geom_opt_internal_bfgs` rebuilds the
+Wilson B matrix and inverts the `nint × nint` G matrix *inside* the cycle loop.
+For decane that is ~150 internal coordinates, so a cycle spends about 6.7 Mflop
+on coordinate algebra against 0.01 Mflop on the force field: **99.8% of the run
+decides where to step rather than working out an energy.** That is the correct
+trade when an energy takes seconds, which is what Behemoth was written for. It
+inverts completely when an energy takes microseconds.
+
+Hence `LocalOptimizer`, with `Cartesian` as Beavyr's default and
+`RedundantInternal` kept and selectable. Behemoth's own default is unchanged, so
+importing the search does not silently alter its behaviour.
+
+**A whole search, Cartesian, 215 local optimisations:**
+
+| cores | time | speedup |
+|---|---|---|
+| 1 | 7.63 s | -- |
+| 2 | 4.66 s | 1.64x |
+| 4 | 2.76 s | 2.76x |
+
+Scaling is sub-linear because the generation is 8 wide while the initial
+population build is limited by how many distinct minima exist to find.
+
+For scale: the same search on internal coordinates would be roughly
+215 x 1.02 s ~= 3.7 minutes serial. Cartesian on four cores is about **80x
+faster overall**, and the two improvements compose -- the optimiser change is
+the larger part by far.
+
 ## Still to do
 
 * **Molecular dynamics** -- velocity Verlet, a thermostat, constraints. The
@@ -410,6 +454,12 @@ diagnosable rather than mysterious.
   search itself needs. Blocked on `xtbrun::call_xtb` writing fixed filenames
   into the current working directory, so it cannot be driven in a loop until it
   is scratch-directory aware.
+* **GDIIS for the local optimisation.** Cartesian BFGS takes 25 cycles where
+  internal coordinates take 8. Extrapolating from a history of gradients
+  (geometry DIIS) should recover much of that gap while keeping the cheap
+  per-cycle cost, which would multiply straight through a search made of
+  thousands of these. The obvious next speed-up now that the per-cycle cost is
+  no longer the bottleneck.
 * **Panels for the imported tools** -- transition states, IRC, RDA,
   spin-crossing and scans are all in the tree and unexposed.
 * **Widening parameter coverage**, if wanted: estimated `S_R`/`S_2` radii would

@@ -8,7 +8,8 @@ use anyhow::{bail, ensure, Result};
 use crate::optimizer::prng::StdRng;
 
 use crate::optimizer::internal_coords::ConnectivityModel;
-use crate::optimizer::{geom_opt_internal_bfgs, GeomOptResult, Objective};
+use super::local::local_optimize;
+use crate::optimizer::{GeomOptResult, Objective};
 
 use super::genetic::{
     crossover, energy_order, mutated_candidate, random_genome, select_parents, validate_options,
@@ -67,13 +68,15 @@ where
             .map(|(coordinates, generation)| {
                 let connectivity = connectivity.clone();
                 let local_options = options.local_optimization.clone();
+                let local_method = options.local_optimizer;
                 // Behemoth confines each worker to a one-thread Rayon pool here, so that Rayon
                 // inside its electronic-structure method cannot borrow the other conformer
                 // workers' threads. Beavyr's force field uses neither Rayon nor BLAS, so one
                 // worker is already one thread and the pool is unnecessary.
                 scope.spawn(move || {
                     let mut objective = objective_factory()?;
-                    let result = geom_opt_internal_bfgs(
+                    let result = local_optimize(
+                        local_method,
                         coordinates,
                         connectivity,
                         &mut objective,

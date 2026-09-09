@@ -14,6 +14,8 @@ use crate::molecule::Molecule;
 use crate::settings::MolSettings;
 use crate::trajectory::{TrajectoryFrame, TrajectoryState};
 
+use crate::optimizer::conformer_search::LocalOptimizer;
+
 use super::{available_cores, ConformerOutcome, ConformerRun, Thoroughness};
 
 /// Draws the panel. Returns `true` if the conformers were just loaded into the viewer, so the
@@ -106,6 +108,30 @@ pub fn conformer_panel(
             "Fixes the random seed, so running the search again on the same structure gives \
              the same conformers.",
         );
+
+    ui.add_space(6.0);
+    ui.label(egui::RichText::new("Local optimiser").strong());
+    ui.horizontal(|ui| {
+        for method in LocalOptimizer::ALL {
+            if ui
+                .selectable_label(run.settings.local_optimizer == method, method.label())
+                .on_hover_text(method.description())
+                .clicked()
+            {
+                run.settings.local_optimizer = method;
+            }
+        }
+    });
+    ui.label(
+        egui::RichText::new(
+            "Relaxing a candidate is where the search spends its time, and with a force field \
+             almost all of it goes on the coordinate algebra rather than the energy. Cartesian \
+             does far less per cycle; internal coordinates need fewer cycles but pay a matrix \
+             inversion for each.",
+        )
+        .small()
+        .weak(),
+    );
 
     ui.add_space(4.0);
     let cores = available_cores();
@@ -203,6 +229,11 @@ fn results_section(
         outcome.workers,
         if outcome.workers == 1 { "" } else { "s" }
     ));
+    ui.label(
+        egui::RichText::new(format!("Local optimiser: {}.", outcome.local_optimizer.label()))
+            .small()
+            .weak(),
+    );
     ui.label(
         egui::RichText::new(format!(
             "{} generations, {} structures tried, {} local optimisations. Finished: {}.",
@@ -469,6 +500,7 @@ mod tests {
             termination: "Converged".into(),
             elapsed: Duration::from_millis(1500),
             workers: 4,
+            local_optimizer: LocalOptimizer::Cartesian,
             best_found_in_generation: 3,
             atoms: vec!["C".into(), "H".into()],
         }

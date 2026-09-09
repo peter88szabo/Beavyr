@@ -6,6 +6,7 @@
 use anyhow::{bail, Result};
 use ndarray::{Array1, Array2};
 
+use super::diis::Diis;
 use super::traits::Objective;
 
 const HARTREE_TO_KJMOL: f64 = 2625.499638;
@@ -13,6 +14,18 @@ const HARTREE_TO_KJMOL: f64 = 2625.499638;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CartesianMinimumMethod {
     Bfgs,
+    /// BFGS with the step extrapolated by GDIIS.
+    ///
+    /// Geometry DIIS, in the Császár-Pulay and Farkas-Schlegel sense: the quasi-Newton
+    /// displacement `eᵢ = -H⁻¹gᵢ` at each visited geometry is treated as an error vector, and the
+    /// next point is the linear combination `Σ cᵢ(xᵢ + eᵢ)` whose residual is smallest with the
+    /// coefficients summing to one.
+    ///
+    /// It costs one extra small linear solve per cycle -- the DIIS matrix is at most 6x6 -- and
+    /// buys cycles, which matters when a cycle is dominated by the energy and gradient rather than
+    /// by the algebra. Falls back to the plain quasi-Newton step whenever the extrapolation would
+    /// be unreliable, so it cannot converge worse than [`Self::Bfgs`].
+    GdiisBfgs,
     SteepestDescent,
     TwoPointGradient1,
     TwoPointGradient2,
@@ -242,6 +255,37 @@ fn converged(
         && energy_change.abs() <= opts.energy_tol
 }
 
+/// The GDIIS step, or `None` if the extrapolation should not be trusted this cycle.
+///
+/// GDIIS is powerful and not unconditionally safe: with nearly parallel error vectors the fit is
+/// ill-conditioned and can throw a point far across the surface, and early on the history spans
+/// geometries too different to interpolate between. Farkas and Schlegel's remedy is to check the
+/// proposed step and fall back when it looks wrong, which is what these two tests do. The caller
+/// then takes the plain quasi-Newton step, so a rejected extrapolation costs one small linear
+/// solve and nothing else.
+fn gdiis_step(gdiis: &Diis, x: &[f64], grad: &[f64], quasi_newton: &[f64]) -> Option<Vec<f64>> {
+    let extrapolated = gdiis.extrapolate_shrinking()?;
+    if extrapolated.len() != x.len() {
+        return None;
+    }
+    let step: Vec<f64> = extrapolated.iter().zip(x).map(|(e, xi)| e - xi).collect();
+
+    // It must still go downhill. An extrapolation pointing along the gradient is worse than
+    // useless -- the line search would reject it and the cycle would be wasted.
+    if dot(&step, grad) >= 0.0 {
+        return None;
+    }
+
+    // And it must not be wildly longer than the step it replaces, which is the signature of an
+    // ill-conditioned fit rather than of genuine acceleration.
+    const MAX_GROWTH: f64 = 10.0;
+    let reference = norm(quasi_newton);
+    if reference > 0.0 && norm(&step) > MAX_GROWTH * reference {
+        return None;
+    }
+    Some(step)
+}
+
 fn mat_vec(a: &Array2<f64>, x: &[f64]) -> Vec<f64> {
     let (nr, nc) = a.dim();
     let mut out = vec![0.0; nr];
@@ -325,6 +369,9 @@ pub fn minimize_cartesian<O: Objective>(
     }
     let ndim = x.len();
     let mut h_inv = Array2::<f64>::eye(ndim);
+    // Six geometries is the usual GDIIS window: enough to extrapolate, short enough that stale
+    // points from a different part of the surface do not pollute the fit.
+    let mut gdiis = Diis::new(6);
     let mut grad = vec![0.0; ndim];
     let mut energy = obj.energy_gradient(&x, &mut grad)?;
     let mut previous_x: Option<Vec<f64>> = None;
@@ -381,6 +428,16 @@ pub fn minimize_cartesian<O: Objective>(
                 .into_iter()
                 .map(|v| -v)
                 .collect::<Vec<_>>(),
+            CartesianMinimumMethod::GdiisBfgs => {
+                // The quasi-Newton displacement doubles as this cycle's GDIIS error vector.
+                let quasi_newton: Vec<f64> =
+                    mat_vec(&h_inv, &grad).into_iter().map(|v| -v).collect();
+                gdiis.push(
+                    x.iter().zip(&quasi_newton).map(|(xi, ei)| xi + ei).collect(),
+                    quasi_newton.clone(),
+                );
+                gdiis_step(&gdiis, &x, &grad, &quasi_newton).unwrap_or(quasi_newton)
+            }
         };
         step_limit(&mut step, opts.step_max_component);
 
@@ -404,7 +461,10 @@ pub fn minimize_cartesian<O: Objective>(
             );
         }
 
-        if opts.method == CartesianMinimumMethod::Bfgs {
+        if matches!(
+            opts.method,
+            CartesianMinimumMethod::Bfgs | CartesianMinimumMethod::GdiisBfgs
+        ) {
             let y: Vec<f64> = trial_grad
                 .iter()
                 .zip(old_grad.iter())

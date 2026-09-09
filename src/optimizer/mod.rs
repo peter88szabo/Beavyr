@@ -25,6 +25,9 @@
 //! | `utils::atomic_masses::AtomicMasses` | [`atomic_masses`], forwarding to Beavyr's mass table |
 //! | `rand` | [`prng`], a seedable xoshiro256** in the tree |
 //!
+//! One thing came from elsewhere in Behemoth rather than its optimizer: [`diis`], Pulay's DIIS
+//! from its SCF solver, which is general over (vector, error) pairs and so drives GDIIS here.
+//!
 //! Two things were deliberately left behind. `xtb_gfn1` and `tasi_eht` are the quantum-chemistry
 //! engine rather than optimiser logic, and Beavyr reaches xTB and Behemoth as subprocesses
 //! instead. The conformer search's one-thread Rayon pool went too: it exists so that Rayon inside
@@ -86,6 +89,9 @@ pub mod conformer_search;
 
 /// Dense Gauss-Jordan solve, imported alongside the optimizer.
 pub mod linalg_solve;
+
+/// Pulay's DIIS, imported from Behemoth's SCF solver and reused for geometry.
+pub mod diis;
 
 /// Atomic masses, forwarding to Beavyr's own table.
 pub mod atomic_masses;
