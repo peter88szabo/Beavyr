@@ -769,6 +769,13 @@ pub struct ConformerRun {
     refine_task: Option<Task<Result<(ConformerOutcome, refine::Refinement), String>>>,
     /// What the last refinement did, or why it could not run.
     pub refinement: Option<Result<refine::Refinement, String>>,
+    /// The xTB executable path, as the user is editing it.
+    ///
+    /// Seeded from the same configuration file the Geometry Optimization panel uses, so a path
+    /// set in an earlier session is already here, and editing it here sets it for both. An
+    /// external engine is no use without this, and sending the user to another panel to type it
+    /// would be a dead end.
+    pub xtb_path: String,
     /// How many of the lowest conformers to re-rank with xTB.
     ///
     /// A choice rather than a fixed cap: the cost is roughly linear in this, so whether it is
@@ -798,6 +805,10 @@ impl Default for ConformerRun {
             task: None,
             refine_task: None,
             refinement: None,
+            // Read once at startup, as the optimizer panel does with its own paths.
+            xtb_path: crate::qchem_interfaces::config::load_path(
+                crate::qchem_interfaces::program::QcProgram::Xtb,
+            ),
             refine_top: refine::DEFAULT_REFINE_TOP,
             trail_task: None,
             trail: tstrail::TrailSettings::default(),
@@ -1555,6 +1566,21 @@ mod tests {
                 .collect();
             assert!((measure_bond(&bohr, 0, 1) - wanted).abs() < 0.02);
         }
+    }
+
+    /// The panel's xTB path must come from the same place the optimizer panel keeps it, so a
+    /// path set in an earlier session -- or in the other panel -- is already there.
+    #[test]
+    fn the_xtb_path_is_shared_with_the_optimizer_panel() {
+        use crate::qchem_interfaces::config::load_path;
+        use crate::qchem_interfaces::program::QcProgram;
+
+        let run = ConformerRun::default();
+        assert_eq!(
+            run.xtb_path,
+            load_path(QcProgram::Xtb),
+            "the panel should start from the configured path, not empty"
+        );
     }
 
     /// An external engine without its executable must fail with a message naming the engine,

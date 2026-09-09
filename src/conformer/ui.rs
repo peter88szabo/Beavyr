@@ -47,6 +47,7 @@ pub fn conformer_panel(
     });
 
     if run.settings.engine.needs_xtb() {
+        xtb_path_row(ui, run);
         ui.horizontal(|ui| {
             ui.label("Charge");
             ui.add_enabled(
@@ -140,18 +141,14 @@ pub fn conformer_panel(
 
     // --- Run ----------------------------------------------------------------------------------
     //
-    // An external engine needs the xTB executable. Resolved here rather than inside the search,
-    // so that module never has to know how paths are configured, and so the button can simply be
+    // An external engine needs the xTB executable. Resolved here rather than inside the search, so
+    // that module never has to know how paths are configured, and so the button can simply be
     // disabled with the reason shown when it is missing.
-    let xtb = run.settings.engine.needs_xtb().then(|| {
-        let configured = crate::qchem_interfaces::config::load_path(
-            crate::qchem_interfaces::program::QcProgram::Xtb,
-        );
-        crate::qchem_interfaces::xtb_optimize::resolve_program_executable(
-            crate::qchem_interfaces::program::QcProgram::Xtb,
-            &configured,
-        )
-    });
+    let xtb = run
+        .settings
+        .engine
+        .needs_xtb()
+        .then(|| resolve_xtb(&run.xtb_path));
     run.settings.xtb_binary = match &xtb {
         Some(Ok(path)) => Some(path.clone()),
         _ => None,
@@ -182,11 +179,7 @@ pub fn conformer_panel(
         );
     }
     if let Some(Err(problem)) = &xtb {
-        ui.label(
-            egui::RichText::new(format!("{problem} Set it in Geometry Optimization."))
-                .small()
-                .weak(),
-        );
+        ui.label(egui::RichText::new(problem).small().weak());
     }
 
     if let Some(error) = &run.error {
@@ -424,6 +417,56 @@ doi:10.1021/acs.jcim.5b00243\n\
 S. L. Mayo, B. D. Olafson, W. A. Goddard III, \"DREIDING: A Generic Force Field for Molecular \
 Simulations\", J. Phys. Chem. 1990, 94, 8897-8909. doi:10.1021/j100389a010";
 
+/// The xTB executable path, editable here as well as in the optimizer panel.
+///
+/// Both read and write the same configuration file, so a path set in either -- or in an earlier
+/// session -- is found by the other. Offering it here matters because an external engine simply
+/// does not run without it, and being told to go and set it somewhere else is a dead end.
+fn xtb_path_row(ui: &mut egui::Ui, run: &mut ConformerRun) {
+    use crate::qchem_interfaces::program::QcProgram;
+
+    ui.horizontal(|ui| {
+        ui.label("xTB path");
+        let response = ui.add_enabled(
+            !run.is_running(),
+            egui::TextEdit::singleline(&mut run.xtb_path)
+                .desired_width(200.0)
+                .hint_text("xtb"),
+        );
+        if response.lost_focus() {
+            crate::qchem_interfaces::config::save_path(QcProgram::Xtb, &run.xtb_path);
+        }
+        if ui
+            .add_enabled(!run.is_running(), egui::Button::new("Browse…"))
+            .clicked()
+        {
+            let mut dialog = rfd::FileDialog::new();
+            if let Some(directory) = std::path::Path::new(&run.xtb_path)
+                .parent()
+                .filter(|p| p.is_dir())
+            {
+                dialog = dialog.set_directory(directory);
+            }
+            if let Some(path) = crate::recent_dir::pick_file(dialog) {
+                run.xtb_path = path.display().to_string();
+                crate::qchem_interfaces::config::save_path(QcProgram::Xtb, &run.xtb_path);
+            }
+        }
+        // A tick as soon as it resolves, so there is no need to press Search to find out.
+        if resolve_xtb(&run.xtb_path).is_ok() {
+            ui.label(egui::RichText::new("found").small().weak());
+        }
+    });
+}
+
+/// Resolves an xTB path the way the optimizer panel does, so both agree on what counts as set.
+fn resolve_xtb(path: &str) -> Result<std::path::PathBuf, String> {
+    crate::qchem_interfaces::xtb_optimize::resolve_program_executable(
+        crate::qchem_interfaces::program::QcProgram::Xtb,
+        path,
+    )
+}
+
 /// Transition-state conformers, by TStrail.
 ///
 /// Its own section rather than part of the ordinary search, because it answers a different
@@ -491,13 +534,8 @@ fn trail_section(ui: &mut egui::Ui, run: &mut ConformerRun, mol: &Molecule) {
                 );
             });
 
-            let configured = crate::qchem_interfaces::config::load_path(
-                crate::qchem_interfaces::program::QcProgram::Xtb,
-            );
-            let resolved = crate::qchem_interfaces::xtb_optimize::resolve_program_executable(
-                crate::qchem_interfaces::program::QcProgram::Xtb,
-                &configured,
-            );
+            xtb_path_row(ui, run);
+            let resolved = resolve_xtb(&run.xtb_path);
 
             ui.add_space(6.0);
             ui.horizontal(|ui| {
@@ -531,8 +569,7 @@ fn trail_section(ui: &mut egui::Ui, run: &mut ConformerRun, mol: &Molecule) {
             if let Err(problem) = &resolved {
                 ui.label(
                     egui::RichText::new(format!(
-                        "{problem} This needs xTB: a force field cannot break a bond, so it \
-                         cannot find a transition state."
+                        "{problem} This needs xTB: a force field cannot break a bond."
                     ))
                     .small()
                     .weak(),
@@ -765,14 +802,7 @@ fn refinement_row(ui: &mut egui::Ui, run: &mut ConformerRun, outcome: &Conformer
     ui.separator();
     ui.add_space(6.0);
 
-    let configured = crate::qchem_interfaces::config::load_path(
-        crate::qchem_interfaces::program::QcProgram::Xtb,
-    );
-    let resolved = crate::qchem_interfaces::xtb_optimize::resolve_program_executable(
-        crate::qchem_interfaces::program::QcProgram::Xtb,
-        &configured,
-    );
-
+    let resolved = resolve_xtb(&run.xtb_path);
     let available = outcome.conformers.len();
     ui.horizontal(|ui| {
         ui.label("Re-rank the lowest");
@@ -823,13 +853,10 @@ fn refinement_row(ui: &mut egui::Ui, run: &mut ConformerRun, outcome: &Conformer
     });
 
     if let Err(problem) = &resolved {
-        ui.label(
-            egui::RichText::new(format!(
-                "{problem} Set it in the Geometry Optimization panel; this uses the same path."
-            ))
-            .small()
-            .weak(),
-        );
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new(problem).small().weak());
+        });
+        xtb_path_row(ui, run);
     }
 
     match &run.refinement {
