@@ -98,8 +98,13 @@ impl Default for Measurements {
             // `MolSettings::line_bond_thickness`) and looked like a solid bar rather than a
             // dimension line.
             line_width: 3.0,
-            dash_gap_scale: 1.5,
-            dash_line_scale: 2.0,
+            // Dash pattern length scales with `line_width`, so now that the line is thin
+            // (3 px) these have to be proportionally larger than they were at the old width
+            // (20 px) to read as a sparse dashed line rather than a rapid train of tiny ticks:
+            // period = line_width * (gap_scale + line_scale) pixels, duty cycle =
+            // line_scale / (gap_scale + line_scale). This gives a ~9 px dash on a ~30 px gap.
+            dash_gap_scale: 10.0,
+            dash_line_scale: 3.0,
             show_labels: true,
             pick_radius: 0.2,
             pick_radius_px: 18.0,

@@ -290,6 +290,17 @@ pub fn ui_panel(
                                 }
                                 open = false;
                             }
+                            {
+                                let hbond_label = if settings.show_hbonds {
+                                    "H-bonds Off"
+                                } else {
+                                    "H-bonds On"
+                                };
+                                if ui.button(hbond_label).clicked() {
+                                    settings.show_hbonds = !settings.show_hbonds;
+                                    open = false;
+                                }
+                            }
 
                             ui.separator();
                             ui.label(egui::RichText::new("Orientation").strong());
