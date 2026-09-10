@@ -248,15 +248,6 @@ Keep it that way.
 
 ## Roadmap
 
-`RENDERING_ROADMAP.md` covers the graphics side in detail. The short version:
-the camera carries no environment map, so the `metallic` and `reflectance`
-sliders cannot physically do anything yet, and the light rig is fixed in world
-space so orbiting swings the molecule into shadow. Ambient occlusion and
-contact shadows share a depth prepass and are the largest legibility win
-available.
-
-Chemistry side:
-
 - Conformer search
 - Simulated NMR spectra
 - A UI for the vibronic analyses above
