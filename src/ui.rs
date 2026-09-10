@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use crate::color_schemes::{color_scheme_map, ELEMENT_SYMBOLS};
 use crate::diagnostics::{self, DiagnosticSeverity};
-use crate::events::{MoleculeChanged, ViewportClicked};
+use crate::events::MoleculeChanged;
 use crate::molecule::{parse_xyz_first_frame_angstrom, Molecule};
 use crate::settings::{BondColorMode, ColorScheme, LightingMode, MolSettings, RepresentationMode};
 
@@ -165,7 +165,6 @@ pub fn ui_panel(
         ResMut<crate::uvvis::run::SpectrumTask>,
         Res<crate::cli::StartupLoadReport>,
         ResMut<crate::conformer::ConformerRun>,
-        MessageReader<ViewportClicked>,
     ),
 ) {
     // bevy_egui 0.41: ctx_mut() returns Result; if it fails, skip this frame
@@ -187,7 +186,6 @@ pub fn ui_panel(
         mut uvvis_task,
         startup_report,
         mut conformer_run,
-        mut viewport_clicks,
     ) = builder_resources;
     if !*style_initialized {
         ctx.style_mut_of(ctx.theme(), |style| {
@@ -292,6 +290,87 @@ pub fn ui_panel(
                                 }
                                 open = false;
                             }
+
+                            ui.separator();
+                            ui.label(egui::RichText::new("Orientation").strong());
+                            {
+                                let expanded_id = egui::Id::new("rc_orient_expanded");
+                                let mut expanded = ctx.data_mut(|d| {
+                                    d.get_persisted::<Option<crate::orientation::MenuItem>>(
+                                        expanded_id,
+                                    )
+                                    .unwrap_or(None)
+                                });
+                                let mut apply: Option<Vec<Vec3>> = None;
+
+                                // Orient: lays the molecule flat by its principal axes. A proper
+                                // rotation -- chirality is unchanged.
+                                menu_row(
+                                    ui,
+                                    "Orient",
+                                    crate::orientation::MenuItem::Orient,
+                                    &mut expanded,
+                                    |ui| {
+                                        for plane in crate::orientation::Plane::ALL {
+                                            if ui.button(plane.label()).clicked() {
+                                                apply = Some(crate::orientation::orient(
+                                                    &mol.atoms, &mol.pos, plane,
+                                                ));
+                                            }
+                                        }
+                                    },
+                                );
+                                // Mirror: a reflection. Turns a chiral molecule into its
+                                // enantiomer, which is the point of offering it separately from
+                                // Orient and Flip.
+                                menu_row(
+                                    ui,
+                                    "Mirror",
+                                    crate::orientation::MenuItem::Mirror,
+                                    &mut expanded,
+                                    |ui| {
+                                        for plane in crate::orientation::Plane::ALL {
+                                            if ui.button(plane.label()).clicked() {
+                                                apply = Some(crate::orientation::mirror(
+                                                    &mol.atoms, &mol.pos, plane,
+                                                ));
+                                            }
+                                        }
+                                    },
+                                );
+                                // Flip: a 180-degree turn about an axis. Proper, like Orient --
+                                // the same molecule seen from the other side, not its mirror
+                                // image.
+                                menu_row(
+                                    ui,
+                                    "Flip",
+                                    crate::orientation::MenuItem::Flip,
+                                    &mut expanded,
+                                    |ui| {
+                                        for axis in crate::orientation::Axis::ALL {
+                                            if ui.button(axis.label()).clicked() {
+                                                apply = Some(crate::orientation::flip(
+                                                    &mol.atoms, &mol.pos, axis,
+                                                ));
+                                            }
+                                        }
+                                    },
+                                );
+
+                                if let Some(new_pos) = apply {
+                                    mol.set_pos(new_pos);
+                                    ev_changed.write(MoleculeChanged::set_pos());
+                                    open = false;
+                                    expanded = None;
+                                }
+                                ctx.data_mut(|d| {
+                                    d.insert_persisted::<Option<crate::orientation::MenuItem>>(
+                                        expanded_id,
+                                        expanded,
+                                    );
+                                });
+                            }
+
                             if picked >= 0 {
                                 ui.separator();
                                 ui.label(format!("Atom #{} (right-click)", picked));
@@ -313,126 +392,6 @@ pub fn ui_panel(
             // write back popup state
             ctx.data_mut(|d| d.insert_persisted(popup_id, open));
         }
-    }
-
-    // -------------------------
-    // Left-click background: floating "Orientation" menu
-    //
-    // Reuses `ViewportClicked` -- the picker's own click/drag distinction and panel-occlusion
-    // check -- rather than re-testing the pointer here, so a camera-orbit drag or a click on a
-    // side panel is never mistaken for a background click. A second `MessageReader` on the same
-    // message queue costs nothing and does not disturb the deselect handling that already reads
-    // it elsewhere.
-    // -------------------------
-    {
-        let open_id = egui::Id::new("orient_ctx_open");
-        let pos_id = egui::Id::new("orient_ctx_pos");
-        let expanded_id = egui::Id::new("orient_ctx_expanded");
-        let just_opened_id = egui::Id::new("orient_ctx_just_opened");
-
-        for ViewportClicked { hit } in viewport_clicks.read().copied() {
-            match hit {
-                // Background: (re)open at the click position, collapsed.
-                None => {
-                    if let Ok(window) = windows.single() {
-                        if let Some(cursor) = window.cursor_position() {
-                            ctx.data_mut(|d| {
-                                d.insert_persisted(open_id, true);
-                                d.insert_persisted(pos_id, egui::pos2(cursor.x, cursor.y));
-                                d.insert_persisted::<Option<crate::orientation::MenuItem>>(
-                                    expanded_id,
-                                    None,
-                                );
-                                d.insert_persisted(just_opened_id, true);
-                            });
-                        }
-                    }
-                }
-                // An atom click means the user wants the atom, not the menu.
-                Some(_) => {
-                    ctx.data_mut(|d| d.insert_persisted(open_id, false));
-                }
-            }
-        }
-
-        let (mut open, pos, mut expanded, just_opened) = ctx.data_mut(|d| {
-            (
-                d.get_persisted::<bool>(open_id).unwrap_or(false),
-                d.get_persisted::<egui::Pos2>(pos_id).unwrap_or(egui::pos2(20.0, 20.0)),
-                d.get_persisted::<Option<crate::orientation::MenuItem>>(expanded_id)
-                    .unwrap_or(None),
-                d.get_persisted::<bool>(just_opened_id).unwrap_or(false),
-            )
-        });
-
-        if open {
-            if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-                open = false;
-            }
-
-            let mut apply: Option<Vec<Vec3>> = None;
-            let area = egui::Area::new(egui::Id::new("orientation_context_menu"))
-                .fixed_pos(pos)
-                .order(egui::Order::Foreground)
-                .show(ctx, |ui| {
-                    egui::Frame::popup(ui.style()).show(ui, |ui| {
-                        ui.set_min_width(150.0);
-                        ui.label(egui::RichText::new("Orientation").strong());
-                        ui.separator();
-
-                        // Orient: lays the molecule flat in the chosen plane by its principal
-                        // axes. A proper rotation -- chirality is unchanged.
-                        menu_row(ui, "Orient", crate::orientation::MenuItem::Orient, &mut expanded, |ui| {
-                            for plane in crate::orientation::Plane::ALL {
-                                if ui.button(plane.label()).clicked() {
-                                    apply = Some(crate::orientation::orient(&mol.atoms, &mol.pos, plane));
-                                }
-                            }
-                        });
-                        // Mirror: a reflection. Turns a chiral molecule into its enantiomer, which
-                        // is the point of offering it separately from Orient and Flip.
-                        menu_row(ui, "Mirror", crate::orientation::MenuItem::Mirror, &mut expanded, |ui| {
-                            for plane in crate::orientation::Plane::ALL {
-                                if ui.button(plane.label()).clicked() {
-                                    apply = Some(crate::orientation::mirror(&mol.atoms, &mol.pos, plane));
-                                }
-                            }
-                        });
-                        // Flip: a 180-degree turn about an axis. Proper, like Orient -- the same
-                        // molecule seen from the other side, not its mirror image.
-                        menu_row(ui, "Flip", crate::orientation::MenuItem::Flip, &mut expanded, |ui| {
-                            for axis in crate::orientation::Axis::ALL {
-                                if ui.button(axis.label()).clicked() {
-                                    apply = Some(crate::orientation::flip(&mol.atoms, &mol.pos, axis));
-                                }
-                            }
-                        });
-                    });
-                });
-
-            if let Some(new_pos) = apply {
-                mol.set_pos(new_pos);
-                ev_changed.write(MoleculeChanged::set_pos());
-                open = false;
-            }
-
-            // Close on a click outside the menu, but not on the very click that opened it: that
-            // click's position is the menu's own anchor, and closing immediately would make the
-            // menu impossible to use.
-            if !just_opened && ctx.input(|i| i.pointer.any_click()) {
-                if let Some(click_pos) = ctx.input(|i| i.pointer.interact_pos()) {
-                    if !area.response.rect.contains(click_pos) {
-                        open = false;
-                    }
-                }
-            }
-        }
-
-        ctx.data_mut(|d| {
-            d.insert_persisted(open_id, open);
-            d.insert_persisted::<Option<crate::orientation::MenuItem>>(expanded_id, expanded);
-            d.insert_persisted(just_opened_id, false);
-        });
     }
 
     // -------------------------
