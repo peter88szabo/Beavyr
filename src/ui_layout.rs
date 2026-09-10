@@ -25,8 +25,10 @@ use bevy_egui::egui;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
     Structure,
+    RecentStructures,
     Representation,
     Optimize,
+    TsGeneration,
     Conformers,
     Vibrations,
     UvVis,
@@ -40,13 +42,15 @@ pub enum Tab {
 }
 
 impl Tab {
-    pub const COUNT: usize = 13;
+    pub const COUNT: usize = 15;
 
     /// Rail order, matching the workflow order the panels were arranged in.
     pub const ALL: [Tab; Tab::COUNT] = [
         Tab::Structure,
+        Tab::RecentStructures,
         Tab::Representation,
         Tab::Optimize,
+        Tab::TsGeneration,
         Tab::Conformers,
         Tab::Vibrations,
         Tab::UvVis,
@@ -65,8 +69,10 @@ impl Tab {
     pub fn icon(self) -> &'static str {
         match self {
             Tab::Structure => "🖹",
+            Tab::RecentStructures => "↶",
             Tab::Representation => "⬢",
             Tab::Optimize => "🔧",
+            Tab::TsGeneration => "⇌",
             Tab::Conformers => "🌿",
             Tab::Vibrations => "📈",
             Tab::UvVis => "🌈",
@@ -94,8 +100,10 @@ impl Tab {
     pub fn default_size(self) -> [f32; 2] {
         match self {
             Tab::Structure => [420.0, 520.0],
+            Tab::RecentStructures => [420.0, 600.0],
             Tab::Representation => [420.0, 480.0],
             Tab::Optimize => [430.0, 420.0],
+            Tab::TsGeneration => [580.0, 720.0],
             // Wide and tall: the conformer table earns the room, one row per
             // conformer with energies and populations alongside.
             Tab::Conformers => [520.0, 620.0],
@@ -116,8 +124,10 @@ impl Tab {
     pub fn title(self) -> &'static str {
         match self {
             Tab::Structure => "Structure (XYZ)",
+            Tab::RecentStructures => "Recent Structures",
             Tab::Representation => "Representation",
             Tab::Optimize => "Geometry Optimization",
+            Tab::TsGeneration => "TS Generation",
             Tab::Conformers => "Conformer Search",
             Tab::Vibrations => "Vibrations",
             Tab::UvVis => "UV-Vis (TD-DFT)",

@@ -241,6 +241,7 @@ type LoadTargets<'w> = (
     ResMut<'w, crate::qchem_interfaces::xtb_freq::XtbFreqPanelState>,
     ResMut<'w, crate::qchem_interfaces::xtb_freq::XtbFrequencyTask>,
     ResMut<'w, crate::uvvis::UvVisState>,
+    ResMut<'w, crate::structure_history::StructureHistory>,
 );
 
 /// Load whatever was named on the command line, once, at startup.
@@ -268,7 +269,7 @@ pub fn load_command_line_files(
         return;
     }
 
-    let (xyz_buf, traj, orbitals, freq_panel, freq_task, uvvis) = &mut targets;
+    let (xyz_buf, traj, orbitals, freq_panel, freq_task, uvvis, history) = &mut targets;
 
     // An .engrad only means something against a Hessian, and the Hessian may
     // be named after it on the command line. Hold gradients back and apply
@@ -287,6 +288,7 @@ pub fn load_command_line_files(
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| path.display().to_string());
 
+        let previous = history.before(&mol, traj);
         let loaded = match kind {
             FileKind::Xyz => match crate::ui::load_xyz_from_path(
                 path,
@@ -396,6 +398,12 @@ pub fn load_command_line_files(
         };
 
         if loaded {
+            if matches!(kind, FileKind::Xyz | FileKind::Molden | FileKind::Hessian) {
+                if !matches!(kind, FileKind::Xyz) {
+                    traj.clear_for_structure();
+                }
+                history.replaced(previous, &mol, traj, &name);
+            }
             if let Some(tab) = kind.window() {
                 layout.open[tab.index()] = true;
             }

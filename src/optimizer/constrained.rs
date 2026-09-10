@@ -528,13 +528,36 @@ pub fn optimize_constrained_with_internals<O: Objective>(
         constrained[idx] = true;
     }
     let free_indices: Vec<usize> = (0..nint).filter(|&i| !constrained[i]).collect();
-    if free_indices.is_empty() {
-        bail!("all internal coordinates are constrained; nothing can relax");
+    if nint == 0 {
+        bail!("the internal coordinate set is empty; nothing can relax");
     }
 
     apply_constraint_targets(&mut x, &ic, &constraints, &indices, opts.best_fit_iters)?;
     let mut grad_x = vec![0.0; x.len()];
     let mut energy = obj.energy_gradient(&x, &mut grad_x)?;
+    // A fully constrained image (for example a diatomic bond scan) still has
+    // a valid energy. Fit its targets and evaluate it without a relaxation step.
+    if free_indices.is_empty() {
+        let qs = compute_internals(&x, &ic);
+        if constraints.iter().zip(&indices).any(|(constraint, &idx)| {
+            let residual = target_delta(constraint.coordinate, constraint.target, qs[idx]);
+            !residual.is_finite() || residual.abs() > 1.0e-6
+        }) {
+            bail!("Could not fit all constrained coordinates to their targets.");
+        }
+        let final_values = final_constraint_values(&x, &ic, &constraints, &indices);
+        return Ok(ConstrainedOptimizationResult {
+            x,
+            energy,
+            gradient: grad_x,
+            converged: true,
+            cycles: 0,
+            message: "All internal coordinates fixed; evaluated the constrained geometry.".into(),
+            constraints,
+            final_values,
+            steps: Vec::new(),
+        });
+    }
     let mut hess_q = identity(nint);
     let mut steps = Vec::new();
 

@@ -52,7 +52,7 @@ sudo pacman -R beavyr
 ```
 
 **Requirements** — a 64-bit Arch or Arch-derived system with working graphics
-drivers. The package requires only `alsa-lib`, `libcap` and `systemd-libs`,
+drivers. The package requires only `libcap` and `systemd-libs`,
 which every desktop install already has. The Vulkan loader, a Vulkan driver
 for your GPU and the X11 or Wayland libraries are listed as optional
 dependencies because Beavyr opens them by name at run time rather than linking
@@ -82,7 +82,7 @@ refuses to run as root. From another distribution, use a container:
 
 ```sh
 docker run --rm -v "$PWD":/src -w /src archlinux:base-devel bash -c '
-  pacman -Syu --noconfirm --needed git rust alsa-lib libcap systemd-libs pkgconf
+  pacman -Syu --noconfirm --needed git rust libcap systemd-libs pkgconf
   useradd -m builder && chown -R builder /src
   sudo -u builder ./packaging/build-arch.sh'
 ```

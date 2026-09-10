@@ -29,6 +29,8 @@ mod scene;
 mod settings;
 mod spectrum;
 mod trajectory;
+mod structure_history;
+mod ts_generation;
 mod ui;
 mod ui_layout;
 mod ui_measurements;
@@ -72,11 +74,7 @@ fn main() {
     }
 
     App::new()
-        .add_plugins(
-            DefaultPlugins
-                .set(ImagePlugin::default_nearest())
-                .disable::<bevy::audio::AudioPlugin>(),
-        )
+        .add_plugins(DefaultPlugins.set(ImagePlugin::default_nearest()))
         .add_plugins(EguiPlugin::default())
         .insert_resource(EguiGlobalSettings {
             auto_create_primary_context: false,
@@ -121,6 +119,8 @@ fn main() {
         .insert_resource(ExportSelectArea::default())
         // measurements
         .init_resource::<conformer::ConformerRun>()
+        .init_resource::<ts_generation::TsGeneration>()
+        .init_resource::<structure_history::StructureHistory>()
         .init_resource::<measurements::Measurements>()
         .init_resource::<DiagnosticsCache>()
         .init_gizmo_group::<measurements::MeasurementGizmos>()
@@ -213,9 +213,9 @@ fn main() {
                 // limit for a system set; nesting costs nothing and keeps
                 // the ordering.
                 (
-                    orbitals::clear_orbitals_on_structure_change,
                     uvvis::run::poll_spectrum_run,
                     conformer::poll_conformer_search,
+                    ts_generation::poll_generation,
                     export_image::process_pending_canvas_captures,
                     export_image::cleanup_export_captures,
                 ),

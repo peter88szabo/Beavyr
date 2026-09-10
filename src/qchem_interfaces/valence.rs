@@ -84,13 +84,13 @@ pub fn validate_electronic_state(
     let unpaired = multiplicity as i64 - 1;
     if unpaired > electrons {
         return Err(ElectronicStateError(
-            "Multiplicity requires more unpaired electrons than are available.".to_string(),
+            "Multiplicity requires more unpaired electrons than are available; check the charge or spin multiplicity.".to_string(),
         ));
     }
     if (electrons + multiplicity as i64) % 2 != 1 {
         return Err(ElectronicStateError(format!(
             "Multiplicity {multiplicity} is incompatible with {electrons} electrons; \
-             choose a multiplicity with the opposite parity."
+             check the charge or spin multiplicity. Electron count and multiplicity must have opposite parity."
         )));
     }
 
@@ -145,8 +145,8 @@ pub fn validate_electronic_state(
             atom_index: idx,
             message: format!(
                 "{symbol}{} has {} bond(s) (estimated valence {:.1}); {typical} is \
-                 typical for {symbol}. If this is a radical centre, increase the \
-                 multiplicity; otherwise check the structure.",
+                 typical for {symbol}. Check the charge or spin multiplicity, \
+                 and whether the structure is missing atoms or bonds.",
                 idx + 1,
                 bond_count[idx],
                 bond_order_sum[idx],
@@ -312,6 +312,8 @@ mod tests {
         let (_uhf, warnings) = validate_electronic_state(&m, 0, 1).unwrap();
         assert_eq!(warnings.len(), 1);
         assert_eq!(warnings[0].atom_index, 0);
+        assert!(warnings[0].message.contains("charge or spin multiplicity"));
+        assert!(!warnings[0].message.contains("increase the"));
 
         // At multiplicity 3 (2 unpaired electrons, still parity-legal for 8
         // electrons), the budget exactly explains the deficit of 2.
@@ -331,6 +333,17 @@ mod tests {
 
         let (_uhf, warnings) = validate_electronic_state(&m, 0, 2).unwrap();
         assert!(warnings.is_empty(), "{warnings:?}");
+    }
+
+    #[test]
+    fn an_incompatible_state_can_be_corrected_by_charge_or_spin() {
+        let m = mol(&["C", "H", "H", "H"], &[(0, 1), (0, 2), (0, 3)]);
+        let err = validate_electronic_state(&m, 0, 1).unwrap_err();
+        assert!(err.0.contains("charge or spin multiplicity"));
+        // The coordinates alone cannot choose between a radical and an ion.
+        assert!(validate_electronic_state(&m, 0, 2).is_ok());
+        assert!(validate_electronic_state(&m, 1, 1).is_ok());
+        assert!(validate_electronic_state(&m, -1, 1).is_ok());
     }
 
     #[test]

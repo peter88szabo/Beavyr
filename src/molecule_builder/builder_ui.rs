@@ -501,6 +501,7 @@ pub struct ZMatrixBuilderState {
     pub last_error: Option<String>,
     /// What the last DREIDING cleanup did, or why it could not run.
     pub cleanup_report: Option<Result<String, String>>,
+    pub hydrogen_state: super::hydrogens::HydrogenState,
 }
 
 #[derive(Clone, Default)]
@@ -557,6 +558,7 @@ impl Default for ZMatrixBuilderState {
         Self {
             zmat: Vec::new(),
             cleanup_report: None,
+            hydrogen_state: Default::default(),
             last_click: None,
             add_atom_active: false,
             add_atom_auto: false,
@@ -1486,6 +1488,27 @@ fn commit_add_atom_auto(
         return;
     }
 
+    // Hydrogen uses exactly the same Cartesian placement in the smart
+    // one-atom tool and in Add missing H. Keep the displayed atoms fixed.
+    if symbol == "H" {
+        match super::hydrogens::append_smart_hydrogen(mol, host) {
+            Ok(()) => {
+                zmat_state.zmat = super::hydrogens::builder_zmat(mol, mol.atoms.len() - 1);
+                mol.recompute_bonds(settings.bond_thresh_scale, settings.hbond_cutoff);
+                settings.geometry_dirty = true;
+                settings.bond_topology_dirty = true;
+                zmat_state.edit_refresh = true;
+                zmat_state.last_error = None;
+                zmat_state.add_atom_active = false;
+                zmat_state.add_atom_auto = false;
+                zmat_state.add_atom_picks.clear();
+                zmat_state.add_atom_status = None;
+            }
+            Err(message) => zmat_state.add_atom_status = Some(message),
+        }
+        return;
+    }
+
     // Refuse a bond the host has no valence for: that is the "chemically
     // aware" part doing its job, and it is more useful said than silently
     // ignored.
@@ -1928,12 +1951,55 @@ pub fn sync_builder_on_structure_load(
         None => &[],
     };
     let atoms = atoms.to_vec();
+    if let Some(mol) = &mol {
+        zmat_state.hydrogen_state.invalidate_if_changed(mol);
+    }
     set_selected_atom(&mut zmat_state, &atoms, None);
     zmat_state.last_frag_snapshot = None;
     zmat_state.frag_undo_visible = false;
     zmat_state.last_remove_snapshot = None;
     zmat_state.redo_remove_visible = false;
     zmat_state.last_error = None;
+}
+
+/// Delete directly from the displayed Cartesian structure, then recreate all
+/// Z-matrix references. Even an atom referenced by later rows can be removed.
+pub fn delete_atom_cartesian(
+    mol: &mut Molecule,
+    settings: &mut MolSettings,
+    zmat_state: &mut ZMatrixBuilderState,
+    editor: &mut EditorRotateState,
+    index: usize,
+) -> bool {
+    if index >= mol.atoms.len() || mol.atoms.len() != mol.pos.len() {
+        return false;
+    }
+    if zmat_state.original_atoms.is_none() {
+        zmat_state.original_atoms = Some(mol.atoms.clone());
+        zmat_state.original_pos = Some(mol.pos.clone());
+    }
+    mol.atoms.remove(index);
+    mol.pos.remove(index);
+    mol.recompute_bonds(settings.bond_thresh_scale, settings.hbond_cutoff);
+    zmat_state.zmat = zmat2xyz::xyz_to_zmat(&mol.atoms, &mol.pos);
+    zmat_state.edit_refresh = true;
+    set_selected_atom(zmat_state, &mol.atoms, None);
+    zmat_state.last_frag_snapshot = None;
+    zmat_state.frag_undo_visible = false;
+    zmat_state.last_remove_snapshot = None;
+    zmat_state.redo_remove_visible = false;
+    zmat_state.add_atom_active = false;
+    zmat_state.add_atom_auto = false;
+    zmat_state.add_atom_picks.clear();
+    zmat_state.add_atom_status = None;
+    zmat_state.last_click = None;
+    zmat_state.last_error = None;
+    zmat_state.cleanup_report = None;
+    zmat_state.hydrogen_state = Default::default();
+    *editor = EditorRotateState::default();
+    settings.geometry_dirty = true;
+    settings.bond_topology_dirty = true;
+    true
 }
 
 /// Refuse to build when the Z-matrix does not describe the molecule on screen.
@@ -2248,7 +2314,11 @@ pub fn builder_ui_contents(
     mut zmat_state: &mut ZMatrixBuilderState,
     mut mol: &mut Molecule,
     mut settings: &mut MolSettings,
-) {
+    history: &mut crate::structure_history::StructureHistory,
+    traj: &mut crate::trajectory::TrajectoryState,
+) -> bool {
+    let mut replaced = false;
+    crate::structure_history::editor_controls(ui, history, mol, traj);
     let ctx = ui.ctx().clone();
             if zmat_state.original_atoms.is_none() && !mol.atoms.is_empty() {
                 zmat_state.original_atoms = Some(mol.atoms.clone());
@@ -2263,10 +2333,14 @@ pub fn builder_ui_contents(
                         zmat_state.last_error = None;
                     }
                     if ui.button("Clear Display").clicked() {
+                        let previous = history.before(mol, traj);
                         mol.atoms.clear();
                         mol.pos.clear();
                         mol.bonds.clear();
                         mol.hydrogen_bonds.clear();
+                        traj.clear_for_structure();
+                        history.replaced(previous, mol, traj, "Drawn structure");
+                        replaced = true;
                         settings.geometry_dirty = true;
                         settings.bond_topology_dirty = true;
                         zmat_state.zmat.clear();
@@ -2278,8 +2352,12 @@ pub fn builder_ui_contents(
                             zmat_state.original_atoms.clone(),
                             zmat_state.original_pos.clone(),
                         ) {
+                            let previous = history.before(mol, traj);
                             mol.atoms = atoms;
                             mol.pos = pos;
+                            traj.clear_for_structure();
+                            history.replaced(previous, mol, traj, "Original structure");
+                            replaced = true;
                             mol.recompute_bonds(2.0, 3.0);
                             settings.geometry_dirty = true;
                             settings.bond_topology_dirty = true;
@@ -2293,6 +2371,29 @@ pub fn builder_ui_contents(
                     }
                 });
 
+                ui.add_space(6.0);
+                let previous_atom_count = mol.atoms.len();
+                if super::hydrogens::controls(ui, &mut zmat_state.hydrogen_state, mol, settings) {
+                    zmat_state.zmat = super::hydrogens::builder_zmat(mol, previous_atom_count);
+                    zmat_state.edit_refresh = true;
+                    zmat_state.last_frag_snapshot = None;
+                    zmat_state.frag_undo_visible = false;
+                    zmat_state.last_remove_snapshot = None;
+                    zmat_state.redo_remove_visible = false;
+                    zmat_state.add_atom_active = false;
+                    zmat_state.add_atom_auto = false;
+                    zmat_state.add_atom_picks.clear();
+                    zmat_state.add_atom_status = None;
+                    zmat_state.last_error = None;
+                    zmat_state.cleanup_report = None;
+                    set_selected_atom(zmat_state, &mol.atoms, None);
+                    *state = EditorRotateState::default();
+                    traj.clear_for_structure();
+                    // Notify dependent panels and stop frequency animation.
+                    // This edit is saved to history only on explicit request
+                    // or when leaving the structure, like other builder edits.
+                    replaced = true;
+                }
                 ui.add_space(6.0);
                 cleanup_row(ui, &mut zmat_state, &mut mol, &mut settings);
 
@@ -3376,6 +3477,7 @@ pub fn builder_ui_contents(
                     ui.add(egui::Slider::new(&mut state.bond_th_xx, 1.0..=3.0).text("X–X (Å)"));
                 });
             });
+    replaced
 }
 
 /// The classic docked-left-panel presentation of the molecule editor.
@@ -3385,12 +3487,15 @@ pub fn builder_ui_panel(
     zmat_state: &mut ZMatrixBuilderState,
     mol: &mut Molecule,
     settings: &mut MolSettings,
-) {
+    history: &mut crate::structure_history::StructureHistory,
+    traj: &mut crate::trajectory::TrajectoryState,
+) -> bool {
     egui::Panel::left("molecule_editor_panel")
         .resizable(true)
         .show(ui, |ui| {
-            builder_ui_contents(ui, state, zmat_state, mol, settings);
-        });
+            builder_ui_contents(ui, state, zmat_state, mol, settings, history, traj)
+        })
+        .inner
 }
 
 
@@ -6012,5 +6117,142 @@ mod zmat_edit_tests {
         let mut mol = Molecule::empty();
         let mut settings = MolSettings::default();
         assert!(run_cleanup(&mut mol, &mut settings).is_err());
+    }
+}
+
+#[cfg(test)]
+mod smart_hydrogen_integration_tests {
+    use super::*;
+
+    #[test]
+    fn manual_auto_button_uses_the_shared_hydrogen_placement() {
+        let mut mol = Molecule::from_xyz("2\nC-O\nC 3 -2 1\nO 4.43 -2 1\n");
+        let mut expected = mol.clone();
+        let mut state = ZMatrixBuilderState {
+            zmat: zmat2xyz::xyz_to_zmat(&mol.atoms, &mol.pos),
+            new_symbol: "H".into(),
+            ..Default::default()
+        };
+        let mut settings = MolSettings::default();
+        for host in [0, 0, 0, 1] {
+            super::super::hydrogens::append_smart_hydrogen(&mut expected, host).unwrap();
+            state.add_atom_active = true;
+            state.add_atom_auto = true;
+            state.add_atom_picks = vec![host];
+            commit_add_atom_auto(&mut state, &mut mol, &mut settings);
+            assert_eq!(mol.atoms, expected.atoms, "{:?}", state.add_atom_status);
+            assert_eq!(mol.pos, expected.pos);
+            assert_eq!(state.zmat.len(), mol.atoms.len());
+            assert_eq!(state.zmat.last().unwrap().bond_ref, Some(host + 1));
+            let expected_length = crate::bond_order::single_bond_length(&mol.atoms[host], "H");
+            assert!((state.zmat.last().unwrap().bond_len - expected_length as f64).abs() < 1.0e-5);
+            assert!(!state.add_atom_active);
+        }
+    }
+}
+
+#[cfg(test)]
+mod cartesian_atom_deletion_tests {
+    use super::*;
+
+    fn fixture() -> Molecule {
+        Molecule::from_xyz("5\nMethane\nC 3 -2 1\nH 3.629 -1.371 1.629\nH 2.371 -2.629 1.629\nH 2.371 -1.371 0.371\nH 3.629 -2.629 0.371\n")
+    }
+
+    #[test]
+    fn any_atom_can_be_deleted_including_referenced_first_rows() {
+        for index in 0..5 {
+            let mut mol = fixture();
+            let mut expected = mol.clone();
+            expected.atoms.remove(index);
+            expected.pos.remove(index);
+            let mut state = ZMatrixBuilderState {
+                zmat: zmat2xyz::xyz_to_zmat(&mol.atoms, &mol.pos),
+                ..Default::default()
+            };
+            if index == 0 {
+                assert!(!can_remove_zmat_index(&state.zmat, index));
+            }
+            let mut settings = MolSettings::default();
+            assert!(delete_atom_cartesian(
+                &mut mol,
+                &mut settings,
+                &mut state,
+                &mut EditorRotateState::default(),
+                index
+            ));
+            assert_eq!(mol.atoms, expected.atoms);
+            assert_eq!(mol.pos, expected.pos);
+            assert_eq!(state.zmat.len(), mol.atoms.len());
+            assert!(settings.geometry_dirty && settings.bond_topology_dirty);
+            for (row, atom) in state.zmat.iter().enumerate() {
+                for reference in [atom.bond_ref, atom.angle_ref, atom.dihedral_ref]
+                    .into_iter()
+                    .flatten()
+                {
+                    assert!(reference > 0 && reference <= row);
+                }
+            }
+            let rebuilt = zmat2xyz::zmat_to_xyz(&state.zmat);
+            for a in 0..mol.atoms.len() {
+                for b in a + 1..mol.atoms.len() {
+                    assert!(
+                        (rebuilt[a].distance(rebuilt[b]) - mol.pos[a].distance(mol.pos[b])).abs()
+                            < 1.0e-4
+                    );
+                }
+            }
+            assert!(mol
+                .bonds
+                .iter()
+                .all(|&(a, b, _)| a < mol.atoms.len() && b < mol.atoms.len()));
+        }
+    }
+
+    #[test]
+    fn deleting_the_last_atom_clears_the_structure_and_editor() {
+        let mut mol = Molecule::from_xyz("1\nCarbon\nC 3 2 1\n");
+        let mut state = ZMatrixBuilderState {
+            zmat: zmat2xyz::xyz_to_zmat(&mol.atoms, &mol.pos),
+            selected_index: Some(0),
+            add_atom_active: true,
+            add_atom_picks: vec![0],
+            ..Default::default()
+        };
+        state.last_frag_snapshot = Some(state.zmat.clone());
+        let mut editor = EditorRotateState {
+            active: true,
+            picks: vec![0],
+            last_rotate_snapshot: Some(mol.pos.clone()),
+            ..Default::default()
+        };
+        assert!(delete_atom_cartesian(
+            &mut mol,
+            &mut MolSettings::default(),
+            &mut state,
+            &mut editor,
+            0
+        ));
+        assert!(mol.atoms.is_empty() && mol.pos.is_empty() && mol.bonds.is_empty());
+        assert!(state.zmat.is_empty());
+        assert!(state.selected_index.is_none() && state.last_frag_snapshot.is_none());
+        assert!(!state.add_atom_active && state.add_atom_picks.is_empty());
+        assert!(!editor.active && editor.picks.is_empty() && editor.last_rotate_snapshot.is_none());
+        assert_eq!(state.original_atoms.as_ref().unwrap(), &["C"]);
+    }
+
+    #[test]
+    fn stale_atom_index_does_not_delete_anything() {
+        let mut mol = fixture();
+        let before = mol.clone();
+        assert!(!delete_atom_cartesian(
+            &mut mol,
+            &mut MolSettings::default(),
+            &mut ZMatrixBuilderState::default(),
+            &mut EditorRotateState::default(),
+            5
+        ));
+        assert_eq!(mol.atoms, before.atoms);
+        assert_eq!(mol.pos, before.pos);
     }
 }

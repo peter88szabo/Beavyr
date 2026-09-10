@@ -19,9 +19,8 @@ arch=('x86_64')
 url="https://github.com/pszabo/beavyr"
 license=('MPL2')
 
-# Read off the built binary with ldd, not guessed: these are the only three
-# non-glibc libraries Beavyr links against.
-depends=('alsa-lib' 'libcap' 'systemd-libs')
+# System libraries linked by the viewer; Bevy audio support is disabled.
+depends=('libcap' 'systemd-libs')
 
 # Opened by name at run time rather than linked, so ldd cannot see them and
 # the package must not hard-require them. A working desktop has them all;

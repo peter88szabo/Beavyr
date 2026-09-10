@@ -49,7 +49,7 @@ install -m 0644 "$ROOT/README.md"           "$STAGE/usr/share/doc/$PKG/README.md
 
 INSTALLED_KB="$(du -sk "$STAGE" | cut -f1)"
 
-# The first five Depends were read off the built binary with ldd and dpkg -S,
+# The first four Depends were read off the built binary with ldd and dpkg -S,
 # not guessed. The X11 pair, and everything in Recommends, is opened by name at
 # run time so it cannot be found that way; those are a judgement call. See
 # docs/superpowers/specs/2026-09-08-debian-package-design.md.
@@ -61,7 +61,7 @@ Priority: optional
 Architecture: $ARCH
 Maintainer: Peter Szabo <peter.szabo@kuleuven.be>
 Installed-Size: $INSTALLED_KB
-Depends: libc6 (>= 2.35), libgcc-s1, libasound2t64, libcap2, libudev1, libx11-6, libxkbcommon0
+Depends: libc6 (>= 2.35), libgcc-s1, libcap2, libudev1, libx11-6, libxkbcommon0
 Recommends: libvulkan1, mesa-vulkan-drivers, libwayland-client0, libxcursor1, libxrandr2, libxi6
 Description: Molecular viewer and quantum-chemistry front-end
  Beavyr displays molecules and trajectories at interactive frame rates, drives

@@ -275,6 +275,10 @@ impl OrbitalState {
         self.field_key = None;
         self.job = None;
         self.job_key = None;
+        self.mesh_positive.clear();
+        self.mesh_negative.clear();
+        self.triangle_count = 0;
+        self.warning = None;
         self.surface_dirty = true;
     }
 }
@@ -286,10 +290,21 @@ impl Plugin for OrbitalPlugin {
         app.init_resource::<OrbitalState>()
             .init_gizmo_group::<OrbitalMeshGizmos>()
             .add_systems(
-                Update,
-                (start_orbital_job, poll_orbital_job, rebuild_orbital_surface).chain(),
-            )
-            .add_systems(Update, (configure_orbital_mesh_gizmos, draw_orbital_mesh));
+                PostUpdate,
+                (
+                    clear_orbitals_on_structure_change,
+                    start_orbital_job,
+                    poll_orbital_job,
+                    rebuild_orbital_surface,
+                    configure_orbital_mesh_gizmos,
+                    draw_orbital_mesh,
+                )
+                    .chain()
+                    // The UI runs in egui's PostUpdate pass. Validate after
+                    // all edits and completed calculations, before drawing.
+                    .after(bevy_egui::EguiPostUpdateSet::EndPass)
+                    .before(bevy::transform::TransformSystems::Propagate),
+            );
     }
 }
 
@@ -385,7 +400,11 @@ const ORBITAL_GEOMETRY_TOLERANCE: f32 = 1.0e-3;
 
 /// Whether the molecule on screen is still the one these orbitals describe.
 fn describes(data: &OrbitalData, mol: &crate::molecule::Molecule) -> bool {
-    if data.atoms.len() != mol.atoms.len() || mol.atoms.is_empty() {
+    if data.atoms.len() != mol.atoms.len()
+        || data.positions.len() != data.atoms.len()
+        || mol.pos.len() != mol.atoms.len()
+        || mol.atoms.is_empty()
+    {
         return false;
     }
     if data.atoms.iter().zip(&mol.atoms).any(|(a, b)| a != b) {
@@ -397,45 +416,19 @@ fn describes(data: &OrbitalData, mol: &crate::molecule::Molecule) -> bool {
         .all(|(a, b)| a.distance(*b) <= ORBITAL_GEOMETRY_TOLERANCE)
 }
 
-/// Clears a displayed orbital once the structure it belongs to is gone.
-///
-/// An isosurface is only meaningful for the geometry and basis it was computed
-/// at. Loading a different structure, or emptying the viewport, used to leave
-/// the lobes hanging in space around whatever arrived next, with no indication
-/// that they no longer had anything to do with it.
-///
-/// The test is whether the molecule on screen is still the one the orbitals
-/// describe, rather than simply "a structure was loaded". That matters because
-/// loading a Molden file *is* a structure load -- the reader adopts the
-/// geometry from the file -- so a handler keyed on the event alone would
-/// discard the orbitals at the moment they arrived. Comparing geometries
-/// instead makes the outcome independent of system ordering: a freshly loaded
-/// set matches and survives, a stale one does not and goes.
-///
-/// Keyed on `ParseXyz` like its neighbours, so trajectory playback -- which
-/// reports `SetPos` on every frame -- does not repeatedly tear down a surface
-/// the user is watching.
-pub fn clear_orbitals_on_structure_change(
-    mut evr: MessageReader<crate::events::MoleculeChanged>,
+/// Validate against the current geometry even when an editor changes it
+/// without a load event. Runs after UI edits and before sampling/remeshing, so
+/// a cancelled or late result cannot restore the old molecule's surface.
+/// A newly imported Molden set survives because its geometry matches.
+fn clear_orbitals_on_structure_change(
     mol: Option<Res<crate::molecule::Molecule>>,
     mut state: ResMut<OrbitalState>,
 ) {
-    let structure_replaced = evr.read().any(|ev| {
-        matches!(
-            ev.reason,
-            crate::events::MoleculeChangeReason::ParseXyz { .. }
-        )
-    });
-    if !structure_replaced {
-        return;
-    }
-    let Some(data) = state.data.clone() else {
+    let Some(data) = state.data.as_ref() else {
         return;
     };
-    let still_ours = mol.as_deref().is_some_and(|mol| describes(&data, mol));
-    if !still_ours {
+    if !mol.as_deref().is_some_and(|mol| describes(data, mol)) {
         state.clear();
-        state.warning = None;
     }
 }
 
@@ -446,7 +439,10 @@ fn rebuild_orbital_surface(
     mut materials: ResMut<Assets<StandardMaterial>>,
     existing: Query<Entity, With<OrbitalLobe>>,
 ) {
-    if !state.surface_dirty {
+    if !state.surface_dirty
+        && (state.data.is_some()
+            || (existing.is_empty() && state.mesh_positive.is_empty() && state.mesh_negative.is_empty()))
+    {
         return;
     }
     state.surface_dirty = false;
@@ -1060,5 +1056,149 @@ mod real_file_tests {
             most_positive > 0.0 && most_negative < 0.0,
             "spin density is single-signed"
         );
+    }
+}
+
+#[cfg(test)]
+mod surface_cleanup_tests {
+    use super::*;
+    use crate::molecule::Molecule;
+
+    fn data() -> OrbitalData {
+        molden::parse_molden(include_str!(
+            "../../tests/fixtures/behemoth_ch2o_canonicalMO.molden"
+        ))
+        .unwrap()
+    }
+
+    fn geometry(data: &OrbitalData) -> Molecule {
+        Molecule {
+            atoms: data.atoms.clone(),
+            pos: data.positions.clone(),
+            bonds: vec![],
+            hydrogen_bonds: vec![],
+        }
+    }
+
+    fn app_with_surface() -> App {
+        let data = data();
+        let mol = geometry(&data);
+        let mut state = OrbitalState::default();
+        state.adopt(data, None, None, None);
+        state.mesh_positive = vec![[Vec3::ZERO, Vec3::X]];
+        state.mesh_negative = vec![[Vec3::ZERO, Vec3::Y]];
+        state.triangle_count = 2;
+        state.surface_dirty = false;
+        let pool = AsyncComputeTaskPool::get_or_init(|| {
+            bevy::tasks::TaskPoolBuilder::new().num_threads(1).build()
+        });
+        state.job = Some(pool.spawn(async { future::pending::<SampleOutput>().await }));
+        let mut app = App::new();
+        app.insert_resource(mol)
+            .insert_resource(state)
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<StandardMaterial>>()
+            .add_systems(
+                PostUpdate,
+                (
+                    clear_orbitals_on_structure_change,
+                    poll_orbital_job,
+                    rebuild_orbital_surface,
+                )
+                    .chain(),
+            );
+        app.world_mut().spawn(OrbitalLobe::Positive);
+        app.world_mut().spawn(OrbitalLobe::Negative);
+        app
+    }
+
+    fn assert_empty(app: &mut App) {
+        for _ in 0..2 {
+            app.update();
+            let state = app.world().resource::<OrbitalState>();
+            assert!(state.data.is_none() && state.selected.is_none());
+            assert!(state.field.is_none() && state.density.is_none());
+            assert!(state.job.is_none() && state.job_key.is_none());
+            assert!(state.mesh_positive.is_empty() && state.mesh_negative.is_empty());
+            assert_eq!(state.triangle_count, 0);
+            assert_eq!(
+                app.world_mut()
+                    .query_filtered::<Entity, With<OrbitalLobe>>()
+                    .iter(app.world())
+                    .count(),
+                0
+            );
+        }
+    }
+
+    #[test]
+    fn clearing_canvas_without_a_load_event_removes_lobes_wireframes_and_pending_jobs() {
+        let mut app = app_with_surface();
+        *app.world_mut().resource_mut::<Molecule>() = Molecule::empty();
+        assert_empty(&mut app);
+    }
+
+    #[test]
+    fn deleting_an_atom_without_a_load_event_removes_its_old_orbitals() {
+        let mut app = app_with_surface();
+        let mut mol = app.world_mut().resource_mut::<Molecule>();
+        mol.atoms.remove(0);
+        mol.pos.remove(0);
+        assert_empty(&mut app);
+    }
+
+    #[test]
+    fn replacing_with_the_same_atom_list_at_different_coordinates_removes_the_old_surface() {
+        let mut app = app_with_surface();
+        app.world_mut().resource_mut::<Molecule>().pos[0].x += 1.0;
+        assert_empty(&mut app);
+    }
+
+    #[test]
+    fn a_late_orbital_set_for_another_structure_is_discarded_before_drawing() {
+        let mut app = app_with_surface();
+        *app.world_mut().resource_mut::<Molecule>() = Molecule::empty();
+        app.update();
+        app.world_mut().resource_mut::<OrbitalState>().adopt(
+            data(),
+            None,
+            Some("late result".into()),
+            None,
+        );
+        assert_empty(&mut app);
+    }
+
+    #[test]
+    fn matching_new_molden_geometry_keeps_its_orbitals() {
+        let mut app = app_with_surface();
+        app.update();
+        let state = app.world().resource::<OrbitalState>();
+        assert!(state.data.is_some() && state.selected.is_some() && state.job.is_some());
+        assert_eq!(state.mesh_positive.len(), 1);
+        assert_eq!(
+            app.world_mut()
+                .query_filtered::<Entity, With<OrbitalLobe>>()
+                .iter(app.world())
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn orphan_lobe_entities_are_removed_even_without_a_dirty_flag() {
+        let mut app = app_with_surface();
+        *app.world_mut().resource_mut::<OrbitalState>() = OrbitalState::default();
+        assert_empty(&mut app);
+    }
+
+    #[test]
+    fn coordinate_length_mismatches_do_not_match_by_a_truncated_zip() {
+        let mut data = data();
+        let mut mol = geometry(&data);
+        mol.pos.pop();
+        assert!(!describes(&data, &mol));
+        let mol = geometry(&data);
+        data.positions.pop();
+        assert!(!describes(&data, &mol));
     }
 }

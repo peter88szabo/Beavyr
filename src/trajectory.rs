@@ -58,6 +58,22 @@ pub struct TrajectoryState {
     pub current_file: Option<PathBuf>,
 }
 
+impl TrajectoryState {
+    /// A deliberate standalone structure replaces playback and all its overlays.
+    pub fn clear_for_structure(&mut self) {
+        self.frames.clear();
+        self.current_frame = 0;
+        self.playing = false;
+        self.direction = 1;
+        self.accum = 0.0;
+        self.last_applied = None;
+        self.overlay_enabled = false;
+        self.overlay_dirty = true;
+        self.fixed_bonds = false;
+        self.current_file = None;
+    }
+}
+
 /// Reuses the immutable meshes and materials created for trajectory overlays.
 #[derive(Resource, Default)]
 pub struct TrajectoryOverlayAssets {

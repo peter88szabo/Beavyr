@@ -1,0 +1,3 @@
+# Keep compilation within the project's four-core resource budget.
+[build]
+jobs = 4

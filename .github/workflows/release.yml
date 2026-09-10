@@ -87,7 +87,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            libasound2-dev libudev-dev pkg-config
+            libudev-dev pkg-config
 
       - name: Cache the crate registry
         uses: actions/cache@v4
@@ -149,11 +149,11 @@ jobs:
 
     steps:
       - name: Install what Bevy needs to compile
-        # git for the checkout action, rust for the build, and the three
+        # git for the checkout action, rust for the build, and the system
         # libraries the binary links against so pkg-config can find them.
         run: |
           pacman -Syu --noconfirm --needed \
-            git rust alsa-lib libcap systemd-libs pkgconf
+            git rust libcap systemd-libs pkgconf
 
       - name: Check out the source
         uses: actions/checkout@v4

@@ -4,6 +4,7 @@
 This is a Rust/Bevy application. The crate root is `src/main.rs`, with most functionality split into Rust modules in `src/`. Key modules include `camera.rs`, `scene.rs`, `ui.rs`, and domain features like `molecule.rs`, `hbonds.rs`, and `measurements.rs`. Subdirectories such as `src/exporting/`, `src/molecule_builder/`, and `src/picking/` group related systems. The `src/old_version_that_worked/` directory holds legacy code for reference only.
 
 ## Build, Test, and Development Commands
+- Never use more than four CPU cores for compilation, tests, application runs, or external calculations. Cargo is capped at four build jobs in `.cargo/config.toml`; also restrict CPU affinity for every run (on Linux, `taskset -c 0-3`, or four CPU IDs allowed by the current affinity mask). Child processes inherit that limit.
 - `cargo run` builds and launches the Bevy viewer.
 - `cargo build` compiles the project without running it.
 - `cargo test` runs tests (currently none are defined).

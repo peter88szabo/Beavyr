@@ -76,15 +76,49 @@ and undoes each of those. Sixteen fragments ship with it: `-CH3 -OH -NH2
 A Z-matrix editor works alongside the Cartesian view — build in internal
 coordinates, convert either way.
 
+**Add missing H** fills saturated sp3 carbon to four bonds and neutral oxygen
+to two, using the same chemically aware placement as **Add Atom (auto)**.
+It keeps existing coordinates fixed and skips centres with detected multiple
+or partial bonds. **Undo H addition** restores the structure before the addition;
+use **Save to history** to keep an edited version between sessions.
+
 **Clean up geometry** relaxes bond lengths and angles a fragment left
 strained, using a force field built into Beavyr — no external program, no
 waiting. It is a starting structure for a real optimisation, not a substitute
 for one, and it says so.
 
+The atom context menu also offers **Delete atom** beside **Use as rotation
+center**. Deletion keeps the remaining Cartesian coordinates fixed and recreates
+the Z-matrix, including when later rows referenced the deleted atom.
+Clearing, replacing, or editing the geometry also removes orbital/density
+surfaces that belong to the previous structure.
+
 Right-click the background for the whole-molecule tools: recentre the view,
 toggle hydrogen bonds, and **Orient / Mirror / Flip** the structure into a
 chosen coordinate plane or about a chosen axis. Orient and Flip keep a chiral
 molecule as it was; Mirror deliberately gives you its enantiomer.
+
+### Recent Structures
+
+The **↶ Recent Structures** icon keeps the last 20 distinct structures, newest
+first. Loading another structure or pressing **Clear Display** preserves the
+structure you are leaving, including unsaved drawings and edits. The newly
+loaded standalone structure is saved too. Click **Load** beside an entry to
+put its coordinates back on screen.
+
+Editing and trajectory playback do not create history entries. Use **Save to
+history** at the top of **Molecule Editor** to keep a particular edited or
+optimized version; an optional name helps distinguish versions. A paused
+trajectory frame can also be saved explicitly with this button.
+
+Snapshots are written immediately as XYZ coordinates in the configuration
+directory, so they survive restarts and remain available in another Beavyr
+window. Windows merge their saved entries and retain the newest 20; reopening
+a structure moves it to the top without adding a duplicate. On Linux the files
+are in `$XDG_CONFIG_HOME/beavyr/structure_history` or
+`~/.config/beavyr/structure_history`; on Windows they use
+`%APPDATA%/Beavyr/structure_history`, and on macOS
+`~/Library/Application Support/Beavyr/structure_history`.
 
 ### Trajectory
 
@@ -131,6 +165,47 @@ Reads excited states — energies and oscillator strengths — from an ORCA
 TD-DFT output, and plots the absorption spectrum against wavelength or energy
 with the same four line shapes UV-Vis needs, over a settable energy window.
 Export the curve for a figure.
+
+### TS Generation
+
+The **⇌ TS Generation** button on the left icon rail opens RDA and Poor Man's
+NEB. Both use the Rust optimizers imported from Behemoth, with energy and
+gradient calculations supplied by an installed xTB or Behemoth executable.
+
+**How To Use** opens a guide with atom-number examples for every Reaction
+definition, active atoms, alignment, coordinate weights, and the complete
+workflow. Detailed RDA option explanations are in a section that starts collapsed.
+
+1. Use **Load A/B XYZ** to load endpoint files, or draw/optimize the molecule
+   in the viewer and press **Use current as A** (reactant). Then draw/optimize
+   the second structure and press **Use current as B** (product). Each stored
+   endpoint has a green loaded marker and a **Show A/B** button to display it
+   again. Captures stay unchanged while you edit or optimize the viewer; capture
+   again to keep those changes. Both endpoints must have the same atoms in the
+   same order.
+2. Define the reaction using one-based atom numbers: a bond change (two atoms),
+   atom transfer (donor, transferred atom, acceptor), an angle, a dihedral, or
+   custom reactive bonds/angles/dihedrals. RDA also supports Cartesian motion
+   on selected active atoms. Active atoms select the distance/alignment subset;
+   they are not frozen-atom constraints.
+3. Select RDA or Poor Man's NEB and configure the backend, method, charge and
+   multiplicity. RDA exposes beta bracketing, gamma search, distance and energy
+   tolerances, coordinate mode and step limits in a section that starts collapsed.
+   Poor Man's NEB exposes image
+   count, constrained relaxation limits and additional connectivity.
+4. Generate, then use **Show TS guess** or **Show path in Trajectory** to inspect
+   the result. Calculations run in the background and can be cancelled.
+
+**Save TS guess XYZ** writes one structure in Å. **Save NEB trajectory XYZ**
+writes the complete multi-frame XYZ path, including both endpoints and all
+constrained-relaxed interior images; each frame's comment includes its energy,
+convergence status and whether it is the selected TS guess. The highest-energy
+interior image is selected. **Plot NEB energy** opens a resizable energy plot
+of all images, including A and B, relative to A in kJ/mol. The selected TS is
+marked; hovering over an image shows its absolute and relative energies.
+The NEB energy profile and RDA search structures
+also have separate save buttons. These outputs are TS guesses; saddle-point
+optimization and a frequency check are needed to establish a transition state.
 
 ### Conformational Analysis
 
@@ -224,12 +299,20 @@ GPL-3.0. See `LICENSE`.
 ```sh
 cargo run                                       # dev build, dynamic linking, fast rebuilds
 cargo build --release --no-default-features     # standalone binary, no dynamic linking
-cargo test                                       # 951 passing, 17 ignored
+cargo test -- --test-threads=1                   # run the tests serially
 ```
+
+Cargo is limited to four build jobs by `.cargo/config.toml`. For a hard limit
+of four CPU cores on Linux, prefix build, test and run commands with
+`taskset -c 0-3` (or four CPU IDs allowed on your machine). Launched calculations
+inherit that CPU limit.
 
 The `dev` feature (on by default) enables Bevy's dynamic linking. Turn it off
 for anything you intend to ship. Dependencies are built at `opt-level = 3`
 even in a dev profile, because an unoptimised wgpu makes the viewer unusable.
+
+Bevy is built with its 2D, 3D and UI features, with audio disabled at compile
+time. Linux builds and packages therefore do not require ALSA.
 
 Beavyr links no quantum-chemistry code of its own. Every external backend is
 an executable you point it at, run in a scratch directory and parsed back

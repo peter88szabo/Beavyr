@@ -118,13 +118,14 @@ pub fn orbital_panel(
     mol: &mut Molecule,
     settings: &mut MolSettings,
     ev_changed: &mut MessageWriter<MoleculeChanged>,
-) {
+) -> bool {
+    let mut loaded = false;
     ui.horizontal(|ui| {
         if ui.button("Load .molden file").clicked() {
             let dialog =
                 crate::recent_dir::open().add_filter("Molden", &["molden", "molden.input", "inp"]);
             if let Some(path) = crate::recent_dir::pick_file(dialog) {
-                load_molden_from_path(&path, state, mol, settings, ev_changed);
+                loaded = load_molden_from_path(&path, state, mol, settings, ev_changed);
             }
         }
         if state.data.is_some() && ui.button("Close").clicked() {
@@ -140,7 +141,7 @@ pub fn orbital_panel(
     let Some(data) = state.data.clone() else {
         ui.add_space(4.0);
         ui.weak("No orbital file loaded.");
-        return;
+        return loaded;
     };
 
     ui.add_space(4.0);
@@ -407,4 +408,5 @@ pub fn orbital_panel(
         // Only the mesh changes; the sampled field is still valid.
         state.mark_surface_dirty();
     }
+    loaded
 }

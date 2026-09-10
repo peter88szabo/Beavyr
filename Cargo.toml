@@ -1,6 +1,6 @@
 [package]
 name = "Beavyr"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 
 [features]
@@ -11,7 +11,8 @@ default = ["dev"]
 dev = ["bevy/dynamic_linking"]
 
 [dependencies]
-bevy = { version = "0.19.1", features = ["jpeg"] }
+# Keep Bevy's rendering/UI defaults, but omit its audio feature and ALSA dependency.
+bevy = { version = "0.19.1", default-features = false, features = ["2d", "3d", "ui", "jpeg"] }
 bevy_egui = "0.42.0"
 rfd = "0.17"
 

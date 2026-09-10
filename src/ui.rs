@@ -89,7 +89,7 @@ impl UiPanelRegions {
     }
 }
 
-#[derive(Resource, Clone)]
+#[derive(Resource, Clone, Default)]
 pub struct XyzBuffer {
     pub text: String,
     pub last_dir: Option<PathBuf>,
@@ -165,6 +165,10 @@ pub fn ui_panel(
         ResMut<crate::uvvis::run::SpectrumTask>,
         Res<crate::cli::StartupLoadReport>,
         ResMut<crate::conformer::ConformerRun>,
+        (
+            ResMut<crate::ts_generation::TsGeneration>,
+            ResMut<crate::structure_history::StructureHistory>,
+        ),
     ),
 ) {
     // bevy_egui 0.41: ctx_mut() returns Result; if it fails, skip this frame
@@ -186,6 +190,7 @@ pub fn ui_panel(
         mut uvvis_task,
         startup_report,
         mut conformer_run,
+        (mut ts_generation, mut structure_history),
     ) = builder_resources;
     if !*style_initialized {
         ctx.style_mut_of(ctx.theme(), |style| {
@@ -392,6 +397,23 @@ pub fn ui_panel(
                                     }
                                     open = false;
                                 }
+                                if ui
+                                    .add_enabled((picked as usize) < mol.atoms.len(), egui::Button::new("Delete atom"))
+                                    .on_hover_text("Removes this atom and recreates the Z-matrix. All remaining atoms keep their current coordinates.")
+                                    .clicked()
+                                    && crate::molecule_builder::builder_ui::delete_atom_cartesian(
+                                        &mut mol, &mut settings, &mut zmat_state,
+                                        &mut editor_rotate_state, picked as usize,
+                                    )
+                                {
+                                    measurements.reset_all();
+                                    traj.clear_for_structure();
+                                    xtb_freq_panel_state.selected_mode = None;
+                                    xyz_buf.current_file = None;
+                                    ev_changed.write(MoleculeChanged::parse_xyz(false));
+                                    ctx.data_mut(|d| d.insert_persisted(pick_id, -1_i32));
+                                    open = false;
+                                }
                             }
                             if ui.button("Cancel").clicked() {
                                 open = false;
@@ -541,16 +563,15 @@ pub fn ui_panel(
                     if ui.button("Load XYZ file").clicked() {
                         let dlg = crate::recent_dir::open().add_filter("XYZ", &["xyz"]);
                         if let Some(path) = crate::recent_dir::pick_file(dlg) {
-                            xyz_buf.last_dir = path.parent().map(|p| p.to_path_buf());
-                            xyz_buf.current_file = Some(path.clone());
-                            if let Ok(text) = fs::read_to_string(&path) {
-                                xyz_buf.text = text;
-                                xyz_buf.warning = apply_xyz_text(
-                                    &xyz_buf.text,
-                                    &mut mol,
-                                    &mut cam,
-                                    &mut ev_changed,
-                                );
+                            let previous = structure_history.before(&mol, &traj);
+                            match load_xyz_from_path(&path, &mut xyz_buf, &mut traj, &mut mol,
+                                &mut settings, &mut cam, &mut ev_changed) {
+                                Ok(_) => {
+                                    xtb_freq_panel_state.selected_mode = None;
+                                    let name = path.file_name().unwrap_or_default().to_string_lossy();
+                                    structure_history.replaced(previous, &mol, &traj, &name);
+                                }
+                                Err(error) => xyz_buf.warning = Some(error),
                             }
                         }
                     }
@@ -609,6 +630,8 @@ pub fn ui_panel(
 
                     ui.horizontal(|ui| {
                         if ui.button("Apply (Parse XYZ)").clicked() {
+                            traj.clear_for_structure();
+                            xtb_freq_panel_state.selected_mode = None;
                             xyz_buf.warning = apply_xyz_text(
                                 &xyz_buf.text,
                                 &mut mol,
@@ -665,6 +688,19 @@ pub fn ui_panel(
             ui.separator();
 
             // ===========================
+            // Recent structures, shared between sessions and viewer windows.
+            // ===========================
+            section(ui, windowed, &mut open[Tab::RecentStructures.index()], rects,
+                Tab::RecentStructures.default_size(), Tab::RecentStructures.title(), |ui| {
+                    if crate::structure_history::panel(ui, &mut structure_history, &mut mol, &mut traj) {
+                        xtb_freq_panel_state.selected_mode = None;
+                        xyz_buf.current_file = None;
+                        xyz_buf.text = format_xyz_from_molecule(&mol);
+                        mol.recompute_bonds(settings.bond_thresh_scale, settings.hbond_cutoff);
+                        ev_changed.write(MoleculeChanged::parse_xyz(true));
+                    }
+                });
+            // ===========================
             // 1b) Geometry Optimization (xTB)
             // ===========================
             ui.add_space(8.0);
@@ -685,7 +721,35 @@ pub fn ui_panel(
                 );
             });
             // ===========================
-            // 1b-bis) Conformer Search
+            // TS guess generation (RDA / Poor Man's NEB)
+            // ===========================
+            let mut show_ts_trajectory = false;
+            section(
+                ui,
+                windowed,
+                &mut open[Tab::TsGeneration.index()],
+                rects,
+                Tab::TsGeneration.default_size(),
+                Tab::TsGeneration.title(),
+                |ui| {
+                    let previous = structure_history.before(&mol, &traj);
+                    if crate::ts_generation::ui::panel(
+                        ui, &mut ts_generation, &mut mol, &mut traj,
+                    ) {
+                        structure_history.replaced(previous, &mol, &traj, "TS tool structure");
+                        // An explicit TS/endpoint display replaces any vibration animation.
+                        xtb_freq_panel_state.selected_mode = None;
+                        mol.recompute_bonds(settings.bond_thresh_scale, settings.hbond_cutoff);
+                        ev_changed.write(MoleculeChanged::parse_xyz(true));
+                        show_ts_trajectory = traj.frames.len() > 1;
+                    }
+                },
+            );
+            if show_ts_trajectory {
+                open[Tab::Trajectory.index()] = true;
+            }
+            // ===========================
+            // Conformer Search
             // ===========================
             ui.add_space(8.0);
             section(
@@ -696,6 +760,7 @@ pub fn ui_panel(
                 Tab::Conformers.default_size(),
                 "Conformer Search",
                 |ui| {
+                    let previous = structure_history.before(&mol, &traj);
                     let loaded = crate::conformer::ui::conformer_panel(
                         ui,
                         &mut conformer_run,
@@ -705,6 +770,10 @@ pub fn ui_panel(
                     );
                     // Showing a conformer, or loading the set as a trajectory, replaces the
                     // geometry -- so the renderer, measurements and bond lists have to be told.
+                    if loaded {
+                        xtb_freq_panel_state.selected_mode = None;
+                        structure_history.replaced(previous, &mol, &traj, "Conformer");
+                    }
                     crate::conformer::ui::announce(loaded, &mut ev_changed);
                 },
             );
@@ -742,8 +811,11 @@ pub fn ui_panel(
                 // anything -- the program starts with an empty viewport, so
                 // otherwise there would be nothing for the modes to move.
                 if let Some((atoms, pos)) = xtb_freq_task.pending_geometry.take() {
+                    let previous = structure_history.before(&mol, &traj);
+                    traj.clear_for_structure();
                     mol.atoms = atoms;
                     mol.pos = pos;
+                    structure_history.replaced(previous, &mol, &traj, "Imported frequency structure");
                     mol.recompute_bonds(settings.bond_thresh_scale, settings.hbond_cutoff);
                     ev_changed.write(MoleculeChanged::parse_xyz(true));
                 }
@@ -801,6 +873,7 @@ pub fn ui_panel(
                         if let Ok(text) = fs::read_to_string(&path) {
                             match trajectory::parse_multi_xyz(&text) {
                                 Ok(frames) => {
+                                    let previous = structure_history.before(&mol, &traj);
                                     traj.frames = frames;
                                     traj.current_frame = 0;
                                     traj.playing = false;
@@ -815,6 +888,9 @@ pub fn ui_panel(
                                         true,
                                         Some(&mut cam),
                                     );
+                                    let name = path.file_name().unwrap_or_default().to_string_lossy();
+                                    structure_history.replaced(previous, &mol, &traj, &name);
+                                    xtb_freq_panel_state.selected_mode = None;
                                     // `apply_current_frame` only reports a
                                     // coordinate update — it runs for every
                                     // playback frame too.  Loading a file
@@ -1107,13 +1183,15 @@ pub fn ui_panel(
                 Tab::Surface.default_size(),
                 "Surface Tools",
                 |ui| {
-                crate::orbitals::ui::orbital_panel(
-                    ui,
-                    &mut orbital_state,
-                    &mut mol,
-                    &mut settings,
-                    &mut ev_changed,
-                );
+                let previous = structure_history.before(&mol, &traj);
+                if crate::orbitals::ui::orbital_panel(
+                    ui, &mut orbital_state, &mut mol, &mut settings, &mut ev_changed,
+                ) {
+                    traj.clear_for_structure();
+                    xtb_freq_panel_state.selected_mode = None;
+                    let name = orbital_state.file_name.clone().unwrap_or_else(|| "Molden structure".into());
+                    structure_history.replaced(previous, &mol, &traj, &name);
+                }
             });
 
             // ===========================
@@ -2092,13 +2170,14 @@ pub fn ui_panel(
             ])
             .vscroll(true)
             .show(&ctx, |ui| {
-                builder_ui_contents(
-                    ui,
-                    &mut editor_rotate_state,
-                    &mut zmat_state,
-                    &mut mol,
-                    &mut settings,
-                );
+                if builder_ui_contents(
+                    ui, &mut editor_rotate_state, &mut zmat_state, &mut mol,
+                    &mut settings, &mut structure_history, &mut traj,
+                ) {
+                    xtb_freq_panel_state.selected_mode = None;
+                    xyz_buf.current_file = None;
+                    ev_changed.write(MoleculeChanged::parse_xyz(true));
+                }
             });
         if let Some(window) = &builder_window {
             window_rects.push(window.response.rect);
@@ -2106,14 +2185,20 @@ pub fn ui_panel(
         ui_layout.builder_open = builder_open;
     }
 
-    if !windowed {
-        builder_ui_panel(
-            &mut viewport_ui,
-            &mut editor_rotate_state,
-            &mut zmat_state,
-            &mut mol,
-            &mut settings,
-        );
+    if !windowed && builder_ui_panel(
+        &mut viewport_ui, &mut editor_rotate_state, &mut zmat_state,
+        &mut mol, &mut settings, &mut structure_history, &mut traj,
+    ) {
+        xtb_freq_panel_state.selected_mode = None;
+        xyz_buf.current_file = None;
+        ev_changed.write(MoleculeChanged::parse_xyz(true));
+    }
+
+    if let Some(rect) = crate::ts_generation::help::window(ctx, &mut ts_generation.help_open) {
+        window_rects.push(rect);
+    }
+    if let Some(rect) = crate::ts_generation::plot::window(ctx, &mut ts_generation) {
+        window_rects.push(rect);
     }
 
     // Record what the panels ended up covering, now that they have all been
@@ -2432,6 +2517,7 @@ pub(crate) fn load_xyz_from_path(
         ev_changed.write(MoleculeChanged::parse_xyz(false));
         Ok(n)
     } else {
+        traj.clear_for_structure();
         apply_xyz_text(&text, mol, cam, ev_changed);
         Ok(1)
     }
