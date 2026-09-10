@@ -27,6 +27,7 @@
 *.carthess
 *.bibtex
 *.property.txt
+continue.txt
 
 # Cluster job leftovers
 slurm-*.out
