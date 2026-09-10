@@ -1,4 +1,0 @@
-claude --resume b5619d72-b54e-407f-b24b-b8c951737b3d
-
-  codex resume 01a08c51-da8e-7d43-9ae8-5b74b4afaed4
-Or run codex resume and select Inspect filesystem.
