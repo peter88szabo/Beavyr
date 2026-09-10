@@ -167,8 +167,8 @@ force field for a quick check) or load a Hessian someone else computed.
 * **Normal modes** — mass-weighted Hessian, Eckart projection to remove
   translation and rotation.
 * **Reaction-path projection** — supply a gradient and the mode along the
-  reaction path is projected out too, which is what you want at a transition
-  state.
+  reaction path is projected out too, which is what you want along a MEP 
+  (reaction path). This can be handy if you do variational TST.
 * **IR spectrum** — intensities from the program's own dipole derivatives,
   broadened as Gaussian, Lorentzian, Voigt or plain sticks, with adjustable
   width and a frequency scaling factor. Exportable as `.dat`.
