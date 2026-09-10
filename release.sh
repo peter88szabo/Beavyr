@@ -16,7 +16,7 @@ case "${1:-}" in
     --help|-h)
         printf '%s\n' 'Edit VERSION at the top, then run ./release.sh.' \
             'Use ./release.sh --dry-run to preview without writing or pushing.' \
-            'Includes tracked changes and new source, tests, packaging, and CI files.' \
+            'Includes tracked changes and new source, tests, packaging, CI files, and Images/.' \
             'Other new files must be staged with git add before running this script.'
         exit 0 ;;
     *) fail 'Usage: ./release.sh [--dry-run|--help]' ;;
@@ -96,7 +96,7 @@ printf 'Release %s from branch %s via %s\n' "$tag" "$branch" "$REMOTE"
 printf '%s\n' 'Installers: Ubuntu, Arch Linux, Windows, macOS (Intel + Apple Silicon).' \
     'Will update Cargo.toml/Cargo.lock, commit tracked edits and new project files, and push branch + tag.'
 # Do not automatically add unrelated untracked research data or machine-local scripts.
-paths=(src tests packaging .github .cargo release.sh)
+paths=(src tests packaging .github .cargo Images release.sh)
 git status --short --untracked-files=normal
 if "$dry_run"; then
     printf '%s\n' 'Dry run complete. No files, commits, tags, or remote refs were changed.'

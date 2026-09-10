@@ -10,6 +10,11 @@ quantum-chemistry calculation actually looked like — normal modes, IR and
 UV-Vis spectra, molecular orbitals, conformers — all in one fast, interactive
 window.
 
+See the tools in action: [build a molecule](#molecule-editor),
+[optimize its geometry](#geometry-optimization), [animate vibrations](#vibrations),
+[view orbitals](#orbital-viewer), [inspect excited states](#uv-vis),
+[find conformers](#conformational-analysis), or [measure a structure](#measurements).
+
 ## Download
 
 Get the current release from the
@@ -59,6 +64,12 @@ number can be open at once, and each keeps its own state.
 
 ### Molecule Editor
 
+Open **Molecule Editor** to load or paste XYZ coordinates, or build a molecule
+by adding atoms and fragments. Select an atom in the viewer to work on it;
+the Z-matrix table lets you edit bond lengths, angles and dihedrals.
+
+![Molecule Editor with a selected atom, Z-matrix coordinates, and atom and fragment controls](Images/Editor.png)
+
 The atom count, molecular formula in Hill notation (`C12 : H24 : O2`) and
 molecular weight sit at the top of the panel — the cheapest way to notice that
 a structure is one hydrogen short before doing anything else with it. An
@@ -97,6 +108,22 @@ Right-click the background for the whole-molecule tools: recentre the view,
 toggle hydrogen bonds, and **Orient / Mirror / Flip** the structure into a
 chosen coordinate plane or about a chosen axis. Orient and Flip keep a chiral
 molecule as it was; Mirror deliberately gives you its enantiomer.
+
+### Geometry Optimization
+
+Relax the displayed structure with xTB, Behemoth, or the built-in DREIDING
+force field. Optimization runs in the background so the viewer stays responsive.
+
+1. Load or draw a molecule, then open **Geometry Optimization** using the wrench
+   icon on the left.
+2. Choose the **Program** and method. For an external program, use **Browse…**
+   to select its executable. Check the structure's **Charge** and **Multiplicity**
+   before starting, and set **nproc** to the number of cores you want to use.
+3. Click **Optimize**. After completion, open **Trajectory** to inspect the
+   optimization steps, or **Show Energy Plot** to see the energy history when
+   available. Use **Save to history** in Molecule Editor to retain the result.
+
+![Geometry Optimization with xTB settings, a completed optimization, and energy plotted against iteration](Images/Optimize.png)
 
 ### Recent Structures
 
@@ -150,6 +177,11 @@ force field for a quick check) or load a Hessian someone else computed.
   with a settable cutoff. The rotational symmetry number must be stated rather
   than guessed; a point-group reference table is built into the panel.
 
+Use **Load Hessian…** to open a supported frequency file, then click
+**Animate** beside a mode to see the corresponding molecular motion.
+
+![Frequency Analysis showing normal-mode frequencies and animation of an imaginary mode](Images/Vibrations.png)
+
 ### Orbital Viewer
 
 Loads a `.molden` file, evaluates the Gaussian basis on a grid, and meshes an
@@ -159,12 +191,31 @@ resolution, opacity, per-lobe colours, and a wireframe overlay. The sampled
 field is retained, so dragging the isovalue slider only re-meshes rather than
 re-evaluating the basis from scratch.
 
+Open **Surface Tools**, click **Load .molden file**, and choose **Orbitals**,
+**Electron density**, or **Spin density**. For an orbital, select a row in the
+list and, for an open-shell calculation, choose **Alpha** or **Beta** spin.
+Adjust **Isovalue** and **Surface resolution**, then choose **Solid** or **Mesh**.
+
+*Solid view with the selected orbital and separate colours for its two phases.*
+
+![Surface Tools displaying a selected beta orbital as a solid blue and yellow isosurface](Images/OrbitalTools.png)
+
+*Mesh view; use the mesh grid and line-width controls to adjust its appearance.*
+
+![Surface Tools displaying an orbital as a blue and yellow mesh](Images/OrbitalTools2.png)
+
 ### UV-Vis
 
 Reads excited states — energies and oscillator strengths — from an ORCA
 TD-DFT output, and plots the absorption spectrum against wavelength or energy
 with the same four line shapes UV-Vis needs, over a settable energy window.
 Export the curve for a figure.
+
+Click **Load ORCA output…** to load excited states, expand a state to inspect
+its orbital contributions, or click **Show Absorption Spectrum** to plot them.
+Load the corresponding Molden file in **Surface Tools** to inspect the orbitals.
+
+![UV-Vis tool showing excited-state energies and expanded orbital contributions alongside an orbital surface](Images/ExcitedTool.png)
 
 ### TS Generation
 
@@ -226,11 +277,23 @@ transition-state guesses that can have genuinely different active-bond
 lengths — not the single length a conventional constrained search would be
 stuck with.
 
+Open **Conformer Search**, choose the energy method and search effort, then
+click **Search for conformers**. Use **Show** beside a result to inspect it,
+**Load as trajectory** to browse the set, or **Save as XYZ trajectory** to export it.
+
+![Conformer Search showing search settings, relative energies, populations, and controls to display or export conformers](Images/Confsearch.png)
+
 ### Measurements
 
 Distances, angles and dihedrals by clicking atoms. Left-drag orbits the
 camera, so a click is distinguished from a drag by how far the pointer
 travelled. Per-measurement and global styling, labels drawn next to the line.
+
+Open **Measurements** and choose **New distance**, **New angle**, or the
+dihedral control, then click two, three, or four atoms respectively. Use
+**Hide** or **Delete** beside a measurement to manage the labels on screen.
+
+![Measurements panel with atom-picking controls and labelled distances on a molecular structure](Images/Measurment.png)
 
 ### Representation and Appearance
 
@@ -249,9 +312,6 @@ with their own colour, thickness and dash geometry.
 
 ### Also included
 
-* **Geometry Optimization** — runs `xtb --opt`, or the built-in force field,
-  in the background without blocking the viewer, and hands back the whole
-  optimisation trajectory to play through.
 * **Structure Comparison** — RMSD between frames or loaded structures, as
   placed and after optimal superposition. Pin any frame as the reference and
   see which atom moved furthest.
