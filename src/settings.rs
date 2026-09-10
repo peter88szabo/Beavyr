@@ -201,9 +201,9 @@ impl Default for MolSettings {
             // pleasant blue for H-bonds
             show_hbonds: true,
             hbond_color: Color::srgb(0.20, 0.60, 1.00),
-            hbond_thickness: 3.0,
-            hbond_gap_scale: 1.5,
-            hbond_line_scale: 3.0,
+            hbond_thickness: 2.0,
+            hbond_gap_scale: 10.0,
+            hbond_line_scale: 20.0,
 
             geometry_dirty: true,
             materials_dirty: false,
