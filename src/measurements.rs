@@ -93,7 +93,11 @@ impl Default for Measurements {
             pending_dihedral: Vec::new(),
 
             color: Color::srgba(0.0, 0.9, 0.9, 1.0),
-            line_width: 20.0,
+            // A thin dashed line reads as a measurement annotation; the old default of 20
+            // was thicker than the bonds it was measuring between (4.0, see
+            // `MolSettings::line_bond_thickness`) and looked like a solid bar rather than a
+            // dimension line.
+            line_width: 3.0,
             dash_gap_scale: 1.5,
             dash_line_scale: 2.0,
             show_labels: true,
@@ -226,7 +230,7 @@ pub fn configure_measurement_gizmos(
     {
         let (cfg, _) = cfg_store.config_mut::<MeasurementGizmos>();
         cfg.enabled = true;
-        cfg.line.width = measurements.line_width.max(1.0).min(50.0);
+        cfg.line.width = measurements.line_width.max(1.0).min(20.0);
         cfg.line.perspective = true;
         cfg.line.style = GizmoLineStyle::Dashed {
             gap_scale: measurements.dash_gap_scale.max(0.05),

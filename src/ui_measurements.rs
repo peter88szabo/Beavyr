@@ -56,7 +56,7 @@ pub fn measurements_panel(
         ui.collapsing("Change Distance Style", |ui| {
             ui.separator();
             ui.label("Global style");
-            ui.add(egui::Slider::new(&mut measurements.line_width, 1.0..=50.0).text("Line width"));
+            ui.add(egui::Slider::new(&mut measurements.line_width, 1.0..=20.0).text("Line width"));
             ui.add(
                 egui::Slider::new(&mut measurements.dash_line_scale, 0.05..=4.0)
                     .text("Dash line scale"),
