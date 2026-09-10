@@ -100,11 +100,11 @@ impl Default for Measurements {
             line_width: 3.0,
             // Bevy's dashed-line shader gives the dash its own length directly:
             // dash length = line_width * line_scale, gap length = line_width * gap_scale
-            // (both in pixels). At 3 px wide this is an 18 px dash on a 39 px gap -- long
-            // enough that it reads as a dash rather than a dot, with a gap clearly bigger
-            // than the dash.
-            dash_gap_scale: 13.0,
-            dash_line_scale: 6.0,
+            // (both in pixels). At 3 px wide this is a 54 px dash on a 117 px gap: a dash
+            // long enough to read clearly as a dash rather than a tick, with the same
+            // proportion of gap to dash as before.
+            dash_gap_scale: 39.0,
+            dash_line_scale: 18.0,
             show_labels: true,
             pick_radius: 0.2,
             pick_radius_px: 18.0,
