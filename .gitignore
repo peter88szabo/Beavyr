@@ -33,3 +33,6 @@ slurm-*.out
 
 # Scratch
 continue.txt
+
+# LibreOffice/OpenOffice lock files
+.~lock.*#
