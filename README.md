@@ -111,7 +111,7 @@ molecule as it was; Mirror deliberately gives you its enantiomer.
 
 ### Geometry Optimization
 
-Relax the displayed structure with xTB, Behemoth, or the built-in DREIDING
+Relax the displayed structure with xTB or the built-in DREIDING
 force field. Optimization runs in the background so the viewer stays responsive.
 
 1. Load or draw a molecule, then open **Geometry Optimization** using the wrench
@@ -220,8 +220,8 @@ Load the corresponding Molden file in **Surface Tools** to inspect the orbitals.
 ### Transition-State Initial Guess Generation
 
 The **⇌ TS Generation** button on the left icon rail opens RDA and Poor Man's
-NEB. Both use the Rust optimizers imported from Behemoth, with energy and
-gradient calculations supplied by an installed xTB or Behemoth executable.
+NEB. Both use the Rust optimizers with energy and
+gradient calculations supplied by an installed xTB executable.
 
 ![TS initial guess generation](Images/TSgenerator.png)
 
