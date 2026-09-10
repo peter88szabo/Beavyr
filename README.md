@@ -217,11 +217,13 @@ Load the corresponding Molden file in **Surface Tools** to inspect the orbitals.
 
 ![UV-Vis tool showing excited-state energies and expanded orbital contributions alongside an orbital surface](Images/ExcitedTool.png)
 
-### TS Generation
+### Transition-State Initial Guess Generation
 
 The **⇌ TS Generation** button on the left icon rail opens RDA and Poor Man's
 NEB. Both use the Rust optimizers imported from Behemoth, with energy and
 gradient calculations supplied by an installed xTB or Behemoth executable.
+
+![TS initial guess generation](Images/TSgenerator.png)
 
 **How To Use** opens a guide with atom-number examples for every Reaction
 definition, active atoms, alignment, coordinate weights, and the complete
