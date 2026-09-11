@@ -15,6 +15,10 @@ See the tools in action: [build a molecule](#molecule-editor),
 [view orbitals](#orbital-viewer), [inspect excited states](#uv-vis),
 [find conformers](#conformational-analysis), or [measure a structure](#measurements).
 
+**Author:** Peter Szabo
+**Affiliations:** KU Leuven & BIRA-IASB, Belgium
+**Join Discord:** https://discord.gg/bA32eVnCQ 
+
 ## Download
 
 Get the current release from the
