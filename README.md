@@ -31,35 +31,7 @@ Get the current release from the
 | Debian, Ubuntu, Mint | `beavyr_amd64.deb` | `sudo apt install ./beavyr_amd64.deb` |
 | Arch, Manjaro | build with `packaging/PKGBUILD` | `makepkg -si` |
 
-No Python, no separate runtime, nothing else to install. Beavyr starts and
-shows the viewer with no structure loaded — it does not need xTB or any other
-program to open.
-
-## Opening files
-
-Beavyr takes filenames on the command line and loads each into the tool that
-owns it:
-
-```sh
-beavyr ZZAllyl.xyz            # structure on screen
-beavyr trajectory.xyz         # several frames: trajectory, ready to play
-beavyr water.hess             # frequencies already analysed
-beavyr mo.molden              # orbitals loaded
-beavyr excited.out            # excited states, if the file has any
-beavyr mol.xyz mo.molden      # several at once, each into its own tool
-beavyr --help                 # the list of formats
-```
-
-`.xyz`, `.hess`, `.molden` and `.engrad` are recognised by name. `.out` and
-`.log` are written by every program in the field, so those are decided by
-looking inside: a Gaussian banner means frequencies, an absorption block means
-excited states. A file that is neither says so rather than opening nothing —
-an ORCA `Freq` output, in particular, is told that its force constants are in
-the companion `.hess`.
-
-Anything that fails is reported both in the terminal and at the top of the
-Structure panel. Beavyr still opens: a bad argument is not a reason to refuse
-to start.
+No Python, no separate runtime, nothing else to install.
 
 ## What you can do
 
@@ -328,6 +300,32 @@ with their own colour, thickness and dash geometry.
   radical.
 * **Export Image** — PNG or JPEG of the viewport, or of a selected area of
   it.
+
+## Opening files
+
+Beavyr takes filenames on the command line and loads each into the tool that
+owns it:
+
+```sh
+beavyr ZZAllyl.xyz            # structure on screen
+beavyr trajectory.xyz         # several frames: trajectory, ready to play
+beavyr water.hess             # frequencies already analysed
+beavyr mo.molden              # orbitals loaded
+beavyr excited.out            # excited states, if the file has any
+beavyr mol.xyz mo.molden      # several at once, each into its own tool
+beavyr --help                 # the list of formats
+```
+
+`.xyz`, `.hess`, `.molden` and `.engrad` are recognised by name. `.out` and
+`.log` are written by every program in the field, so those are decided by
+looking inside: a Gaussian banner means frequencies, an absorption block means
+excited states. A file that is neither says so rather than opening nothing —
+an ORCA `Freq` output, in particular, is told that its force constants are in
+the companion `.hess`.
+
+Anything that fails is reported both in the terminal and at the top of the
+Structure panel. Beavyr still opens: a bad argument is not a reason to refuse
+
 
 ## File formats
 
