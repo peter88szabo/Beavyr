@@ -23,6 +23,7 @@ mod optimizer;
 mod orbitals;
 mod picking;
 mod qchem_interfaces;
+mod qchem_panel;
 mod recent_dir;
 mod rmsd;
 mod scene;
@@ -74,7 +75,22 @@ fn main() {
     }
 
     App::new()
-        .add_plugins(DefaultPlugins.set(ImagePlugin::default_nearest()))
+        .add_plugins(
+            DefaultPlugins
+                .set(ImagePlugin::default_nearest())
+                .set(bevy::log::LogPlugin {
+                    // Bevy's own defaults, plus one addition.
+                    //
+                    // `sctk-adwaita` draws the window decorations on Wayland
+                    // and warns about every button in the title bar it does
+                    // not recognise. There is nothing to fix on our side and
+                    // nothing a user can do about it, so it is silenced rather
+                    // than left to scroll past on every launch. Its errors
+                    // still show, in case a decoration ever genuinely fails.
+                    filter: format!("{}sctk_adwaita=error", bevy::log::DEFAULT_FILTER),
+                    ..default()
+                }),
+        )
         .add_plugins(EguiPlugin::default())
         .insert_resource(EguiGlobalSettings {
             auto_create_primary_context: false,
@@ -145,6 +161,8 @@ fn main() {
         .init_resource::<qchem_interfaces::xtb_freq::XtbFreqPanelState>()
         // structure comparison (RMSD / Kabsch)
         .init_resource::<rmsd::RmsdState>()
+        .init_resource::<qchem_panel::QcPanelState>()
+        .init_resource::<qchem_panel::run::QcRunTask>()
         .init_resource::<uvvis::UvVisState>()
         .init_resource::<uvvis::run::SpectrumTask>()
         .init_resource::<ui_layout::UiLayout>()
@@ -213,6 +231,7 @@ fn main() {
                 // limit for a system set; nesting costs nothing and keeps
                 // the ordering.
                 (
+                    qchem_panel::run::poll_qc_run,
                     uvvis::run::poll_spectrum_run,
                     conformer::poll_conformer_search,
                     ts_generation::poll_generation,

@@ -297,7 +297,7 @@ pub fn uvvis_panel(
 
     ui.add_space(8.0);
     ui.horizontal(|ui| {
-        if ui.button("Load ORCA output\u{2026}").clicked() {
+        if ui.button("Load output\u{2026}").clicked() {
             load_from_dialog(state);
         }
         if state.result.is_some() && ui.button("Clear").clicked() {
@@ -389,7 +389,7 @@ pub fn uvvis_panel(
 fn load_from_dialog(state: &mut UvVisState) {
     let Some(path) = crate::recent_dir::pick_file(
         crate::recent_dir::open()
-            .add_filter("ORCA output", &["out", "log", "txt"])
+            .add_filter("Output file", &["out", "log", "dat", "txt"])
             .add_filter("All files", &["*"]),
     ) else {
         return;
@@ -403,7 +403,7 @@ fn load_from_dialog(state: &mut UvVisState) {
 /// Returns whether it worked; on failure `state.load_error` says why.
 pub(crate) fn load_tddft_from_path(path: &std::path::Path, state: &mut UvVisState) -> bool {
     match std::fs::read_to_string(path) {
-        Ok(text) => match super::orca::parse_orca_tddft(&text, path) {
+        Ok(text) => match super::detect_and_parse(&text, path) {
             Ok(result) => {
                 state.result = Some(result);
                 state.load_error = None;

@@ -168,6 +168,8 @@ pub fn ui_panel(
         (
             ResMut<crate::ts_generation::TsGeneration>,
             ResMut<crate::structure_history::StructureHistory>,
+            ResMut<crate::qchem_panel::QcPanelState>,
+            ResMut<crate::qchem_panel::run::QcRunTask>,
         ),
     ),
 ) {
@@ -190,7 +192,7 @@ pub fn ui_panel(
         mut uvvis_task,
         startup_report,
         mut conformer_run,
-        (mut ts_generation, mut structure_history),
+        (mut ts_generation, mut structure_history, mut qc_panel, mut qc_task),
     ) = builder_resources;
     if !*style_initialized {
         ctx.style_mut_of(ctx.theme(), |style| {
@@ -2136,17 +2138,38 @@ pub fn ui_panel(
                 egui::Frame::popup(ui.style())
                     .corner_radius(egui::CornerRadius::same(18))
                     .show(ui, |ui| {
-                        let label = egui::RichText::new("✏").size(18.0);
-                        let button = egui::Button::new(label)
-                            .min_size(egui::vec2(30.0, 30.0))
-                            .selected(ui_layout.builder_open);
-                        if ui
-                            .add(button)
-                            .on_hover_text("Molecule editor / Z-matrix")
-                            .clicked()
-                        {
-                            ui_layout.builder_open = !ui_layout.builder_open;
-                        }
+                        // Two launchers in one group, the general
+                        // quantum-chemistry panel beside the editor. They sit
+                        // together because both are entry points to doing
+                        // something *to* the structure, rather than tools for
+                        // looking at one, which is what the left rail is.
+                        ui.horizontal(|ui| {
+                            let label = egui::RichText::new("⚛").size(18.0);
+                            let button = egui::Button::new(label)
+                                .min_size(egui::vec2(30.0, 30.0))
+                                .selected(qc_panel.open);
+                            if ui
+                                .add(button)
+                                .on_hover_text(
+                                    "Quantum chemistry — run any job on this structure",
+                                )
+                                .clicked()
+                            {
+                                qc_panel.open = !qc_panel.open;
+                            }
+
+                            let label = egui::RichText::new("✏").size(18.0);
+                            let button = egui::Button::new(label)
+                                .min_size(egui::vec2(30.0, 30.0))
+                                .selected(ui_layout.builder_open);
+                            if ui
+                                .add(button)
+                                .on_hover_text("Molecule editor / Z-matrix")
+                                .clicked()
+                            {
+                                ui_layout.builder_open = !ui_layout.builder_open;
+                            }
+                        });
                     });
             });
 
@@ -2192,6 +2215,38 @@ pub fn ui_panel(
         xtb_freq_panel_state.selected_mode = None;
         xyz_buf.current_file = None;
         ev_changed.write(MoleculeChanged::parse_xyz(true));
+    }
+
+    // The general quantum-chemistry panel, and the summary a finished run
+    // leaves behind. Both are windows rather than rail tabs because the panel
+    // is opened from the round launcher beside the editor.
+    if qc_panel.open {
+        crate::qchem_panel::ui::qc_panel(
+            ctx,
+            &mut qc_panel,
+            &mut qc_task,
+            &mut xtb_panel_state,
+            &xtb_task,
+            &mol,
+        );
+    }
+    if qc_panel.summary_open {
+        if let Some(output) = &qc_task.last {
+            let duration = qc_task.last_duration;
+            let mut open = qc_panel.summary_open;
+            crate::qchem_panel::summary::summary_window(
+                ctx,
+                &mut open,
+                &mut qc_panel.summary_confirm_close,
+                output,
+                duration,
+                &mut xtb_panel_state,
+                &xtb_task,
+            );
+            qc_panel.summary_open = open;
+        } else {
+            qc_panel.summary_open = false;
+        }
     }
 
     if let Some(rect) = crate::ts_generation::help::window(ctx, &mut ts_generation.help_open) {

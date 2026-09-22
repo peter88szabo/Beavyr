@@ -1,0 +1,119 @@
+----------------------------------------D-I-I-S--------------------------------------------
+Iteration    Energy (Eh)           Delta-E    RMSDP     MaxDP     DIISErr   Damp  Time(sec)
+-------------------------------------------------------------------------------------------
+               ***  Starting incremental Fock matrix formation  ***
+                              *** Initializing SOSCF ***
+---------------------------------------S-O-S-C-F--------------------------------------
+Iteration    Energy (Eh)           Delta-E    RMSDP     MaxDP     MaxGrad    Time(sec)
+--------------------------------------------------------------------------------------
+    1    -76.3211291996846484     0.00e+00  1.82e-05  1.38e-04  1.37e-05     0.1
+               *** Restarting incremental Fock matrix formation ***
+    2    -76.3211292125388781    -1.29e-08  2.30e-05  1.68e-04  6.33e-05     0.1
+    3    -76.3211291976960382     1.48e-08  1.18e-05  7.87e-05  9.29e-05     0.1
+                 **** Energy Check signals convergence ****
+
+               *****************************************************
+               *                     SUCCESS                       *
+               *           SCF CONVERGED AFTER   3 CYCLES          *
+               *****************************************************
+
+Recomputing exchange energy using gridx3       ... done (    0.068 sec)
+Old exchange energy                            :     -1.791893875 Eh
+New exchange energy                            :     -1.791839378 Eh
+Exchange energy change after final integration :      0.000054497 Eh
+Total energy after final integration           :    -76.321074728 Eh
+             **** ENERGY FILE WAS UPDATED (td_block.en.tmp) ****
+
+----------------
+TOTAL SCF ENERGY
+----------------
+
+Total Energy       :        -76.32107472787662 Eh           -2076.80203 eV
+
+Components:
+Nuclear Repulsion  :          9.18953371743676 Eh             250.05993 eV
+Electronic Energy  :        -85.51066294189816 Eh           -2326.86343 eV
+One Electron Energy:       -123.11014215182497 Eh           -3349.99728 eV
+Two Electron Energy:         37.59947920992681 Eh            1023.13384 eV
+
+
+
+                 *** DAVIDSON DONE ***
+
+Total time for solving the CIS problem:     0.177sec
+
+------------------------------------
+TD-DFT/TDA EXCITED STATES (SINGLETS)
+------------------------------------
+
+the weight of the individual excitations are printed if larger than 1.0e-02
+
+STATE  1:  E=   0.279709 au      7.611 eV    61388.9 cm**-1 <S**2> =   0.000000 Mult 1
+     4a ->   5a  :     0.999144 (c=  0.99957202)
+
+STATE  2:  E=   0.349587 au      9.513 eV    76725.6 cm**-1 <S**2> =   0.000000 Mult 1
+     4a ->   6a  :     0.997888 (c=  0.99894337)
+
+STATE  3:  E=   0.364626 au      9.922 eV    80026.2 cm**-1 <S**2> =   0.000000 Mult 1
+     2a ->   6a  :     0.011944 (c= -0.10928830)
+     3a ->   5a  :     0.983858 (c= -0.99189639)
+
+STATE  4:  E=   0.438258 au     11.926 eV    96186.6 cm**-1 <S**2> =   0.000000 Mult 1
+     3a ->   6a  :     0.987154 (c= -0.99355624)
+
+STATE  5:  E=   0.514766 au     14.008 eV   112978.2 cm**-1 <S**2> =   0.000000 Mult 1
+     2a ->   5a  :     0.987829 (c=  0.99389605)
+
+Storing amplitudes in GBW file ... 
+... GBW file created
+
+-----------------------------
+TD-DFT/TDA-EXCITATION SPECTRA
+-----------------------------
+
+Center of mass = (  0.0000,  0.0000,  0.0976)
+Generating CIS transition densities           ... done
+
+----------------------------------------------------------------------------------------------------
+                     ABSORPTION SPECTRUM VIA TRANSITION ELECTRIC DIPOLE MOMENTS    
+----------------------------------------------------------------------------------------------------
+     Transition      Energy     Energy  Wavelength fosc(D2)      D2        DX        DY        DZ   
+                      (eV)      (cm-1)    (nm)                 (au**2)    (au)      (au)      (au)  
+----------------------------------------------------------------------------------------------------
+  0-1A  ->  1-1A    7.611257   61388.9   162.9   0.017914042   0.09607   0.30995  -0.00000   0.00000
+  0-1A  ->  2-1A    9.512757   76725.6   130.3   0.000000000   0.00000   0.00000   0.00000   0.00000
+  0-1A  ->  3-1A    9.921982   80026.2   125.0   0.085376780   0.35122  -0.00000   0.00000   0.59264
+  0-1A  ->  4-1A   11.925619   96186.6   104.0   0.069591289   0.23819  -0.00000   0.48804  -0.00000
+  0-1A  ->  5-1A   14.007505  112978.2    88.5   0.300796808   0.87650   0.00000   0.93622  -0.00000
+
+----------------------------------------------------------------------------------------------------
+                     ABSORPTION SPECTRUM VIA TRANSITION VELOCITY DIPOLE MOMENTS    
+
+Total run time:        0.228 sec
+
+           *** ORCA-CIS/TD-DFT FINISHED WITHOUT ERROR ***
+-----------------------
+CIS/TD-DFT TOTAL ENERGY
+-----------------------
+
+    E(SCF)  =    -76.321074728 Eh
+    DE(CIS) =      0.279708561 Eh (Root  1)
+    ----------------------------- ---------
+    E(tot)  =    -76.041366167 Eh
+
+
+Maximum memory used throughout the entire CIS-calculation: 5.8 MB
+=> NOW LEAVING ORCA_CIS
+
+-------------------------   --------------------
+FINAL SINGLE POINT ENERGY       -76.041366166992
+-------------------------   --------------------
+
+
+------------------------------------------------------------------------------
+                              ORCA PROPERTY CALCULATIONS
+------------------------------------------------------------------------------
+
+GBWName                                 ... td_block.gbw
+
+****ORCA TERMINATED NORMALLY****

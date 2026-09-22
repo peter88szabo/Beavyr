@@ -151,10 +151,12 @@ pub fn normal_modes_with_projection(
         if coords.len() != ncoord {
             bail!("coords_bohr must have length 3N");
         }
-        println!();
-        println!("!!!!!              Eckart transformation switched on            !!!!!");
-        println!("!!!!! Translations and Rotations projected out from the Hessian !!!!!");
-        println!();
+        // No banner. This routine came from Behemoth, where printing to the
+        // terminal is how a command-line program reports what it did; here it
+        // runs behind a panel that already states which projection was used,
+        // next to the frequencies it produced. Printing it as well put an
+        // alarming row of exclamation marks in the terminal on every ordinary
+        // frequency job.
         match eckart {
             EckartMode::VibRot => {
                 h_mw = eckart_transform(&mass_au, coords, &h_mw, &la)?;

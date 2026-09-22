@@ -122,12 +122,14 @@ fn classify_output(head: &str) -> FileKind {
 /// reports that. This exists to route the file to the right parser, not to
 /// promise the parse will work.
 fn has_excited_states(head: &str) -> bool {
-    const MARKERS: [&str; 5] = [
+    const MARKERS: [&str; 6] = [
         "ABSORPTION SPECTRUM",
         "TD-DFT",
         "TDDFT",
         "EXCITED STATES",
         "CIS-EXCITED STATES",
+        // Psi4 and PySCF both write this line per root, in their own case.
+        "EXCITED STATE",
     ];
     let upper = head.to_ascii_uppercase();
     MARKERS.iter().any(|m| upper.contains(m))
@@ -479,6 +481,14 @@ mod tests {
     fn an_output_with_an_absorption_spectrum_goes_to_uv_vis() {
         let head = "* O   R   C   A *\n-----------------\nABSORPTION SPECTRUM VIA TRANSITION ELECTRIC DIPOLE MOMENTS\n";
         assert_eq!(kind_of("exc.out", head), FileKind::TdDft);
+
+        // Psi4 and PySCF both write "Excited State" per root, in their own
+        // case and with no shared banner above it, so the marker list has to
+        // carry that too or their files route to the wrong panel.
+        let psi4 = "  Psi4 started on host\nExcited State    1 (1 B2):   0.27971 au\n";
+        assert_eq!(kind_of("psi4.out", psi4), FileKind::TdDft);
+        let pyscf = "** Singlet excitation energies and oscillator strengths **\n                     Excited State   1:      7.61100 eV\n";
+        assert_eq!(kind_of("pyscf.log", pyscf), FileKind::TdDft);
     }
 
     /// The case that matters most: an ORCA Freq output has no force constants

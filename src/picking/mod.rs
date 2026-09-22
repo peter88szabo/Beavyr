@@ -9,6 +9,57 @@ use crate::molecule_builder::builder_ui::EditorRotateState;
 
 pub mod screen;
 
+/// How a picked atom's highlight ring is drawn.
+///
+/// One definition for every picker. Two of them existed before -- the
+/// measurement tool's and the molecule editor's -- with their own copies of the
+/// same three numbers, and they had already drifted apart. A highlight that
+/// looks different depending on which tool is open suggests a difference in
+/// meaning where there is none, so the numbers live here and both read them.
+///
+/// The two scales are multipliers on the width, not lengths: a dash is
+/// `thickness * line_scale` pixels long and a gap is `thickness * gap_scale`.
+/// Changing the thickness therefore rescales the dashes with it and keeps the
+/// look, while changing a scale alters the dash-to-gap proportion.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct HighlightStyle {
+    /// Line width in pixels.
+    pub thickness: f32,
+    /// Gap length, as a multiple of the thickness.
+    pub gap_scale: f32,
+    /// Dash length, as a multiple of the thickness.
+    pub line_scale: f32,
+}
+
+impl Default for HighlightStyle {
+    fn default() -> Self {
+        HighlightStyle {
+            thickness: 2.0,
+            gap_scale: 10.0,
+            line_scale: 20.0,
+        }
+    }
+}
+
+impl HighlightStyle {
+    /// Applies this style to a gizmo configuration.
+    ///
+    /// `perspective` is on, so the ring shrinks with distance and reads as
+    /// something sitting in the scene beside the atom rather than painted on
+    /// the glass.
+    pub fn apply(self, cfg: &mut bevy::gizmos::config::GizmoConfig) {
+        cfg.enabled = true;
+        cfg.line.width = self.thickness;
+        cfg.line.perspective = true;
+        cfg.line.style = bevy::gizmos::config::GizmoLineStyle::Dashed {
+            // Guarded, because Bevy's dashed-line shader divides by these and a
+            // zero would put the whole ring on one dash.
+            gap_scale: self.gap_scale.max(0.05),
+            line_scale: self.line_scale.max(0.05),
+        };
+    }
+}
+
 pub struct PickerPlugin;
 
 impl Plugin for PickerPlugin {

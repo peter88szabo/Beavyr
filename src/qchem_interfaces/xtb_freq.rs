@@ -316,15 +316,100 @@ fn run_hess_cancellable(
     if program == QcProgram::Dreiding {
         return dreiding_hessian(input_xyz, atoms, need_gradient);
     }
-    if binary.as_os_str().is_empty() {
+    // A Python backend has no executable: it is run with `python3` from
+    // Beavyr's own environment, which the panel checked before letting this
+    // start.
+    if program.needs_binary_path() && binary.as_os_str().is_empty() {
         return Err(format!("{} path is empty", program.label()));
     }
     fs::create_dir_all(workdir).map_err(|e| format!("Failed to create workdir: {e}"))?;
     fs::write(workdir.join("input.xyz"), input_xyz)
         .map_err(|e| format!("Failed to write input.xyz: {e}"))?;
 
-    let stdout = fs::File::create(workdir.join("xtb.stdout"))
-        .map_err(|e| format!("Failed to create xtb.stdout: {e}"))?;
+    // Both of these are told what to do by a file, written before the process
+    // starts rather than by flags on its command line.
+    match program {
+        QcProgram::Orca => {
+            let (_, symbols, coords) = parse_xyz_angstrom(input_xyz);
+            let flat: Vec<f64> = coords.into_iter().flatten().collect();
+            let text = super::orca_run::input_text(
+                crate::qchem_interfaces::job::JobType::Frequencies,
+                charge,
+                multiplicity,
+                method,
+                &method.orca_extra,
+                &super::orca_run::xyz_body(&symbols, &flat),
+            );
+            fs::write(super::orca_run::job_files(workdir).input, text)
+                .map_err(|e| format!("Failed to write the ORCA input: {e}"))?;
+        }
+        QcProgram::PySCF => {
+            let (_, symbols, coords) = parse_xyz_angstrom(input_xyz);
+            let flat: Vec<f64> = coords.into_iter().flatten().collect();
+            let text = super::pyscf_run::script_text(
+                crate::qchem_interfaces::job::JobType::Hessian,
+                charge,
+                multiplicity,
+                method,
+                // Not an excited-state job; the defaults are never read.
+                crate::qchem_interfaces::job::ExcitedStateOptions::default(),
+                // These panels do not offer the orbital toggle; the general
+                // Quantum Chemistry panel does.
+                false,
+                &symbols,
+                &flat,
+            );
+            fs::write(super::pyscf_run::job_files(workdir).script, text)
+                .map_err(|e| format!("Failed to write the PySCF script: {e}"))?;
+        }
+        QcProgram::SparrowPy => {
+            let (_, symbols, coords) = parse_xyz_angstrom(input_xyz);
+            let flat: Vec<f64> = coords.into_iter().flatten().collect();
+            let files = super::sparrow_run::job_files(workdir);
+            fs::write(&files.geometry, super::sparrow_run::geometry_text(&symbols, &flat))
+                .map_err(|e| format!("Failed to write the Sparrow geometry: {e}"))?;
+            fs::write(
+                &files.script,
+                super::sparrow_run::script_text(
+                    crate::qchem_interfaces::job::JobType::Hessian,
+                    charge,
+                    multiplicity,
+                    method,
+                    // A frequency job wants the matrix, not the orbitals.
+                    false,
+                ),
+            )
+            .map_err(|e| format!("Failed to write the Sparrow script: {e}"))?;
+        }
+        QcProgram::Psi4 | QcProgram::Psi4Py => {
+            let (_, symbols, coords) = parse_xyz_angstrom(input_xyz);
+            let flat: Vec<f64> = coords.into_iter().flatten().collect();
+            super::xtb_optimize::write_psi4_job(
+                program,
+                crate::qchem_interfaces::job::JobType::Frequencies,
+                workdir,
+                &symbols,
+                &flat,
+                charge,
+                multiplicity,
+                method,
+            )?;
+        }
+        QcProgram::Xtb | QcProgram::Behemoth | QcProgram::Dreiding => {}
+    }
+
+    // ORCA has no output file of its own: it prints everything to standard
+    // output, and its `.out` exists only because whoever ran it redirected
+    // there. So this redirect *is* that file, and reading the results back
+    // from anywhere else finds nothing. Getting this wrong makes every ORCA
+    // run fail on an empty output rather than on anything real.
+    let stdout_path = if program == QcProgram::Orca {
+        super::orca_run::job_files(workdir).output
+    } else {
+        workdir.join("xtb.stdout")
+    };
+    let stdout = fs::File::create(&stdout_path)
+        .map_err(|e| format!("Failed to create {}: {e}", stdout_path.display()))?;
     let stderr = fs::File::create(workdir.join("xtb.stderr"))
         .map_err(|e| format!("Failed to create xtb.stderr: {e}"))?;
     let mut cmd = match program {
@@ -359,6 +444,15 @@ fn run_hess_cancellable(
             multiplicity,
             method,
         ),
+        QcProgram::Orca => super::orca_run::run_command(binary, workdir),
+        QcProgram::PySCF => super::pyscf_run::run_command(workdir),
+        QcProgram::SparrowPy => super::sparrow_run::run_command(workdir),
+        QcProgram::Psi4 | QcProgram::Psi4Py => super::psi4_run::run_command(
+            super::xtb_optimize::psi4_route(program),
+            binary,
+            workdir,
+            method.nproc,
+        ),
     };
     cmd.stdout(Stdio::from(stdout)).stderr(Stdio::from(stderr));
 
@@ -392,11 +486,119 @@ fn run_hess_cancellable(
         drop(child);
         std::thread::sleep(Duration::from_millis(50));
     };
-    if !status.success() {
+    // ORCA can exit zero having failed, so its output decides rather than its
+    // status.
+    if program == QcProgram::Orca {
+        let output_text =
+            fs::read_to_string(super::orca_run::job_files(workdir).output).unwrap_or_default();
+        super::orca_run::check_output(&output_text, status.success())?;
+    } else if !status.success() {
+        if program == QcProgram::SparrowPy {
+        // Sparrow has no frequency analysis; it hands over the matrix and
+        // Beavyr's own projection and eigensolver do the rest.
+        let text = fs::read_to_string(super::sparrow_run::job_files(workdir).hessian)
+            .map_err(|_| "Sparrow wrote no Hessian".to_string())?;
+        let (_, symbols, coords) = parse_xyz_angstrom(input_xyz);
+        let hessian = parse_turbomole_hessian(&text, symbols.len())?;
+        let coords_bohr = coords
+            .into_iter()
+            .flatten()
+            .map(|c| c * ANGSTROM_TO_BOHR)
+            .collect();
+        return Ok(RawFrequencyOutput {
+            atoms: symbols,
+            coords_bohr,
+            hessian,
+            vib_lines: Vec::new(),
+            gradient_bohr: None,
+            masses_amu: None,
+            ir_intensities_km_mol: None,
+        });
+    }
+
+    if matches!(program, QcProgram::Psi4 | QcProgram::Psi4Py) {
+        // The generated body writes the matrix behind a `$hessian` header, the
+        // same as PySCF's, so the Turbomole reader takes it.
+        let files = super::psi4_run::job_files(workdir);
+        let text = fs::read_to_string(&files.hessian)
+            .map_err(|_| "Psi4 wrote no Hessian".to_string())?;
+        let (_, symbols, coords) = parse_xyz_angstrom(input_xyz);
+        let hessian = parse_turbomole_hessian(&text, symbols.len())?;
+        let coords_bohr = coords
+            .into_iter()
+            .flatten()
+            .map(|c| c * ANGSTROM_TO_BOHR)
+            .collect();
+        return Ok(RawFrequencyOutput {
+            atoms: symbols,
+            coords_bohr,
+            hessian,
+            vib_lines: Vec::new(),
+            gradient_bohr: None,
+            masses_amu: None,
+            ir_intensities_km_mol: None,
+        });
+    }
+
+    if program == QcProgram::PySCF {
+            let stderr_text = fs::read_to_string(workdir.join("xtb.stderr")).unwrap_or_default();
+            return Err(format!(
+                "PySCF stopped: {}",
+                super::pyscf_run::failure_detail(&stderr_text)
+            ));
+        }
         return Err(format!(
             "{} frequency calculation failed (see xtb.stderr in the run directory)",
             program.label()
         ));
+    }
+
+    if program == QcProgram::Orca {
+        // The `.hess` reader Beavyr already has takes everything: the matrix,
+        // the geometry ORCA built it at, the per-atom masses so an isotope
+        // survives, and its own infrared spectrum. Nothing is parsed twice.
+        let text = fs::read_to_string(super::orca_run::job_files(workdir).hessian)
+            .map_err(|_| "ORCA wrote no .hess file".to_string())?;
+        let hess = super::orca_hess::parse_orca_hess(&text)?;
+        let intensities = hess.ir_intensities_in_eigenvalue_order();
+        return Ok(RawFrequencyOutput {
+            atoms: hess.atoms.clone(),
+            coords_bohr: hess.coords_bohr.clone(),
+            hessian: hess.hessian.clone(),
+            vib_lines: Vec::new(),
+            // ORCA's gradient lives in a separate `.engrad`, which a `Freq` run
+            // does not write, so a reaction-path projection falls back to the
+            // ordinary one and says so.
+            gradient_bohr: None,
+            masses_amu: Some(hess.masses_amu),
+            ir_intensities_km_mol: (!intensities.is_empty()).then_some(intensities),
+        });
+    }
+
+    if program == QcProgram::PySCF {
+        // Written behind a `$hessian` header precisely so the Turbomole reader
+        // takes it and no second matrix format enters the codebase.
+        let text = fs::read_to_string(super::pyscf_run::job_files(workdir).hessian)
+            .map_err(|_| "PySCF wrote no Hessian".to_string())?;
+        let (_, symbols, coords) = parse_xyz_angstrom(input_xyz);
+        let hessian = parse_turbomole_hessian(&text, symbols.len())?;
+        let coords_bohr = coords
+            .into_iter()
+            .flatten()
+            .map(|c| c * ANGSTROM_TO_BOHR)
+            .collect();
+        return Ok(RawFrequencyOutput {
+            atoms: symbols,
+            coords_bohr,
+            hessian,
+            // No intensities: they would need a separate dipole-derivative
+            // calculation, roughly doubling what a frequency job costs. The
+            // mode list shows them as unavailable rather than as zeroes.
+            vib_lines: Vec::new(),
+            gradient_bohr: None,
+            masses_amu: None,
+            ir_intensities_km_mol: None,
+        });
     }
 
     if program == QcProgram::Behemoth {
@@ -405,7 +607,7 @@ fn run_hess_cancellable(
         // and no separate file to read. It reports no IR intensities with
         // `--hessian`, so the mode list shows N/A and the spectrum stays
         // unavailable rather than showing a row of zeroes.
-        let log = fs::read_to_string(workdir.join("xtb.stdout"))
+        let log = fs::read_to_string(&stdout_path)
             .map_err(|_| "Behemoth wrote no output to read the Hessian from".to_string())?;
         let hessian = super::behemoth::parse_hessian_for(&log, atoms)?;
         let coords_bohr = parse_xyz_angstrom(input_xyz)
@@ -1567,6 +1769,7 @@ pub fn xtb_frequency_panel(
         .show(ui, |ui| {
         ui.horizontal(|ui| {
             ui.label("Program");
+            let before = freq_panel.program;
             egui::ComboBox::from_id_salt("freq_program")
                 .selected_text(freq_panel.program.label())
                 .show_ui(ui, |ui| {
@@ -1574,12 +1777,32 @@ pub fn xtb_frequency_panel(
                         ui.selectable_value(&mut freq_panel.program, program, program.label());
                     }
                 });
+            // Each program reads its own catalogue and they do not translate
+            // between each other, so switching resets the level of theory to
+            // the new program's default rather than carrying over a name it
+            // would reject.
+            if freq_panel.program != before {
+                crate::qchem_interfaces::method::adopt_program_defaults(
+                    &mut freq_panel.method,
+                    freq_panel.program,
+                );
+            }
             if freq_panel.program.runs_in_process() {
                 ui.weak("built in");
+            } else if freq_panel.program.python_module().is_some() {
+                ui.weak("run through python3");
             } else {
                 ui.weak("path set in Geometry Optimization");
             }
         });
+
+        // Blocked before the run when the launch environment cannot import the
+        // backend, for the same reason as in the optimizer panel.
+        let python_ready = crate::qchem_interfaces::xtb_optimize::python_environment_row(
+            ui,
+            freq_panel.program,
+            running,
+        );
         ui.horizontal(|ui| {
             ui.label("Charge");
             ui.add_enabled(
@@ -1656,7 +1879,8 @@ pub fn xtb_frequency_panel(
                 && !mol.atoms.is_empty()
                 && uhf.is_some()
                 && !animating
-                && !method_blocked;
+                && !method_blocked
+                && python_ready;
             let mut button =
                 ui.add_enabled(
                     can_run,
@@ -1672,6 +1896,10 @@ pub fn xtb_frequency_panel(
             } else if method_blocked {
                 button = button.on_disabled_hover_text(
                     "This method cannot run on this structure -- see the note above.",
+                );
+            } else if !python_ready {
+                button = button.on_disabled_hover_text(
+                    "This backend needs a Python that can import it -- see the note above.",
                 );
             }
             if button.clicked() {

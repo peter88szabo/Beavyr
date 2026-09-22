@@ -450,6 +450,18 @@ pub struct MethodConfig {
     pub memory_mb: u32,
     /// Threads. Behemoth's `--nproc`, xTB's `-P`.
     pub nproc: u32,
+    /// ORCA's dispersion correction. Its own field rather than the `dispersion`
+    /// one above, because the two codes spell these differently and translating
+    /// between them is exactly what per-program catalogues avoid.
+    pub orca_dispersion: super::orca_method::Dispersion,
+    /// Anything else to put on ORCA's `!` line, verbatim.
+    ///
+    /// ORCA's keyword line is how it is asked for a dispersion correction
+    /// (`D4`), tighter convergence (`TightSCF`), a solvent model and much else.
+    /// The dropdowns cannot cover all of it and should not try, so this is the
+    /// way out -- and it is why the dispersion dropdown, whose entries carry
+    /// Behemoth's spellings, is not shown for ORCA.
+    pub orca_extra: String,
 }
 
 impl Default for MethodConfig {
@@ -467,8 +479,53 @@ impl Default for MethodConfig {
             // every thread the environment offers, which competes with
             // Beavyr's own rendering; choosing more is the user's call.
             nproc: 1,
+            orca_dispersion: super::orca_method::Dispersion::None,
+            orca_extra: String::new(),
         }
     }
+}
+
+/// The functional and basis defaults for `program`.
+///
+/// Switching program resets the level of theory, because the catalogues do not
+/// translate between each other: ORCA's `M062X` means nothing to Behemoth and
+/// Behemoth's `m06-2x` is an ORCA input error. Carrying a name across would
+/// leave the panel showing something the new program cannot run.
+pub fn defaults_for(program: QcProgram) -> (String, String) {
+    match program {
+        QcProgram::Orca => (
+            super::orca_method::DEFAULT_FUNCTIONAL.to_string(),
+            super::orca_method::DEFAULT_BASIS.to_string(),
+        ),
+        QcProgram::PySCF => (
+            super::pyscf_method::DEFAULT_FUNCTIONAL.to_string(),
+            super::pyscf_method::DEFAULT_BASIS.to_string(),
+        ),
+        QcProgram::Psi4 | QcProgram::Psi4Py => (
+            super::psi4_method::DEFAULT_FUNCTIONAL.to_string(),
+            super::psi4_method::DEFAULT_BASIS.to_string(),
+        ),
+        QcProgram::SparrowPy => (
+            super::sparrow_method::DEFAULT_METHOD.to_string(),
+            // No basis set exists for a semi-empirical parametrisation.
+            String::new(),
+        ),
+        // xTB and DREIDING take neither; Behemoth keeps the originals.
+        QcProgram::Xtb | QcProgram::Dreiding | QcProgram::Behemoth => {
+            (DEFAULT_FUNCTIONAL.to_string(), DEFAULT_BASIS.to_string())
+        }
+    }
+}
+
+/// Resets `config`'s level of theory to `program`'s own defaults.
+///
+/// Called when the program selector changes. Resources (memory, threads) and
+/// the ORCA keyword line are left alone: they are the user's preference about
+/// the machine, not about the level of theory.
+pub fn adopt_program_defaults(config: &mut MethodConfig, program: QcProgram) {
+    let (functional, basis) = defaults_for(program);
+    config.functional = functional;
+    config.basis = basis;
 }
 
 /// Which fields apply to the current program and method.
@@ -516,6 +573,47 @@ pub fn visible_fields(program: QcProgram, config: &MethodConfig) -> VisibleField
         // which are perceived rather than selected, and it is single-threaded because a force
         // field evaluation is already far below the cost of spawning threads for it.
         QcProgram::Dreiding => hidden,
+        // ORCA takes a functional, a basis, a per-core memory figure and a
+        // thread count. The dispersion dropdown is deliberately not shown: its
+        // entries carry Behemoth's spellings, which ORCA does not share, and a
+        // correction is asked for here by adding `D4` or `D3BJ` to the extra
+        // keyword line instead.
+        QcProgram::Orca => {
+            let base = VisibleFields { functional: true, memory: true, nproc: true, ..hidden };
+            if super::orca_method::is_composite(&config.functional) {
+                // A composite brings its own basis set, so there is nothing to
+                // choose and passing one alongside would contradict it.
+                base
+            } else {
+                VisibleFields { basis: true, ..base }
+            }
+        }
+        // PySCF allocates memory as it goes and has no equivalent of a memory
+        // ceiling, so that field stays hidden rather than being shown and
+        // quietly ignored.
+        QcProgram::PySCF => VisibleFields {
+            functional: true,
+            basis: true,
+            nproc: true,
+            ..hidden
+        },
+        // Psi4 takes a memory ceiling as well, and asks for a dispersion
+        // correction inside the functional's own name rather than as a separate
+        // keyword -- which is why no dispersion field appears for it.
+        // Sparrow takes a parametrisation and a thread count. No functional,
+        // no basis, no memory ceiling: there is nothing else to set.
+        QcProgram::SparrowPy => VisibleFields {
+            functional: true,
+            nproc: true,
+            ..hidden
+        },
+        QcProgram::Psi4 | QcProgram::Psi4Py => VisibleFields {
+            functional: true,
+            basis: true,
+            memory: true,
+            nproc: true,
+            ..hidden
+        },
         QcProgram::Behemoth => {
             let base = VisibleFields { memory: true, nproc: true, ..hidden };
             match config.behemoth {
@@ -593,6 +691,41 @@ pub fn validate(
     atoms: &[String],
 ) -> Vec<MethodIssue> {
     let mut issues = Vec::new();
+
+    // ORCA and PySCF both implement effective core potentials and both pull
+    // one in automatically with a def2 basis beyond krypton, so the heavy-element
+    // rule that blocks Behemoth does not apply to them. Saying so matters:
+    // switching program makes a block disappear, and a user is entitled to know
+    // that is a real difference between the codes rather than a lapse.
+    if matches!(
+        program,
+        QcProgram::Orca | QcProgram::PySCF | QcProgram::Psi4 | QcProgram::Psi4Py
+    ) {
+        let heavy = elements_needing_ecp(atoms);
+        if !heavy.is_empty() {
+            issues.push(MethodIssue::note(format!(
+                "{} need an effective core potential. {} supplies one with a def2 basis set, \
+                 so this runs -- unlike Behemoth, which implements none.",
+                heavy.join(", "),
+                program.label()
+            )));
+        }
+        if program == QcProgram::Orca {
+            if let Some(brings) = super::orca_method::composite_note(&config.functional) {
+                issues.push(MethodIssue::note(format!(
+                    "A composite method brings its own basis set and dispersion correction: \
+                     {brings}.",
+                )));
+            }
+        }
+        if multiplicity > 1 {
+            issues.push(MethodIssue::note(
+                "An open-shell reference runs unrestricted.",
+            ));
+        }
+        return issues;
+    }
+
     if program != QcProgram::Behemoth {
         // xTB takes no basis set and carries parameters for elements up to
         // radon, so none of the rules below apply to it.

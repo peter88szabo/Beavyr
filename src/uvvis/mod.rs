@@ -1,10 +1,10 @@
-//! UV-Vis absorption spectra from TD-DFT output files.
+//! UV-Vis absorption spectra, read from a quantum-chemistry output or produced
+//! by a run Beavyr started.
 //!
-//! The tool reads an existing quantum-chemistry output rather than running the
-//! program itself -- unlike the xTB optimizer and Hessian tools, a TD-DFT job
-//! is something the user has already queued and run elsewhere. ORCA is the
-//! only reader for now; `types.rs` is deliberately program-independent so a
-//! second one slots in beside `orca.rs` without the UI noticing.
+//! Four readers fill one set of structures: ORCA, Psi4 and PySCF for real
+//! TD-DFT, and Behemoth for its simplified sTDA and sTD-DFT. `types.rs` is
+//! program-independent precisely so the panel never has to know which produced
+//! what, and [`detect_and_parse`] is the one place that decides.
 
 use bevy::prelude::*;
 
@@ -14,9 +14,51 @@ use types::TddftResult;
 pub mod behemoth;
 pub mod excited_state;
 pub mod orca;
+pub mod psi4;
+pub mod pyscf;
 pub mod run;
 pub mod types;
 pub mod ui;
+
+/// Reads whichever program's output this is.
+///
+/// The file is identified by what it says about itself rather than by its
+/// extension: every one of these programs writes `.out`, `.log` or `.dat`
+/// depending only on what the user redirected to.
+///
+/// Each reader is tried only when its own program has been recognised, so a
+/// file that is plainly ORCA's never reaches PySCF's reader and come back with
+/// a confusing message about a heading it does not have. When nothing is
+/// recognised, the error names every program that was considered -- which is
+/// more use than "could not parse".
+pub fn detect_and_parse(
+    text: &str,
+    source: &std::path::Path,
+) -> Result<types::TddftResult, String> {
+    if psi4::is_psi4_output(text) {
+        return psi4::parse_psi4_tddft(text, source);
+    }
+    if pyscf::is_pyscf_output(text) {
+        return pyscf::parse_pyscf_tddft(text, source);
+    }
+    // ORCA's reader is tried before Behemoth's because an ORCA file is
+    // recognisable from its excited-state heading alone, where Behemoth's root
+    // table needs more of the file read to be sure.
+    if text.contains("EXCITED STATES") || text.contains("ORCA") {
+        return orca::parse_orca_tddft(text, source);
+    }
+    if text.contains("sTDA") || text.contains("sTD-DFT") {
+        return behemoth::parse_behemoth_spectrum(text, source, None);
+    }
+    // Nothing identified it. Try ORCA anyway, since that reader gives the most
+    // specific message about what it expected, and fall back to naming the
+    // four programs if it too finds nothing.
+    orca::parse_orca_tddft(text, source).map_err(|_| {
+        "This file carries no excited states Beavyr recognises. It reads TD-DFT output from \
+         ORCA, Psi4 and PySCF, and sTDA/sTD-DFT output from Behemoth."
+            .to_string()
+    })
+}
 
 /// Which axis the absorption spectrum is drawn against.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -141,6 +183,44 @@ impl Default for UvVisState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
+
+    /// Each program's output goes to its own reader. Getting this wrong is not
+    /// a parse failure but a wrong answer: Psi4 prints its excitation energy in
+    /// atomic units where PySCF prints electronvolts, so reading one with the
+    /// other's reader is wrong by a factor of twenty-seven and plots a spectrum
+    /// that looks entirely reasonable.
+    #[test]
+    fn each_program_reaches_its_own_reader() {
+        let psi4 = concat!(
+            "Psi4 1.11\n  Psi4 started on host\n",
+            "Excited State    1 (1 B2):   0.27971 au   162.97 nm f =  0.0123\n",
+        );
+        let result = detect_and_parse(psi4, Path::new("a.out")).expect("Psi4 output");
+        assert!(result.program.starts_with("Psi4"), "{}", result.program);
+        // 0.27971 Hartree is 7.6 eV, not 0.28.
+        assert!(result.states[0].energy_ev > 7.0, "{:?}", result.states[0]);
+
+        let pyscf = concat!(
+            "** Singlet excitation energies and oscillator strengths **\n",
+            "Excited State   1:      7.61100 eV    162.97 nm  f=0.0123\n",
+        );
+        let result = detect_and_parse(pyscf, Path::new("b.log")).expect("PySCF output");
+        assert_eq!(result.program, "PySCF");
+        // Already electronvolts; it must not be multiplied again.
+        assert!((result.states[0].energy_ev - 7.611).abs() < 1.0e-9);
+    }
+
+    /// A file none of the readers recognises says so, and names what Beavyr
+    /// does read -- more use than refusing without explanation.
+    #[test]
+    fn an_unrecognised_file_names_what_is_supported() {
+        let err = detect_and_parse("just some text\n", Path::new("x.txt"))
+            .expect_err("nothing to read here");
+        for program in ["ORCA", "Psi4", "PySCF", "Behemoth"] {
+            assert!(err.contains(program), "{program} is not mentioned: {err}");
+        }
+    }
 
     #[test]
     fn each_unit_describes_its_own_axis() {

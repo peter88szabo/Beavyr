@@ -163,6 +163,11 @@ pub struct XtbOptimizationTask {
     pub last_program: Option<QcProgram>,
     /// The finished run's per-iteration energies, success or failure alike,
     /// kept until the next run starts so the plot button stays available.
+    ///
+    /// Written by this panel's own runs and by the general quantum-chemistry
+    /// panel's, so an optimisation started from either place gets the same
+    /// energy plot and the same summary rather than a second set built to look
+    /// almost the same.
     pub last_energy_history: Vec<EnergyHistoryPoint>,
 }
 
@@ -474,6 +479,7 @@ pub fn xtb_optimization_panel(
 
     ui.horizontal(|ui| {
         ui.label("Program");
+        let before = panel_state.program;
         egui::ComboBox::from_id_salt("opt_program")
             .selected_text(panel_state.program.label())
             .show_ui(ui, |ui| {
@@ -481,7 +487,22 @@ pub fn xtb_optimization_panel(
                     ui.selectable_value(&mut panel_state.program, program, program.label());
                 }
             });
+        // Each program reads its own catalogue and they do not translate
+        // between each other -- ORCA's `M062X` is an input error to Behemoth
+        // and Behemoth's `m06-2x` is one to ORCA. Carrying a name across would
+        // leave the panel showing a level of theory the new program cannot run,
+        // so switching resets it to that program's own default.
+        if panel_state.program != before {
+            super::method::adopt_program_defaults(&mut panel_state.method, panel_state.program);
+        }
     });
+
+    // A backend reached through Python is blocked before it starts if the
+    // environment Beavyr was launched in cannot import it. Checked here rather
+    // than at run time: the failure this catches is launching Beavyr from a
+    // desktop icon after activating the environment in a terminal, and finding
+    // that out minutes into a job is far worse than finding it out now.
+    let python_ready = python_environment_row(ui, panel_state.program, running);
     // A built-in backend has no executable, so offering a path field would be a dead end.
     if panel_state.program.runs_in_process() {
         ui.label(
@@ -574,13 +595,16 @@ pub fn xtb_optimization_panel(
             && !mol.atoms.is_empty()
             && uhf.is_some()
             && !animating
-            && !method_blocked;
+            && !method_blocked
+            && python_ready;
         if ui
             .add_enabled(can_optimize, egui::Button::new("Optimize"))
             .on_disabled_hover_text(if animating {
                 "Stop the animation first: the structure on screen is a frame of it."
             } else if method_blocked {
                 "This method cannot run on this structure -- see the note above."
+            } else if !python_ready {
+                "This backend needs a Python that can import it -- see the note above."
             } else {
                 "Nothing to optimize with the current structure and electronic state."
             })
@@ -758,7 +782,7 @@ impl OptimizationReport {
 /// cycle-by-cycle convergence table Behemoth prints -- energy, energy change
 /// and both gradient measures -- with each of the final cycle's five criteria
 /// marked against the threshold it had to meet.
-fn optimization_summary_window(
+pub(crate) fn optimization_summary_window(
     ctx: &egui::Context,
     open: &mut bool,
     report: &OptimizationReport,
@@ -882,7 +906,7 @@ fn optimization_summary_window(
 /// in spirit to Molden's own optimization-energy plot. Hand-drawn on
 /// `egui::Painter` rather than pulling in a plotting crate: a straight
 /// polyline through a handful of points does not need one.
-fn energy_history_window(
+pub(crate) fn energy_history_window(
     ctx: &egui::Context,
     open: &mut bool,
     history: &[EnergyHistoryPoint],
@@ -1099,6 +1123,58 @@ pub fn format_elapsed(elapsed: Duration) -> String {
     }
 }
 
+/// Draws the Python environment line for a backend that needs one, and returns
+/// whether a run may start.
+///
+/// Returns `true` unchanged for every backend that is not reached through
+/// Python, so a caller can gate its Run button on this without asking which
+/// kind of backend it has.
+///
+/// The message always names the interpreter that was searched. Without that,
+/// a wrong-environment mistake -- the common one, activating in a terminal and
+/// launching from an icon -- looks exactly like a broken installation.
+pub fn python_environment_row(
+    ui: &mut egui::Ui,
+    program: QcProgram,
+    running: bool,
+) -> bool {
+    use super::python_env;
+
+    let Some(module) = program.python_module() else {
+        return true;
+    };
+
+    let env = python_env::cached(module);
+    let ready = env.is_ready();
+
+    ui.horizontal(|ui| {
+        // One short line, with the whole explanation on hover. In the middle of
+        // a form a paragraph pushes everything below it off the panel and reads
+        // as an error even when it is only a note.
+        if ready {
+            ui.label(egui::RichText::new(env.short()).small().weak())
+                .on_hover_text(env.detail());
+        } else {
+            ui.colored_label(
+                egui::Color32::from_rgb(230, 120, 90),
+                format!("\u{26a0} {}", env.short()),
+            )
+            .on_hover_text(env.detail());
+        }
+        // Worth offering even though the environment cannot change under a
+        // running process: someone who installs the module in another terminal
+        // will try this before believing they have to restart.
+        if ui
+            .add_enabled(!running, egui::Button::new("Check again").small())
+            .clicked()
+        {
+            python_env::forget();
+        }
+    });
+
+    ready
+}
+
 pub fn write_xyz_string(atoms: &[String], pos: &[Vec3]) -> String {
     let mut out = format!("{}\n\n", atoms.len());
     for (symbol, p) in atoms.iter().zip(pos) {
@@ -1123,9 +1199,10 @@ pub fn resolve_program_executable(
     program: QcProgram,
     configured: &str,
 ) -> Result<PathBuf, String> {
-    // A built-in backend has no executable to resolve. Returning an empty path is what the
-    // run functions check for when deciding to answer in process.
-    if program.runs_in_process() {
+    // A backend with no executable has nothing to resolve: DREIDING because it is built in,
+    // PySCF because it is reached through `python3` rather than through a program of its own.
+    // The empty path returned here is what the run functions check for.
+    if !program.needs_binary_path() {
         return Ok(PathBuf::new());
     }
     let configured = configured.trim();
@@ -1152,11 +1229,15 @@ pub fn resolve_program_executable(
         .ok_or_else(|| format!("Could not find {configured:?} on PATH"))
 }
 
-/// Directory that holds xTB working directories. Deliberately not derived
-/// from `CARGO_MANIFEST_DIR` (a compile-time, machine-specific path) --
+/// Directory that holds every backend's working directories.
+///
+/// Named for Beavyr rather than for xTB: seven programs run through here now,
+/// and a path reading `beavyr_xtb` under a failed ORCA job says the wrong
+/// thing to whoever goes looking in it. Deliberately not derived from
+/// `CARGO_MANIFEST_DIR` (a compile-time, machine-specific path) --
 /// `std::env::temp_dir()` works for any installed build, on any machine.
 pub fn xtb_scratch_dir() -> PathBuf {
-    std::env::temp_dir().join("beavyr_xtb")
+    std::env::temp_dir().join("beavyr_runs")
 }
 
 /// Deletes a finished run directory. Failures are ignored: leaving scratch
@@ -1166,21 +1247,22 @@ pub fn discard_xtb_run_dir(dir: &Path) {
 }
 
 pub fn create_xtb_run_dir(base_dir: &Path) -> Result<PathBuf, String> {
-    fs::create_dir_all(base_dir).map_err(|e| format!("Failed to create xTB directory: {e}"))?;
+    fs::create_dir_all(base_dir)
+        .map_err(|e| format!("Failed to create the scratch directory: {e}"))?;
     for _ in 0..128 {
         let stamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|duration| duration.as_millis())
             .unwrap_or_default();
         let serial = XTB_RUN_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-        let dir = base_dir.join(format!("xtb_{stamp}_{}_{}", std::process::id(), serial));
+        let dir = base_dir.join(format!("run_{stamp}_{}_{}", std::process::id(), serial));
         match fs::create_dir(&dir) {
             Ok(()) => return Ok(dir),
             Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
             Err(err) => return Err(format!("Failed to create xTB run directory: {err}")),
         }
     }
-    Err("Could not allocate a unique xTB run directory".to_string())
+    Err("Could not allocate a unique run directory".to_string())
 }
 
 /// A snapshot of where an in-progress `--opt` run currently stands, read
@@ -1322,7 +1404,92 @@ fn energy_history_for(program: QcProgram, workdir: &Path) -> Vec<EnergyHistoryPo
                 })
                 .collect()
         }
+        // ORCA writes its own comment format, so it is translated here as well
+        // as after a successful run: this is read for a run that failed or was
+        // cancelled too, where the translation step was never reached.
+        QcProgram::Orca => {
+            let text = fs::read_to_string(super::orca_run::job_files(workdir).trajectory)
+                .unwrap_or_default();
+            history_from_beavyr_trajectory(&super::orca_run::trajectory_to_beavyr(&text))
+        }
+        // The generated script writes Beavyr's format directly, so there is
+        // nothing to translate.
+        QcProgram::PySCF => {
+            let text = fs::read_to_string(super::pyscf_run::job_files(workdir).trajectory)
+                .unwrap_or_default();
+            history_from_beavyr_trajectory(&text)
+        }
+        // The generated body writes Beavyr's format directly, like PySCF's.
+        QcProgram::Psi4 | QcProgram::Psi4Py => {
+            let text = fs::read_to_string(super::psi4_run::job_files(workdir).trajectory)
+                .unwrap_or_default();
+            history_from_beavyr_trajectory(&text)
+        }
+        // Whatever Beavyr's own optimiser recorded, in the shared format.
+        QcProgram::SparrowPy => {
+            let text = fs::read_to_string(workdir.join(super::behemoth::TRAJECTORY_FILE))
+                .unwrap_or_default();
+            history_from_beavyr_trajectory(&text)
+        }
     }
+}
+
+/// Which of Psi4's two routes a program variant means.
+pub(crate) fn psi4_route(program: QcProgram) -> super::psi4_run::Route {
+    if program == QcProgram::Psi4Py {
+        super::psi4_run::Route::Python
+    } else {
+        super::psi4_run::Route::Executable
+    }
+}
+
+/// Writes the Psi4 job file for whichever route was chosen.
+///
+/// One body, two wrappers: the executable route takes it as an input file, the
+/// Python route as a script with an import on the front.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn write_psi4_job(
+    program: QcProgram,
+    job: crate::qchem_interfaces::job::JobType,
+    workdir: &Path,
+    atoms: &[String],
+    positions_angstrom: &[f64],
+    charge: i32,
+    multiplicity: i32,
+    method: &MethodConfig,
+) -> Result<(), String> {
+    use crate::qchem_interfaces::job::QcMethod;
+    let files = super::psi4_run::job_files(workdir);
+    let excited = crate::qchem_interfaces::job::ExcitedStateOptions::default();
+    let (path, text) = match psi4_route(program) {
+        super::psi4_run::Route::Executable => (
+            files.input,
+            super::psi4_run::input_text(
+                job, QcMethod::Dft, charge, multiplicity, method, excited, false, atoms,
+                positions_angstrom,
+            ),
+        ),
+        super::psi4_run::Route::Python => (
+            files.script,
+            super::psi4_run::script_text(
+                job, QcMethod::Dft, charge, multiplicity, method, excited, false, atoms,
+                positions_angstrom,
+            ),
+        ),
+    };
+    fs::write(&path, text).map_err(|e| format!("Failed to write the Psi4 job: {e}"))
+}
+
+/// The energy plot's points from a trajectory already in Beavyr's own format.
+fn history_from_beavyr_trajectory(text: &str) -> Vec<EnergyHistoryPoint> {
+    super::behemoth::parse_trajectory_energies(text)
+        .into_iter()
+        .enumerate()
+        .map(|(index, energy)| EnergyHistoryPoint {
+            iteration: index as u32 + 1,
+            energy_hartree: energy,
+        })
+        .collect()
 }
 
 fn read_energy_history(workdir: &Path) -> Vec<EnergyHistoryPoint> {
@@ -1365,20 +1532,109 @@ fn run_optimize_cancellable(
     if program == QcProgram::Dreiding {
         return super::dreiding_run::optimize(workdir, input_xyz);
     }
-    if binary.as_os_str().is_empty() {
+    // A backend reached through Python has no executable to check: it is run
+    // with `python3` from Beavyr's own environment, whose suitability the panel
+    // settled before letting this start.
+    if program.needs_binary_path() && binary.as_os_str().is_empty() {
         return Err(format!("{} path is empty", program.label()));
     }
     fs::create_dir_all(workdir).map_err(|e| format!("Failed to create workdir: {e}"))?;
     fs::write(workdir.join("input.xyz"), input_xyz)
         .map_err(|e| format!("Failed to write input.xyz: {e}"))?;
 
-    let stdout = fs::File::create(workdir.join("xtb.stdout"))
-        .map_err(|e| format!("Failed to create xtb.stdout: {e}"))?;
+    // ORCA and PySCF are told what to do by a file rather than by flags, so
+    // that file is written before the process is started. xTB and Behemoth
+    // take everything on their command lines and need nothing here.
+    match program {
+        QcProgram::Orca => {
+            let (_, atoms, coords) = crate::molecule::parse_xyz_angstrom(input_xyz);
+            let flat: Vec<f64> = coords.into_iter().flatten().collect();
+            let text = super::orca_run::input_text(
+                crate::qchem_interfaces::job::JobType::Optimize,
+                charge,
+                multiplicity,
+                method,
+                &method.orca_extra,
+                &super::orca_run::xyz_body(&atoms, &flat),
+            );
+            fs::write(super::orca_run::job_files(workdir).input, text)
+                .map_err(|e| format!("Failed to write the ORCA input: {e}"))?;
+        }
+        QcProgram::PySCF => {
+            let (_, atoms, coords) = crate::molecule::parse_xyz_angstrom(input_xyz);
+            let flat: Vec<f64> = coords.into_iter().flatten().collect();
+            let text = super::pyscf_run::script_text(
+                crate::qchem_interfaces::job::JobType::Optimize,
+                charge,
+                multiplicity,
+                method,
+                // Not an excited-state job; the defaults are never read.
+                crate::qchem_interfaces::job::ExcitedStateOptions::default(),
+                // These panels do not offer the orbital toggle; the general
+                // Quantum Chemistry panel does.
+                false,
+                &atoms,
+                &flat,
+            );
+            fs::write(super::pyscf_run::job_files(workdir).script, text)
+                .map_err(|e| format!("Failed to write the PySCF script: {e}"))?;
+        }
+        QcProgram::Psi4 | QcProgram::Psi4Py => {
+            let (_, atoms, coords) = crate::molecule::parse_xyz_angstrom(input_xyz);
+            let flat: Vec<f64> = coords.into_iter().flatten().collect();
+            write_psi4_job(
+                program,
+                crate::qchem_interfaces::job::JobType::Optimize,
+                workdir,
+                &atoms,
+                &flat,
+                charge,
+                multiplicity,
+                method,
+            )?;
+        }
+        // Sparrow has no optimiser. Driving it with Beavyr's own is the
+        // general Quantum Chemistry panel's job, not this one's, so this panel
+        // says so rather than starting something that cannot finish.
+        QcProgram::SparrowPy => {
+            return Err(
+                "Sparrow has no geometry optimizer. Use the Quantum Chemistry panel, which \
+                 drives it with Beavyr's own optimizer."
+                    .to_string(),
+            )
+        }
+        QcProgram::Xtb | QcProgram::Behemoth | QcProgram::Dreiding => {}
+    }
+
+    // ORCA has no output file of its own: it prints everything to standard
+    // output, and its `.out` exists only because whoever ran it redirected
+    // there. So this redirect *is* that file, and reading the results back
+    // from anywhere else finds nothing. Getting this wrong makes every ORCA
+    // run fail on an empty output rather than on anything real.
+    let stdout_path = if program == QcProgram::Orca {
+        super::orca_run::job_files(workdir).output
+    } else {
+        workdir.join("xtb.stdout")
+    };
+    let stdout = fs::File::create(&stdout_path)
+        .map_err(|e| format!("Failed to create {}: {e}", stdout_path.display()))?;
     let stderr = fs::File::create(workdir.join("xtb.stderr"))
         .map_err(|e| format!("Failed to create xtb.stderr: {e}"))?;
     let mut cmd = match program {
         // Unreachable: the DREIDING branch returned above, before any command was built.
         QcProgram::Dreiding => unreachable!("DREIDING runs in process"),
+        QcProgram::Orca => super::orca_run::run_command(binary, workdir),
+        // No executable: `python3` comes from the environment Beavyr was
+        // started in, which was checked before the panel let this start.
+        QcProgram::PySCF => super::pyscf_run::run_command(workdir),
+        // Unreachable: the Sparrow branch returned above.
+        QcProgram::SparrowPy => unreachable!("Sparrow has no optimizer"),
+        QcProgram::Psi4 | QcProgram::Psi4Py => super::psi4_run::run_command(
+            psi4_route(program),
+            binary,
+            workdir,
+            method.nproc,
+        ),
         QcProgram::Xtb => {
             let mut cmd = Command::new(binary);
             cmd.current_dir(workdir)
@@ -1436,7 +1692,21 @@ fn run_optimize_cancellable(
         drop(child);
         std::thread::sleep(Duration::from_millis(50));
     };
-    if !status.success() {
+    // ORCA can exit zero having failed, printing its error into the output
+    // instead, so its own output is what decides. Every other backend is
+    // judged on its exit status.
+    if program == QcProgram::Orca {
+        let output_text =
+            fs::read_to_string(super::orca_run::job_files(workdir).output).unwrap_or_default();
+        super::orca_run::check_output(&output_text, status.success())?;
+    } else if !status.success() {
+        if program == QcProgram::PySCF {
+            let stderr_text = fs::read_to_string(workdir.join("xtb.stderr")).unwrap_or_default();
+            return Err(format!(
+                "PySCF stopped: {}",
+                super::pyscf_run::failure_detail(&stderr_text)
+            ));
+        }
         return Err(format!(
             "{} optimization failed (see xtb.stderr in the run directory)",
             program.label()
@@ -1446,6 +1716,43 @@ fn run_optimize_cancellable(
     let (trajectory_text, final_energy_hartree) = match program {
         // Unreachable: see above.
         QcProgram::Dreiding => unreachable!("DREIDING runs in process"),
+        QcProgram::Orca => {
+            let files = super::orca_run::job_files(workdir);
+            let orca_trajectory = fs::read_to_string(&files.trajectory)
+                .or_else(|_| fs::read_to_string(&files.final_geometry))
+                .map_err(|_| "ORCA wrote no optimized geometry".to_string())?;
+            // Translated into Beavyr's one trajectory format, so the player,
+            // the energy plot and the summary window need no ORCA branch.
+            let text = super::orca_run::trajectory_to_beavyr(&orca_trajectory);
+            let energy = super::behemoth::parse_trajectory_energies(&text)
+                .last()
+                .copied();
+            (text, energy)
+        }
+        QcProgram::SparrowPy => unreachable!("Sparrow has no optimizer"),
+        QcProgram::Psi4 | QcProgram::Psi4Py => {
+            let files = super::psi4_run::job_files(workdir);
+            let text = fs::read_to_string(&files.trajectory)
+                .or_else(|_| fs::read_to_string(&files.geometry))
+                .map_err(|_| "Psi4 wrote no optimized geometry".to_string())?;
+            let printed = fs::read_to_string(&files.output).unwrap_or_default();
+            let energy = super::psi4_run::parse_energy(&printed)
+                .or_else(|| super::behemoth::parse_trajectory_energies(&text).last().copied());
+            (text, energy)
+        }
+        QcProgram::PySCF => {
+            let files = super::pyscf_run::job_files(workdir);
+            let text = fs::read_to_string(&files.trajectory)
+                .or_else(|_| fs::read_to_string(&files.geometry))
+                .map_err(|_| "PySCF wrote no optimized geometry".to_string())?;
+            // The script prints the final energy at the optimised geometry,
+            // which is more precise than the last trajectory comment: that one
+            // is the energy *before* the final step.
+            let printed = fs::read_to_string(workdir.join("xtb.stdout")).unwrap_or_default();
+            let energy = super::pyscf_run::parse_energy(&printed)
+                .or_else(|| super::behemoth::parse_trajectory_energies(&text).last().copied());
+            (text, energy)
+        }
         QcProgram::Xtb => {
             let text = fs::read_to_string(workdir.join("xtbopt.log"))
                 .or_else(|_| fs::read_to_string(workdir.join("xtbopt.xyz")))
@@ -1467,7 +1774,9 @@ fn run_optimize_cancellable(
         }
     };
     let energy_history = energy_history_for(program, workdir);
-    let log = fs::read_to_string(workdir.join("xtb.stdout")).unwrap_or_default();
+    // The same file the run was redirected to, which for ORCA is its own
+    // `.out` rather than the shared name.
+    let log = fs::read_to_string(&stdout_path).unwrap_or_default();
 
     Ok(XtbOptimizationOutput {
         trajectory_text,

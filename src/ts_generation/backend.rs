@@ -118,6 +118,20 @@ impl EnergyGradient {
                 &self.config.method,
             ),
             QcProgram::Dreiding => bail!("Choose xTB or Behemoth for the reaction energy surface."),
+            // ORCA and PySCF reach the optimizer and frequency panels first;
+            // the reaction-path tools follow in their own stage. Refusing here
+            // is deliberate: a path must use one energy surface throughout, so
+            // quietly running a different program would be worse than saying
+            // this is not wired up yet.
+            QcProgram::Orca
+            | QcProgram::PySCF
+            | QcProgram::Psi4
+            | QcProgram::Psi4Py
+            | QcProgram::SparrowPy => bail!(
+                "{} is not yet available for the reaction energy surface. Use xTB or Behemoth \
+                 here for now.",
+                self.config.program.label()
+            ),
         };
         let stdout_path = self.workdir.join("gradient.stdout");
         let stderr_path = self.workdir.join("gradient.stderr");
@@ -182,7 +196,13 @@ impl EnergyGradient {
             QcProgram::Behemoth => {
                 behemoth::parse_gradient(&stdout, self.atoms.len()).map_err(anyhow::Error::msg)?
             }
-            QcProgram::Dreiding => unreachable!(),
+            // Unreachable: both returned above, before a process was started.
+            QcProgram::Dreiding
+            | QcProgram::Orca
+            | QcProgram::PySCF
+            | QcProgram::Psi4
+            | QcProgram::Psi4Py
+            | QcProgram::SparrowPy => unreachable!(),
         };
         if !energy.is_finite()
             || gradient.len() != x.len()

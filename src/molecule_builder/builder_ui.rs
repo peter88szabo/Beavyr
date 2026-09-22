@@ -1299,14 +1299,10 @@ pub fn configure_builder_gizmos(mut cfg_store: ResMut<GizmoConfigStore>) {
         cfg.line.perspective = true;
     }
     {
+        // The shared picker-highlight style, so this ring and the measurement
+        // tool's are the same thing drawn the same way.
         let (cfg, _) = cfg_store.config_mut::<BuilderHighlightGizmos>();
-        cfg.enabled = true;
-        cfg.line.width = 2.0;
-        cfg.line.perspective = true;
-        cfg.line.style = GizmoLineStyle::Dashed {
-            gap_scale: 2.0,
-            line_scale: 1.25,
-        };
+        crate::picking::HighlightStyle::default().apply(cfg);
     }
 }
 

@@ -19,6 +19,35 @@ pub fn method_summary(program: QcProgram, config: &MethodConfig) -> String {
     match program {
         QcProgram::Xtb => config.xtb.label().to_string(),
         QcProgram::Dreiding => "DREIDING force field".to_string(),
+        // For ORCA and PySCF the functional *is* the method: there is no
+        // separate method choice above it, so the summary is the level of
+        // theory and nothing else.
+        QcProgram::Orca => {
+            let name = super::orca_method::functional_label(&config.functional);
+            if super::orca_method::is_composite(&config.functional) {
+                // A composite names its own basis, so appending one would be
+                // wrong as well as redundant.
+                name.to_string()
+            } else {
+                format!("{name}/{}", super::orca_method::basis_label(&config.basis))
+            }
+        }
+        QcProgram::PySCF => format!(
+            "{}/{}",
+            super::pyscf_method::functional_label(&config.functional),
+            super::pyscf_method::basis_label(&config.basis)
+        ),
+        QcProgram::SparrowPy => {
+            super::sparrow_method::method_label(&config.functional).to_string()
+        }
+        QcProgram::Psi4 | QcProgram::Psi4Py => {
+            let name = super::psi4_method::functional_label(&config.functional);
+            if super::psi4_method::is_composite(&config.functional) {
+                name.to_string()
+            } else {
+                format!("{name}/{}", super::psi4_method::basis_label(&config.basis))
+            }
+        }
         QcProgram::Behemoth => match config.behemoth {
             BehemothMethod::Dft => {
                 let name = functional(&config.functional)
@@ -83,6 +112,67 @@ pub fn method_config_ui(
                         .weak(),
                     );
                 }
+                // Neither has a method choice above the functional: choosing
+                // B3LYP *is* choosing the method. A "Method" dropdown with one
+                // entry would be noise, so the functional and basis rows below
+                // are the whole block.
+                QcProgram::Orca => {
+                    ui.label(
+                        egui::RichText::new(
+                            "The functional and basis set below are written onto ORCA's keyword \
+                             line. Anything the lists do not cover \u{2014} a dispersion \
+                             correction, tighter convergence \u{2014} goes in Extra keywords.",
+                        )
+                        .small()
+                        .weak(),
+                    );
+                }
+                QcProgram::PySCF => {
+                    ui.label(
+                        egui::RichText::new(
+                            "Runs through the python3 of the environment Beavyr was started in. \
+                             The functional accepts any LibXC specification, not only the \
+                             listed names.",
+                        )
+                        .small()
+                        .weak(),
+                    );
+                }
+                QcProgram::Psi4 => {
+                    ui.label(
+                        egui::RichText::new(
+                            "Psi4's own executable, which carries its own environment, so this \
+                             route works whichever environment Beavyr was started from. A \
+                             dispersion correction is part of the functional's name here, not a \
+                             separate setting.",
+                        )
+                        .small()
+                        .weak(),
+                    );
+                }
+                QcProgram::Psi4Py => {
+                    ui.label(
+                        egui::RichText::new(
+                            "The same engine as Psi4, reached through the python3 of the \
+                             environment Beavyr was started in. Use the plain Psi4 entry instead \
+                             if that environment does not have it.",
+                        )
+                        .small()
+                        .weak(),
+                    );
+                }
+                QcProgram::SparrowPy => {
+                    ui.label(
+                        egui::RichText::new(
+                            "Semi-empirical parametrisations, through SCINE's Python bindings. \
+                             Sparrow gives an energy, a gradient and a Hessian; Beavyr's own \
+                             optimiser and frequency analysis do the rest, because Sparrow has \
+                             neither.",
+                        )
+                        .small()
+                        .weak(),
+                    );
+                }
                 QcProgram::Xtb => {
                     ui.horizontal(|ui| {
                         ui.label("Method");
@@ -126,7 +216,33 @@ pub fn method_config_ui(
             // late.
             let fields = super::method::visible_fields(program, config);
 
-            if fields.functional {
+            // ORCA and PySCF each read their own catalogue, because the same
+            // functional is spelled differently by different codes -- ORCA
+            // rejects `M06-2X` and wants `M062X`, Behemoth is the other way
+            // round. Sharing one list would mean translating between them,
+            // which is exactly what per-program catalogues avoid.
+            if fields.functional && program == QcProgram::Orca {
+                orca_functional_row(ui, config, running, id_prefix);
+            }
+            if fields.functional && program == QcProgram::PySCF {
+                pyscf_functional_row(ui, config, running, id_prefix);
+            }
+            if fields.functional && matches!(program, QcProgram::Psi4 | QcProgram::Psi4Py) {
+                psi4_functional_row(ui, config, running, id_prefix);
+            }
+            if fields.functional && program == QcProgram::SparrowPy {
+                sparrow_method_row(ui, config, running, id_prefix);
+            }
+            if fields.functional
+                && !matches!(
+                    program,
+                    QcProgram::Orca
+                        | QcProgram::PySCF
+                        | QcProgram::Psi4
+                        | QcProgram::Psi4Py
+                        | QcProgram::SparrowPy
+                )
+            {
                 ui.horizontal(|ui| {
                     ui.label("Functional");
                     ui.add_enabled_ui(!running, |ui| {
@@ -177,7 +293,25 @@ pub fn method_config_ui(
                 });
             }
 
-            if fields.basis {
+            if fields.basis && program == QcProgram::Orca {
+                orca_basis_row(ui, config, running, id_prefix);
+            }
+            if fields.basis && program == QcProgram::PySCF {
+                pyscf_basis_row(ui, config, running, id_prefix);
+            }
+            if fields.basis && matches!(program, QcProgram::Psi4 | QcProgram::Psi4Py) {
+                psi4_basis_row(ui, config, running, id_prefix);
+            }
+            if fields.basis
+                && !matches!(
+                    program,
+                    QcProgram::Orca
+                        | QcProgram::PySCF
+                        | QcProgram::Psi4
+                        | QcProgram::Psi4Py
+                        | QcProgram::SparrowPy
+                )
+            {
                 ui.horizontal(|ui| {
                     ui.label("Basis set");
                     ui.add_enabled_ui(!running, |ui| {
@@ -269,6 +403,349 @@ pub fn method_config_ui(
         });
 
     blocked
+}
+
+/// ORCA's functional dropdown, reading ORCA's own catalogue.
+///
+/// The composites are separated from the ordinary functionals, as in the
+/// Behemoth block, because choosing one takes the basis field away and that is
+/// worth signalling before the click rather than after it.
+pub(crate) fn orca_functional_row(
+    ui: &mut egui::Ui,
+    config: &mut MethodConfig,
+    running: bool,
+    id_prefix: &str,
+) {
+    use super::orca_method;
+
+    ui.horizontal(|ui| {
+        ui.label("Functional");
+        ui.add_enabled_ui(!running, |ui| {
+            egui::ComboBox::from_id_salt(format!("{id_prefix}_orca_functional"))
+                .selected_text(orca_method::functional_label(&config.functional))
+                .show_ui(ui, |ui| {
+                    // Grouped by family: forty-six entries in one flat list
+                    // would be unreadable, and the family is what a chemist is
+                    // choosing between before the individual name.
+                    for (index, family) in orca_method::Family::ALL.into_iter().enumerate() {
+                        let mut any = false;
+                        for entry in orca_method::functionals_in(family) {
+                            if !any {
+                                if index > 0 {
+                                    ui.separator();
+                                }
+                                ui.weak(family.heading());
+                                any = true;
+                            }
+                            let mut chosen = config.functional.clone();
+                            if ui
+                                .selectable_value(
+                                    &mut chosen,
+                                    entry.keyword.to_string(),
+                                    entry.label,
+                                )
+                                .clicked()
+                            {
+                                config.functional = entry.keyword.to_string();
+                            }
+                        }
+                    }
+                });
+        });
+    });
+
+    // A double hybrid silently gains a correlation-fitting basis, which is the
+    // only way ORCA will run one. Said out loud, because it changes the input
+    // that gets written and a user reading the run directory should not have to
+    // work out where the extra keyword came from.
+    if let Some(aux) = orca_method::auxiliary_basis(&config.functional, &config.basis) {
+        ui.label(
+            egui::RichText::new(format!(
+                "A double hybrid needs a correlation-fitting basis; {aux} is added automatically."
+            ))
+            .small()
+            .weak(),
+        );
+    }
+    if let Some(brings) = orca_method::composite_note(&config.functional) {
+        ui.label(egui::RichText::new(format!("Brings: {brings}.")).small().weak());
+    }
+
+    orca_dispersion_row(ui, config, running, id_prefix);
+
+    // Everything ORCA can be asked for that no dropdown covers.
+    ui.horizontal(|ui| {
+        ui.label("Extra keywords");
+        ui.add_enabled(
+            !running,
+            egui::TextEdit::singleline(&mut config.orca_extra)
+                .desired_width(220.0)
+                .hint_text("e.g. D4 TightSCF"),
+        );
+    });
+}
+
+/// ORCA's dispersion dropdown.
+///
+/// Disabled, with the reason beside it, where the functional already carries a
+/// correction: a composite brings its own, and a name ending in `-D3`, `-D4` or
+/// `-V` is corrected by definition. Adding one on top would double-count, and
+/// the resulting energy would look perfectly ordinary.
+pub(crate) fn orca_dispersion_row(
+    ui: &mut egui::Ui,
+    config: &mut MethodConfig,
+    running: bool,
+    id_prefix: &str,
+) {
+    use super::orca_method::{self, Dispersion};
+
+    let built_in = orca_method::is_composite(&config.functional)
+        || orca_method::carries_own_dispersion(&config.functional);
+
+    ui.horizontal(|ui| {
+        ui.label("Dispersion");
+        ui.add_enabled_ui(!running && !built_in, |ui| {
+            egui::ComboBox::from_id_salt(format!("{id_prefix}_orca_dispersion"))
+                .selected_text(if built_in {
+                    "built in"
+                } else {
+                    config.orca_dispersion.label()
+                })
+                .show_ui(ui, |ui| {
+                    for entry in Dispersion::ALL {
+                        ui.selectable_value(&mut config.orca_dispersion, entry, entry.label());
+                    }
+                });
+        });
+        if built_in {
+            ui.label(
+                egui::RichText::new("this functional already includes one")
+                    .small()
+                    .weak(),
+            );
+        }
+    });
+}
+
+/// ORCA's basis dropdown, reading ORCA's own catalogue.
+pub(crate) fn orca_basis_row(ui: &mut egui::Ui, config: &mut MethodConfig, running: bool, id_prefix: &str) {
+    use super::orca_method;
+
+    ui.horizontal(|ui| {
+        ui.label("Basis set");
+        ui.add_enabled_ui(!running, |ui| {
+            egui::ComboBox::from_id_salt(format!("{id_prefix}_orca_basis"))
+                .selected_text(orca_method::basis_label(&config.basis))
+                .show_ui(ui, |ui| {
+                    for (index, group) in orca_method::BASIS_GROUPS.iter().enumerate() {
+                        if index > 0 {
+                            ui.separator();
+                        }
+                        ui.weak(group.name);
+                        for (label, keyword) in group.sets {
+                            let mut chosen = config.basis.clone();
+                            if ui
+                                .selectable_value(&mut chosen, keyword.to_string(), *label)
+                                .clicked()
+                            {
+                                config.basis = keyword.to_string();
+                            }
+                        }
+                    }
+                });
+        });
+    });
+}
+
+/// Sparrow's parametrisation dropdown.
+///
+/// Labelled "Parametrisation" rather than "Functional": there is no functional
+/// here and no basis set either. Sparrow is a set of parameter fits, and
+/// calling the choice something it is not would be its own small lie.
+pub(crate) fn sparrow_method_row(
+    ui: &mut egui::Ui,
+    config: &mut MethodConfig,
+    running: bool,
+    id_prefix: &str,
+) {
+    use super::sparrow_method;
+
+    ui.horizontal(|ui| {
+        ui.label("Parametrisation");
+        ui.add_enabled_ui(!running, |ui| {
+            egui::ComboBox::from_id_salt(format!("{id_prefix}_sparrow_method"))
+                .selected_text(sparrow_method::method_label(&config.functional))
+                .show_ui(ui, |ui| {
+                    for (index, family) in sparrow_method::Family::ALL.into_iter().enumerate() {
+                        if index > 0 {
+                            ui.separator();
+                        }
+                        ui.weak(family.heading());
+                        for entry in sparrow_method::methods_in(family) {
+                            let mut chosen = config.functional.clone();
+                            if ui
+                                .selectable_value(&mut chosen, entry.name.to_string(), entry.label)
+                                .clicked()
+                            {
+                                config.functional = entry.name.to_string();
+                            }
+                        }
+                    }
+                });
+        });
+    });
+}
+
+/// Psi4's functional dropdown, reading Psi4's own catalogue.
+///
+/// No dispersion row goes with it: Psi4 asks for a correction inside the
+/// functional's own name (`b97-d3bj`, `wb97x-d3bj`), so a separate control
+/// would be a second way to say the same thing, and the two could disagree.
+pub(crate) fn psi4_functional_row(
+    ui: &mut egui::Ui,
+    config: &mut MethodConfig,
+    running: bool,
+    id_prefix: &str,
+) {
+    use super::psi4_method;
+
+    ui.horizontal(|ui| {
+        ui.label("Functional");
+        ui.add_enabled_ui(!running, |ui| {
+            egui::ComboBox::from_id_salt(format!("{id_prefix}_psi4_functional"))
+                .selected_text(psi4_method::functional_label(&config.functional))
+                .show_ui(ui, |ui| {
+                    for (index, family) in psi4_method::Family::ALL.into_iter().enumerate() {
+                        let mut any = false;
+                        for entry in psi4_method::functionals_in(family) {
+                            if !any {
+                                if index > 0 {
+                                    ui.separator();
+                                }
+                                ui.weak(family.heading());
+                                any = true;
+                            }
+                            let mut chosen = config.functional.clone();
+                            if ui
+                                .selectable_value(&mut chosen, entry.name.to_string(), entry.label)
+                                .clicked()
+                            {
+                                config.functional = entry.name.to_string();
+                            }
+                        }
+                    }
+                });
+        });
+    });
+
+    if let Some(brings) = psi4_method::composite_note(&config.functional) {
+        ui.label(egui::RichText::new(format!("Brings: {brings}.")).small().weak());
+    }
+}
+
+/// Psi4's basis dropdown, reading Psi4's own catalogue.
+pub(crate) fn psi4_basis_row(
+    ui: &mut egui::Ui,
+    config: &mut MethodConfig,
+    running: bool,
+    id_prefix: &str,
+) {
+    use super::psi4_method;
+
+    ui.horizontal(|ui| {
+        ui.label("Basis set");
+        ui.add_enabled_ui(!running, |ui| {
+            egui::ComboBox::from_id_salt(format!("{id_prefix}_psi4_basis"))
+                .selected_text(psi4_method::basis_label(&config.basis))
+                .show_ui(ui, |ui| {
+                    for (index, group) in psi4_method::BASIS_GROUPS.iter().enumerate() {
+                        if index > 0 {
+                            ui.separator();
+                        }
+                        ui.weak(group.name);
+                        for (label, spelling) in group.sets {
+                            let mut chosen = config.basis.clone();
+                            if ui
+                                .selectable_value(&mut chosen, spelling.to_string(), *label)
+                                .clicked()
+                            {
+                                config.basis = spelling.to_string();
+                            }
+                        }
+                    }
+                });
+        });
+    });
+}
+
+/// PySCF's functional dropdown, reading PySCF's own catalogue.
+pub(crate) fn pyscf_functional_row(
+    ui: &mut egui::Ui,
+    config: &mut MethodConfig,
+    running: bool,
+    id_prefix: &str,
+) {
+    use super::pyscf_method;
+
+    ui.horizontal(|ui| {
+        ui.label("Functional");
+        ui.add_enabled_ui(!running, |ui| {
+            egui::ComboBox::from_id_salt(format!("{id_prefix}_pyscf_functional"))
+                .selected_text(pyscf_method::functional_label(&config.functional))
+                .show_ui(ui, |ui| {
+                    // Grouped by family, as ORCA's is and for the same reason.
+                    for (index, family) in pyscf_method::Family::ALL.into_iter().enumerate() {
+                        let mut any = false;
+                        for entry in pyscf_method::functionals_in(family) {
+                            if !any {
+                                if index > 0 {
+                                    ui.separator();
+                                }
+                                ui.weak(family.heading());
+                                any = true;
+                            }
+                            let mut chosen = config.functional.clone();
+                            if ui
+                                .selectable_value(&mut chosen, entry.cli.to_string(), entry.label)
+                                .clicked()
+                            {
+                                config.functional = entry.cli.to_string();
+                            }
+                        }
+                    }
+                });
+        });
+    });
+}
+
+/// PySCF's basis dropdown, reading PySCF's own catalogue.
+pub(crate) fn pyscf_basis_row(ui: &mut egui::Ui, config: &mut MethodConfig, running: bool, id_prefix: &str) {
+    use super::pyscf_method;
+
+    ui.horizontal(|ui| {
+        ui.label("Basis set");
+        ui.add_enabled_ui(!running, |ui| {
+            egui::ComboBox::from_id_salt(format!("{id_prefix}_pyscf_basis"))
+                .selected_text(pyscf_method::basis_label(&config.basis))
+                .show_ui(ui, |ui| {
+                    for (index, group) in pyscf_method::BASIS_GROUPS.iter().enumerate() {
+                        if index > 0 {
+                            ui.separator();
+                        }
+                        ui.weak(group.name);
+                        for (label, cli) in group.sets {
+                            let mut chosen = config.basis.clone();
+                            if ui
+                                .selectable_value(&mut chosen, cli.to_string(), *label)
+                                .clicked()
+                            {
+                                config.basis = cli.to_string();
+                            }
+                        }
+                    }
+                });
+        });
+    });
 }
 
 #[cfg(test)]

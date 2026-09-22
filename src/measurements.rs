@@ -243,14 +243,10 @@ pub fn configure_measurement_gizmos(
         };
     }
     {
+        // The shared picker-highlight style, so this ring and the molecule
+        // editor's are the same thing drawn the same way.
         let (cfg, _) = cfg_store.config_mut::<MeasurementHighlightGizmos>();
-        cfg.enabled = true;
-        cfg.line.width = 2.0;
-        cfg.line.perspective = true;
-        cfg.line.style = GizmoLineStyle::Dashed {
-            gap_scale: 2.0,
-            line_scale: 1.25,
-        };
+        crate::picking::HighlightStyle::default().apply(cfg);
     }
 }
 
