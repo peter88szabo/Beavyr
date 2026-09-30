@@ -2214,12 +2214,16 @@ pub fn ui_panel(
                 viewport.top() + EDITOR_MARGIN,
             ]);
         if fit_now {
-            // A fifth more than the contents measure now: placing the first
-            // fragment opens the Newly Placed Fragment section underneath,
-            // and the window should already have room for it.
-            const EDITOR_HEADROOM: f32 = 1.2;
+            // Room for the Newly Placed Fragment section from the start. It
+            // only appears once a fragment is placed, so measuring the panel
+            // at opening leaves it out; its full height -- heading, axis and
+            // moving lines, three sliders, the buttons and the note -- is
+            // reserved here so it is visible the moment it appears.
+            const PLACED_EDITOR_HEIGHT: f32 = 290.0;
+            let placed_shown = zmat_state.placed_editor.moving.is_some();
+            let reserve = if placed_shown { 0.0 } else { PLACED_EDITOR_HEIGHT };
             builder_window = builder_window.min_height(
-                ((measured + EDITOR_CHROME) * EDITOR_HEADROOM).min(editor_max_height),
+                (measured + EDITOR_CHROME + reserve).min(editor_max_height),
             );
         }
         let builder_window = builder_window
