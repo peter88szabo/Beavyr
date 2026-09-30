@@ -2411,11 +2411,11 @@ pub fn draw_builder_highlights(
         if let Some(&i0) = state.picks.get(0) {
             draw_hl(&mut highlights, i0, magenta);
         }
+        // The two axis atoms are marked by their spheres alone. A line drawn
+        // between them looked like a leftover bond once a fragment had been
+        // pulled far enough apart that the real bond was gone.
         if let Some(&i1) = state.picks.get(1) {
             draw_hl(&mut highlights, i1, cyan);
-            if let Some(&i0) = state.picks.get(0) {
-                gizmos.line(mol.pos[i0], mol.pos[i1], Color::WHITE);
-            }
         }
         if let Some(&i2) = state.picks.get(2) {
             draw_hl(&mut highlights, i2, green);
