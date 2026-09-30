@@ -582,10 +582,10 @@ pub fn xtb_optimization_panel(
         // button cannot register anyway.
         ui.colored_label(egui::Color32::from_rgb(220, 80, 80), err.to_string());
     } else if panel_state.show_warnings {
-        for warning in warnings {
+        if !warnings.is_empty() {
             ui.colored_label(
                 egui::Color32::from_rgb(210, 160, 40),
-                format!("Atom {}: {}", warning.atom_index + 1, warning.message),
+                super::valence::BONDING_WARNING,
             );
         }
     }

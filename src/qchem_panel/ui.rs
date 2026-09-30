@@ -131,8 +131,11 @@ fn body(
         );
     } else if panel.show_warnings {
         if let Ok((_, warnings)) = &electronic {
-            for warning in warnings {
-                ui.label(egui::RichText::new(format!("\u{26a0} {}", warning.message)).weak());
+            if !warnings.is_empty() {
+                ui.label(
+                    egui::RichText::new(crate::qchem_interfaces::valence::BONDING_WARNING)
+                        .weak(),
+                );
             }
         }
     }

@@ -1866,10 +1866,10 @@ pub fn xtb_frequency_panel(
             // straight away rather than waiting for a click that cannot land.
             ui.colored_label(egui::Color32::from_rgb(220, 80, 80), err.to_string());
         } else if freq_panel.show_warnings {
-            for warning in warnings {
+            if !warnings.is_empty() {
                 ui.colored_label(
                     egui::Color32::from_rgb(210, 160, 40),
-                    format!("Atom {}: {}", warning.atom_index + 1, warning.message),
+                    super::valence::BONDING_WARNING,
                 );
             }
         }

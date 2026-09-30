@@ -2464,18 +2464,21 @@ fn cleanup_row(
             )
             .clicked()
         {
-            record_step(zmat_state, mol, "cleaned up the geometry");
+            let before = current_step(zmat_state, mol);
             let report = run_cleanup(mol, settings);
             if report.is_ok() {
+                zmat_state.history.record(
+                    "cleaned up the geometry",
+                    &before.atoms,
+                    &before.pos,
+                    &before.zmat,
+                );
                 // Every coordinate moved and dummies may have gone, so the
                 // Z-matrix built from the old structure no longer describes
                 // this one.
                 zmat_state.zmat = zmat2xyz::xyz_to_zmat(&mol.atoms, &mol.pos);
                 zmat_state.edit_refresh = true;
                 set_selected_atom(zmat_state, &mol.atoms, None);
-            } else {
-                // Nothing changed, so nothing to undo.
-                let _ = zmat_state.history.undo(current_step(zmat_state, mol));
             }
             zmat_state.cleanup_report = Some(report);
         }
@@ -2514,24 +2517,31 @@ fn run_cleanup(mol: &mut Molecule, settings: &mut MolSettings) -> Result<String,
     // business in it, DREIDING has no type for it, and leaving it would carry
     // it into every later calculation. So it is removed from the structure,
     // not merely hidden from the force field.
-    let dummies_removed = crate::molecule::dummy_count(&mol.atoms);
+    //
+    // All of it happens on a copy, and the structure on screen is replaced
+    // only once the relaxation has succeeded. Stripping the dummies and
+    // clearing the bonds in place, before the steps that can fail, meant a
+    // failed cleanup left the structure with its dummies gone and no bonds
+    // at all -- every atom then reported as unbonded.
+    let mut work = mol.clone();
+    let dummies_removed = crate::molecule::dummy_count(&work.atoms);
     if dummies_removed > 0 {
-        let (atoms, positions) = crate::molecule::without_dummies(&mol.atoms, &mol.pos);
-        mol.atoms = atoms;
-        mol.pos = positions;
-        mol.bonds.clear();
-        mol.hydrogen_bonds.clear();
+        let (atoms, positions) = crate::molecule::without_dummies(&work.atoms, &work.pos);
+        work.atoms = atoms;
+        work.pos = positions;
+        work.bonds.clear();
+        work.hydrogen_bonds.clear();
     }
 
     // Perceived at the standard threshold rather than at whatever the viewport is set to: a
     // generous display setting bonds atoms that are merely close, which mistypes every atom and
     // would return a confidently wrong geometry. The builder's own calls use a loose threshold
     // for display, so this cannot simply reuse `mol.bonds`.
-    let mut perceived = mol.clone();
+    let mut perceived = work.clone();
     perceived.recompute_bonds(1.2, 2.5);
 
     let topology = DreidingTopology::build(&perceived).map_err(|e| e.to_string())?;
-    let start: Vec<f64> = mol
+    let start: Vec<f64> = work
         .pos
         .iter()
         .flat_map(|p| [p.x as f64, p.y as f64, p.z as f64])
@@ -2540,13 +2550,14 @@ fn run_cleanup(mol: &mut Molecule, settings: &mut MolSettings) -> Result<String,
     let (relaxed, report) =
         relax_angstrom(&topology, &start, cleanup_options()).map_err(|e| e.to_string())?;
 
-    mol.set_pos(
+    work.set_pos(
         relaxed
             .chunks_exact(3)
             .map(|c| Vec3::new(c[0] as f32, c[1] as f32, c[2] as f32))
             .collect(),
     );
-    mol.recompute_bonds(settings.bond_thresh_scale, settings.hbond_cutoff);
+    work.recompute_bonds(settings.bond_thresh_scale, settings.hbond_cutoff);
+    *mol = work;
     settings.geometry_dirty = true;
     settings.bond_topology_dirty = true;
 

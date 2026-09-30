@@ -48,6 +48,14 @@ fn typical_valence(symbol: &str) -> Option<u32> {
 ///
 /// On success, returns the xTB `--uhf` value (the number of unpaired
 /// electrons) together with any non-blocking valence warnings.
+/// The one line shown when the structure's bonding looks wrong.
+///
+/// One line however many atoms are affected. A line per atom repeated the same
+/// advice ten or twenty times and pushed the rest of the panel off the screen;
+/// the advice is the same for all of them.
+pub const BONDING_WARNING: &str =
+    "\u{26a0} Check the charge, spin multiplicity, or missing atoms.";
+
 pub fn validate_electronic_state(
     mol: &Molecule,
     charge: i32,
