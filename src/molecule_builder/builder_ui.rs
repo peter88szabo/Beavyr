@@ -440,6 +440,14 @@ pub struct EditorRotateState {
     /// which cannot work on a sandwich ring, joined to its metal through every
     /// carbon as well as through its centre.
     pub moving: Option<Vec<usize>>,
+    /// The bonds as they were when the current edit began.
+    ///
+    /// The side of the bond that moves is worked out from these, not from
+    /// the live bond list. The live list is rebuilt as atoms move, so that a
+    /// fragment pulled away shows no bond it no longer has -- and if the side
+    /// were taken from it, dragging a fragment close to something else would
+    /// change which atoms are moving halfway through the drag.
+    pub base_bonds: Vec<(usize, usize, f32)>,
     pub active: bool,                    // capture 3D clicks when true
     pub picks: Vec<usize>,               // [A, B, side-indicator (any atom on that side)]
     pub chosen_side: Option<RotateSide>, // inferred from 3rd pick
@@ -1548,6 +1556,7 @@ impl EditorRotateState {
             axis_len_target: 0.0,
             bend_angle_deg: 0.0,
             moving: None,
+            base_bonds: Vec::new(),
             session_origin: None,
             base_pos: None,
             base_ref: None,
@@ -3689,7 +3698,8 @@ fn current_bend_deg(pos: &[Vec3], a: usize, b: usize, p: usize, side: RotateSide
 fn revert_preview(state: &mut EditorRotateState, mol: &mut Molecule, settings: &mut MolSettings) {
     if let Some(base) = state.base_pos.take() {
         mol.pos = base;
-        settings.coords_dirty = true;
+        // Bonds too, not just coordinates: the bond list follows the atoms.
+        settings.bond_topology_dirty = true;
     }
     state.base_ref = None;
     state.preview_values = None;
@@ -3734,7 +3744,7 @@ fn recompute_preview(
                 let center = if side == RotateSide::A { a } else { b };
                 super::rotator::rotate_atoms(&coords, a, b, center, set, state.angle_deg)
             }
-            None => rotate_side_with_bonds(&coords, &mol.bonds, a, b, side, state.angle_deg),
+            None => rotate_side_with_bonds(&coords, &state.base_bonds, a, b, side, state.angle_deg),
         };
         match turned {
             Some(next) => coords = next,
@@ -3753,7 +3763,7 @@ fn recompute_preview(
                     side == RotateSide::B,
                     delta,
                 ),
-                None => translate_fragment_containing_atom(&coords, &mol.bonds, a, b, p, delta),
+                None => translate_fragment_containing_atom(&coords, &state.base_bonds, a, b, p, delta),
             };
             match slid {
                 Some(next) => coords = next,
@@ -3767,7 +3777,7 @@ fn recompute_preview(
                 let center = if side == RotateSide::A { a } else { b };
                 super::rotator::bend_atoms(&coords, a, b, center, set, p, state.bend_angle_deg)
             }
-            None => bend_side_with_bonds(&coords, &mol.bonds, a, b, side, p, state.bend_angle_deg),
+            None => bend_side_with_bonds(&coords, &state.base_bonds, a, b, side, p, state.bend_angle_deg),
         };
         match bent {
             Some(next) => coords = next,
@@ -3780,7 +3790,10 @@ fn recompute_preview(
         None => {
             state.status = None;
             mol.pos = coords;
-            settings.coords_dirty = true;
+            // Bonds rebuilt from where the atoms now are. Only updating the
+            // coordinates kept every bond perceived before the move and drew
+            // it stretched between atoms that had been pulled far apart.
+            settings.bond_topology_dirty = true;
         }
     }
 }
@@ -3831,10 +3844,11 @@ fn fragment_editor_prepare(
             // again from the geometry as it now stands.
             if let Some(base) = state.base_pos.take() {
                 mol.pos = base;
-                settings.coords_dirty = true;
+                settings.bond_topology_dirty = true;
             }
             let (a, b, p) = (key.0, key.1, key.2);
             state.base_pos = Some(mol.pos.clone());
+            state.base_bonds = mol.bonds.clone();
             state.base_ref = Some(key);
             state.preview_values = None;
             state.angle_deg = 0.0;
@@ -4014,7 +4028,7 @@ fn fragment_editor_finish(
         if let Some(origin) = state.session_origin.clone() {
             record_step(zmat_state, mol, "restored the fragment");
             mol.pos = origin;
-            settings.coords_dirty = true;
+            settings.bond_topology_dirty = true;
             state.base_pos = None;
             state.base_ref = None;
             state.preview_values = None;
@@ -4269,6 +4283,54 @@ C   2.050   1.450   0.000
                 );
             }
         }
+    }
+
+    /// Reported: two centred rings stacked and pulled apart along their
+    /// dummies still showed carbon-carbon bonds between them at 2-4 A. A move
+    /// updated the coordinates but not the bond list, so bonds perceived
+    /// before the move stayed and were drawn stretched across the gap.
+    #[test]
+    fn a_ring_pulled_away_keeps_no_bond_to_the_other() {
+        let mut mol = Molecule {
+            atoms: vec!["Fe".to_string()],
+            pos: vec![Vec3::ZERO],
+            bonds: vec![],
+            hydrogen_bonds: vec![],
+        };
+        let mut state = ZMatrixBuilderState::default();
+        state.zmat = xyz_to_zmat(&mol.atoms, &mol.pos);
+        let mut settings = MolSettings::default();
+
+        // First ring on the iron, second ring on the first ring's centre --
+        // stacked, the two rings close enough to bond carbon to carbon.
+        state.selected_index = Some(0);
+        state.frag_name = "5-Ring centered".to_string();
+        commit_fragment_connect(&mut state, &mut mol, &mut settings);
+        let lower: Vec<usize> = state.placed_editor.moving.clone().unwrap();
+        let lower_centre = state.placed_editor.picks[1];
+        state.selected_index = Some(lower_centre);
+        commit_fragment_connect(&mut state, &mut mol, &mut settings);
+        assert!(state.last_error.is_none(), "{:?}", state.last_error);
+        let upper: Vec<usize> = state.placed_editor.moving.clone().unwrap();
+
+        // Pull the upper ring 4 A further out along the centre-centre axis.
+        let mut editor = state.placed_editor.clone();
+        assert!(fragment_editor_prepare(&mut editor, &mut mol, &mut settings));
+        settings.bond_topology_dirty = false;
+        editor.axis_len_target = editor.base_axis_len + 4.0;
+        recompute_preview(&mut editor, &mut mol, &mut settings);
+        assert!(editor.status.is_none(), "{:?}", editor.status);
+        assert!(
+            settings.bond_topology_dirty,
+            "a move must ask for the bonds to be rebuilt, not just the coordinates"
+        );
+
+        // What the scene then does with that request.
+        mol.recompute_bonds(settings.bond_thresh_scale, settings.hbond_cutoff);
+        let across = mol.bonds.iter().find(|&&(i, j, _)| {
+            (upper.contains(&i) && lower.contains(&j)) || (upper.contains(&j) && lower.contains(&i))
+        });
+        assert!(across.is_none(), "a bond is still drawn across the gap: {across:?}");
     }
 
     /// Draw the real editor panel for one frame, headless.
@@ -7221,6 +7283,7 @@ H   1.1405   1.0087  -0.1781
             chosen_side: Some(RotateSide::A),
             base_pos: Some(mol.pos.clone()),
             base_ref: Some((0, 1, 2, RotateSide::A)),
+            base_bonds: mol.bonds.clone(),
             base_axis_len: axis_len,
             axis_len_target: axis_len,
             ..Default::default()
