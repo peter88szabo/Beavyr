@@ -1208,6 +1208,7 @@ pub fn poll_qc_run(
     mut cam: Query<&mut crate::camera::OrbitCamera>,
     mut ev_changed: MessageWriter<crate::events::MoleculeChanged>,
     mut opt_task: ResMut<crate::qchem_interfaces::xtb_optimize::XtbOptimizationTask>,
+    mut opt_panel: ResMut<crate::qchem_interfaces::xtb_optimize::XtbPanelState>,
     mut freq_panel: ResMut<crate::qchem_interfaces::xtb_freq::XtbFreqPanelState>,
     mut freq_task: ResMut<crate::qchem_interfaces::xtb_freq::XtbFrequencyTask>,
     mut uvvis: ResMut<crate::uvvis::UvVisState>,
@@ -1265,6 +1266,13 @@ pub fn poll_qc_run(
                         .collect()
                 })
                 .unwrap_or_default();
+            // An optimisation that has just finished opens its energy plot:
+            // the curve is the first thing worth looking at, and it should
+            // not wait behind a button. Closing it is the user's call; it can
+            // be reopened from the summary.
+            if opt_task.last_energy_history.len() > 1 {
+                opt_panel.energy_plot_open = true;
+            }
 
             // The trajectory, into the player, which the energy plot reads too.
             // Forced to play once rather than loop: watching an optimisation

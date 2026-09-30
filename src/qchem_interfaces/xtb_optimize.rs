@@ -278,6 +278,7 @@ impl XtbOptimizationTask {
 /// failure.
 pub fn poll_xtb_optimization(
     mut xtb_task: ResMut<XtbOptimizationTask>,
+    mut panel_state: ResMut<XtbPanelState>,
     mut traj: ResMut<TrajectoryState>,
     mut mol: ResMut<Molecule>,
     mut settings: ResMut<MolSettings>,
@@ -369,6 +370,10 @@ pub fn poll_xtb_optimization(
             }
             xtb_task.last_energy_history = output.energy_history;
             xtb_task.last_log = Some(output.log);
+            // A finished optimisation opens its energy plot straight away.
+            if xtb_task.last_energy_history.len() > 1 {
+                panel_state.energy_plot_open = true;
+            }
         }
         Err(failure) => {
             // A failed run's scratch directory is kept (not discarded) so

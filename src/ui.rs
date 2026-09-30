@@ -2071,28 +2071,11 @@ pub fn ui_panel(
             // A permanent, narrow rail on the left; every tool lives in its
             // own floating window that the rail toggles, so any number can be
             // open at once and dragged where the user wants them.
-            let mut switch_layout = false;
             let rail = egui::Panel::left("tool_rail")
                 .exact_size(50.0)
                 .resizable(false)
                 .show(&mut viewport_ui, |ui| {
                     icon_rail(ui, &mut open_windows);
-                    // The layout switch lives at the foot of the rail, the
-                    // usual home for it, and away from the orientation gizmo
-                    // now in the bottom-right corner.
-                    ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
-                        ui.add_space(8.0);
-                        if ui
-                            .add(
-                                egui::Button::new(egui::RichText::new("▤").size(15.0))
-                                    .min_size(egui::vec2(30.0, 26.0)),
-                            )
-                            .on_hover_text("Switch to the classic panel layout")
-                            .clicked()
-                        {
-                            switch_layout = true;
-                        }
-                    });
                 });
             // The windows themselves are drawn straight onto the context,
             // which is what lets them float. The `Ui` handed to
@@ -2113,9 +2096,6 @@ pub fn ui_panel(
                     .invisible(),
             );
             draw_sections(&mut scratch, true, &mut open_windows, &mut window_rects);
-            if switch_layout {
-                ui_layout.windowed = false;
-            }
             rail
         } else {
             egui::Panel::right("controls")
@@ -2130,29 +2110,6 @@ pub fn ui_panel(
     };
 
     ui_layout.open = open_windows;
-
-    // In the classic layout the switch floats bottom-left; the
-    // floating-window layout puts it at the foot of its rail instead.
-    if !windowed {
-    egui::Area::new(egui::Id::new("layout_switch"))
-        .anchor(egui::Align2::LEFT_BOTTOM, egui::vec2(12.0, -12.0))
-        .show(&ctx, |ui| {
-            egui::Frame::popup(ui.style())
-                .corner_radius(egui::CornerRadius::same(14))
-                .show(ui, |ui| {
-                    if ui
-                        .add(
-                            egui::Button::new(egui::RichText::new("▦").size(16.0))
-                                .min_size(egui::vec2(26.0, 26.0)),
-                        )
-                        .on_hover_text("Switch to the floating-window layout")
-                        .clicked()
-                    {
-                        ui_layout.windowed = true;
-                    }
-                });
-        });
-    }
 
     // A small rounded floating button opens the molecule editor as a window
     // in the tabbed layout, instead of it permanently occupying the left
@@ -2315,10 +2272,10 @@ pub fn ui_panel(
             &mut qc_panel,
             &mut qc_task,
             &mut xtb_panel_state,
-            &xtb_task,
             &mol,
         );
     }
+    crate::qchem_panel::ui::result_windows(ctx, &mut xtb_panel_state, &xtb_task);
     if qc_panel.summary_open {
         if let Some(output) = &qc_task.last {
             let duration = qc_task.last_duration;

@@ -27,7 +27,6 @@ pub fn qc_panel(
     panel: &mut QcPanelState,
     task: &mut QcRunTask,
     opt_panel: &mut XtbPanelState,
-    opt_task: &crate::qchem_interfaces::xtb_optimize::XtbOptimizationTask,
     mol: &Molecule,
 ) {
     let mut open = panel.open;
@@ -40,36 +39,6 @@ pub fn qc_panel(
         });
     panel.open = open;
 
-    // The optimizer panel's own two windows, driven from its own flags. An
-    // optimisation started here and one started there are the same
-    // calculation, so they get the same summary and the same energy plot
-    // rather than a second pair built to look almost alike.
-    let report = opt_task
-        .last_log
-        .as_deref()
-        .filter(|_| {
-            opt_task.last_program == Some(QcProgram::Behemoth)
-                || opt_task.last_program == Some(QcProgram::Dreiding)
-        })
-        .map(|log| {
-            crate::qchem_interfaces::xtb_optimize::OptimizationReport::from_log(
-                log,
-                opt_task.last_duration,
-            )
-        });
-    crate::qchem_interfaces::xtb_optimize::energy_history_window(
-        ctx,
-        &mut opt_panel.energy_plot_open,
-        &opt_task.last_energy_history,
-        opt_task.last_is_error,
-    );
-    if let Some(report) = &report {
-        crate::qchem_interfaces::xtb_optimize::optimization_summary_window(
-            ctx,
-            &mut opt_panel.summary_open,
-            report,
-        );
-    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -929,5 +898,47 @@ mod tests {
                 "{job:?}"
             );
         }
+    }
+}
+
+/// The energy plot and the optimisation summary of the last run.
+///
+/// Drawn every frame whether or not the Quantum Chemistry window is open. The
+/// run's results outlive the panel that started it: closing the panel must
+/// not take the energy plot with it, and nothing else draws these windows now
+/// that the Geometry Optimization tab is gone.
+pub fn result_windows(
+    ctx: &egui::Context,
+    opt_panel: &mut XtbPanelState,
+    opt_task: &crate::qchem_interfaces::xtb_optimize::XtbOptimizationTask,
+) {
+    // The optimizer panel's own two windows, driven from its own flags. An
+    // optimisation started here and one started there are the same
+    // calculation, so they get the same summary and the same energy plot
+    // rather than a second pair built to look almost alike.
+    // For every program. The Geometry Optimization tab used to draw this for
+    // xTB runs; that tab is gone, so this is now the only place, and the
+    // log reader decides whether a program printed a summary at all.
+    let report = opt_task
+        .last_log
+        .as_deref()
+        .map(|log| {
+            crate::qchem_interfaces::xtb_optimize::OptimizationReport::from_log(
+                log,
+                opt_task.last_duration,
+            )
+        });
+    crate::qchem_interfaces::xtb_optimize::energy_history_window(
+        ctx,
+        &mut opt_panel.energy_plot_open,
+        &opt_task.last_energy_history,
+        opt_task.last_is_error,
+    );
+    if let Some(report) = &report {
+        crate::qchem_interfaces::xtb_optimize::optimization_summary_window(
+            ctx,
+            &mut opt_panel.summary_open,
+            report,
+        );
     }
 }

@@ -401,6 +401,11 @@ pub fn poll_generation(mut state: ResMut<TsGeneration>) {
                 "{} TS guess generated. Use the buttons below to view or save it.",
                 output.algorithm.label()
             ));
+            // The energy profile opens by itself, as an optimisation's
+            // energy plot does: it is the first thing worth looking at, and
+            // it should not wait behind a button. Only when there is one --
+            // not every method writes a profile.
+            state.energy_plot_open = output.profile_dat.is_some();
             state.output = Some(output);
             state.is_error = false;
         }

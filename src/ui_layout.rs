@@ -216,6 +216,13 @@ pub fn icon_rail(ui: &mut egui::Ui, open: &mut [bool; Tab::COUNT]) {
     ui.vertical_centered(|ui| {
         ui.add_space(6.0);
         for (index, tab) in Tab::ALL.iter().enumerate() {
+            // Geometry optimisation is run from the Quantum Chemistry panel
+            // beside the editor, which does the same job for every program.
+            // A second button for it only offered two ways into one thing.
+            if *tab == Tab::Optimize {
+                open[index] = false;
+                continue;
+            }
             let is_open = open[index];
             let button = egui::Button::new(egui::RichText::new(tab.icon()).size(19.0))
                 .min_size(egui::vec2(34.0, 34.0))
