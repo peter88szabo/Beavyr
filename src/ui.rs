@@ -2193,13 +2193,16 @@ pub fn ui_panel(
             ])
             .vscroll(true)
             .show(&ctx, |ui| {
-                if builder_ui_contents(
+                let change = builder_ui_contents(
                     ui, &mut editor_rotate_state, &mut zmat_state, &mut mol,
                     &mut settings, &mut structure_history, &mut traj,
-                ) {
+                );
+                if change.happened() {
                     xtb_freq_panel_state.selected_mode = None;
                     xyz_buf.current_file = None;
-                    ev_changed.write(MoleculeChanged::parse_xyz(true));
+                    // Only a genuinely different structure re-frames the
+                    // camera. An edit in place leaves the view alone.
+                    ev_changed.write(MoleculeChanged::parse_xyz(change.recenter()));
                 }
             });
         if let Some(window) = &builder_window {
@@ -2208,13 +2211,16 @@ pub fn ui_panel(
         ui_layout.builder_open = builder_open;
     }
 
-    if !windowed && builder_ui_panel(
-        &mut viewport_ui, &mut editor_rotate_state, &mut zmat_state,
-        &mut mol, &mut settings, &mut structure_history, &mut traj,
-    ) {
-        xtb_freq_panel_state.selected_mode = None;
-        xyz_buf.current_file = None;
-        ev_changed.write(MoleculeChanged::parse_xyz(true));
+    if !windowed {
+        let change = builder_ui_panel(
+            &mut viewport_ui, &mut editor_rotate_state, &mut zmat_state,
+            &mut mol, &mut settings, &mut structure_history, &mut traj,
+        );
+        if change.happened() {
+            xtb_freq_panel_state.selected_mode = None;
+            xyz_buf.current_file = None;
+            ev_changed.write(MoleculeChanged::parse_xyz(change.recenter()));
+        }
     }
 
     // The general quantum-chemistry panel, and the summary a finished run

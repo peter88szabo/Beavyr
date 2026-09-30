@@ -289,28 +289,37 @@ fn refresh(mol: &mut Molecule, settings: &mut MolSettings) {
     settings.bond_topology_dirty = true;
 }
 
-/// Returns true for a successful edit or undo, so the caller can synchronize
-/// the builder and detach animation of the previous atom list.
-pub(super) fn controls(
+/// Just the two buttons, with no row of their own, so the caller can put them
+/// beside other buttons that belong on the same line.
+pub(super) fn buttons(
     ui: &mut egui::Ui,
     state: &mut HydrogenState,
     mol: &mut Molecule,
     settings: &mut MolSettings,
 ) -> bool {
-    state.invalidate_if_changed(mol);
     let mut changed = false;
-    ui.horizontal(|ui| {
-        if ui.add_enabled(!mol.atoms.is_empty(), egui::Button::new("Add missing H"))
-            .on_hover_text("Assumes sp3 C and neutral divalent O; other elements are unchanged.")
-            .on_hover_text("Uses the same chemically aware placement as Add Atom (auto): fills saturated sp3 carbon to four bonds and oxygen to two. Existing atoms stay fixed. Detected multiple/partial bonds are skipped.")
-            .clicked() {
-            changed = state.add(mol, settings);
-        }
-        if ui.add_enabled(state.undo.is_some(), egui::Button::new("Undo H addition")).clicked() {
-            changed |= state.undo(mol, settings);
-        }
-    });
+    if ui
+        .add_enabled(!mol.atoms.is_empty(), egui::Button::new("Add missing H"))
+        .on_hover_text(
+            "Fills saturated sp3 carbon to four bonds and oxygen to two, with the same \
+             chemically aware placement as Add Atom (auto). Existing atoms stay fixed. \
+             Other elements, and detected multiple or partial bonds, are left alone.",
+        )
+        .clicked()
+    {
+        changed = state.add(mol, settings);
+    }
+    if ui
+        .add_enabled(state.undo.is_some(), egui::Button::new("Undo H addition"))
+        .clicked()
+    {
+        changed |= state.undo(mol, settings);
+    }
+    changed
+}
 
+/// Whatever the last addition had to say, if anything.
+pub(super) fn report(ui: &mut egui::Ui, state: &HydrogenState) {
     match &state.report {
         Some(Ok(message)) => {
             ui.label(egui::RichText::new(message).small());
@@ -320,7 +329,6 @@ pub(super) fn controls(
         }
         None => {}
     }
-    changed
 }
 
 #[cfg(test)]

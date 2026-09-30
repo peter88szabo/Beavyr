@@ -458,14 +458,45 @@ pub struct EditorRotateState {
     pub base_axis_len: f32,
     pub base_bend_deg: f32,
     pub window_open: bool,
-    pub thresholds_window_open: bool,
-    pub bond_th_hx: f32,                         // Å
-    pub bond_th_xx: f32,                         // Å
+}
+
+/// What the builder just did, as far as the rest of the program is concerned.
+///
+/// The distinction that matters is the camera. Adding hydrogens or running a
+/// cleanup leaves the user looking at the same molecule they were looking at a
+/// moment ago, and re-framing it throws away the view they set up -- which is
+/// what made filling empty sites with hydrogens jump and zoom.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BuilderChange {
+    /// Nothing anyone else needs to hear about.
+    None,
+    /// The structure was edited in place. Same molecule, so the camera holds
+    /// still and the builder does not resync from its own edit.
+    Edited,
+    /// A different structure. Re-framing is what the user expects.
+    Replaced,
+}
+
+impl BuilderChange {
+    /// Whether anything happened at all.
+    pub fn happened(self) -> bool {
+        !matches!(self, BuilderChange::None)
+    }
+
+    /// Whether the camera should re-frame the molecule.
+    pub fn recenter(self) -> bool {
+        matches!(self, BuilderChange::Replaced)
+    }
 }
 
 #[derive(Resource, Clone)]
 pub struct ZMatrixBuilderState {
     pub zmat: Vec<ZAtom>,
+    /// Set when the builder made the change itself, so the structure-load
+    /// sync leaves it alone: the builder has already updated its own
+    /// Z-matrix, and resyncing would also clear the undo history for an edit
+    /// the user can reasonably expect to undo.
+    pub skip_next_sync: bool,
     /// One undo history for every action the builder takes. There were six
     /// separate Undo buttons; each reversed only its own last action, so
     /// pressing one did not reverse what had actually been done last.
@@ -580,6 +611,7 @@ impl Default for ZMatrixBuilderState {
     fn default() -> Self {
         Self {
             zmat: Vec::new(),
+            skip_next_sync: false,
             history: super::history::BuilderHistory::default(),
             zmat_window_open: false,
             cleanup_report: None,
@@ -1458,9 +1490,6 @@ impl EditorRotateState {
             base_axis_len: 0.0,
             base_bend_deg: 0.0,
             window_open: false,
-            thresholds_window_open: false,
-            bond_th_hx: 1.4,
-            bond_th_xx: 1.8,
         };
     }
 }
@@ -2086,6 +2115,13 @@ pub fn sync_builder_on_structure_load(
     if !structure_replaced {
         return;
     }
+    // The builder's own in-place edits already left its Z-matrix correct, and
+    // resyncing here would clear the undo history for an edit the user can
+    // reasonably expect to take back.
+    if zmat_state.skip_next_sync {
+        zmat_state.skip_next_sync = false;
+        return;
+    }
     let atoms: &[String] = match &mol {
         Some(mol) => {
             zmat_state.zmat = zmat2xyz::xyz_to_zmat(&mol.atoms, &mol.pos);
@@ -2366,7 +2402,13 @@ fn cleanup_row(
     ui.horizontal(|ui| {
         let enabled = !mol.atoms.is_empty();
         if ui
-            .add_enabled(enabled, egui::Button::new("Clean up geometry"))
+            .add_enabled(
+                enabled,
+                egui::Button::new(
+                    egui::RichText::new("Clean up geometry").color(egui::Color32::BLACK),
+                )
+                .fill(egui::Color32::from_rgb(120, 190, 120)),
+            )
             .on_hover_text(
                 "Relaxes the structure with the built-in DREIDING force field. Fixes the strained \
                  bond lengths and angles that hand-building leaves behind, in milliseconds. A \
@@ -2462,8 +2504,8 @@ pub fn builder_ui_contents(
     mut settings: &mut MolSettings,
     history: &mut crate::structure_history::StructureHistory,
     traj: &mut crate::trajectory::TrajectoryState,
-) -> bool {
-    let mut replaced = false;
+) -> BuilderChange {
+    let mut change = BuilderChange::None;
     crate::structure_history::editor_controls(ui, history, mol, traj);
     let ctx = ui.ctx().clone();
             if zmat_state.original_atoms.is_none() && !mol.atoms.is_empty() {
@@ -2471,13 +2513,17 @@ pub fn builder_ui_contents(
                 zmat_state.original_pos = Some(mol.pos.clone());
             }
             ui.add_space(8.0);
-            egui::CollapsingHeader::new(
-                egui::RichText::new("Molecule Builder").heading(),
-            )
-            .default_open(true)
-            .show(ui, |ui| {
+            {
+                let previous_atom_count = mol.atoms.len();
+                let mut hydrogens_changed = false;
                 ui.horizontal(|ui| {
-                    if ui.button("Clear Display").clicked() && !mol.atoms.is_empty() {
+                    // Yellow: it throws the structure away. Undo brings it
+                    // back, but the button should still look like what it is.
+                    let clear = egui::Button::new(
+                        egui::RichText::new("Clear Display").color(egui::Color32::BLACK),
+                    )
+                    .fill(egui::Color32::from_rgb(230, 195, 70));
+                    if ui.add(clear).clicked() && !mol.atoms.is_empty() {
                         // Recorded first, so Undo brings the structure back.
                         // Clearing the screen by accident used to be the one
                         // edit with no way back.
@@ -2489,18 +2535,23 @@ pub fn builder_ui_contents(
                         mol.hydrogen_bonds.clear();
                         traj.clear_for_structure();
                         history.replaced(previous, mol, traj, "Drawn structure");
-                        replaced = true;
+                        change = BuilderChange::Replaced;
                         settings.geometry_dirty = true;
                         settings.bond_topology_dirty = true;
                         zmat_state.zmat.clear();
                         set_selected_atom(&mut zmat_state, &mol.atoms, None);
                         zmat_state.last_error = None;
                     }
+                    hydrogens_changed = super::hydrogens::buttons(
+                        ui,
+                        &mut zmat_state.hydrogen_state,
+                        mol,
+                        settings,
+                    );
                 });
+                super::hydrogens::report(ui, &zmat_state.hydrogen_state);
 
-                ui.add_space(6.0);
-                let previous_atom_count = mol.atoms.len();
-                if super::hydrogens::controls(ui, &mut zmat_state.hydrogen_state, mol, settings) {
+                if hydrogens_changed {
                     zmat_state.zmat = super::hydrogens::builder_zmat(mol, previous_atom_count);
                     zmat_state.edit_refresh = true;
                     zmat_state.last_frag_snapshot = None;
@@ -2519,7 +2570,10 @@ pub fn builder_ui_contents(
                     // Notify dependent panels and stop frequency animation.
                     // This edit is saved to history only on explicit request
                     // or when leaving the structure, like other builder edits.
-                    replaced = true;
+                    // Same molecule with its hydrogens filled in: the
+                    // camera must not move, and the history must survive.
+                    change = BuilderChange::Edited;
+                    zmat_state.skip_next_sync = true;
                 }
                 ui.add_space(6.0);
                 cleanup_row(ui, &mut zmat_state, &mut mol, &mut settings);
@@ -2552,9 +2606,6 @@ pub fn builder_ui_contents(
                         .clicked()
                     {
                         state.window_open = !state.window_open;
-                    }
-                    if ui.button("Bond thresholds").clicked() {
-                        state.thresholds_window_open = !state.thresholds_window_open;
                     }
                 });
 
@@ -2889,7 +2940,7 @@ pub fn builder_ui_contents(
                 if let Some(score) = zmat_state.frag_scan_score {
                     ui.weak(format!("Fragment scan min distance: {:.3} Å", score));
                 }
-            });
+            }
 
             // The Z-matrix, in its own window. Drawn after the panel body so
             // the panel's borrows of zmat_state have ended; `open` needs a
@@ -3344,24 +3395,9 @@ pub fn builder_ui_contents(
                     });
             }
 
-            let mut thresholds_open = state.thresholds_window_open;
-            egui::Window::new("Bond thresholds")
-                .open(&mut thresholds_open)
-                // Resizable, like every other window here. How big a window
-                // should be is the user's business.
-                .resizable(true)
-                .show(&ctx, |ui| {
-                    ui.add(
-                        egui::Slider::new(&mut state.bond_th_hx, 0.6..=2.0).text("H\u{2013}X (\u{c5})"),
-                    );
-                    ui.add(
-                        egui::Slider::new(&mut state.bond_th_xx, 1.0..=3.0).text("X\u{2013}X (\u{c5})"),
-                    );
-                });
-            state.thresholds_window_open = thresholds_open;
 
             fragment_editor_window(&ctx, state, zmat_state, mol, settings);
-    replaced
+    change
 }
 
 
@@ -3645,7 +3681,7 @@ pub fn builder_ui_panel(
     settings: &mut MolSettings,
     history: &mut crate::structure_history::StructureHistory,
     traj: &mut crate::trajectory::TrajectoryState,
-) -> bool {
+) -> BuilderChange {
     egui::Panel::left("molecule_editor_panel")
         .resizable(true)
         .show(ui, |ui| {
@@ -6523,6 +6559,24 @@ H   1.1405   1.0087  -0.1781
                 "atom {i} did not come back: {now:?} vs {before:?}"
             );
         }
+    }
+
+    /// Filling the empty sites with hydrogens leaves the user looking at the
+    /// same molecule, so the camera must hold still. Re-framing it there
+    /// throws away the view they set up, and on a large structure the jump
+    /// and zoom is disorienting -- the same on the way back out.
+    #[test]
+    fn only_a_replaced_structure_moves_the_camera() {
+        assert!(!BuilderChange::None.happened(), "nothing to report");
+        assert!(BuilderChange::Edited.happened());
+        assert!(BuilderChange::Replaced.happened());
+
+        assert!(
+            !BuilderChange::Edited.recenter(),
+            "an edit in place must leave the camera where the user put it"
+        );
+        assert!(BuilderChange::Replaced.recenter());
+        assert!(!BuilderChange::None.recenter());
     }
 
     /// The line must name the listener that will actually consume the click.
