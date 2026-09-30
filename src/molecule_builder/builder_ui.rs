@@ -1093,7 +1093,10 @@ pub struct ChosenFragment {
 /// it before the fragment editor does, and the editor before selection, so
 /// the line has to report them in that order or it will describe a listener
 /// that is not listening.
-pub fn next_click_meaning(zmat_state: &ZMatrixBuilderState, editor: &EditorRotateState) -> String {
+pub fn next_click_meaning(
+    zmat_state: &ZMatrixBuilderState,
+    editor: &EditorRotateState,
+) -> Option<String> {
     if zmat_state.add_atom_active {
         let needed = if zmat_state.add_atom_auto {
             1
@@ -1104,31 +1107,32 @@ pub fn next_click_meaning(zmat_state: &ZMatrixBuilderState, editor: &EditorRotat
         let symbol = zmat_state.new_symbol.trim();
         let what = if symbol.is_empty() { "an atom" } else { symbol };
         if picked >= needed {
-            return format!("Adding {what}: all references picked.");
+            return Some(format!("Adding {what}: all references picked."));
         }
         let role = match picked {
             0 => "bond",
             1 => "angle",
             _ => "dihedral",
         };
-        return format!(
+        return Some(format!(
             "Adding {what}: click the {role} reference atom ({} of {needed}).",
             picked + 1
-        );
+        ));
     }
     if editor.active {
-        return match editor.picks.len() {
+        return Some(match editor.picks.len() {
             0 => "Fragment editor: click the first atom of the bond axis.".to_string(),
             1 => "Fragment editor: click the second atom of the bond axis.".to_string(),
             2 => "Fragment editor: click an atom on the side you want to move.".to_string(),
             _ => "Fragment editor: axis and side are set.".to_string(),
-        };
+        });
     }
     match (zmat_state.selected_index, &zmat_state.selected_symbol) {
-        (Some(idx), Some(symbol)) => {
-            format!("Selected {symbol}{}. Click another atom to select it instead.", idx + 1)
-        }
-        _ => "Click an atom to select it; click the background to clear.".to_string(),
+        (Some(idx), Some(symbol)) => Some(format!("Selected {symbol}{}", idx + 1)),
+        // Nothing is listening for anything in particular and nothing is
+        // selected. Saying "click an atom to select it" here is a line of
+        // panel spent telling the user what clicking does.
+        _ => None,
     }
 }
 
@@ -2467,9 +2471,17 @@ pub fn builder_ui_contents(
                 zmat_state.original_pos = Some(mol.pos.clone());
             }
             ui.add_space(8.0);
-            ui.collapsing("Molecule Builder", |ui| {
+            egui::CollapsingHeader::new(
+                egui::RichText::new("Molecule Builder").heading(),
+            )
+            .default_open(true)
+            .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    if ui.button("Clear Display").clicked() {
+                    if ui.button("Clear Display").clicked() && !mol.atoms.is_empty() {
+                        // Recorded first, so Undo brings the structure back.
+                        // Clearing the screen by accident used to be the one
+                        // edit with no way back.
+                        record_step(zmat_state, mol, "cleared the display");
                         let previous = history.before(mol, traj);
                         mol.atoms.clear();
                         mol.pos.clear();
@@ -2483,28 +2495,6 @@ pub fn builder_ui_contents(
                         zmat_state.zmat.clear();
                         set_selected_atom(&mut zmat_state, &mol.atoms, None);
                         zmat_state.last_error = None;
-                    }
-                    if ui.button("Load Original").clicked() {
-                        if let (Some(atoms), Some(pos)) = (
-                            zmat_state.original_atoms.clone(),
-                            zmat_state.original_pos.clone(),
-                        ) {
-                            let previous = history.before(mol, traj);
-                            mol.atoms = atoms;
-                            mol.pos = pos;
-                            traj.clear_for_structure();
-                            history.replaced(previous, mol, traj, "Original structure");
-                            replaced = true;
-                            mol.recompute_bonds(2.0, 3.0);
-                            settings.geometry_dirty = true;
-                            settings.bond_topology_dirty = true;
-                            zmat_state.zmat = zmat2xyz::xyz_to_zmat(&mol.atoms, &mol.pos);
-                            set_selected_atom(&mut zmat_state, &mol.atoms, None);
-                            zmat_state.last_error = None;
-                        } else {
-                            zmat_state.last_error =
-                                Some("Original structure not captured.".to_string());
-                        }
                     }
                 });
 
@@ -2537,7 +2527,9 @@ pub fn builder_ui_contents(
                 ui.add_space(6.0);
                 // What the next click will do, always. Three things want the
                 // same click and nothing used to say which was listening.
-                ui.label(egui::RichText::new(next_click_meaning(zmat_state, state)).strong());
+                if let Some(line) = next_click_meaning(zmat_state, state) {
+                    ui.label(egui::RichText::new(line).strong());
+                }
                 ui.add_space(6.0);
                 ui.separator();
                 ui.add_space(6.0);
@@ -2547,13 +2539,22 @@ pub fn builder_ui_contents(
                 // sessions never open it, so it does not belong in the panel.
                 // It is the same table, with the same editing, moved.
                 ui.horizontal(|ui| {
-                    let rows = zmat_state.zmat.len();
                     if ui
-                        .button(format!("Z-matrix\u{2026} ({rows} rows)"))
+                        .button("Open Z-matrix")
                         .on_hover_text("Edit the internal coordinates in a separate window.")
                         .clicked()
                     {
                         zmat_state.zmat_window_open = !zmat_state.zmat_window_open;
+                    }
+                    if ui
+                        .button("Fragment editor")
+                        .on_hover_text("Rotate, stretch or bend part of the structure about a bond.")
+                        .clicked()
+                    {
+                        state.window_open = !state.window_open;
+                    }
+                    if ui.button("Bond thresholds").clicked() {
+                        state.thresholds_window_open = !state.thresholds_window_open;
                     }
                 });
 
@@ -2568,13 +2569,14 @@ pub fn builder_ui_contents(
                 // fragment of one atom -- -Cl, -Br and -I in the list already
                 // are exactly that -- so they are one code path now, and
                 // "Single atom..." is simply the first entry in the list.
-                ui.label("Insert");
+                ui.label(egui::RichText::new("Add / Replace Fragment").heading().strong());
 
                 let inserting_atom = zmat_state.frag_name.starts_with("Atom: ");
 
                 ui.horizontal(|ui| {
                     ui.label("What");
                     egui::ComboBox::from_id_salt("frag_combo")
+                        .width(150.0)
                         .selected_text(zmat_state.frag_name.clone())
                         .show_ui(ui, |ui| {
                             // Choosing this opens the element form. The name
@@ -2603,6 +2605,26 @@ pub fn builder_ui_contents(
                                     frag.name.to_string(),
                                     frag.name,
                                 );
+                            }
+                        });
+                    ui.add_space(10.0);
+                    ui.label("Bond");
+                    egui::ComboBox::from_id_salt("frag_bond_order")
+                        .width(84.0)
+                        .selected_text(zmat_state.frag_bond_order.label())
+                        .show_ui(ui, |ui| {
+                            for &bo in &[BondOrder::Single, BondOrder::Double, BondOrder::Triple] {
+                                if ui
+                                    .selectable_value(
+                                        &mut zmat_state.frag_bond_order,
+                                        bo,
+                                        bo.label(),
+                                    )
+                                    .clicked()
+                                {
+                                    zmat_state.frag_angle_deg = bo.default_angle();
+                                    zmat_state.frag_dihedral_deg = bo.default_dihedral();
+                                }
                             }
                         });
                 });
@@ -2640,26 +2662,6 @@ pub fn builder_ui_contents(
                         format!("Atom: {}", zmat_state.new_symbol.trim());
                 }
 
-                ui.horizontal(|ui| {
-                    ui.label("Bond");
-                    egui::ComboBox::from_id_salt("frag_bond_order")
-                        .selected_text(zmat_state.frag_bond_order.label())
-                        .show_ui(ui, |ui| {
-                            for &bo in &[BondOrder::Single, BondOrder::Double, BondOrder::Triple] {
-                                if ui
-                                    .selectable_value(
-                                        &mut zmat_state.frag_bond_order,
-                                        bo,
-                                        bo.label(),
-                                    )
-                                    .clicked()
-                                {
-                                    zmat_state.frag_angle_deg = bo.default_angle();
-                                    zmat_state.frag_dihedral_deg = bo.default_dihedral();
-                                }
-                            }
-                        });
-                });
                 ui.horizontal(|ui| {
                     ui.label("Angle (deg)");
                     ui.add(egui::DragValue::new(&mut zmat_state.frag_angle_deg).speed(0.1));
@@ -2884,22 +2886,6 @@ pub fn builder_ui_contents(
                 if let Some(err) = &zmat_state.last_error {
                     ui.colored_label(egui::Color32::LIGHT_RED, err);
                 }
-                ui.weak(format!(
-                    "Z-matrix {} rows \u{2022} molecule {} atoms \u{2022} selected {} \u{2022} \
-                     last 3D click: {}",
-                    zmat_state.zmat.len(),
-                    mol.atoms.len(),
-                    match (zmat_state.selected_index, &zmat_state.selected_symbol) {
-                        (Some(i), Some(sym)) => format!("{sym}{}", i + 1),
-                        _ => "nothing".to_string(),
-                    },
-                    match zmat_state.last_click {
-                        Some(Some(i)) => format!("atom {}", i + 1),
-                        Some(None) => "background".to_string(),
-                        None => "none received".to_string(),
-                    }
-                ));
-
                 if let Some(score) = zmat_state.frag_scan_score {
                     ui.weak(format!("Fragment scan min distance: {:.3} Å", score));
                 }
@@ -3357,25 +3343,6 @@ pub fn builder_ui_contents(
                         });
                     });
             }
-
-            ui.add_space(8.0);
-            ui.separator();
-            ui.add_space(8.0);
-            // The fragment editor and the bond thresholds each get a window.
-            // Both were stacked into the panel, and the editor alone was three
-            // sections, three action buttons and three Undos tall.
-            ui.horizontal(|ui| {
-                if ui
-                    .button("Fragment editor\u{2026}")
-                    .on_hover_text("Rotate, stretch or bend part of the structure about a bond.")
-                    .clicked()
-                {
-                    state.window_open = !state.window_open;
-                }
-                if ui.button("Bond thresholds\u{2026}").clicked() {
-                    state.thresholds_window_open = !state.thresholds_window_open;
-                }
-            });
 
             let mut thresholds_open = state.thresholds_window_open;
             egui::Window::new("Bond thresholds")
@@ -6568,35 +6535,42 @@ H   1.1405   1.0087  -0.1781
         let mut zmat = ZMatrixBuilderState::default();
         let mut editor = EditorRotateState::default();
 
-        // Nothing armed: the click selects.
-        let line = next_click_meaning(&zmat, &editor);
-        assert!(line.contains("select"), "{line}");
+        // Nothing armed, nothing selected: nothing worth a line. Explaining
+        // that clicking selects is a row of panel spent on the obvious.
+        assert_eq!(next_click_meaning(&zmat, &editor), None);
 
-        // The fragment editor takes clicks once it is picking.
+        // A selection is worth saying, because the buttons act on it.
+        zmat.selected_index = Some(6);
+        zmat.selected_symbol = Some("C".to_string());
+        let line = next_click_meaning(&zmat, &editor).expect("a selection is reported");
+        assert!(line.contains("C7"), "{line}");
+
+        // The fragment editor takes clicks once it is picking, and says which
+        // pick is wanted, as they arrive.
         editor.active = true;
-        let line = next_click_meaning(&zmat, &editor);
-        assert!(line.contains("Fragment editor"), "{line}");
-        assert!(line.contains("first atom"), "{line}");
-
-        // ...and it says which pick is wanted next, as they arrive.
+        let line = next_click_meaning(&zmat, &editor).expect("the editor is listening");
+        assert!(line.contains("Fragment editor") && line.contains("first atom"), "{line}");
         editor.picks.push(0);
-        assert!(next_click_meaning(&zmat, &editor).contains("second atom"));
+        assert!(next_click_meaning(&zmat, &editor)
+            .is_some_and(|l| l.contains("second atom")));
         editor.picks.push(1);
-        assert!(next_click_meaning(&zmat, &editor).contains("side you want to move"));
+        assert!(next_click_meaning(&zmat, &editor)
+            .is_some_and(|l| l.contains("side you want to move")));
 
         // An armed add-atom tool takes the click before the editor does,
         // because that is the order the click actually reaches them in.
         zmat.add_atom_active = true;
         zmat.new_symbol = "N".to_string();
-        let line = next_click_meaning(&zmat, &editor);
+        let line = next_click_meaning(&zmat, &editor).expect("the tool is listening");
         assert!(line.starts_with("Adding N"), "{line}");
         assert!(!line.contains("Fragment editor"), "{line}");
     }
 
-    /// Whatever the state, the line says something. A blank line where the
-    /// explanation should be is the failure this whole change is about.
+    /// Silence is allowed only when nothing is waiting for a click. Whenever
+    /// something *is* listening, it must say so -- a tool that has quietly
+    /// armed itself is the failure this line exists to prevent.
     #[test]
-    fn the_next_click_line_is_never_empty() {
+    fn the_line_is_silent_only_when_nothing_is_listening() {
         let mut zmat = ZMatrixBuilderState::default();
         let mut editor = EditorRotateState::default();
         for add_atom in [false, true] {
@@ -6609,11 +6583,16 @@ H   1.1405   1.0087  -0.1781
                         editor.active = editor_active;
                         editor.picks = (0..picks).collect();
                         let line = next_click_meaning(&zmat, &editor);
-                        assert!(
-                            !line.trim().is_empty(),
-                            "silent for add_atom={add_atom} auto={auto} picks={picks} \
-                             editor={editor_active}"
+                        let listening = add_atom || editor_active;
+                        assert_eq!(
+                            line.is_some(),
+                            listening,
+                            "add_atom={add_atom} auto={auto} picks={picks} \
+                             editor={editor_active} gave {line:?}"
                         );
+                        if let Some(text) = line {
+                            assert!(!text.trim().is_empty(), "a blank line is not an answer");
+                        }
                     }
                 }
             }

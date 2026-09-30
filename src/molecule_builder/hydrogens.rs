@@ -301,6 +301,7 @@ pub(super) fn controls(
     let mut changed = false;
     ui.horizontal(|ui| {
         if ui.add_enabled(!mol.atoms.is_empty(), egui::Button::new("Add missing H"))
+            .on_hover_text("Assumes sp3 C and neutral divalent O; other elements are unchanged.")
             .on_hover_text("Uses the same chemically aware placement as Add Atom (auto): fills saturated sp3 carbon to four bonds and oxygen to two. Existing atoms stay fixed. Detected multiple/partial bonds are skipped.")
             .clicked() {
             changed = state.add(mol, settings);
@@ -309,7 +310,7 @@ pub(super) fn controls(
             changed |= state.undo(mol, settings);
         }
     });
-    ui.weak("Assumes sp3 C and neutral divalent O; other elements are unchanged.");
+
     match &state.report {
         Some(Ok(message)) => {
             ui.label(egui::RichText::new(message).small());
