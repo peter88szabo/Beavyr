@@ -432,6 +432,14 @@ pub struct BuilderHighlightGizmos;
 
 #[derive(Resource, Default, Clone)]
 pub struct EditorRotateState {
+    /// The atoms that move, when they are already known.
+    ///
+    /// Set for a fragment just placed: its own atoms, dummy and all, so a
+    /// centred ring always moves with its centre. `None` means "find the side
+    /// by cutting the bond", which is what picking three atoms does -- and
+    /// which cannot work on a sandwich ring, joined to its metal through every
+    /// carbon as well as through its centre.
+    pub moving: Option<Vec<usize>>,
     pub active: bool,                    // capture 3D clicks when true
     pub picks: Vec<usize>,               // [A, B, side-indicator (any atom on that side)]
     pub chosen_side: Option<RotateSide>, // inferred from 3rd pick
@@ -497,6 +505,15 @@ impl BuilderChange {
 #[derive(Resource, Clone)]
 pub struct ZMatrixBuilderState {
     pub zmat: Vec<ZAtom>,
+    /// The editor under the insert buttons, set up for the fragment placed
+    /// last: the new bond is its axis and the fragment's own atoms are what
+    /// moves. Empty until something has been placed.
+    pub placed_editor: EditorRotateState,
+    /// How many atoms the structure had when `placed_editor` was set up. Any
+    /// other count means the indices it holds no longer name the fragment --
+    /// an undo, a deletion, a reload -- and it is put away rather than left
+    /// to move the wrong atoms.
+    pub placed_atom_count: usize,
     /// Whether the fragments are shown as a grid of tiles rather than a
     /// dropdown. A dropdown hides twenty names behind one; tiles show them
     /// at the cost of height, so which is better is the user's call.
@@ -622,6 +639,8 @@ impl Default for ZMatrixBuilderState {
     fn default() -> Self {
         Self {
             zmat: Vec::new(),
+            placed_editor: EditorRotateState::default(),
+            placed_atom_count: 0,
             fragment_tiles: true,
             confirm_clear: false,
             skip_next_sync: false,
@@ -1528,6 +1547,7 @@ impl EditorRotateState {
             angle_deg: 0.0,
             axis_len_target: 0.0,
             bend_angle_deg: 0.0,
+            moving: None,
             session_origin: None,
             base_pos: None,
             base_ref: None,
@@ -1991,7 +2011,7 @@ fn commit_fragment_connect(
     // Placement and the clearance search now happen inside
     // the splice, in Cartesian space, so the reported score
     // describes the geometry that was actually adopted.
-    let (_fragment_indices, clearance) = add_fragment_to_zmat(
+    let (fragment_indices, clearance) = add_fragment_to_zmat(
         &mut zmat_state.zmat,
         &frag.xyz,
         Some((bond_ref, angle_ref, dihedral_ref)),
@@ -2021,6 +2041,25 @@ fn commit_fragment_connect(
     // attach to". Clearing it makes the highlight mean one thing.
     set_selected_atom(zmat_state, &mol.atoms, None);
     zmat_state.edit_refresh = true;
+
+    // The editor under the insert buttons now works on what was just put
+    // down. The axis is the bond just made, host to connector; what moves is
+    // the fragment's own atoms, taken from the placement rather than worked
+    // out from the bonds. For a centred ring the connector is the dummy, so
+    // the ring and its centre always move as one piece.
+    if let Some(&connector) = fragment_indices.first() {
+        // The bend needs an atom off the axis to measure against: the first
+        // atom after the connector, or the connector itself for a lone atom,
+        // where there is nothing to bend.
+        let third = fragment_indices.get(1).copied().unwrap_or(connector);
+        let mut editor = EditorRotateState::default();
+        editor.picks = vec![bond_ref, connector, third];
+        editor.chosen_side = Some(RotateSide::B);
+        editor.moving = Some(fragment_indices.clone());
+        editor.session_origin = Some(mol.pos.clone());
+        zmat_state.placed_editor = editor;
+        zmat_state.placed_atom_count = mol.atoms.len();
+    }
 }
 
 /// Replace the selected atom with the fragment named in
@@ -2186,6 +2225,7 @@ pub fn sync_builder_on_structure_load(
     // Undoing across a structure change would restore atoms that no longer
     // belong to anything.
     zmat_state.history.clear();
+    zmat_state.placed_editor = EditorRotateState::default();
     zmat_state.last_error = None;
 }
 
@@ -3085,6 +3125,10 @@ pub fn builder_ui_contents(
                     }
                 }
 
+                // The fragment just placed, ready to be turned, slid or tilted
+                // about the bond it was placed on.
+                placed_fragment_editor(ui, zmat_state, mol, settings);
+
                 // One Undo and one Redo, over every action the builder takes.
                 // The line beside them says what Undo will take back, so it
                 // can be read before it is pressed rather than discovered
@@ -3665,7 +3709,14 @@ fn recompute_preview(
     let mut failed: Option<&'static str> = None;
 
     if state.angle_deg.abs() > 1.0e-6 {
-        match rotate_side_with_bonds(&coords, &mol.bonds, a, b, side, state.angle_deg) {
+        let turned = match &state.moving {
+            Some(set) => {
+                let center = if side == RotateSide::A { a } else { b };
+                super::rotator::rotate_atoms(&coords, a, b, center, set, state.angle_deg)
+            }
+            None => rotate_side_with_bonds(&coords, &mol.bonds, a, b, side, state.angle_deg),
+        };
+        match turned {
             Some(next) => coords = next,
             None => failed = Some("The selected bond no longer separates two fragments."),
         }
@@ -3673,14 +3724,32 @@ fn recompute_preview(
     if failed.is_none() && (state.axis_len_target - state.base_axis_len).abs() > 1.0e-6 {
         let delta = state.axis_len_target - coords[a].distance(coords[b]);
         if delta.abs() > 1.0e-6 {
-            match translate_fragment_containing_atom(&coords, &mol.bonds, a, b, p, delta) {
+            let slid = match &state.moving {
+                Some(set) => super::rotator::translate_atoms(
+                    &coords,
+                    a,
+                    b,
+                    set,
+                    side == RotateSide::B,
+                    delta,
+                ),
+                None => translate_fragment_containing_atom(&coords, &mol.bonds, a, b, p, delta),
+            };
+            match slid {
                 Some(next) => coords = next,
                 None => failed = Some("The third-picked atom is not on a movable bond fragment."),
             }
         }
     }
     if failed.is_none() && (state.bend_angle_deg - state.base_bend_deg).abs() > 1.0e-6 {
-        match bend_side_with_bonds(&coords, &mol.bonds, a, b, side, p, state.bend_angle_deg) {
+        let bent = match &state.moving {
+            Some(set) => {
+                let center = if side == RotateSide::A { a } else { b };
+                super::rotator::bend_atoms(&coords, a, b, center, set, p, state.bend_angle_deg)
+            }
+            None => bend_side_with_bonds(&coords, &mol.bonds, a, b, side, p, state.bend_angle_deg),
+        };
+        match bent {
             Some(next) => coords = next,
             None => failed = Some("The selected bond no longer separates two fragments."),
         }
@@ -3696,32 +3765,34 @@ fn recompute_preview(
     }
 }
 
-/// The fragment editor, in one window and one form.
-///
-/// It was three stacked sections, each with its own action button and its own
-/// Undo. Rotating, stretching and bending about a bond are three numbers for
-/// the same choice of axis and side, so they are three sliders now: the
-/// structure follows as they move, nothing is committed until Apply, and
-/// Cancel restores exactly. One Undo, taken at Apply, because three of them
-/// were why pressing Undo did not reverse what was last done.
-fn fragment_editor_window(
-    ctx: &egui::Context,
+/// Where the fragment editor's axis comes from. The only thing that differs
+/// between the Fragment Editor window and the editor under the insert buttons:
+/// everything else -- the sliders, Apply, Cancel, Reset, Restore -- is the
+/// same code, so the two cannot drift apart.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum AxisSource {
+    /// Picked by clicking three atoms, in the Fragment Editor window.
+    Picked,
+    /// The bond a fragment was just placed on. Nothing to pick.
+    JustPlaced,
+}
+
+/// What the form's buttons asked for this frame.
+#[derive(Default)]
+struct EditorActions {
+    apply: bool,
+    cancel: bool,
+    reset: bool,
+    restore: bool,
+}
+
+/// Take a fresh base when the axis or side changes, and report whether the
+/// editor has everything it needs to preview.
+fn fragment_editor_prepare(
     state: &mut EditorRotateState,
-    zmat_state: &mut ZMatrixBuilderState,
     mol: &mut Molecule,
     settings: &mut MolSettings,
-) {
-    // Taken on the frame the window opens, before any preview exists, and
-    // dropped when it closes so reopening starts from wherever the structure
-    // now stands.
-    if state.window_open {
-        if state.session_origin.is_none() {
-            state.session_origin = Some(mol.pos.clone());
-        }
-    } else {
-        state.session_origin = None;
-    }
-
+) -> bool {
     // A pick can outlive the atom it named -- a removal renumbers everything --
     // so every index is checked before it indexes.
     let in_range = state.picks.len() >= 3 && state.picks.iter().all(|&i| i < mol.pos.len());
@@ -3755,22 +3826,21 @@ fn fragment_editor_window(
     } else if state.base_pos.is_some() {
         revert_preview(state, mol, settings);
     }
+    ready
+}
 
-    let mut open = state.window_open;
-    let mut apply = false;
-    let mut cancel = false;
-    let mut reset = false;
-    let mut restore = false;
+/// The editor's controls. Identical in both places except for how the axis is
+/// described: picked atoms need instructions, a just-placed bond does not.
+fn fragment_editor_form(
+    ui: &mut egui::Ui,
+    state: &mut EditorRotateState,
+    ready: bool,
+    source: AxisSource,
+) -> EditorActions {
+    let mut actions = EditorActions::default();
 
-    egui::Window::new("Fragment Editor")
-        .open(&mut open)
-        .default_width(340.0)
-        .default_height(380.0)
-        // Both directions. A form of fixed height is still a window the user
-        // may want wider, and the sliders read better with room.
-        .resizable(true)
-        .vscroll(true)
-        .show(ctx, |ui| {
+    match source {
+        AxisSource::Picked => {
             ui.horizontal(|ui| {
                 if ui
                     .button(if state.active { "Stop picking" } else { "Pick atoms" })
@@ -3785,9 +3855,7 @@ fn fragment_editor_window(
                 ui.weak("Click atoms in the 3D view.");
             });
             ui.separator();
-            ui.label(
-                egui::RichText::new("Pick three atoms").strong(),
-            );
+            ui.label(egui::RichText::new("Pick three atoms").strong());
             ui.weak(
                 "Two for the bond axis, then one on the side you want to move. \
                  Everything joined to that side moves with it.",
@@ -3815,57 +3883,85 @@ fn fragment_editor_window(
                 2 => ui.weak("3 of 3: click an atom on the side you want to move."),
                 _ => ui.weak("All three picked. The structure follows the sliders."),
             };
-            if let Some(status) = &state.status {
-                ui.colored_label(egui::Color32::LIGHT_RED, status);
+        }
+        AxisSource::JustPlaced => {
+            if let (Some(a), Some(b)) = (state.picks.first(), state.picks.get(1)) {
+                ui.monospace(format!("Axis:   atom {} \u{2014} atom {} (the new bond)", a + 1, b + 1));
             }
+            let count = state.moving.as_ref().map_or(0, Vec::len);
+            ui.monospace(format!("Moving: the {count} atoms just placed"));
+        }
+    }
+    if let Some(status) = &state.status {
+        ui.colored_label(egui::Color32::LIGHT_RED, status);
+    }
 
-            ui.add_space(6.0);
-            let max_len = (state.base_axis_len * 2.0).max(0.5);
-            ui.add_enabled_ui(ready, |ui| {
-                ui.add(
-                    egui::Slider::new(&mut state.angle_deg, -180.0..=180.0)
-                        .text("Rotate about axis (\u{b0})"),
-                );
-                ui.add(
-                    egui::Slider::new(&mut state.axis_len_target, 0.0..=max_len)
-                        .text("Axis length (\u{c5})"),
-                );
-                ui.add(
-                    egui::Slider::new(&mut state.bend_angle_deg, 0.0..=180.0)
-                        .text("Angle to axis (\u{b0})"),
-                );
-            });
+    ui.add_space(6.0);
+    let max_len = (state.base_axis_len * 2.0).max(0.5);
+    ui.add_enabled_ui(ready, |ui| {
+        ui.add(
+            egui::Slider::new(&mut state.angle_deg, -180.0..=180.0)
+                .text("Rotate about axis (\u{b0})"),
+        );
+        ui.add(
+            egui::Slider::new(&mut state.axis_len_target, 0.0..=max_len)
+                .text("Axis length (\u{c5})"),
+        );
+        ui.add(
+            egui::Slider::new(&mut state.bend_angle_deg, 0.0..=180.0)
+                .text("Angle to axis (\u{b0})"),
+        );
+    });
 
-            ui.add_space(8.0);
-            ui.horizontal(|ui| {
-                apply = ui
-                    .add_enabled(ready, egui::Button::new("Apply"))
-                    .on_disabled_hover_text("Pick an axis and a side first.")
-                    .clicked();
-                cancel = ui
-                    .add_enabled(state.base_pos.is_some(), egui::Button::new("Cancel"))
-                    .on_disabled_hover_text("There is nothing in progress to cancel.")
-                    .clicked();
-                reset = ui
-                    .button("Reset")
-                    .on_hover_text("Forget the picks and start again.")
-                    .clicked();
-                restore = ui
-                    .add_enabled(
-                        state.session_origin.is_some(),
-                        egui::Button::new("Restore original"),
-                    )
-                    .on_hover_text(
-                        "Put the structure back as it was when this window was opened, \
-                         undoing every Apply made since.",
-                    )
-                    .on_disabled_hover_text("Nothing has been changed here yet.")
-                    .clicked();
-            });
-            ui.weak("Nothing is written until Apply. Undo is in the builder panel.");
-        });
+    ui.add_space(8.0);
+    ui.horizontal_wrapped(|ui| {
+        actions.apply = ui
+            .add_enabled(ready, egui::Button::new("Apply"))
+            .on_disabled_hover_text("Pick an axis and a side first.")
+            .clicked();
+        actions.cancel = ui
+            .add_enabled(state.base_pos.is_some(), egui::Button::new("Cancel"))
+            .on_disabled_hover_text("There is nothing in progress to cancel.")
+            .clicked();
+        actions.reset = ui
+            .button("Reset")
+            .on_hover_text(match source {
+                AxisSource::Picked => "Forget the picks and start again.",
+                AxisSource::JustPlaced => "Put the sliders back to where they started.",
+            })
+            .clicked();
+        actions.restore = ui
+            .add_enabled(
+                state.session_origin.is_some(),
+                egui::Button::new("Restore original"),
+            )
+            .on_hover_text(match source {
+                AxisSource::Picked => {
+                    "Put the structure back as it was when this window was opened, \
+                     undoing every Apply made since."
+                }
+                AxisSource::JustPlaced => {
+                    "Put the fragment back exactly where it was placed, \
+                     undoing every Apply made since."
+                }
+            })
+            .on_disabled_hover_text("Nothing has been changed here yet.")
+            .clicked();
+    });
+    ui.weak("Nothing is written until Apply. Undo is in the builder panel.");
+    actions
+}
 
-    if apply {
+/// Carry out what the buttons asked for, then rebuild the preview.
+fn fragment_editor_finish(
+    actions: EditorActions,
+    state: &mut EditorRotateState,
+    zmat_state: &mut ZMatrixBuilderState,
+    mol: &mut Molecule,
+    settings: &mut MolSettings,
+    source: AxisSource,
+) {
+    if actions.apply {
         // What is on screen already *is* the result, so committing it is only
         // a matter of stopping treating it as provisional. The base goes to
         // the builder's one history, which is where Undo lives: the editor
@@ -3882,10 +3978,10 @@ fn fragment_editor_window(
         settings.geometry_dirty = true;
         settings.bond_topology_dirty = true;
     }
-    if cancel {
+    if actions.cancel {
         revert_preview(state, mol, settings);
     }
-    if restore {
+    if actions.restore {
         // Back to the geometry this session started from, however many
         // Applies ago that was. Recorded first, so the builder's Undo can
         // take the restore itself back if it was a mistake.
@@ -3899,20 +3995,104 @@ fn fragment_editor_window(
             state.preview_values = None;
         }
     }
-    if reset {
+    if actions.reset {
         revert_preview(state, mol, settings);
-        // reset() clears every field. Two must survive it: the window the
-        // button was pressed in should stay where it is, and forgetting the
-        // picks must not also forget what "Restore original" restores to --
-        // otherwise Restore would quietly re-anchor to the edited geometry.
+        // reset() clears every field. Some must survive it: the window stays
+        // where it is, and forgetting the picks must not also forget what
+        // "Restore original" restores to -- otherwise Restore would quietly
+        // re-anchor to the edited geometry. For a fragment just placed the
+        // axis and the atoms are the whole point, so they survive too.
+        let window_open = state.window_open;
         let origin = state.session_origin.take();
+        let keep = (source == AxisSource::JustPlaced)
+            .then(|| (state.picks.clone(), state.chosen_side, state.moving.clone()));
         state.reset();
-        state.window_open = open;
+        state.window_open = window_open;
         state.session_origin = origin;
+        if let Some((picks, side, moving)) = keep {
+            state.picks = picks;
+            state.chosen_side = side;
+            state.moving = moving;
+        }
     }
 
     recompute_preview(state, mol, settings);
+}
+
+/// The fragment editor, in its own window, on three picked atoms.
+///
+/// Rotating, stretching and bending about a bond are three numbers for the
+/// same choice of axis and side, so they are three sliders on one form: the
+/// structure follows as they move, nothing is committed until Apply, and
+/// Cancel restores exactly.
+fn fragment_editor_window(
+    ctx: &egui::Context,
+    state: &mut EditorRotateState,
+    zmat_state: &mut ZMatrixBuilderState,
+    mol: &mut Molecule,
+    settings: &mut MolSettings,
+) {
+    // Taken on the frame the window opens, before any preview exists, and
+    // dropped when it closes so reopening starts from wherever the structure
+    // now stands.
+    if state.window_open {
+        if state.session_origin.is_none() {
+            state.session_origin = Some(mol.pos.clone());
+        }
+    } else {
+        state.session_origin = None;
+    }
+
+    let ready = fragment_editor_prepare(state, mol, settings);
+
+    let mut open = state.window_open;
+    let mut actions = EditorActions::default();
+    egui::Window::new("Fragment Editor")
+        .open(&mut open)
+        .default_width(340.0)
+        .default_height(380.0)
+        .resizable(true)
+        .vscroll(true)
+        .show(ctx, |ui| {
+            actions = fragment_editor_form(ui, state, ready, AxisSource::Picked);
+        });
     state.window_open = open;
+
+    fragment_editor_finish(actions, state, zmat_state, mol, settings, AxisSource::Picked);
+}
+
+/// The same editor, under the insert buttons, for the fragment just placed.
+///
+/// No picking: the axis is the bond the fragment was placed on, and what
+/// moves is the fragment's own atoms. It follows each new placement, and
+/// disappears as soon as the structure no longer matches it -- after an undo,
+/// a deletion or a reload its atom indices would name the wrong atoms.
+fn placed_fragment_editor(
+    ui: &mut egui::Ui,
+    zmat_state: &mut ZMatrixBuilderState,
+    mol: &mut Molecule,
+    settings: &mut MolSettings,
+) {
+    if zmat_state.placed_editor.moving.is_none() {
+        return;
+    }
+    if mol.atoms.len() != zmat_state.placed_atom_count {
+        zmat_state.placed_editor = EditorRotateState::default();
+        return;
+    }
+
+    // Taken out for the frame so the editor and the builder's history can
+    // both be borrowed; put back at the end.
+    let mut editor = std::mem::take(&mut zmat_state.placed_editor);
+    let ready = fragment_editor_prepare(&mut editor, mol, settings);
+
+    ui.add_space(6.0);
+    ui.separator();
+    ui.label(egui::RichText::new("Newly Placed Fragment").heading().strong());
+    let actions = fragment_editor_form(ui, &mut editor, ready, AxisSource::JustPlaced);
+    fragment_editor_finish(actions, &mut editor, zmat_state, mol, settings, AxisSource::JustPlaced);
+
+    zmat_state.placed_editor = editor;
 }
 
 /// The classic docked-left-panel presentation of the molecule editor.
@@ -4063,6 +4243,58 @@ C   2.050   1.450   0.000
                     "{name}: the centre is not bonded to ring atom {carbon}"
                 );
             }
+        }
+    }
+
+    /// A fragment just placed gets an editor aimed at it: the new bond as
+    /// the axis, the fragment's own atoms as what moves. For a centred ring
+    /// that means the dummy and the whole ring slide, turn and tilt as one,
+    /// and the metal it hangs from stays exactly where it is.
+    ///
+    /// This is also what the bond-based editor cannot do on a sandwich ring:
+    /// the ring is bonded to the metal through every carbon as well as
+    /// through its centre, so cutting the metal-centre bond leaves no loose
+    /// side to move.
+    #[test]
+    fn a_placed_ring_moves_as_one_piece_with_its_centre() {
+        let mut mol = Molecule {
+            atoms: vec!["Fe".to_string()],
+            pos: vec![Vec3::ZERO],
+            bonds: vec![],
+            hydrogen_bonds: vec![],
+        };
+        let mut state = ZMatrixBuilderState::default();
+        state.zmat = xyz_to_zmat(&mol.atoms, &mol.pos);
+        state.selected_index = Some(0);
+        state.frag_name = "5-Ring centered".to_string();
+        let mut settings = MolSettings::default();
+
+        commit_fragment_connect(&mut state, &mut mol, &mut settings);
+        assert!(state.last_error.is_none(), "{:?}", state.last_error);
+
+        let mut editor = state.placed_editor.clone();
+        let moving = editor.moving.clone().expect("the placed editor is set up");
+        assert_eq!(moving.len(), 11, "the dummy, five carbons and five hydrogens");
+        assert_eq!(editor.picks[0], 0, "the axis starts at the iron");
+        let centre = editor.picks[1];
+        assert_eq!(mol.atoms[centre], "X", "and ends at the ring's centre");
+
+        // Stretch the metal-centre bond by half an angstrom.
+        assert!(fragment_editor_prepare(&mut editor, &mut mol, &mut settings));
+        let before = mol.pos.clone();
+        let axis = (before[centre] - before[0]).normalize();
+        editor.axis_len_target = editor.base_axis_len + 0.5;
+        recompute_preview(&mut editor, &mut mol, &mut settings);
+        assert!(editor.status.is_none(), "{:?}", editor.status);
+
+        assert_eq!(mol.pos[0], before[0], "the iron must not move");
+        for &i in &moving {
+            let shift = mol.pos[i] - before[i];
+            assert!(
+                (shift - axis * 0.5).length() < 1.0e-4,
+                "atom {i} ({}) moved by {shift:?}, not with its centre",
+                mol.atoms[i]
+            );
         }
     }
 

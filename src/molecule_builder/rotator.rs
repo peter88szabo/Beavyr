@@ -87,12 +87,36 @@ pub fn rotate_side_with_bonds(
         RotateSide::A => (a, side_a),
         RotateSide::B => (b, side_b),
     };
-    let center = coords[center_index];
+    rotate_atoms(coords, a, b, center_index, &rotating_set, angle_deg)
+}
+
+/// Rotate a given set of atoms about the a-b axis, around `center_index`.
+///
+/// The set is given rather than found. The bond-based versions find it by
+/// cutting the bond and seeing what falls away, which fails wherever the far
+/// side is joined back some other way -- a sandwich ring is bonded to its
+/// metal through every carbon as well as through its centre. When the atoms
+/// to move are already known, as they are for a fragment just placed, they
+/// are passed here directly.
+pub fn rotate_atoms(
+    coords: &[Vec3],
+    a: usize,
+    b: usize,
+    center_index: usize,
+    moving: &[usize],
+    angle_deg: f32,
+) -> Option<Vec<Vec3>> {
+    let axis_vec = *coords.get(b)? - *coords.get(a)?;
+    let axis_len = axis_vec.length();
+    if axis_len <= 1.0e-6 {
+        return None;
+    }
+    let center = *coords.get(center_index)?;
     let axis = axis_vec / axis_len;
     let angle = angle_deg.to_radians();
     let mut new_coords = coords.to_vec();
-    for index in rotating_set {
-        if index == center_index {
+    for &index in moving {
+        if index == center_index || index >= coords.len() {
             continue;
         }
         let offset = coords[index] - center;
@@ -120,17 +144,42 @@ pub fn translate_fragment_containing_atom(
         return None;
     }
     let (side_a, side_b) = split_sides_from_bonds(coords.len(), bonds, a, b)?;
-    let (direction, moving_set) = if side_a.contains(&selected_atom) {
-        (-axis_vec / axis_len, side_a)
+    let (toward_b, moving_set) = if side_a.contains(&selected_atom) {
+        (false, side_a)
     } else if side_b.contains(&selected_atom) {
-        (axis_vec / axis_len, side_b)
+        (true, side_b)
     } else {
         return None;
     };
+    translate_atoms(coords, a, b, &moving_set, toward_b, distance)
+}
 
+/// Move a given set of atoms along the a-b axis: away from `a` when
+/// `toward_b`, away from `b` otherwise, so a positive distance always
+/// lengthens the bond. See [`rotate_atoms`] for why the set is given.
+pub fn translate_atoms(
+    coords: &[Vec3],
+    a: usize,
+    b: usize,
+    moving: &[usize],
+    toward_b: bool,
+    distance: f32,
+) -> Option<Vec<Vec3>> {
+    let axis_vec = *coords.get(b)? - *coords.get(a)?;
+    let axis_len = axis_vec.length();
+    if axis_len <= 1.0e-6 {
+        return None;
+    }
+    let direction = if toward_b {
+        axis_vec / axis_len
+    } else {
+        -axis_vec / axis_len
+    };
     let mut new_coords = coords.to_vec();
-    for index in moving_set {
-        new_coords[index] += direction * distance;
+    for &index in moving {
+        if index < coords.len() {
+            new_coords[index] += direction * distance;
+        }
     }
     Some(new_coords)
 }
@@ -154,11 +203,31 @@ pub fn bend_side_with_bonds(
         RotateSide::A => (a, side_a),
         RotateSide::B => (b, side_b),
     };
+    bend_atoms(coords, a, b, center_index, &rotating_set, picked_idx, target_angle_deg)
+}
+
+/// Swing a given set of atoms about `center_index` until `picked_idx` makes
+/// `target_angle_deg` with the a-b axis. See [`rotate_atoms`] for why the set
+/// is given.
+pub fn bend_atoms(
+    coords: &[Vec3],
+    a: usize,
+    b: usize,
+    center_index: usize,
+    rotating_set: &[usize],
+    picked_idx: usize,
+    target_angle_deg: f32,
+) -> Option<Vec<Vec3>> {
+    let axis_vec = *coords.get(b)? - *coords.get(a)?;
+    let axis_len = axis_vec.length();
+    if axis_len <= 1.0e-6 {
+        return None;
+    }
     if !rotating_set.contains(&picked_idx) {
         return None;
     }
 
-    let center = coords[center_index];
+    let center = *coords.get(center_index)?;
     let axis = axis_vec / axis_len;
     let picked_offset = *coords.get(picked_idx)? - center;
     let picked_len = picked_offset.length();
@@ -181,8 +250,8 @@ pub fn bend_side_with_bonds(
     }
     let rotation_axis = rotation_axis.normalize();
     let mut new_coords = coords.to_vec();
-    for index in rotating_set {
-        if index == center_index {
+    for &index in rotating_set {
+        if index == center_index || index >= coords.len() {
             continue;
         }
         let offset = coords[index] - center;
@@ -227,5 +296,40 @@ mod tests {
         assert_eq!(moved[1], Vec3::new(0.5, 0.0, 0.0));
         assert_eq!(moved[2], coords[2]);
         assert_eq!(moved[3], coords[3]);
+    }
+
+    /// A ring bonded to its metal through every carbon as well as through its
+    /// centre has no "far side" for the bond search to find, so the bond-based
+    /// rotation refuses. Given the atoms directly, the rotation works, and
+    /// leaves everything outside the set exactly where it was.
+    #[test]
+    fn an_explicit_set_moves_where_the_bond_search_cannot() {
+        // Metal 0, centre 1, and a three-atom "ring" 2..4 bonded to both.
+        let coords = vec![
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(0.0, 0.0, 1.7),
+            Vec3::new(1.2, 0.0, 1.7),
+            Vec3::new(-0.6, 1.0, 1.7),
+            Vec3::new(-0.6, -1.0, 1.7),
+        ];
+        let bonds = vec![
+            (0, 1, 1.7),
+            (1, 2, 1.2),
+            (1, 3, 1.2),
+            (1, 4, 1.2),
+            (0, 2, 2.1),
+            (0, 3, 2.1),
+            (0, 4, 2.1),
+        ];
+        assert!(
+            rotate_side_with_bonds(&coords, &bonds, 0, 1, RotateSide::B, 30.0).is_none(),
+            "the bond search has no side to find here"
+        );
+
+        let moved = rotate_atoms(&coords, 0, 1, 1, &[1, 2, 3, 4], 90.0).unwrap();
+        assert_eq!(moved[0], coords[0], "the metal must not move");
+        assert_eq!(moved[1], coords[1], "the centre is the pivot");
+        // A quarter turn about z takes (1.2, 0) to (0, 1.2) at the same height.
+        assert!((moved[2] - Vec3::new(0.0, 1.2, 1.7)).length() < 1.0e-4, "{:?}", moved[2]);
     }
 }
