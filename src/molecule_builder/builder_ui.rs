@@ -2404,10 +2404,13 @@ fn cleanup_row(
         if ui
             .add_enabled(
                 enabled,
+                // Neon green text on the ordinary button background. A filled
+                // button drew far more attention than a convenience deserves.
                 egui::Button::new(
-                    egui::RichText::new("Clean up geometry").color(egui::Color32::BLACK),
-                )
-                .fill(egui::Color32::from_rgb(120, 190, 120)),
+                    egui::RichText::new("Clean up geometry")
+                        .color(egui::Color32::from_rgb(57, 255, 20))
+                        .strong(),
+                ),
             )
             .on_hover_text(
                 "Relaxes the structure with the built-in DREIDING force field. Fixes the strained \
