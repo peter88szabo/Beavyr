@@ -37,3 +37,7 @@ continue.txt
 
 # LibreOffice/OpenOffice lock files
 .~lock.*#
+
+# Claude working notes; never part of the project
+.superpowers/
+docs/superpowers/
