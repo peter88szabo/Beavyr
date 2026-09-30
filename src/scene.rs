@@ -1015,6 +1015,9 @@ pub fn rebuild_if_dirty(
     if matches!(settings.representation, RepresentationMode::SticksRounded) {
         degree = vec![0; mol.atoms.len()];
         for &(i, j, _d) in &bonds {
+            if bond_touches_dummy(&mol, i, j) {
+                continue;
+            }
             if i < degree.len() {
                 degree[i] += 1;
             }
@@ -1025,6 +1028,9 @@ pub fn rebuild_if_dirty(
     }
     for (i, j, len_cc) in bonds {
         if i >= mol.atoms.len() || j >= mol.atoms.len() {
+            continue;
+        }
+        if bond_touches_dummy(&mol, i, j) {
             continue;
         }
         if !element_visible(&mol.atoms[i], &settings) || !element_visible(&mol.atoms[j], &settings)
@@ -1243,6 +1249,9 @@ pub fn draw_bond_lines(
 
     for &(i, j, _len_cc) in &mol.bonds {
         if i >= n_pos || j >= n_pos || i >= n_atoms || j >= n_atoms {
+            continue;
+        }
+        if bond_touches_dummy(&mol, i, j) {
             continue;
         }
         if !element_visible(&mol.atoms[i], &settings) || !element_visible(&mol.atoms[j], &settings)
@@ -1625,4 +1634,18 @@ mod axis_gizmo_tests {
             "the logical coordinates themselves must differ between scale factors"
         );
     }
+}
+
+/// Whether a bond has a dummy at either end, and so is not drawn.
+///
+/// Only hidden, not removed: the bond stays in `mol.bonds`, because the
+/// fragment editor finds the ring to rotate by asking which atoms lie beyond
+/// the metal-dummy bond. Deleting it would leave nothing to turn.
+fn bond_touches_dummy(mol: &Molecule, i: usize, j: usize) -> bool {
+    let is_dummy = |k: usize| {
+        mol.atoms
+            .get(k)
+            .is_some_and(|symbol| crate::molecule::is_dummy(symbol))
+    };
+    is_dummy(i) || is_dummy(j)
 }

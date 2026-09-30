@@ -27,6 +27,13 @@ fn base_map() -> HashMap<String, Color> {
     m
 }
 
+/// A dummy atom's colour, the same in every scheme.
+///
+/// A clear sky blue: a dummy is a placeholder, not an element, so it should
+/// never be mistaken for one, and nitrogen's darker blue is the nearest thing
+/// on screen it could be confused with.
+pub const DUMMY_COLOR: Color = Color::srgb(0.25, 0.65, 1.0);
+
 /// Handy: get a full per-element map (used to seed `element_colors`)
 pub fn color_scheme_map(s: ColorScheme) -> HashMap<String, Color> {
     use ColorScheme::*;
@@ -96,11 +103,17 @@ pub fn color_scheme_map(s: ColorScheme) -> HashMap<String, Color> {
             m.insert("I".into(), HALO_I);
         }
     }
+    // Every scheme, since a dummy is not part of any of them.
+    m.insert(crate::molecule::DUMMY_SYMBOL.into(), DUMMY_COLOR);
+    m.insert("Xx".into(), DUMMY_COLOR);
     m
 }
 
 /// A convenience single-atom color query (mirrors the maps above)
 pub fn color_for(atom: &str, scheme: ColorScheme) -> Color {
+    if crate::molecule::is_dummy(atom) {
+        return DUMMY_COLOR;
+    }
     match scheme {
         ColorScheme::Custom => default_custom(atom),
         ColorScheme::CPK => cpk(atom),
