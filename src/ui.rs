@@ -2174,19 +2174,21 @@ pub fn ui_panel(
             });
 
         let mut builder_open = ui_layout.builder_open;
-        // Opens tall and on the right: the editor is a long column of
-        // controls with the Z-matrix table under them, and the button that
-        // opens it lives on the right edge, so appearing on the left meant
-        // crossing the whole window to reach it. `default_*` only apply the
-        // first time -- egui remembers wherever the user drags it afterwards.
+        // Opens on the right, because the button that opens it lives on the
+        // right edge and appearing on the left meant crossing the whole
+        // window to reach it. Height follows the content: the Z-matrix table
+        // moved to its own window, so the editor is no longer a long column
+        // and reserving most of the screen for it wasted the space. `default_*`
+        // only apply the first time -- egui remembers wherever the user drags
+        // it afterwards, hence the id change to let this default take once.
         const EDITOR_WIDTH: f32 = 440.0;
         const EDITOR_MARGIN: f32 = 16.0;
         let viewport = ctx.viewport_rect();
-        let editor_height = (viewport.height() - 2.0 * EDITOR_MARGIN).clamp(420.0, 980.0);
         let builder_window = egui::Window::new("Molecule Editor")
+            .id(egui::Id::new("molecule_editor_window_v2"))
             .open(&mut builder_open)
             .resizable(true)
-            .default_size([EDITOR_WIDTH, editor_height])
+            .default_width(EDITOR_WIDTH)
             .default_pos([
                 (viewport.right() - EDITOR_WIDTH - EDITOR_MARGIN).max(viewport.left()),
                 viewport.top() + EDITOR_MARGIN,

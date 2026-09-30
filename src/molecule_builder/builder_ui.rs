@@ -439,6 +439,11 @@ pub struct EditorRotateState {
     pub angle_deg: f32,                  // degrees
     pub axis_len_target: f32,            // Å, absolute axis length target
     pub bend_angle_deg: f32, // degrees
+    /// The geometry as it stood when the fragment editor was opened, before
+    /// anything in this session was applied. `base_pos` reaches back one
+    /// uncommitted edit; this reaches back to the start, which is what
+    /// "restore the original" means after several Applies.
+    pub session_origin: Option<Vec<Vec3>>,
     /// The geometry as it stood before the current, uncommitted edit.
     ///
     /// The three operations are previewed live by recomputing from this every
@@ -492,6 +497,8 @@ impl BuilderChange {
 #[derive(Resource, Clone)]
 pub struct ZMatrixBuilderState {
     pub zmat: Vec<ZAtom>,
+    /// Whether the "really clear the display?" question is on screen.
+    pub confirm_clear: bool,
     /// Set when the builder made the change itself, so the structure-load
     /// sync leaves it alone: the builder has already updated its own
     /// Z-matrix, and resyncing would also clear the undo history for an edit
@@ -611,6 +618,7 @@ impl Default for ZMatrixBuilderState {
     fn default() -> Self {
         Self {
             zmat: Vec::new(),
+            confirm_clear: false,
             skip_next_sync: false,
             history: super::history::BuilderHistory::default(),
             zmat_window_open: false,
@@ -1484,6 +1492,7 @@ impl EditorRotateState {
             angle_deg: 0.0,
             axis_len_target: 0.0,
             bend_angle_deg: 0.0,
+            session_origin: None,
             base_pos: None,
             base_ref: None,
             preview_values: None,
@@ -2509,8 +2518,69 @@ pub fn builder_ui_contents(
     traj: &mut crate::trajectory::TrajectoryState,
 ) -> BuilderChange {
     let mut change = BuilderChange::None;
-    crate::structure_history::editor_controls(ui, history, mol, traj);
+    let mut clear_pressed = false;
+    crate::structure_history::editor_controls(ui, history, mol, traj, |ui| {
+        // Yellow, and beside Save to history rather than among the buttons
+        // that edit the structure in place: it acts on the whole structure,
+        // like saving it does.
+        let clear = egui::Button::new(
+            egui::RichText::new("Clear Display").color(egui::Color32::BLACK),
+        )
+        .fill(egui::Color32::from_rgb(230, 195, 70));
+        clear_pressed = ui.add(clear).clicked();
+    });
+    if clear_pressed && !mol.atoms.is_empty() {
+        zmat_state.confirm_clear = true;
+    }
     let ctx = ui.ctx().clone();
+
+    // Asked before, not explained after. Undo does bring the structure back,
+    // but a structure built by hand over several minutes is not something to
+    // lose to a misplaced click and then have to notice.
+    if zmat_state.confirm_clear {
+        let mut do_clear = false;
+        let mut cancel = false;
+        egui::Window::new("Clear the display?")
+            .collapsible(false)
+            .resizable(true)
+            .show(&ctx, |ui| {
+                ui.label(format!(
+                    "This removes the {} atoms on screen.",
+                    mol.atoms.len()
+                ));
+                ui.weak("Undo in the editor brings them back.");
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    let clear = egui::Button::new(
+                        egui::RichText::new("Clear").color(egui::Color32::BLACK),
+                    )
+                    .fill(egui::Color32::from_rgb(230, 195, 70));
+                    do_clear = ui.add(clear).clicked();
+                    cancel = ui.button("Cancel").clicked();
+                });
+            });
+        if cancel {
+            zmat_state.confirm_clear = false;
+        }
+        if do_clear {
+            zmat_state.confirm_clear = false;
+            // Recorded first, so Undo brings the structure back.
+            record_step(zmat_state, mol, "cleared the display");
+            let previous = history.before(mol, traj);
+            mol.atoms.clear();
+            mol.pos.clear();
+            mol.bonds.clear();
+            mol.hydrogen_bonds.clear();
+            traj.clear_for_structure();
+            history.replaced(previous, mol, traj, "Drawn structure");
+            change = BuilderChange::Replaced;
+            settings.geometry_dirty = true;
+            settings.bond_topology_dirty = true;
+            zmat_state.zmat.clear();
+            set_selected_atom(&mut zmat_state, &mol.atoms, None);
+            zmat_state.last_error = None;
+        }
+    }
             if zmat_state.original_atoms.is_none() && !mol.atoms.is_empty() {
                 zmat_state.original_atoms = Some(mol.atoms.clone());
                 zmat_state.original_pos = Some(mol.pos.clone());
@@ -2520,31 +2590,6 @@ pub fn builder_ui_contents(
                 let previous_atom_count = mol.atoms.len();
                 let mut hydrogens_changed = false;
                 ui.horizontal(|ui| {
-                    // Yellow: it throws the structure away. Undo brings it
-                    // back, but the button should still look like what it is.
-                    let clear = egui::Button::new(
-                        egui::RichText::new("Clear Display").color(egui::Color32::BLACK),
-                    )
-                    .fill(egui::Color32::from_rgb(230, 195, 70));
-                    if ui.add(clear).clicked() && !mol.atoms.is_empty() {
-                        // Recorded first, so Undo brings the structure back.
-                        // Clearing the screen by accident used to be the one
-                        // edit with no way back.
-                        record_step(zmat_state, mol, "cleared the display");
-                        let previous = history.before(mol, traj);
-                        mol.atoms.clear();
-                        mol.pos.clear();
-                        mol.bonds.clear();
-                        mol.hydrogen_bonds.clear();
-                        traj.clear_for_structure();
-                        history.replaced(previous, mol, traj, "Drawn structure");
-                        change = BuilderChange::Replaced;
-                        settings.geometry_dirty = true;
-                        settings.bond_topology_dirty = true;
-                        zmat_state.zmat.clear();
-                        set_selected_atom(&mut zmat_state, &mol.atoms, None);
-                        zmat_state.last_error = None;
-                    }
                     hydrogens_changed = super::hydrogens::buttons(
                         ui,
                         &mut zmat_state.hydrogen_state,
@@ -2603,8 +2648,15 @@ pub fn builder_ui_contents(
                     {
                         zmat_state.zmat_window_open = !zmat_state.zmat_window_open;
                     }
+                    // Blue text, the same treatment as Clean up geometry:
+                    // a coloured label on the ordinary button background,
+                    // light enough to read against a dark panel.
                     if ui
-                        .button("Fragment editor")
+                        .add(egui::Button::new(
+                            egui::RichText::new("Fragment editor")
+                                .color(egui::Color32::from_rgb(105, 175, 255))
+                                .strong(),
+                        ))
                         .on_hover_text("Rotate, stretch or bend part of the structure about a bond.")
                         .clicked()
                     {
@@ -3521,6 +3573,17 @@ fn fragment_editor_window(
     mol: &mut Molecule,
     settings: &mut MolSettings,
 ) {
+    // Taken on the frame the window opens, before any preview exists, and
+    // dropped when it closes so reopening starts from wherever the structure
+    // now stands.
+    if state.window_open {
+        if state.session_origin.is_none() {
+            state.session_origin = Some(mol.pos.clone());
+        }
+    } else {
+        state.session_origin = None;
+    }
+
     // A pick can outlive the atom it named -- a removal renumbers everything --
     // so every index is checked before it indexes.
     let in_range = state.picks.len() >= 3 && state.picks.iter().all(|&i| i < mol.pos.len());
@@ -3559,6 +3622,7 @@ fn fragment_editor_window(
     let mut apply = false;
     let mut cancel = false;
     let mut reset = false;
+    let mut restore = false;
 
     egui::Window::new("Fragment Editor")
         .open(&mut open)
@@ -3583,6 +3647,14 @@ fn fragment_editor_window(
                 ui.weak("Click atoms in the 3D view.");
             });
             ui.separator();
+            ui.label(
+                egui::RichText::new("Pick three atoms").strong(),
+            );
+            ui.weak(
+                "Two for the bond axis, then one on the side you want to move. \
+                 Everything joined to that side moves with it.",
+            );
+            ui.add_space(4.0);
 
             // What the picks have settled, and what is still wanted. Both on
             // screen: a form that waits for a click without saying which one
@@ -3600,9 +3672,10 @@ fn fragment_editor_window(
                 },
             );
             match state.picks.len() {
-                0 | 1 => ui.weak("Pick the two atoms of the bond axis."),
-                2 => ui.weak("Pick a third atom on the side you want to move."),
-                _ => ui.weak("The structure follows the sliders as you drag them."),
+                0 => ui.weak("1 of 3: click the first atom of the bond axis."),
+                1 => ui.weak("2 of 3: click the second atom of the bond axis."),
+                2 => ui.weak("3 of 3: click an atom on the side you want to move."),
+                _ => ui.weak("All three picked. The structure follows the sliders."),
             };
             if let Some(status) = &state.status {
                 ui.colored_label(egui::Color32::LIGHT_RED, status);
@@ -3639,6 +3712,17 @@ fn fragment_editor_window(
                     .button("Reset")
                     .on_hover_text("Forget the picks and start again.")
                     .clicked();
+                restore = ui
+                    .add_enabled(
+                        state.session_origin.is_some(),
+                        egui::Button::new("Restore original"),
+                    )
+                    .on_hover_text(
+                        "Put the structure back as it was when this window was opened, \
+                         undoing every Apply made since.",
+                    )
+                    .on_disabled_hover_text("Nothing has been changed here yet.")
+                    .clicked();
             });
             ui.weak("Nothing is written until Apply. Undo is in the builder panel.");
         });
@@ -3663,12 +3747,30 @@ fn fragment_editor_window(
     if cancel {
         revert_preview(state, mol, settings);
     }
+    if restore {
+        // Back to the geometry this session started from, however many
+        // Applies ago that was. Recorded first, so the builder's Undo can
+        // take the restore itself back if it was a mistake.
+        revert_preview(state, mol, settings);
+        if let Some(origin) = state.session_origin.clone() {
+            record_step(zmat_state, mol, "restored the fragment");
+            mol.pos = origin;
+            settings.coords_dirty = true;
+            state.base_pos = None;
+            state.base_ref = None;
+            state.preview_values = None;
+        }
+    }
     if reset {
         revert_preview(state, mol, settings);
-        // reset() clears the window flag along with everything else; the
-        // window the button was pressed in should stay where it is.
+        // reset() clears every field. Two must survive it: the window the
+        // button was pressed in should stay where it is, and forgetting the
+        // picks must not also forget what "Restore original" restores to --
+        // otherwise Restore would quietly re-anchor to the edited geometry.
+        let origin = state.session_origin.take();
         state.reset();
         state.window_open = open;
+        state.session_origin = origin;
     }
 
     recompute_preview(state, mol, settings);
