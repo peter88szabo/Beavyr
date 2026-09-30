@@ -2214,8 +2214,13 @@ pub fn ui_panel(
                 viewport.top() + EDITOR_MARGIN,
             ]);
         if fit_now {
-            builder_window =
-                builder_window.min_height((measured + EDITOR_CHROME).min(editor_max_height));
+            // A fifth more than the contents measure now: placing the first
+            // fragment opens the Newly Placed Fragment section underneath,
+            // and the window should already have room for it.
+            const EDITOR_HEADROOM: f32 = 1.2;
+            builder_window = builder_window.min_height(
+                ((measured + EDITOR_CHROME) * EDITOR_HEADROOM).min(editor_max_height),
+            );
         }
         let builder_window = builder_window
             .show(&ctx, |ui| {
