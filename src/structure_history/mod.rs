@@ -167,6 +167,13 @@ impl Default for StructureHistory {
     }
 }
 impl StructureHistory {
+    /// A history with nowhere to save, for tests: nothing they do may land in
+    /// the user's real Recent Structures.
+    #[cfg(test)]
+    pub(crate) fn detached() -> Self {
+        Self::open(None)
+    }
+
     fn open(directory: Option<PathBuf>) -> Self {
         let mut history = Self {
             directory,

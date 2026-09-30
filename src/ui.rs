@@ -598,6 +598,32 @@ pub fn ui_panel(
                         let live = format_xyz_from_molecule(&mol);
                         ctx.copy_text(live);
                     }
+
+                    // The structure as it is on screen, to a file. Named after
+                    // the file it came from when there is one, so saving an
+                    // edited copy starts from a sensible name.
+                    if ui
+                        .add_enabled(!mol.atoms.is_empty(), egui::Button::new("Save XYZ"))
+                        .on_disabled_hover_text("There is no structure to save.")
+                        .clicked()
+                    {
+                        let suggested = xyz_buf
+                            .current_file
+                            .as_ref()
+                            .and_then(|path| path.file_name())
+                            .map(|name| name.to_string_lossy().to_string())
+                            .unwrap_or_else(|| "structure.xyz".to_string());
+                        let dlg = crate::recent_dir::save(&suggested).add_filter("XYZ", &["xyz"]);
+                        if let Some(path) = crate::recent_dir::save_file(dlg) {
+                            match std::fs::write(&path, format_xyz_from_molecule(&mol)) {
+                                Ok(()) => xyz_buf.warning = None,
+                                Err(error) => {
+                                    xyz_buf.warning =
+                                        Some(format!("Could not save {}: {error}", path.display()))
+                                }
+                            }
+                        }
+                    }
                 });
                 ui.add_space(8.0);
 

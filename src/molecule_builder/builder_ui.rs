@@ -2627,6 +2627,41 @@ fn run_cleanup(mol: &mut Molecule, settings: &mut MolSettings) -> Result<String,
         })
 }
 
+/// Empty the display, after the user has confirmed it.
+///
+/// Recorded in the builder's history first, so Undo brings the structure
+/// back.
+fn clear_display(
+    zmat_state: &mut ZMatrixBuilderState,
+    editor: &mut EditorRotateState,
+    mol: &mut Molecule,
+    settings: &mut MolSettings,
+    history: &mut crate::structure_history::StructureHistory,
+    traj: &mut crate::trajectory::TrajectoryState,
+) -> BuilderChange {
+    zmat_state.confirm_clear = false;
+    record_step(zmat_state, mol, "cleared the display");
+    let previous = history.before(mol, traj);
+    mol.atoms.clear();
+    mol.pos.clear();
+    mol.bonds.clear();
+    mol.hydrogen_bonds.clear();
+    traj.clear_for_structure();
+    history.replaced(previous, mol, traj, "Drawn structure");
+    settings.geometry_dirty = true;
+    settings.bond_topology_dirty = true;
+    zmat_state.zmat.clear();
+    set_selected_atom(zmat_state, &mol.atoms, None);
+    zmat_state.last_error = None;
+    // Both editors hold atom numbers, and after this there are no atoms for
+    // them to name. The Fragment Editor window stays open if it was.
+    let window_open = editor.window_open;
+    editor.reset();
+    editor.window_open = window_open;
+    zmat_state.placed_editor = EditorRotateState::default();
+    BuilderChange::Replaced
+}
+
 pub fn builder_ui_contents(
     ui: &mut egui::Ui,
     state: &mut EditorRotateState,
@@ -2682,22 +2717,7 @@ pub fn builder_ui_contents(
             zmat_state.confirm_clear = false;
         }
         if do_clear {
-            zmat_state.confirm_clear = false;
-            // Recorded first, so Undo brings the structure back.
-            record_step(zmat_state, mol, "cleared the display");
-            let previous = history.before(mol, traj);
-            mol.atoms.clear();
-            mol.pos.clear();
-            mol.bonds.clear();
-            mol.hydrogen_bonds.clear();
-            traj.clear_for_structure();
-            history.replaced(previous, mol, traj, "Drawn structure");
-            change = BuilderChange::Replaced;
-            settings.geometry_dirty = true;
-            settings.bond_topology_dirty = true;
-            zmat_state.zmat.clear();
-            set_selected_atom(&mut zmat_state, &mol.atoms, None);
-            zmat_state.last_error = None;
+            change = clear_display(zmat_state, state, mol, settings, history, traj);
         }
     }
             if zmat_state.original_atoms.is_none() && !mol.atoms.is_empty() {
@@ -4244,6 +4264,63 @@ C   2.050   1.450   0.000
                 );
             }
         }
+    }
+
+    /// Draw the real editor panel for one frame, headless.
+    fn draw_editor_frame(
+        ctx: &egui::Context,
+        editor: &mut EditorRotateState,
+        state: &mut ZMatrixBuilderState,
+        mol: &mut Molecule,
+        settings: &mut MolSettings,
+        history: &mut crate::structure_history::StructureHistory,
+        traj: &mut crate::trajectory::TrajectoryState,
+    ) {
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            builder_ui_contents(ui, editor, state, mol, settings, history, traj);
+        });
+        // No renderer here to upload fonts to; egui insists that is said.
+        output.textures_delta.clear();
+    }
+
+    /// Reported crash: build a sandwich, confirm Clear Display, and the
+    /// program went down. Reproduced here on the real panel code, frame by
+    /// frame, with the fragment just placed still aimed at by its editor.
+    #[test]
+    fn clearing_a_freshly_built_sandwich_does_not_crash() {
+        let mut mol = Molecule {
+            atoms: vec!["Fe".to_string()],
+            pos: vec![Vec3::ZERO],
+            bonds: vec![],
+            hydrogen_bonds: vec![],
+        };
+        let mut state = ZMatrixBuilderState::default();
+        state.zmat = xyz_to_zmat(&mol.atoms, &mol.pos);
+        let mut settings = MolSettings::default();
+        let mut editor = EditorRotateState::default();
+        let mut history = crate::structure_history::StructureHistory::detached();
+        let mut traj = crate::trajectory::TrajectoryState::default();
+        let ctx = egui::Context::default();
+
+        for _ in 0..2 {
+            state.selected_index = Some(0);
+            state.frag_name = "5-Ring centered".to_string();
+            commit_fragment_connect(&mut state, &mut mol, &mut settings);
+            assert!(state.last_error.is_none(), "{:?}", state.last_error);
+            for _ in 0..2 {
+                draw_editor_frame(&ctx, &mut editor, &mut state, &mut mol, &mut settings, &mut history, &mut traj);
+            }
+        }
+        // Nudge the placed ring so its editor holds a live preview.
+        state.placed_editor.angle_deg = 20.0;
+        draw_editor_frame(&ctx, &mut editor, &mut state, &mut mol, &mut settings, &mut history, &mut traj);
+
+        clear_display(&mut state, &mut editor, &mut mol, &mut settings, &mut history, &mut traj);
+        for _ in 0..3 {
+            draw_editor_frame(&ctx, &mut editor, &mut state, &mut mol, &mut settings, &mut history, &mut traj);
+        }
+        assert!(mol.atoms.is_empty());
+        assert_eq!(mol.atoms.len(), mol.pos.len(), "atoms and positions out of step");
     }
 
     /// A fragment just placed gets an editor aimed at it: the new bond as
