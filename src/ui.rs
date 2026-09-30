@@ -2178,39 +2178,53 @@ pub fn ui_panel(
         // right edge and appearing on the left meant crossing the whole
         // window to reach it.
         //
-        // Narrow and tall: the fragment tiles wrap to a few per line, so the
-        // panel is a slim column that wants height rather than width. Tall
-        // enough that nothing needs scrolling to, but never taller than the
-        // viewport. `default_*` only apply the first time -- egui remembers
-        // wherever the user drags it afterwards, hence the id suffix, which
-        // steps whenever a default has to reach someone who has already
-        // opened the editor.
+        // Only the width is given. The height is whatever the contents come
+        // to, because that is what "fits" means and no number written here
+        // can know it -- the fragment tiles wrap differently at every width,
+        // and the rows below them come and go.
+        //
+        // Window::vscroll would have taken the height instead: it fills the
+        // window rather than reporting what it needs, so the window had to be
+        // told a height, and every number tried was wrong for some state. The
+        // scroll area is inside the window instead, shrinking to its contents
+        // on the vertical axis, so the window measures them. Its max_height
+        // is the only limit: a panel taller than the screen scrolls rather
+        // than running off the bottom.
+        //
+        // `default_*` apply the first time only -- egui remembers wherever
+        // the user drags it -- hence the id suffix, stepped whenever a
+        // default has to reach someone who has already opened the editor.
         const EDITOR_WIDTH: f32 = 360.0;
         const EDITOR_MARGIN: f32 = 16.0;
         let viewport = ctx.viewport_rect();
-        let editor_height = (viewport.height() - 2.0 * EDITOR_MARGIN).clamp(520.0, 900.0);
+        let editor_max_height = (viewport.height() - 2.0 * EDITOR_MARGIN).max(200.0);
         let builder_window = egui::Window::new("Molecule Editor")
-            .id(egui::Id::new("molecule_editor_window_v4"))
+            .id(egui::Id::new("molecule_editor_window_v6"))
             .open(&mut builder_open)
             .resizable(true)
-            .default_size([EDITOR_WIDTH, editor_height])
+            .default_width(EDITOR_WIDTH)
             .default_pos([
                 (viewport.right() - EDITOR_WIDTH - EDITOR_MARGIN).max(viewport.left()),
                 viewport.top() + EDITOR_MARGIN,
             ])
-            .vscroll(true)
             .show(&ctx, |ui| {
-                let change = builder_ui_contents(
-                    ui, &mut editor_rotate_state, &mut zmat_state, &mut mol,
-                    &mut settings, &mut structure_history, &mut traj,
-                );
-                if change.happened() {
-                    xtb_freq_panel_state.selected_mode = None;
-                    xyz_buf.current_file = None;
-                    // Only a genuinely different structure re-frames the
-                    // camera. An edit in place leaves the view alone.
-                    ev_changed.write(MoleculeChanged::parse_xyz(change.recenter()));
-                }
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, true])
+                    .max_height(editor_max_height)
+                    .show(ui, |ui| {
+                        let change = builder_ui_contents(
+                            ui, &mut editor_rotate_state, &mut zmat_state, &mut mol,
+                            &mut settings, &mut structure_history, &mut traj,
+                        );
+                        if change.happened() {
+                            xtb_freq_panel_state.selected_mode = None;
+                            xyz_buf.current_file = None;
+                            // Only a genuinely different structure re-frames
+                            // the camera. An edit in place leaves the view
+                            // alone.
+                            ev_changed.write(MoleculeChanged::parse_xyz(change.recenter()));
+                        }
+                    });
             });
         if let Some(window) = &builder_window {
             window_rects.push(window.response.rect);
