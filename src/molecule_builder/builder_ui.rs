@@ -497,6 +497,10 @@ impl BuilderChange {
 #[derive(Resource, Clone)]
 pub struct ZMatrixBuilderState {
     pub zmat: Vec<ZAtom>,
+    /// Whether the fragments are shown as a grid of tiles rather than a
+    /// dropdown. A dropdown hides twenty names behind one; tiles show them
+    /// at the cost of height, so which is better is the user's call.
+    pub fragment_tiles: bool,
     /// Whether the "really clear the display?" question is on screen.
     pub confirm_clear: bool,
     /// Set when the builder made the change itself, so the structure-load
@@ -618,6 +622,7 @@ impl Default for ZMatrixBuilderState {
     fn default() -> Self {
         Self {
             zmat: Vec::new(),
+            fragment_tiles: false,
             confirm_clear: false,
             skip_next_sync: false,
             history: super::history::BuilderHistory::default(),
@@ -1220,6 +1225,22 @@ fn restore_step(
     zmat_state.selected_index = None;
     zmat_state.selected_symbol = None;
     zmat_state.last_error = None;
+}
+
+/// The fragments worth a tile: the ones made of more than one atom.
+///
+/// `-Cl`, `-Br` and `-I` are single atoms, and `Single atom...` already
+/// reaches every element there is, so three halogen tiles would say worse
+/// what one entry says well. Counted from the geometry rather than named
+/// here, so a single-atom fragment added later drops out on its own.
+pub fn tile_fragments() -> Vec<&'static fragments::FragmentDef> {
+    fragments::FRAGMENTS
+        .iter()
+        .filter(|frag| {
+            let (n, _symbols, _coords) = parse_xyz_angstrom(frag.xyz);
+            n > 1
+        })
+        .collect()
 }
 
 /// Resolve the name shown in the panel to something insertable.
@@ -2681,6 +2702,12 @@ pub fn builder_ui_contents(
 
                 ui.horizontal(|ui| {
                     ui.label("What");
+                    if zmat_state.fragment_tiles {
+                        // The tiles below are the chooser; this only reports
+                        // what they chose, so the row still reads as a
+                        // setting rather than going blank.
+                        ui.label(egui::RichText::new(zmat_state.frag_name.clone()).strong());
+                    } else {
                     egui::ComboBox::from_id_salt("frag_combo")
                         .width(150.0)
                         .selected_text(zmat_state.frag_name.clone())
@@ -2713,6 +2740,7 @@ pub fn builder_ui_contents(
                                 );
                             }
                         });
+                    }
                     ui.add_space(10.0);
                     ui.label("Bond");
                     egui::ComboBox::from_id_salt("frag_bond_order")
@@ -2733,7 +2761,51 @@ pub fn builder_ui_contents(
                                 }
                             }
                         });
+                    ui.add_space(10.0);
+                    if ui
+                        .selectable_label(zmat_state.fragment_tiles, "tiles")
+                        .on_hover_text("Show the fragments as a grid instead of a dropdown.")
+                        .clicked()
+                    {
+                        zmat_state.fragment_tiles = !zmat_state.fragment_tiles;
+                    }
                 });
+
+                if zmat_state.fragment_tiles {
+                    ui.add_space(2.0);
+                    ui.horizontal_wrapped(|ui| {
+                        // First, and keeping its name: it is how every element
+                        // that has no tile of its own gets inserted.
+                        if ui
+                            .add_sized(
+                                [96.0, 26.0],
+                                egui::Button::new(SINGLE_ATOM_ENTRY).selected(inserting_atom),
+                            )
+                            .clicked()
+                        {
+                            if zmat_state.new_symbol.trim().is_empty() {
+                                zmat_state.new_symbol = "C".to_string();
+                            }
+                            zmat_state.frag_name =
+                                format!("Atom: {}", zmat_state.new_symbol.trim());
+                            zmat_state.last_error = None;
+                        }
+                        for frag in tile_fragments() {
+                            let selected = zmat_state.frag_name == frag.name;
+                            if ui
+                                .add_sized(
+                                    [96.0, 26.0],
+                                    egui::Button::new(frag.name).selected(selected),
+                                )
+                                .clicked()
+                            {
+                                zmat_state.frag_name = frag.name.to_string();
+                                zmat_state.last_error = None;
+                            }
+                        }
+                    });
+                    ui.add_space(2.0);
+                }
 
                 // The element, on the next row rather than behind a button.
                 // Only when an atom is what is being inserted -- a group
@@ -3817,6 +3889,35 @@ C   2.050   1.450   0.000
             .map(|v| Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32))
             .collect();
         xyz_to_zmat(&symbols, &positions)
+    }
+
+    /// The tiles skip the fragments that are one atom, because choosing an
+    /// element already does that better. Counted from the geometry, so this
+    /// keeps holding as fragments are added.
+    #[test]
+    fn the_tiles_leave_out_the_single_atom_fragments() {
+        let tiles = tile_fragments();
+        let names: Vec<&str> = tiles.iter().map(|f| f.name).collect();
+
+        for lone in ["-Cl", "-Br", "-I"] {
+            assert!(
+                !names.contains(&lone),
+                "{lone} is one atom and belongs to Single atom..., not a tile"
+            );
+            // ...but it is still in the list, and still insertable.
+            assert!(find_fragment(lone).is_some(), "{lone} must still work");
+        }
+        for group in ["-CH3", "-OH", "-Phenyl", "-COOH"] {
+            assert!(names.contains(&group), "{group} should have a tile");
+        }
+        assert!(
+            tiles.len() < fragments::FRAGMENTS.len(),
+            "something must have been filtered out"
+        );
+        for frag in tiles {
+            let (n, _s, _c) = parse_xyz_angstrom(frag.xyz);
+            assert!(n > 1, "{} slipped through with {n} atoms", frag.name);
+        }
     }
 
     /// A single atom is a fragment of one atom, and goes in through the same
