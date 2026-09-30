@@ -2178,37 +2178,45 @@ pub fn ui_panel(
         // right edge and appearing on the left meant crossing the whole
         // window to reach it.
         //
-        // Only the width is given. The height is whatever the contents come
-        // to, because that is what "fits" means and no number written here
-        // can know it -- the fragment tiles wrap differently at every width,
-        // and the rows below them come and go.
+        // The window is never shorter than its contents.
         //
-        // Window::vscroll would have taken the height instead: it fills the
-        // window rather than reporting what it needs, so the window had to be
-        // told a height, and every number tried was wrong for some state. The
-        // scroll area is inside the window instead, shrinking to its contents
-        // on the vertical axis, so the window measures them. Its max_height
-        // is the only limit: a panel taller than the screen scrolls rather
-        // than running off the bottom.
+        // A *default* size cannot do this, and that was the mistake made
+        // three times here: a default applies on the first open, egui stores
+        // whatever size resulted, and the next row added to the panel makes
+        // that stored size too short again. The fit has to be re-asserted
+        // every frame, not chosen once.
         //
-        // `default_*` apply the first time only -- egui remembers wherever
-        // the user drags it -- hence the id suffix, stepped whenever a
-        // default has to reach someone who has already opened the editor.
+        // So the panel's height is measured as it is drawn and fed back as
+        // the window's minimum on the next frame -- one frame behind, which
+        // is invisible. The user can still make the window bigger, and
+        // dragging it smaller stops where the contents stop, which is the
+        // point. The cap is the screen: on a display too short for the panel
+        // the scroll area inside takes over rather than the window running
+        // off the bottom.
         const EDITOR_WIDTH: f32 = 360.0;
         const EDITOR_MARGIN: f32 = 16.0;
         let viewport = ctx.viewport_rect();
         let editor_max_height = (viewport.height() - 2.0 * EDITOR_MARGIN).max(200.0);
+        // Room for the title bar and the window's own padding, which the
+        // measured content height does not include.
+        const EDITOR_CHROME: f32 = 42.0;
+        let content_key = egui::Id::new("molecule_editor_content_height");
+        let measured = ctx
+            .data(|d| d.get_temp::<f32>(content_key))
+            .unwrap_or(0.0);
+        let editor_min_height = (measured + EDITOR_CHROME).min(editor_max_height);
         let builder_window = egui::Window::new("Molecule Editor")
-            .id(egui::Id::new("molecule_editor_window_v6"))
+            .id(egui::Id::new("molecule_editor_window_v7"))
             .open(&mut builder_open)
             .resizable(true)
             .default_width(EDITOR_WIDTH)
+            .min_height(editor_min_height)
             .default_pos([
                 (viewport.right() - EDITOR_WIDTH - EDITOR_MARGIN).max(viewport.left()),
                 viewport.top() + EDITOR_MARGIN,
             ])
             .show(&ctx, |ui| {
-                egui::ScrollArea::vertical()
+                let inner = egui::ScrollArea::vertical()
                     .auto_shrink([false, true])
                     .max_height(editor_max_height)
                     .show(ui, |ui| {
@@ -2225,6 +2233,10 @@ pub fn ui_panel(
                             ev_changed.write(MoleculeChanged::parse_xyz(change.recenter()));
                         }
                     });
+                // What the panel actually came to this frame, for the window
+                // to be at least that tall on the next one.
+                ui.ctx()
+                    .data_mut(|d| d.insert_temp(content_key, inner.content_size.y));
             });
         if let Some(window) = &builder_window {
             window_rects.push(window.response.rect);
