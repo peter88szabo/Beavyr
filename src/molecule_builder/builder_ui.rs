@@ -457,10 +457,6 @@ pub struct EditorRotateState {
     /// against the base rather than against zero.
     pub base_axis_len: f32,
     pub base_bend_deg: f32,
-    /// One undo buffer, taken at Apply. There were three -- one per operation
-    /// -- and with three of them pressing Undo did not reliably reverse what
-    /// was last done.
-    pub last_apply_snapshot: Option<Vec<Vec3>>,
     pub window_open: bool,
     pub thresholds_window_open: bool,
     pub bond_th_hx: f32,                         // Å
@@ -470,6 +466,10 @@ pub struct EditorRotateState {
 #[derive(Resource, Clone)]
 pub struct ZMatrixBuilderState {
     pub zmat: Vec<ZAtom>,
+    /// One undo history for every action the builder takes. There were six
+    /// separate Undo buttons; each reversed only its own last action, so
+    /// pressing one did not reverse what had actually been done last.
+    pub history: super::history::BuilderHistory,
     /// Whether the single-atom form is showing. Choosing "Single atom..."
     /// in the insert list opens it; the chosen element becomes the inserted
     /// fragment's name, so the panel keeps one row for "what".
@@ -584,6 +584,7 @@ impl Default for ZMatrixBuilderState {
     fn default() -> Self {
         Self {
             zmat: Vec::new(),
+            history: super::history::BuilderHistory::default(),
             zmat_window_open: false,
             atom_form_open: false,
             cleanup_report: None,
@@ -1086,6 +1087,52 @@ pub struct ChosenFragment {
     pub xyz: String,
 }
 
+/// Snapshot the structure before an action changes it, so one Undo can
+/// reverse it afterwards. Called at the moment an action is known to be going
+/// ahead, never before a check that might refuse it -- a history full of steps
+/// that changed nothing is as bad as no history.
+fn record_step(
+    zmat_state: &mut ZMatrixBuilderState,
+    mol: &Molecule,
+    name: impl Into<String>,
+) {
+    let zmat = zmat_state.zmat.clone();
+    zmat_state.history.record(name, &mol.atoms, &mol.pos, &zmat);
+}
+
+/// The structure as it stands, for the redo stack to return to.
+fn current_step(zmat_state: &ZMatrixBuilderState, mol: &Molecule) -> super::history::BuilderStep {
+    super::history::BuilderStep {
+        name: String::new(),
+        atoms: mol.atoms.clone(),
+        pos: mol.pos.clone(),
+        zmat: zmat_state.zmat.clone(),
+    }
+}
+
+/// Put a recorded state back on screen.
+///
+/// The selection is dropped: it refers to indices that an undone add or delete
+/// may have renumbered, and a selection pointing at the wrong atom is worse
+/// than none.
+fn restore_step(
+    step: super::history::BuilderStep,
+    zmat_state: &mut ZMatrixBuilderState,
+    mol: &mut Molecule,
+    settings: &mut MolSettings,
+) {
+    mol.atoms = step.atoms;
+    mol.pos = step.pos;
+    zmat_state.zmat = step.zmat;
+    mol.recompute_bonds(2.0, 3.0);
+    settings.geometry_dirty = true;
+    settings.bond_topology_dirty = true;
+    zmat_state.edit_refresh = true;
+    zmat_state.selected_index = None;
+    zmat_state.selected_symbol = None;
+    zmat_state.last_error = None;
+}
+
 /// Resolve the name shown in the panel to something insertable.
 ///
 /// `Atom: X` builds a one-atom fragment at the origin; that atom is its own
@@ -1361,7 +1408,6 @@ impl EditorRotateState {
             preview_values: None,
             base_axis_len: 0.0,
             base_bend_deg: 0.0,
-            last_apply_snapshot: None,
             window_open: false,
             thresholds_window_open: false,
             bond_th_hx: 1.4,
@@ -1386,34 +1432,6 @@ pub fn configure_builder_gizmos(mut cfg_store: ResMut<GizmoConfigStore>) {
     }
 }
 
-/// Put the structure back as it was before the last fragment was added.
-///
-/// Both fragment rows call this, so the very first fragment dropped into an
-/// empty editor is as undoable as one spliced onto an existing atom.
-fn undo_last_fragment(
-    zmat_state: &mut ZMatrixBuilderState,
-    mol: &mut Molecule,
-    settings: &mut MolSettings,
-) {
-    if let Some(snapshot) = zmat_state.last_frag_snapshot.take() {
-        zmat_state.zmat = snapshot;
-        mol.atoms = zmat_state
-            .zmat
-            .iter()
-            .map(|atom| atom.symbol.clone())
-            .collect();
-        mol.pos = zmat2xyz::zmat_to_xyz(&zmat_state.zmat);
-        mol.recompute_bonds(2.0, 3.0);
-        settings.geometry_dirty = true;
-        settings.bond_topology_dirty = true;
-        zmat_state.edit_refresh = true;
-    }
-    zmat_state.frag_undo_visible = false;
-    // The atom the fragment was hung on may not exist any more (an undone
-    // Replace restores the atom that was swapped out), so start clean.
-    set_selected_atom(zmat_state, &mol.atoms, None);
-    zmat_state.last_error = None;
-}
 
 /// Whether a click should clear the Z-matrix table's selection.
 ///
@@ -2035,6 +2053,9 @@ pub fn sync_builder_on_structure_load(
     zmat_state.frag_undo_visible = false;
     zmat_state.last_remove_snapshot = None;
     zmat_state.redo_remove_visible = false;
+    // Undoing across a structure change would restore atoms that no longer
+    // belong to anything.
+    zmat_state.history.clear();
     zmat_state.last_error = None;
 }
 
@@ -2579,6 +2600,8 @@ pub fn builder_ui_contents(
                         // stands. One atom or twelve, the same path.
                         if ui.button("Place").clicked() {
                             if let Some(frag) = find_fragment(&zmat_state.frag_name) {
+                                let name = format!("placed {}", zmat_state.frag_name);
+                                record_step(zmat_state, mol, name);
                                 zmat_state.last_frag_snapshot = Some(zmat_state.zmat.clone());
                                 zmat_state.frag_undo_visible = true;
                                 let frag_angle_deg = zmat_state.frag_angle_deg;
@@ -2624,6 +2647,8 @@ pub fn builder_ui_contents(
                             if zmat_state.selected_index.is_none() {
                                 zmat_state.last_error = Some(NOTHING_SELECTED.to_string());
                             } else {
+                                let name = format!("added {}", zmat_state.frag_name);
+                                record_step(zmat_state, mol, name);
                                 zmat_state.frag_mode = FragmentInsertMode::Connect;
                                 commit_fragment_connect(zmat_state, mol, settings);
                             }
@@ -2636,19 +2661,16 @@ pub fn builder_ui_contents(
                             if zmat_state.selected_index.is_none() {
                                 zmat_state.last_error = Some(NOTHING_SELECTED.to_string());
                             } else {
+                                let name = format!("replaced with {}", zmat_state.frag_name);
+                                record_step(zmat_state, mol, name);
                                 zmat_state.frag_mode = FragmentInsertMode::Replace;
                                 commit_fragment_replace(zmat_state, mol, settings, state);
                             }
                         }
                     }
 
-                    // The way out of a placement you did not want, right where
-                    // you just looked.
-                    if zmat_state.frag_undo_visible && ui.button("Undo").clicked() {
-                        undo_last_fragment(zmat_state, mol, settings);
-                    }
-
-                    if ui.button("Remove Last").clicked() {
+                    if ui.button("Remove Last").clicked() && !zmat_state.zmat.is_empty() {
+                        record_step(zmat_state, mol, "removed the last atom");
                         if zmat_state.zmat.pop().is_some() {
                             let coords = zmat2xyz::zmat_to_xyz(&zmat_state.zmat);
                             mol.atoms = zmat_state
@@ -2731,6 +2753,8 @@ pub fn builder_ui_contents(
                     // The last pick is the last thing the user has to do: the
                     // atom appears as soon as its placement is fully stated.
                     if picked >= needed && needed > 0 {
+                        let name = format!("added {}", zmat_state.new_symbol.trim());
+                        record_step(zmat_state, mol, name);
                         if zmat_state.add_atom_auto {
                             commit_add_atom_auto(&mut zmat_state, &mut mol, &mut settings);
                         } else {
@@ -2738,6 +2762,44 @@ pub fn builder_ui_contents(
                         }
                     }
                 }
+
+                // One Undo and one Redo, over every action the builder takes.
+                // The line beside them says what Undo will take back, so it
+                // can be read before it is pressed rather than discovered
+                // after -- which is what made six separate Undos untrustworthy.
+                ui.add_space(6.0);
+                ui.separator();
+                ui.horizontal(|ui| {
+                    let undo_name = zmat_state.history.next_undo().map(str::to_string);
+                    let redo_name = zmat_state.history.next_redo().map(str::to_string);
+                    if ui
+                        .add_enabled(undo_name.is_some(), egui::Button::new("Undo"))
+                        .on_hover_text(format!("{} steps can be undone.", zmat_state.history.depth()))
+                        .on_disabled_hover_text("Nothing to undo yet.")
+                        .clicked()
+                    {
+                        let now = current_step(zmat_state, mol);
+                        if let Some(step) = zmat_state.history.undo(now) {
+                            restore_step(step, zmat_state, mol, settings);
+                        }
+                    }
+                    if ui
+                        .add_enabled(redo_name.is_some(), egui::Button::new("Redo"))
+                        .on_disabled_hover_text("Nothing to redo.")
+                        .clicked()
+                    {
+                        let now = current_step(zmat_state, mol);
+                        if let Some(step) = zmat_state.history.redo(now) {
+                            restore_step(step, zmat_state, mol, settings);
+                        }
+                    }
+                    match (&undo_name, &redo_name) {
+                        (Some(name), _) => ui.weak(format!("last: {name}")),
+                        (None, Some(name)) => ui.weak(format!("redo: {name}")),
+                        (None, None) => ui.weak("nothing done yet"),
+                    };
+                });
+                ui.add_space(6.0);
 
                 // Why a press did nothing, said where the press happened. The
                 // panel's other error line sits above the Z-matrix table,
@@ -3167,6 +3229,8 @@ pub fn builder_ui_contents(
                         if let Some(idx) = zmat_state.selected_index {
                             if can_remove_zmat_index(&zmat_state.zmat, idx) {
                                 if ui.button("Remove Atom").clicked() {
+                                    let name = format!("removed atom {}", idx + 1);
+                                    record_step(zmat_state, mol, name);
                                     zmat_state.last_remove_snapshot = Some(zmat_state.zmat.clone());
                                     remove_zmat_index(&mut zmat_state.zmat, idx);
                                     let coords = zmat2xyz::zmat_to_xyz(&zmat_state.zmat);
@@ -3190,26 +3254,6 @@ pub fn builder_ui_contents(
                             } else {
                                 zmat_state.last_error =
                                     Some("Cannot remove: referenced by later rows.".to_string());
-                            }
-                        }
-                        if zmat_state.redo_remove_visible {
-                            if ui.button("Undo Remove Atom").clicked() {
-                                if let Some(prev) = zmat_state.last_remove_snapshot.take() {
-                                    zmat_state.zmat = prev;
-                                    let coords = zmat2xyz::zmat_to_xyz(&zmat_state.zmat);
-                                    mol.atoms = zmat_state
-                                        .zmat
-                                        .iter()
-                                        .map(|atom| atom.symbol.clone())
-                                        .collect();
-                                    mol.pos = coords;
-                                    mol.recompute_bonds(2.0, 3.0);
-                                    settings.geometry_dirty = true;
-                                    settings.bond_topology_dirty = true;
-                                    zmat_state.edit_refresh = true;
-                                }
-                                zmat_state.redo_remove_visible = false;
-                                zmat_state.frag_undo_visible = false;
                             }
                         }
                         if let Some(err) = &zmat_state.last_error {
@@ -3316,7 +3360,7 @@ pub fn builder_ui_contents(
                 });
             state.thresholds_window_open = thresholds_open;
 
-            fragment_editor_window(&ctx, state, mol, settings);
+            fragment_editor_window(&ctx, state, zmat_state, mol, settings);
     replaced
 }
 
@@ -3434,6 +3478,7 @@ fn recompute_preview(
 fn fragment_editor_window(
     ctx: &egui::Context,
     state: &mut EditorRotateState,
+    zmat_state: &mut ZMatrixBuilderState,
     mol: &mut Molecule,
     settings: &mut MolSettings,
 ) {
@@ -3474,7 +3519,6 @@ fn fragment_editor_window(
     let mut open = state.window_open;
     let mut apply = false;
     let mut cancel = false;
-    let mut undo = false;
     let mut reset = false;
 
     egui::Window::new("Fragment Editor")
@@ -3548,26 +3592,25 @@ fn fragment_editor_window(
                     .add_enabled(state.base_pos.is_some(), egui::Button::new("Cancel"))
                     .on_disabled_hover_text("There is nothing in progress to cancel.")
                     .clicked();
-                undo = ui
-                    .add_enabled(
-                        state.last_apply_snapshot.is_some(),
-                        egui::Button::new("Undo"),
-                    )
-                    .on_disabled_hover_text("Nothing has been applied yet.")
-                    .clicked();
                 reset = ui
                     .button("Reset")
                     .on_hover_text("Forget the picks and start again.")
                     .clicked();
             });
-            ui.weak("Nothing is written to the structure until Apply.");
+            ui.weak("Nothing is written until Apply. Undo is in the builder panel.");
         });
 
     if apply {
         // What is on screen already *is* the result, so committing it is only
-        // a matter of stopping treating it as provisional. The base becomes
-        // the one undo buffer.
-        state.last_apply_snapshot = state.base_pos.take();
+        // a matter of stopping treating it as provisional. The base goes to
+        // the builder's one history, which is where Undo lives: the editor
+        // keeping its own would put us back where this redesign started.
+        if let Some(base) = state.base_pos.take() {
+            let zmat = zmat_state.zmat.clone();
+            zmat_state
+                .history
+                .record("moved a fragment", &mol.atoms, &base, &zmat);
+        }
         state.base_ref = None;
         state.preview_values = None;
         state.angle_deg = 0.0;
@@ -3577,16 +3620,6 @@ fn fragment_editor_window(
     if cancel {
         revert_preview(state, mol, settings);
     }
-    if undo {
-        if let Some(snapshot) = state.last_apply_snapshot.take() {
-            mol.pos = snapshot;
-            settings.coords_dirty = true;
-            state.base_pos = None;
-            state.base_ref = None;
-            state.preview_values = None;
-        }
-    }
-
     if reset {
         revert_preview(state, mol, settings);
         // reset() clears the window flag along with everything else; the
@@ -4455,6 +4488,14 @@ H   1.090   0.000   0.000
         (mol, state)
     }
 
+    /// Take one step back through the builder's history, the way the Undo
+    /// button does.
+    fn undo_once(state: &mut ZMatrixBuilderState, mol: &mut Molecule) {
+        let now = current_step(state, mol);
+        let step = state.history.undo(now).expect("something to undo");
+        restore_step(step, state, mol, &mut MolSettings::default());
+    }
+
     /// Adding a fragment must leave an undo available, and taking it must put
     /// the structure back exactly as it was.
     #[test]
@@ -4464,19 +4505,21 @@ H   1.090   0.000   0.000
         let atoms_before = mol.atoms.clone();
         state.selected_index = Some(0);
 
+        record_step(&mut state, &mol, "added -CH3");
         commit_fragment_connect(&mut state, &mut mol, &mut MolSettings::default());
         assert!(state.last_error.is_none(), "{:?}", state.last_error);
         assert!(state.zmat.len() > before, "the fragment should have landed");
-        assert!(
-            state.frag_undo_visible,
-            "an undo must be offered right after adding a fragment"
+        assert_eq!(
+            state.history.next_undo(),
+            Some("added -CH3"),
+            "the history must name what Undo will take back"
         );
 
-        undo_last_fragment(&mut state, &mut mol, &mut MolSettings::default());
+        undo_once(&mut state, &mut mol);
 
         assert_eq!(state.zmat.len(), before);
         assert_eq!(mol.atoms, atoms_before);
-        assert!(!state.frag_undo_visible, "the undo is spent");
+        assert_eq!(state.history.next_undo(), None, "the undo is spent");
         assert_eq!(state.selected_index, None);
     }
 
@@ -4490,6 +4533,7 @@ H   1.090   0.000   0.000
         state.selected_index = Some(1); // the hydrogen
         state.frag_mode = FragmentInsertMode::Replace;
 
+        record_step(&mut state, &mol, "replaced with -CH3");
         commit_fragment_replace(
             &mut state,
             &mut mol,
@@ -4498,10 +4542,37 @@ H   1.090   0.000   0.000
         );
         assert!(state.last_error.is_none(), "{:?}", state.last_error);
 
-        undo_last_fragment(&mut state, &mut mol, &mut MolSettings::default());
+        undo_once(&mut state, &mut mol);
 
         assert_eq!(mol.atoms, atoms_before, "the hydrogen must be back");
         assert_eq!(state.zmat.len(), zmat_before.len());
+    }
+
+    /// One history, across kinds of action. Add a fragment, then replace an
+    /// atom, and Undo must reverse the replace first -- the thing actually
+    /// done last -- rather than whatever a particular button remembers.
+    #[test]
+    fn undo_reverses_the_last_action_whatever_kind_it_was() {
+        let (mut mol, mut state) = host();
+        state.selected_index = Some(0);
+        record_step(&mut state, &mol, "added -CH3");
+        commit_fragment_connect(&mut state, &mut mol, &mut MolSettings::default());
+        let after_add = mol.atoms.clone();
+
+        state.selected_index = Some(1);
+        state.frag_mode = FragmentInsertMode::Replace;
+        record_step(&mut state, &mol, "replaced with -CH3");
+        commit_fragment_replace(
+            &mut state,
+            &mut mol,
+            &mut MolSettings::default(),
+            &EditorRotateState::default(),
+        );
+
+        assert_eq!(state.history.next_undo(), Some("replaced with -CH3"));
+        undo_once(&mut state, &mut mol);
+        assert_eq!(mol.atoms, after_add, "the replace came back first");
+        assert_eq!(state.history.next_undo(), Some("added -CH3"));
     }
 }
 
@@ -6363,7 +6434,7 @@ mod cartesian_atom_deletion_tests {
         let mut editor = EditorRotateState {
             active: true,
             picks: vec![0],
-            last_apply_snapshot: Some(mol.pos.clone()),
+            base_pos: Some(mol.pos.clone()),
             ..Default::default()
         };
         assert!(delete_atom_cartesian(
@@ -6377,7 +6448,7 @@ mod cartesian_atom_deletion_tests {
         assert!(state.zmat.is_empty());
         assert!(state.selected_index.is_none() && state.last_frag_snapshot.is_none());
         assert!(!state.add_atom_active && state.add_atom_picks.is_empty());
-        assert!(!editor.active && editor.picks.is_empty() && editor.last_apply_snapshot.is_none());
+        assert!(!editor.active && editor.picks.is_empty() && editor.base_pos.is_none());
         assert_eq!(state.original_atoms.as_ref().unwrap(), &["C"]);
     }
 
