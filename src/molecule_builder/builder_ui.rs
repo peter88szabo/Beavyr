@@ -451,6 +451,10 @@ pub struct EditorRotateState {
 #[derive(Resource, Clone)]
 pub struct ZMatrixBuilderState {
     pub zmat: Vec<ZAtom>,
+    /// Whether the Z-matrix window is showing. The table is the tallest thing
+    /// the builder can draw and most sessions never need it, so it is out of
+    /// the panel and behind this flag.
+    pub zmat_window_open: bool,
     /// What the most recent deliberate viewport click delivered: `Some(Some(i))`
     /// for an atom, `Some(None)` for background, `None` if no click has
     /// arrived at all. Shown in the panel, because "the button does nothing"
@@ -557,6 +561,7 @@ impl Default for ZMatrixBuilderState {
     fn default() -> Self {
         Self {
             zmat: Vec::new(),
+            zmat_window_open: false,
             cleanup_report: None,
             hydrogen_state: Default::default(),
             last_click: None,
@@ -2323,11 +2328,6 @@ pub fn builder_ui_contents(
             ui.add_space(8.0);
             ui.collapsing("Molecule Builder", |ui| {
                 ui.horizontal(|ui| {
-                    if ui.button("Sync from Molecule").clicked() {
-                        zmat_state.zmat = zmat2xyz::xyz_to_zmat(&mol.atoms, &mol.pos);
-                        set_selected_atom(&mut zmat_state, &mol.atoms, None);
-                        zmat_state.last_error = None;
-                    }
                     if ui.button("Clear Display").clicked() {
                         let previous = history.before(mol, traj);
                         mol.atoms.clear();
@@ -2409,394 +2409,20 @@ pub fn builder_ui_contents(
                 ui.separator();
                 ui.add_space(6.0);
 
-                let row_count = zmat_state.zmat.len();
-                ui.label(format!("Z-matrix rows: {}", row_count));
-                ui.weak("References are 1-based, targeting previous rows.");
-                if row_count > 0 {
-                    ensure_zmat_edit_buffers(&mut zmat_state);
-                    zmat_state.edit_preview.clear();
-                    let mut preview_indices: Option<Vec<usize>> = None;
-                    let mut grid_rect: Option<egui::Rect> = None;
-                    let col_idx = [20.0, 28.0, 28.0, 68.0, 28.0, 60.0, 28.0, 60.0];
-                    let row_height = 22.0;
-                    let max_height = row_height * 15.0;
-                    egui::ScrollArea::vertical()
-                        .max_height(max_height)
-                        .show(ui, |ui| {
-                            let grid_resp = egui::Grid::new("zmat_rows")
-                                .striped(true)
-                                .spacing(egui::vec2(4.0, 4.0))
-                                .show(ui, |ui| {
-                                    ui.add_sized([col_idx[0], 0.0], egui::Label::new("#"));
-                                    ui.add_sized([col_idx[1], 0.0], egui::Label::new("Atom"));
-                                    ui.add_sized([col_idx[2], 0.0], egui::Label::new(""));
-                                    ui.add_sized([col_idx[3], 0.0], egui::Label::new("Bond"));
-                                    ui.add_sized([col_idx[4], 0.0], egui::Label::new(""));
-                                    ui.add_sized([col_idx[5], 0.0], egui::Label::new("Angle"));
-                                    ui.add_sized([col_idx[6], 0.0], egui::Label::new(""));
-                                    ui.add_sized([col_idx[7], 0.0], egui::Label::new("Dihedral"));
-                                    ui.end_row();
-
-                                    let selected_idx = zmat_state.selected_index;
-                                    let selected_sym = zmat_state.selected_symbol.clone();
-                                    #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-                                    enum SelectionAction {
-                                        Clear,
-                                    }
-                                    let mut pending_select: Option<(usize, String)> = None;
-                                    let mut pending_popup_pos: Option<egui::Pos2> = None;
-                                    let mut pending_open_popup = false;
-                                    let mut pending_action: Option<SelectionAction> = None;
-                                    let mut pending_symbol_sync: Option<String> = None;
-                                    // Edits apply as soon as a field is left,
-                                    // rather than waiting for a button. Not on
-                                    // every keystroke: "1" on the way to "12",
-                                    // or an empty field on the way to a
-                                    // retyped number, is not a Z-matrix worth
-                                    // rebuilding the molecule from.
-                                    let mut apply_now = false;
-
-                                    for (i, row) in zmat_state.edit_rows.iter_mut().enumerate() {
-                                        let is_selected = selected_idx == Some(i);
-                                        let same_element = selected_sym
-                                            .as_deref()
-                                            .map(|s| s == row.symbol.as_str())
-                                            .unwrap_or(false);
-                                        let sym_color = if !row.symbol.trim().is_empty() {
-                                            settings
-                                                .element_colors
-                                                .get(row.symbol.trim())
-                                                .copied()
-                                                .unwrap_or_else(|| {
-                                                    color_for(row.symbol.trim(), settings.scheme)
-                                                })
-                                        } else {
-                                            Color::WHITE
-                                        };
-                                        let mut hl_bg: Option<egui::Color32> = None;
-                                        if same_element && is_selected {
-                                            let c = color_to_egui(sym_color);
-                                            hl_bg = Some(egui::Color32::from_rgba_premultiplied(
-                                                c.r(),
-                                                c.g(),
-                                                c.b(),
-                                                if is_selected { 90 } else { 40 },
-                                            ));
-                                        } else if is_selected {
-                                            hl_bg = Some(egui::Color32::from_rgba_premultiplied(
-                                                200, 200, 200, 60,
-                                            ));
-                                        }
-                                        let idx_label = format!("{}", i + 1);
-                                        let idx_resp = ui.add_sized(
-                                            [col_idx[0], 0.0],
-                                            egui::Button::new(idx_label).selected(is_selected),
-                                        );
-                                        if idx_resp.clicked() {
-                                            if selected_idx == Some(i) {
-                                                pending_action = Some(SelectionAction::Clear);
-                                            } else {
-                                                pending_select = Some((i, row.symbol.clone()));
-                                            }
-                                        }
-                                        if idx_resp.secondary_clicked() {
-                                            pending_select = Some((i, row.symbol.clone()));
-                                            pending_popup_pos = Some(idx_resp.rect.right_top());
-                                            pending_open_popup = true;
-                                        }
-
-                                        // An explicit Id, because the field is
-                                        // wrapped in a highlight `Frame` only
-                                        // while its row is selected. An
-                                        // auto-generated Id depends on the
-                                        // surrounding Ui, so it would change
-                                        // as the highlight came and went and
-                                        // egui would drop keyboard focus
-                                        // mid-edit.
-                                        let sym_edit = egui::TextEdit::singleline(&mut row.symbol)
-                                            .id_salt(("zmat_symbol", i))
-                                            .desired_width(col_idx[1] - 4.0);
-                                        let mut sym_changed = false;
-                                        let sym_resp = if let Some(bg) = hl_bg {
-                                            let mut resp = None;
-                                            egui::Frame::NONE.fill(bg).show(ui, |ui| {
-                                                let r = ui.add_sized([col_idx[1], 0.0], sym_edit);
-                                                if r.changed() {
-                                                    sym_changed = true;
-                                                }
-                                                resp = Some(r);
-                                            });
-                                            resp.unwrap()
-                                        } else {
-                                            let r = ui.add_sized([col_idx[1], 0.0], sym_edit);
-                                            if r.changed() {
-                                                sym_changed = true;
-                                            }
-                                            r
-                                        };
-                                        // Clicking the symbol edits it. Selection
-                                        // belongs to the index button alone:
-                                        // a click that both focused the field
-                                        // and toggled the highlight made the
-                                        // element impossible to change.
-                                        if sym_resp.lost_focus() {
-                                            apply_now = true;
-                                        }
-                                        if sym_resp.secondary_clicked() {
-                                            pending_select = Some((i, row.symbol.clone()));
-                                            pending_popup_pos = Some(sym_resp.rect.right_top());
-                                            pending_open_popup = true;
-                                        }
-                                        if sym_changed {
-                                            let trimmed = row.symbol.trim();
-                                            if !trimmed.is_empty() {
-                                                row.symbol = trimmed.to_string();
-                                            }
-                                        }
-                                        // Keep the highlight's colour in step with
-                                        // a symbol being retyped, without
-                                        // re-selecting: selection sets
-                                        // `edit_refresh`, which rebuilds every
-                                        // row from the Z-matrix and would throw
-                                        // the half-typed symbol away.
-                                        if selected_idx == Some(i) && sym_changed {
-                                            pending_symbol_sync = Some(row.symbol.clone());
-                                        }
-                                        if i >= 1 {
-                                            let bond_ref_resp = ui.add_sized(
-                                                [col_idx[2], 0.0],
-                                                egui::TextEdit::singleline(&mut row.bond_ref),
-                                            );
-                                            if bond_ref_resp.changed() {
-                                                row.bond_ref = row.bond_ref.trim().to_string();
-                                            }
-                                            if bond_ref_resp.lost_focus() {
-                                                apply_now = true;
-                                            }
-                                            if bond_ref_resp.has_focus() {
-                                                preview_indices = Some(build_preview_indices(
-                                                    i,
-                                                    row,
-                                                    PreviewKind::Bond,
-                                                    row_count,
-                                                ));
-                                            }
-
-                                            let bond_len_resp = ui.add_sized(
-                                                [col_idx[3], 0.0],
-                                                egui::TextEdit::singleline(&mut row.bond_len),
-                                            );
-                                            if bond_len_resp.changed() {
-                                                row.bond_len = row.bond_len.trim().to_string();
-                                            }
-                                            if bond_len_resp.lost_focus() {
-                                                apply_now = true;
-                                            }
-                                            if bond_len_resp.has_focus() {
-                                                preview_indices = Some(build_preview_indices(
-                                                    i,
-                                                    row,
-                                                    PreviewKind::Bond,
-                                                    row_count,
-                                                ));
-                                            }
-                                        } else {
-                                            ui.add_sized([col_idx[2], 0.0], egui::Label::new("—"));
-                                            ui.add_sized([col_idx[3], 0.0], egui::Label::new("—"));
-                                        }
-                                        if i >= 2 {
-                                            let angle_ref_resp = ui.add_sized(
-                                                [col_idx[4], 0.0],
-                                                egui::TextEdit::singleline(&mut row.angle_ref),
-                                            );
-                                            if angle_ref_resp.changed() {
-                                                row.angle_ref = row.angle_ref.trim().to_string();
-                                            }
-                                            if angle_ref_resp.lost_focus() {
-                                                apply_now = true;
-                                            }
-                                            if angle_ref_resp.has_focus() {
-                                                preview_indices = Some(build_preview_indices(
-                                                    i,
-                                                    row,
-                                                    PreviewKind::Angle,
-                                                    row_count,
-                                                ));
-                                            }
-
-                                            let angle_deg_resp = ui.add_sized(
-                                                [col_idx[5], 0.0],
-                                                egui::TextEdit::singleline(&mut row.angle_deg),
-                                            );
-                                            if angle_deg_resp.changed() {
-                                                row.angle_deg = row.angle_deg.trim().to_string();
-                                            }
-                                            if angle_deg_resp.lost_focus() {
-                                                apply_now = true;
-                                            }
-                                            if angle_deg_resp.has_focus() {
-                                                preview_indices = Some(build_preview_indices(
-                                                    i,
-                                                    row,
-                                                    PreviewKind::Angle,
-                                                    row_count,
-                                                ));
-                                            }
-                                        } else {
-                                            ui.add_sized([col_idx[4], 0.0], egui::Label::new("—"));
-                                            ui.add_sized([col_idx[5], 0.0], egui::Label::new("—"));
-                                        }
-                                        if i >= 3 {
-                                            let dihedral_ref_resp = ui.add_sized(
-                                                [col_idx[6], 0.0],
-                                                egui::TextEdit::singleline(&mut row.dihedral_ref),
-                                            );
-                                            if dihedral_ref_resp.changed() {
-                                                row.dihedral_ref =
-                                                    row.dihedral_ref.trim().to_string();
-                                            }
-                                            if dihedral_ref_resp.lost_focus() {
-                                                apply_now = true;
-                                            }
-                                            if dihedral_ref_resp.has_focus() {
-                                                preview_indices = Some(build_preview_indices(
-                                                    i,
-                                                    row,
-                                                    PreviewKind::Dihedral,
-                                                    row_count,
-                                                ));
-                                            }
-
-                                            let dihedral_deg_resp = ui.add_sized(
-                                                [col_idx[7], 0.0],
-                                                egui::TextEdit::singleline(&mut row.dihedral_deg),
-                                            );
-                                            if dihedral_deg_resp.changed() {
-                                                row.dihedral_deg =
-                                                    row.dihedral_deg.trim().to_string();
-                                            }
-                                            if dihedral_deg_resp.lost_focus() {
-                                                apply_now = true;
-                                            }
-                                            if dihedral_deg_resp.has_focus() {
-                                                preview_indices = Some(build_preview_indices(
-                                                    i,
-                                                    row,
-                                                    PreviewKind::Dihedral,
-                                                    row_count,
-                                                ));
-                                            }
-                                        } else {
-                                            ui.add_sized([col_idx[6], 0.0], egui::Label::new("—"));
-                                            ui.add_sized([col_idx[7], 0.0], egui::Label::new("—"));
-                                        }
-                                        ui.end_row();
-                                    }
-
-                                    if let Some(SelectionAction::Clear) = pending_action {
-                                        zmat_state.selected_index = None;
-                                        zmat_state.selected_symbol = None;
-                                        zmat_state.edit_preview.clear();
-                                        zmat_state.remove_popup_open = false;
-                                        zmat_state.remove_popup_pos = None;
-                                        zmat_state.redo_remove_visible = false;
-                                        zmat_state.last_error = None;
-                                    } else if let Some((idx, sym)) = pending_select {
-                                        zmat_state.selected_index = Some(idx);
-                                        zmat_state.selected_symbol = Some(sym);
-                                        zmat_state.edit_preview = vec![idx];
-                                        if pending_open_popup {
-                                            zmat_state.remove_popup_open = true;
-                                            zmat_state.remove_popup_pos = pending_popup_pos;
-                                        }
-                                        zmat_state.redo_remove_visible = false;
-                                        zmat_state.last_error = None;
-                                    } else if let Some(sym) = pending_symbol_sync {
-                                        // Last, so a real selection always wins:
-                                        // this only refreshes the remembered
-                                        // symbol so the highlight keeps the new
-                                        // element's colour. No refresh flag, so
-                                        // no lost focus.
-                                        zmat_state.selected_symbol = Some(sym);
-                                    }
-                                    apply_now
-                                });
-                            grid_rect = Some(grid_resp.response.rect);
-                            // Applied out here, where `zmat_state` is no longer
-                            // borrowed by the row iteration.
-                            if grid_resp.inner {
-                                apply_zmat_edits(&mut zmat_state, &mut mol, &mut settings);
-                            }
-                        });
-                    // Derived outright, every frame the table is drawn: a
-                    // focused reference field previews the atoms it names,
-                    // otherwise the selection previews itself, and with
-                    // neither there is nothing to highlight. Assigning only in
-                    // the first two cases is what let a stale index survive.
-                    zmat_state.edit_preview = preview_indices
-                        .or_else(|| zmat_state.selected_index.map(|sel| vec![sel]))
-                        .unwrap_or_default();
-                    if let Some(idx) = zmat_state.selected_index {
-                        if can_remove_zmat_index(&zmat_state.zmat, idx) {
-                            if ui.button("Remove Atom").clicked() {
-                                zmat_state.last_remove_snapshot = Some(zmat_state.zmat.clone());
-                                remove_zmat_index(&mut zmat_state.zmat, idx);
-                                let coords = zmat2xyz::zmat_to_xyz(&zmat_state.zmat);
-                                mol.atoms = zmat_state
-                                    .zmat
-                                    .iter()
-                                    .map(|atom| atom.symbol.clone())
-                                    .collect();
-                                mol.pos = coords;
-                                mol.recompute_bonds(2.0, 3.0);
-                                settings.geometry_dirty = true;
-                                settings.bond_topology_dirty = true;
-                                zmat_state.edit_refresh = true;
-                                zmat_state.selected_index = None;
-                                zmat_state.selected_symbol = None;
-                                zmat_state.edit_preview.clear();
-                                zmat_state.redo_remove_visible = true;
-                                zmat_state.frag_undo_visible = false;
-                                zmat_state.last_error = None;
-                            }
-                        } else {
-                            zmat_state.last_error =
-                                Some("Cannot remove: referenced by later rows.".to_string());
-                        }
+                // The Z-matrix table lives in its own window now. It is by
+                // far the tallest thing the builder draws, and most editing
+                // sessions never open it, so it does not belong in the panel.
+                // It is the same table, with the same editing, moved.
+                ui.horizontal(|ui| {
+                    let rows = zmat_state.zmat.len();
+                    if ui
+                        .button(format!("Z-matrix\u{2026} ({rows} rows)"))
+                        .on_hover_text("Edit the internal coordinates in a separate window.")
+                        .clicked()
+                    {
+                        zmat_state.zmat_window_open = !zmat_state.zmat_window_open;
                     }
-                    if zmat_state.redo_remove_visible {
-                        if ui.button("Undo Remove Atom").clicked() {
-                            if let Some(prev) = zmat_state.last_remove_snapshot.take() {
-                                zmat_state.zmat = prev;
-                                let coords = zmat2xyz::zmat_to_xyz(&zmat_state.zmat);
-                                mol.atoms = zmat_state
-                                    .zmat
-                                    .iter()
-                                    .map(|atom| atom.symbol.clone())
-                                    .collect();
-                                mol.pos = coords;
-                                mol.recompute_bonds(2.0, 3.0);
-                                settings.geometry_dirty = true;
-                                settings.bond_topology_dirty = true;
-                                zmat_state.edit_refresh = true;
-                            }
-                            zmat_state.redo_remove_visible = false;
-                            zmat_state.frag_undo_visible = false;
-                        }
-                    }
-                    if let Some(err) = &zmat_state.last_error {
-                        ui.colored_label(egui::Color32::LIGHT_RED, err);
-                    }
-
-                    // No "clicking outside the table clears the selection"
-                    // here any more. It fired for *every* click over the panel
-                    // that was not inside the grid -- including the click on
-                    // Add Fragment, Replace Atom or Add Atom -- and it runs
-                    // earlier in the frame than those buttons, so it destroyed
-                    // the selection the button was about to use. Deselecting
-                    // is the 3D background click's job, which the picker
-                    // already delivers as `ViewportClicked { hit: None }`.
-                }
+                });
 
                 ui.add_space(6.0);
                 ui.separator();
@@ -3177,6 +2803,417 @@ pub fn builder_ui_contents(
                     ui.weak(format!("Fragment scan min distance: {:.3} Å", score));
                 }
             });
+
+            // The Z-matrix, in its own window. Drawn after the panel body so
+            // the panel's borrows of zmat_state have ended; `open` needs a
+            // separate bool for the same reason, since the closure below
+            // borrows the state the flag lives in.
+            let mut zmat_open = zmat_state.zmat_window_open;
+            egui::Window::new("Z-matrix")
+                .open(&mut zmat_open)
+                .default_width(470.0)
+                .resizable(true)
+                .show(&ctx, |ui| {
+                    // Rebuilding the table from the structure belongs with the
+                    // table: in the panel it was a button whose effect the user
+                    // could not see.
+                    if ui.button("Sync from Molecule").clicked() {
+                        zmat_state.zmat = zmat2xyz::xyz_to_zmat(&mol.atoms, &mol.pos);
+                        set_selected_atom(&mut zmat_state, &mol.atoms, None);
+                        zmat_state.last_error = None;
+                    }
+                    ui.separator();
+                    let row_count = zmat_state.zmat.len();
+                    ui.label(format!("Z-matrix rows: {}", row_count));
+                    ui.weak("References are 1-based, targeting previous rows.");
+                    if row_count > 0 {
+                        ensure_zmat_edit_buffers(&mut zmat_state);
+                        zmat_state.edit_preview.clear();
+                        let mut preview_indices: Option<Vec<usize>> = None;
+                        let mut grid_rect: Option<egui::Rect> = None;
+                        let col_idx = [20.0, 28.0, 28.0, 68.0, 28.0, 60.0, 28.0, 60.0];
+                        let row_height = 22.0;
+                        let max_height = row_height * 15.0;
+                        egui::ScrollArea::vertical()
+                            .max_height(max_height)
+                            .show(ui, |ui| {
+                                let grid_resp = egui::Grid::new("zmat_rows")
+                                    .striped(true)
+                                    .spacing(egui::vec2(4.0, 4.0))
+                                    .show(ui, |ui| {
+                                        ui.add_sized([col_idx[0], 0.0], egui::Label::new("#"));
+                                        ui.add_sized([col_idx[1], 0.0], egui::Label::new("Atom"));
+                                        ui.add_sized([col_idx[2], 0.0], egui::Label::new(""));
+                                        ui.add_sized([col_idx[3], 0.0], egui::Label::new("Bond"));
+                                        ui.add_sized([col_idx[4], 0.0], egui::Label::new(""));
+                                        ui.add_sized([col_idx[5], 0.0], egui::Label::new("Angle"));
+                                        ui.add_sized([col_idx[6], 0.0], egui::Label::new(""));
+                                        ui.add_sized([col_idx[7], 0.0], egui::Label::new("Dihedral"));
+                                        ui.end_row();
+
+                                        let selected_idx = zmat_state.selected_index;
+                                        let selected_sym = zmat_state.selected_symbol.clone();
+                                        #[derive(Copy, Clone, Debug, PartialEq, Eq)]
+                                        enum SelectionAction {
+                                            Clear,
+                                        }
+                                        let mut pending_select: Option<(usize, String)> = None;
+                                        let mut pending_popup_pos: Option<egui::Pos2> = None;
+                                        let mut pending_open_popup = false;
+                                        let mut pending_action: Option<SelectionAction> = None;
+                                        let mut pending_symbol_sync: Option<String> = None;
+                                        // Edits apply as soon as a field is left,
+                                        // rather than waiting for a button. Not on
+                                        // every keystroke: "1" on the way to "12",
+                                        // or an empty field on the way to a
+                                        // retyped number, is not a Z-matrix worth
+                                        // rebuilding the molecule from.
+                                        let mut apply_now = false;
+
+                                        for (i, row) in zmat_state.edit_rows.iter_mut().enumerate() {
+                                            let is_selected = selected_idx == Some(i);
+                                            let same_element = selected_sym
+                                                .as_deref()
+                                                .map(|s| s == row.symbol.as_str())
+                                                .unwrap_or(false);
+                                            let sym_color = if !row.symbol.trim().is_empty() {
+                                                settings
+                                                    .element_colors
+                                                    .get(row.symbol.trim())
+                                                    .copied()
+                                                    .unwrap_or_else(|| {
+                                                        color_for(row.symbol.trim(), settings.scheme)
+                                                    })
+                                            } else {
+                                                Color::WHITE
+                                            };
+                                            let mut hl_bg: Option<egui::Color32> = None;
+                                            if same_element && is_selected {
+                                                let c = color_to_egui(sym_color);
+                                                hl_bg = Some(egui::Color32::from_rgba_premultiplied(
+                                                    c.r(),
+                                                    c.g(),
+                                                    c.b(),
+                                                    if is_selected { 90 } else { 40 },
+                                                ));
+                                            } else if is_selected {
+                                                hl_bg = Some(egui::Color32::from_rgba_premultiplied(
+                                                    200, 200, 200, 60,
+                                                ));
+                                            }
+                                            let idx_label = format!("{}", i + 1);
+                                            let idx_resp = ui.add_sized(
+                                                [col_idx[0], 0.0],
+                                                egui::Button::new(idx_label).selected(is_selected),
+                                            );
+                                            if idx_resp.clicked() {
+                                                if selected_idx == Some(i) {
+                                                    pending_action = Some(SelectionAction::Clear);
+                                                } else {
+                                                    pending_select = Some((i, row.symbol.clone()));
+                                                }
+                                            }
+                                            if idx_resp.secondary_clicked() {
+                                                pending_select = Some((i, row.symbol.clone()));
+                                                pending_popup_pos = Some(idx_resp.rect.right_top());
+                                                pending_open_popup = true;
+                                            }
+
+                                            // An explicit Id, because the field is
+                                            // wrapped in a highlight `Frame` only
+                                            // while its row is selected. An
+                                            // auto-generated Id depends on the
+                                            // surrounding Ui, so it would change
+                                            // as the highlight came and went and
+                                            // egui would drop keyboard focus
+                                            // mid-edit.
+                                            let sym_edit = egui::TextEdit::singleline(&mut row.symbol)
+                                                .id_salt(("zmat_symbol", i))
+                                                .desired_width(col_idx[1] - 4.0);
+                                            let mut sym_changed = false;
+                                            let sym_resp = if let Some(bg) = hl_bg {
+                                                let mut resp = None;
+                                                egui::Frame::NONE.fill(bg).show(ui, |ui| {
+                                                    let r = ui.add_sized([col_idx[1], 0.0], sym_edit);
+                                                    if r.changed() {
+                                                        sym_changed = true;
+                                                    }
+                                                    resp = Some(r);
+                                                });
+                                                resp.unwrap()
+                                            } else {
+                                                let r = ui.add_sized([col_idx[1], 0.0], sym_edit);
+                                                if r.changed() {
+                                                    sym_changed = true;
+                                                }
+                                                r
+                                            };
+                                            // Clicking the symbol edits it. Selection
+                                            // belongs to the index button alone:
+                                            // a click that both focused the field
+                                            // and toggled the highlight made the
+                                            // element impossible to change.
+                                            if sym_resp.lost_focus() {
+                                                apply_now = true;
+                                            }
+                                            if sym_resp.secondary_clicked() {
+                                                pending_select = Some((i, row.symbol.clone()));
+                                                pending_popup_pos = Some(sym_resp.rect.right_top());
+                                                pending_open_popup = true;
+                                            }
+                                            if sym_changed {
+                                                let trimmed = row.symbol.trim();
+                                                if !trimmed.is_empty() {
+                                                    row.symbol = trimmed.to_string();
+                                                }
+                                            }
+                                            // Keep the highlight's colour in step with
+                                            // a symbol being retyped, without
+                                            // re-selecting: selection sets
+                                            // `edit_refresh`, which rebuilds every
+                                            // row from the Z-matrix and would throw
+                                            // the half-typed symbol away.
+                                            if selected_idx == Some(i) && sym_changed {
+                                                pending_symbol_sync = Some(row.symbol.clone());
+                                            }
+                                            if i >= 1 {
+                                                let bond_ref_resp = ui.add_sized(
+                                                    [col_idx[2], 0.0],
+                                                    egui::TextEdit::singleline(&mut row.bond_ref),
+                                                );
+                                                if bond_ref_resp.changed() {
+                                                    row.bond_ref = row.bond_ref.trim().to_string();
+                                                }
+                                                if bond_ref_resp.lost_focus() {
+                                                    apply_now = true;
+                                                }
+                                                if bond_ref_resp.has_focus() {
+                                                    preview_indices = Some(build_preview_indices(
+                                                        i,
+                                                        row,
+                                                        PreviewKind::Bond,
+                                                        row_count,
+                                                    ));
+                                                }
+
+                                                let bond_len_resp = ui.add_sized(
+                                                    [col_idx[3], 0.0],
+                                                    egui::TextEdit::singleline(&mut row.bond_len),
+                                                );
+                                                if bond_len_resp.changed() {
+                                                    row.bond_len = row.bond_len.trim().to_string();
+                                                }
+                                                if bond_len_resp.lost_focus() {
+                                                    apply_now = true;
+                                                }
+                                                if bond_len_resp.has_focus() {
+                                                    preview_indices = Some(build_preview_indices(
+                                                        i,
+                                                        row,
+                                                        PreviewKind::Bond,
+                                                        row_count,
+                                                    ));
+                                                }
+                                            } else {
+                                                ui.add_sized([col_idx[2], 0.0], egui::Label::new("—"));
+                                                ui.add_sized([col_idx[3], 0.0], egui::Label::new("—"));
+                                            }
+                                            if i >= 2 {
+                                                let angle_ref_resp = ui.add_sized(
+                                                    [col_idx[4], 0.0],
+                                                    egui::TextEdit::singleline(&mut row.angle_ref),
+                                                );
+                                                if angle_ref_resp.changed() {
+                                                    row.angle_ref = row.angle_ref.trim().to_string();
+                                                }
+                                                if angle_ref_resp.lost_focus() {
+                                                    apply_now = true;
+                                                }
+                                                if angle_ref_resp.has_focus() {
+                                                    preview_indices = Some(build_preview_indices(
+                                                        i,
+                                                        row,
+                                                        PreviewKind::Angle,
+                                                        row_count,
+                                                    ));
+                                                }
+
+                                                let angle_deg_resp = ui.add_sized(
+                                                    [col_idx[5], 0.0],
+                                                    egui::TextEdit::singleline(&mut row.angle_deg),
+                                                );
+                                                if angle_deg_resp.changed() {
+                                                    row.angle_deg = row.angle_deg.trim().to_string();
+                                                }
+                                                if angle_deg_resp.lost_focus() {
+                                                    apply_now = true;
+                                                }
+                                                if angle_deg_resp.has_focus() {
+                                                    preview_indices = Some(build_preview_indices(
+                                                        i,
+                                                        row,
+                                                        PreviewKind::Angle,
+                                                        row_count,
+                                                    ));
+                                                }
+                                            } else {
+                                                ui.add_sized([col_idx[4], 0.0], egui::Label::new("—"));
+                                                ui.add_sized([col_idx[5], 0.0], egui::Label::new("—"));
+                                            }
+                                            if i >= 3 {
+                                                let dihedral_ref_resp = ui.add_sized(
+                                                    [col_idx[6], 0.0],
+                                                    egui::TextEdit::singleline(&mut row.dihedral_ref),
+                                                );
+                                                if dihedral_ref_resp.changed() {
+                                                    row.dihedral_ref =
+                                                        row.dihedral_ref.trim().to_string();
+                                                }
+                                                if dihedral_ref_resp.lost_focus() {
+                                                    apply_now = true;
+                                                }
+                                                if dihedral_ref_resp.has_focus() {
+                                                    preview_indices = Some(build_preview_indices(
+                                                        i,
+                                                        row,
+                                                        PreviewKind::Dihedral,
+                                                        row_count,
+                                                    ));
+                                                }
+
+                                                let dihedral_deg_resp = ui.add_sized(
+                                                    [col_idx[7], 0.0],
+                                                    egui::TextEdit::singleline(&mut row.dihedral_deg),
+                                                );
+                                                if dihedral_deg_resp.changed() {
+                                                    row.dihedral_deg =
+                                                        row.dihedral_deg.trim().to_string();
+                                                }
+                                                if dihedral_deg_resp.lost_focus() {
+                                                    apply_now = true;
+                                                }
+                                                if dihedral_deg_resp.has_focus() {
+                                                    preview_indices = Some(build_preview_indices(
+                                                        i,
+                                                        row,
+                                                        PreviewKind::Dihedral,
+                                                        row_count,
+                                                    ));
+                                                }
+                                            } else {
+                                                ui.add_sized([col_idx[6], 0.0], egui::Label::new("—"));
+                                                ui.add_sized([col_idx[7], 0.0], egui::Label::new("—"));
+                                            }
+                                            ui.end_row();
+                                        }
+
+                                        if let Some(SelectionAction::Clear) = pending_action {
+                                            zmat_state.selected_index = None;
+                                            zmat_state.selected_symbol = None;
+                                            zmat_state.edit_preview.clear();
+                                            zmat_state.remove_popup_open = false;
+                                            zmat_state.remove_popup_pos = None;
+                                            zmat_state.redo_remove_visible = false;
+                                            zmat_state.last_error = None;
+                                        } else if let Some((idx, sym)) = pending_select {
+                                            zmat_state.selected_index = Some(idx);
+                                            zmat_state.selected_symbol = Some(sym);
+                                            zmat_state.edit_preview = vec![idx];
+                                            if pending_open_popup {
+                                                zmat_state.remove_popup_open = true;
+                                                zmat_state.remove_popup_pos = pending_popup_pos;
+                                            }
+                                            zmat_state.redo_remove_visible = false;
+                                            zmat_state.last_error = None;
+                                        } else if let Some(sym) = pending_symbol_sync {
+                                            // Last, so a real selection always wins:
+                                            // this only refreshes the remembered
+                                            // symbol so the highlight keeps the new
+                                            // element's colour. No refresh flag, so
+                                            // no lost focus.
+                                            zmat_state.selected_symbol = Some(sym);
+                                        }
+                                        apply_now
+                                    });
+                                grid_rect = Some(grid_resp.response.rect);
+                                // Applied out here, where `zmat_state` is no longer
+                                // borrowed by the row iteration.
+                                if grid_resp.inner {
+                                    apply_zmat_edits(&mut zmat_state, &mut mol, &mut settings);
+                                }
+                            });
+                        // Derived outright, every frame the table is drawn: a
+                        // focused reference field previews the atoms it names,
+                        // otherwise the selection previews itself, and with
+                        // neither there is nothing to highlight. Assigning only in
+                        // the first two cases is what let a stale index survive.
+                        zmat_state.edit_preview = preview_indices
+                            .or_else(|| zmat_state.selected_index.map(|sel| vec![sel]))
+                            .unwrap_or_default();
+                        if let Some(idx) = zmat_state.selected_index {
+                            if can_remove_zmat_index(&zmat_state.zmat, idx) {
+                                if ui.button("Remove Atom").clicked() {
+                                    zmat_state.last_remove_snapshot = Some(zmat_state.zmat.clone());
+                                    remove_zmat_index(&mut zmat_state.zmat, idx);
+                                    let coords = zmat2xyz::zmat_to_xyz(&zmat_state.zmat);
+                                    mol.atoms = zmat_state
+                                        .zmat
+                                        .iter()
+                                        .map(|atom| atom.symbol.clone())
+                                        .collect();
+                                    mol.pos = coords;
+                                    mol.recompute_bonds(2.0, 3.0);
+                                    settings.geometry_dirty = true;
+                                    settings.bond_topology_dirty = true;
+                                    zmat_state.edit_refresh = true;
+                                    zmat_state.selected_index = None;
+                                    zmat_state.selected_symbol = None;
+                                    zmat_state.edit_preview.clear();
+                                    zmat_state.redo_remove_visible = true;
+                                    zmat_state.frag_undo_visible = false;
+                                    zmat_state.last_error = None;
+                                }
+                            } else {
+                                zmat_state.last_error =
+                                    Some("Cannot remove: referenced by later rows.".to_string());
+                            }
+                        }
+                        if zmat_state.redo_remove_visible {
+                            if ui.button("Undo Remove Atom").clicked() {
+                                if let Some(prev) = zmat_state.last_remove_snapshot.take() {
+                                    zmat_state.zmat = prev;
+                                    let coords = zmat2xyz::zmat_to_xyz(&zmat_state.zmat);
+                                    mol.atoms = zmat_state
+                                        .zmat
+                                        .iter()
+                                        .map(|atom| atom.symbol.clone())
+                                        .collect();
+                                    mol.pos = coords;
+                                    mol.recompute_bonds(2.0, 3.0);
+                                    settings.geometry_dirty = true;
+                                    settings.bond_topology_dirty = true;
+                                    zmat_state.edit_refresh = true;
+                                }
+                                zmat_state.redo_remove_visible = false;
+                                zmat_state.frag_undo_visible = false;
+                            }
+                        }
+                        if let Some(err) = &zmat_state.last_error {
+                            ui.colored_label(egui::Color32::LIGHT_RED, err);
+                        }
+
+                        // No "clicking outside the table clears the selection"
+                        // here any more. It fired for *every* click over the panel
+                        // that was not inside the grid -- including the click on
+                        // Add Fragment, Replace Atom or Add Atom -- and it runs
+                        // earlier in the frame than those buttons, so it destroyed
+                        // the selection the button was about to use. Deselecting
+                        // is the 3D background click's job, which the picker
+                        // already delivers as `ViewportClicked { hit: None }`.
+                    }
+                });
+            zmat_state.zmat_window_open = zmat_open;
+
 
             if zmat_state.remove_popup_open {
                 let popup_pos = zmat_state
