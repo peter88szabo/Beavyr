@@ -323,7 +323,12 @@ pub fn editor_controls(
             history.save_current(mol);
         }
     });
-    status(ui, history);
+    // Failures only. A confirmation line under a button that says "Save to
+    // history" repeats what the button already said, and it sat there for the
+    // rest of the session; a save that failed silently would be a real loss.
+    if history.is_error {
+        status(ui, history);
+    }
     ui.separator();
 }
 pub fn panel(

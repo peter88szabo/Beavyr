@@ -470,10 +470,6 @@ pub struct ZMatrixBuilderState {
     /// separate Undo buttons; each reversed only its own last action, so
     /// pressing one did not reverse what had actually been done last.
     pub history: super::history::BuilderHistory,
-    /// Whether the single-atom form is showing. Choosing "Single atom..."
-    /// in the insert list opens it; the chosen element becomes the inserted
-    /// fragment's name, so the panel keeps one row for "what".
-    pub atom_form_open: bool,
     /// Whether the Z-matrix window is showing. The table is the tallest thing
     /// the builder can draw and most sessions never need it, so it is out of
     /// the panel and behind this flag.
@@ -586,7 +582,6 @@ impl Default for ZMatrixBuilderState {
             zmat: Vec::new(),
             history: super::history::BuilderHistory::default(),
             zmat_window_open: false,
-            atom_form_open: false,
             cleanup_report: None,
             hydrogen_state: Default::default(),
             last_click: None,
@@ -2590,7 +2585,16 @@ pub fn builder_ui_contents(
                                 .selectable_label(inserting_atom, SINGLE_ATOM_ENTRY)
                                 .clicked()
                             {
-                                zmat_state.atom_form_open = true;
+                                // Straight into the list. The element is set
+                                // on the row below, in the panel, because a
+                                // window to choose one letter is a window too
+                                // many.
+                                if zmat_state.new_symbol.trim().is_empty() {
+                                    zmat_state.new_symbol = "C".to_string();
+                                }
+                                zmat_state.frag_name =
+                                    format!("Atom: {}", zmat_state.new_symbol.trim());
+                                zmat_state.last_error = None;
                             }
                             ui.separator();
                             for frag in fragments::FRAGMENTS {
@@ -2601,10 +2605,40 @@ pub fn builder_ui_contents(
                                 );
                             }
                         });
-                    if inserting_atom && ui.small_button("change\u{2026}").clicked() {
-                        zmat_state.atom_form_open = true;
-                    }
                 });
+
+                // The element, on the next row rather than behind a button.
+                // Only when an atom is what is being inserted -- a group
+                // carries its own atoms.
+                if inserting_atom {
+                    ui.horizontal(|ui| {
+                        ui.label("Element");
+                        egui::ComboBox::from_id_salt("atom_element")
+                            .width(56.0)
+                            .selected_text(zmat_state.new_symbol.clone())
+                            .show_ui(ui, |ui| {
+                                for sym in COMMON_ELEMENTS {
+                                    ui.selectable_value(
+                                        &mut zmat_state.new_symbol,
+                                        sym.to_string(),
+                                        *sym,
+                                    );
+                                }
+                            });
+                        ui.label("or type");
+                        ui.add(
+                            egui::TextEdit::singleline(&mut zmat_state.new_symbol)
+                                .desired_width(48.0),
+                        );
+                    });
+                    // What is inserted follows the symbol with no separate
+                    // confirming step. An empty box leaves the name "Atom: ",
+                    // which resolves to nothing, so the buttons refuse it and
+                    // say why -- and this row stays on screen while it is
+                    // being typed into.
+                    zmat_state.frag_name =
+                        format!("Atom: {}", zmat_state.new_symbol.trim());
+                }
 
                 ui.horizontal(|ui| {
                     ui.label("Bond");
@@ -2870,57 +2904,6 @@ pub fn builder_ui_contents(
                     ui.weak(format!("Fragment scan min distance: {:.3} Å", score));
                 }
             });
-
-            // The single-atom form. An element is chosen here rather than in
-            // the panel, so the panel keeps one "What" row whether the thing
-            // being inserted is one atom or a whole group.
-            let mut atom_form_open = zmat_state.atom_form_open;
-            let mut close_form = false;
-            egui::Window::new("Single atom")
-                .open(&mut atom_form_open)
-                .resizable(false)
-                .collapsible(false)
-                .show(&ctx, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label("Element");
-                        egui::ComboBox::from_id_salt("atom_form_element")
-                            .width(56.0)
-                            .selected_text(zmat_state.new_symbol.clone())
-                            .show_ui(ui, |ui| {
-                                for sym in COMMON_ELEMENTS {
-                                    ui.selectable_value(
-                                        &mut zmat_state.new_symbol,
-                                        sym.to_string(),
-                                        *sym,
-                                    );
-                                }
-                            });
-                        ui.label("or type");
-                        ui.add(
-                            egui::TextEdit::singleline(&mut zmat_state.new_symbol)
-                                .desired_width(48.0),
-                        );
-                    });
-                    ui.add_space(6.0);
-                    ui.horizontal(|ui| {
-                        let symbol = zmat_state.new_symbol.trim().to_string();
-                        if ui
-                            .add_enabled(!symbol.is_empty(), egui::Button::new("Use this"))
-                            .on_disabled_hover_text("Choose or type an element symbol.")
-                            .clicked()
-                        {
-                            zmat_state.frag_name = format!("Atom: {symbol}");
-                            zmat_state.last_error = None;
-                            close_form = true;
-                        }
-                        if ui.button("Cancel").clicked() {
-                            close_form = true;
-                        }
-                    });
-                });
-            // Closing from inside the window needs its own flag: `open` is
-            // already borrowed by the frame above.
-            zmat_state.atom_form_open = atom_form_open && !close_form;
 
             // The Z-matrix, in its own window. Drawn after the panel body so
             // the panel's borrows of zmat_state have ended; `open` needs a
@@ -3397,7 +3380,9 @@ pub fn builder_ui_contents(
             let mut thresholds_open = state.thresholds_window_open;
             egui::Window::new("Bond thresholds")
                 .open(&mut thresholds_open)
-                .resizable(false)
+                // Resizable, like every other window here. How big a window
+                // should be is the user's business.
+                .resizable(true)
                 .show(&ctx, |ui| {
                     ui.add(
                         egui::Slider::new(&mut state.bond_th_hx, 0.6..=2.0).text("H\u{2013}X (\u{c5})"),
@@ -3572,7 +3557,11 @@ fn fragment_editor_window(
     egui::Window::new("Fragment Editor")
         .open(&mut open)
         .default_width(340.0)
-        .resizable(false)
+        .default_height(380.0)
+        // Both directions. A form of fixed height is still a window the user
+        // may want wider, and the sliders read better with room.
+        .resizable(true)
+        .vscroll(true)
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
                 if ui
