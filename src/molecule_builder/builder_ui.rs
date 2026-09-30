@@ -2698,6 +2698,11 @@ pub fn builder_ui_contents(
                 // "Single atom..." is simply the first entry in the list.
                 ui.label(egui::RichText::new("Add / Replace Fragment").heading().strong());
 
+                // Read again after the chooser below, never reused from
+                // here: the dropdown and the tiles both change what is being
+                // inserted, and acting on the value from the top of the frame
+                // is what made choosing a group after an atom impossible --
+                // the element row would still run and overwrite it.
                 let inserting_atom = zmat_state.frag_name.starts_with("Atom: ");
 
                 ui.horizontal(|ui| {
@@ -2810,7 +2815,10 @@ pub fn builder_ui_contents(
                 // The element, on the next row rather than behind a button.
                 // Only when an atom is what is being inserted -- a group
                 // carries its own atoms.
-                if inserting_atom {
+                //
+                // Recomputed, because the dropdown or a tile above may have
+                // just changed the answer.
+                if zmat_state.frag_name.starts_with("Atom: ") {
                     ui.horizontal(|ui| {
                         ui.label("Element");
                         egui::ComboBox::from_id_salt("atom_element")
