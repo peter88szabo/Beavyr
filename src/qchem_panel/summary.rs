@@ -153,8 +153,18 @@ fn optimization_buttons(
     use crate::qchem_interfaces::xtb_optimize::OptimizationReport;
 
     ui.strong("Optimization");
+
+    let has_history = !opt_task.last_energy_history.is_empty();
+    // The convergence table only exists where the program printed one this
+    // reader understands. Shown disabled with the reason rather than hidden,
+    // so a missing button is never a mystery.
+    let has_report = opt_task
+        .last_log
+        .as_deref()
+        .map(|log| OptimizationReport::from_log(log, opt_task.last_duration))
+        .is_some_and(|report| report.has_content());
+
     ui.horizontal(|ui| {
-        let has_history = !opt_task.last_energy_history.is_empty();
         if ui
             .add_enabled(
                 has_history,
@@ -170,14 +180,6 @@ fn optimization_buttons(
             opt_panel.energy_plot_open = !opt_panel.energy_plot_open;
         }
 
-        // The convergence table only exists where the program printed one this
-        // reader understands. Shown disabled with the reason rather than
-        // hidden, so a missing button is never a mystery.
-        let has_report = opt_task
-            .last_log
-            .as_deref()
-            .map(|log| OptimizationReport::from_log(log, opt_task.last_duration))
-            .is_some_and(|report| report.has_content());
         if ui
             .add_enabled(
                 has_report,
@@ -196,6 +198,31 @@ fn optimization_buttons(
             opt_panel.summary_open = !opt_panel.summary_open;
         }
     });
+
+    // The same reasons again, on screen. A greyed button whose explanation is
+    // only in hover text tells the user that they cannot proceed without
+    // telling them why, and on a touch screen it tells them nothing at all.
+    //
+    // Both buttons say their own piece: one visible reason beside two greyed
+    // buttons reads as if it explained both.
+    if !has_history {
+        ui.label(
+            egui::RichText::new("No energy plot: this run recorded no per-cycle energies.")
+                .small()
+                .weak(),
+        );
+    }
+    if !has_report {
+        ui.label(
+            egui::RichText::new(
+                "No optimization summary: this program printed no per-cycle convergence table \
+                 Beavyr can read. The energy plot and the cycle table above come from the \
+                 trajectory instead.",
+            )
+            .small()
+            .weak(),
+        );
+    }
 }
 
 /// The files this run produced, each with a Save button.

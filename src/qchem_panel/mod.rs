@@ -12,14 +12,49 @@
 //! stays here is the run summary: the iterations, and the energies at the end.
 
 pub mod run;
+pub mod sections;
 pub mod summary;
 pub mod ui;
+pub mod ui_classic;
+pub mod ui_sections;
 
 use bevy::prelude::*;
 
 use crate::qchem_interfaces::job::{ExcitedStateOptions, JobType, QcMethod};
 use crate::qchem_interfaces::method::MethodConfig;
 use crate::qchem_interfaces::program::QcProgram;
+
+/// Which arrangement of the runner panel is drawn.
+///
+/// The sectioned layout replaced a flat eleven-row form. The old one stays
+/// reachable rather than being deleted, because a redesign is a claim about
+/// what someone finds usable, and a claim like that should be testable by the
+/// person it is made for rather than argued with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PanelLayout {
+    /// Six collapsed sections, each showing its current setting.
+    #[default]
+    Sections,
+    /// The original flat form, every control visible at once.
+    Classic,
+}
+
+impl PanelLayout {
+    pub fn label(self) -> &'static str {
+        match self {
+            PanelLayout::Sections => "sections",
+            PanelLayout::Classic => "the old layout",
+        }
+    }
+
+    /// The other one, for a control that toggles.
+    pub fn other(self) -> PanelLayout {
+        match self {
+            PanelLayout::Sections => PanelLayout::Classic,
+            PanelLayout::Classic => PanelLayout::Sections,
+        }
+    }
+}
 
 /// Everything the panel remembers between frames.
 #[derive(Resource)]
@@ -56,6 +91,8 @@ pub struct QcPanelState {
     /// box is opened, so editing starts from something that runs rather than
     /// from a blank page.
     pub advanced_text: String,
+    /// Which arrangement is drawn. Remembered between sessions.
+    pub layout: PanelLayout,
     /// Whether the run summary window is open.
     pub summary_open: bool,
     /// Whether the "really close it?" prompt is showing for that window.
@@ -91,6 +128,7 @@ impl Default for QcPanelState {
             wavefunction: false,
             advanced: false,
             advanced_text: String::new(),
+            layout: crate::qchem_interfaces::config::load_layout(),
             summary_open: false,
             summary_confirm_close: false,
             show_warnings: false,
@@ -281,6 +319,116 @@ impl QcPanelState {
             )
         } else {
             format!("{} {method} \u{2014} {}", self.program.label(), self.job.label())
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The new layout is what a user gets unless they have chosen otherwise.
+    #[test]
+    fn the_new_layout_is_the_default() {
+        assert_eq!(PanelLayout::default(), PanelLayout::Sections);
+    }
+
+    /// The choice survives a restart. Being dropped back into a layout you
+    /// rejected is worse than having no switch at all, and the existing
+    /// classic/windowed switch already has that wart; this one must not.
+    #[test]
+    fn the_layout_choice_is_remembered() {
+        use crate::qchem_interfaces::config;
+
+        let dir = std::env::temp_dir().join(format!(
+            "beavyr_layout_test_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        // SAFETY: the suite runs single-threaded via --test-threads=1 and no
+        // other test in this crate touches these variables concurrently.
+        unsafe {
+            std::env::remove_var("XDG_CONFIG_HOME");
+            std::env::set_var("HOME", &dir);
+        }
+
+        // Nothing saved yet: the default.
+        assert_eq!(config::load_layout(), PanelLayout::Sections);
+
+        config::save_layout(PanelLayout::Classic);
+        assert_eq!(config::load_layout(), PanelLayout::Classic);
+
+        config::save_layout(PanelLayout::Sections);
+        assert_eq!(config::load_layout(), PanelLayout::Sections);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Review Focus 4. Switching program must update every header at once. A
+    /// header still showing the previous program's basis is worse than no
+    /// header, because it reads as current.
+    #[test]
+    fn switching_program_updates_every_header() {
+        use crate::qchem_interfaces::job::QcMethod;
+        use crate::qchem_interfaces::program::QcProgram;
+        use sections::{header, Section};
+
+        let mut state = QcPanelState::default();
+        state.set_program(QcProgram::Orca);
+        state.method = Some(QcMethod::Dft);
+        state.config.functional = "M062X".to_string();
+        let before = header(Section::LevelOfTheory, &state);
+        assert!(before.contains("M06-2X"), "{before}");
+
+        state.set_program(QcProgram::PySCF);
+        let after = header(Section::LevelOfTheory, &state);
+        assert!(
+            !after.contains("M06-2X"),
+            "ORCA's spelling must not survive the switch: {after}"
+        );
+        assert!(header(Section::Program, &state).contains("PySCF"));
+    }
+
+    /// The switch offers the other one, whichever you are on.
+    #[test]
+    fn the_switch_offers_the_other_layout() {
+        assert_eq!(PanelLayout::Sections.other(), PanelLayout::Classic);
+        assert_eq!(PanelLayout::Classic.other(), PanelLayout::Sections);
+        assert!(!PanelLayout::Sections.label().is_empty());
+        assert!(!PanelLayout::Classic.label().is_empty());
+    }
+
+    /// A job the chosen program cannot do must explain itself on screen.
+    ///
+    /// The reason currently lives in a hover tooltip. A user who cannot see
+    /// why an option is unavailable is left guessing, and a tooltip is
+    /// unreachable the moment this panel is used with a finger.
+    #[test]
+    fn an_unavailable_job_explains_itself_without_hovering() {
+        use crate::qchem_interfaces::job::{self, JobType};
+        use crate::qchem_interfaces::program::QcProgram;
+
+        // The model already carries the reason; this test pins that it is
+        // available to draw on screen rather than only as hover text.
+        let reason =
+            job::unsupported_reason(QcProgram::Xtb, JobType::Irc).expect("xTB has no IRC");
+        assert!(reason.contains("ORCA") || reason.contains("Psi4"), "{reason}");
+
+        // And that every refusal is short enough to show inline.
+        for program in QcProgram::ALL {
+            for a_job in JobType::ALL {
+                if let Some(text) = job::unsupported_reason(program, a_job) {
+                    assert!(
+                        text.chars().count() < 200,
+                        "{program:?}/{a_job:?} is too long to show inline: {} chars",
+                        text.chars().count()
+                    );
+                }
+            }
         }
     }
 }

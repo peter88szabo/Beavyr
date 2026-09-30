@@ -1133,6 +1133,25 @@ pub fn format_elapsed(elapsed: Duration) -> String {
 /// The message always names the interpreter that was searched. Without that,
 /// a wrong-environment mistake -- the common one, activating in a terminal and
 /// launching from an icon -- looks exactly like a broken installation.
+/// Whether this program's Python backend can be imported, without drawing.
+///
+/// Split out of `python_environment_row` because the sectioned panel needs the
+/// answer whether or not the section that draws it is open. egui does not run
+/// a collapsed `CollapsingHeader`'s body, so a value assigned inside one is
+/// simply never assigned -- and a gate left at its default is a gate that
+/// says yes. Collapsing the Program section would otherwise re-enable Run for
+/// a backend this Python cannot import, and the run would fail minutes later
+/// on an import error.
+///
+/// Cheap to call every frame: `python_env::cached` probes once and remembers.
+pub fn python_environment_ready(program: QcProgram) -> bool {
+    let Some(module) = program.python_module() else {
+        // Nothing to import, so nothing to be unready for.
+        return true;
+    };
+    super::python_env::cached(module).is_ready()
+}
+
 pub fn python_environment_row(
     ui: &mut egui::Ui,
     program: QcProgram,
@@ -1145,7 +1164,9 @@ pub fn python_environment_row(
     };
 
     let env = python_env::cached(module);
-    let ready = env.is_ready();
+    // The same verdict the Run button uses, from the same place, so the row
+    // and the gate cannot come to disagree.
+    let ready = python_environment_ready(program);
 
     ui.horizontal(|ui| {
         // One short line, with the whole explanation on hover. In the middle of
@@ -2102,5 +2123,42 @@ H 0.0 0.0 0.74
         assert_eq!(frames[0].atoms.len(), 4);
 
         let _ = fs::remove_dir_all(&workdir);
+    }
+
+    /// The Run gate must be answerable without drawing the row that shows it.
+    ///
+    /// In the sectioned panel the Program section can be collapsed, and egui
+    /// does not run a collapsed section's body. A readiness value assigned
+    /// inside that body is therefore never assigned, and the gate falls back
+    /// to its default -- which for a gate means "allowed". Run would go live
+    /// for a backend this Python cannot import, and fail on the import
+    /// minutes later.
+    #[test]
+    fn python_readiness_is_answerable_without_drawing() {
+        // A program with nothing to import is ready whether drawn or not.
+        for program in QcProgram::ALL {
+            if program.python_module().is_none() {
+                assert!(
+                    python_environment_ready(program),
+                    "{program:?} has no Python backend and must never gate Run"
+                );
+            }
+        }
+
+        // For the ones that do import something, the undrawn answer is the
+        // same answer the drawn row reports. Whatever this machine's Python
+        // happens to have installed, the two must not disagree.
+        let mut checked = 0;
+        for program in QcProgram::ALL {
+            if let Some(module) = program.python_module() {
+                assert_eq!(
+                    python_environment_ready(program),
+                    super::super::python_env::cached(module).is_ready(),
+                    "{program:?}"
+                );
+                checked += 1;
+            }
+        }
+        assert!(checked > 0, "no Python backend to check: the test has rotted");
     }
 }

@@ -99,3 +99,45 @@ mod tests {
         assert_eq!(load_path(QcProgram::Xtb), "");
     }
 }
+
+/// Where the runner panel's layout choice is remembered.
+const LAYOUT_FILE: &str = "qc_panel_layout.txt";
+
+/// The directory the config files live in, or `None` when there is nowhere
+/// sensible to put them.
+fn config_dir() -> Option<PathBuf> {
+    config_path_for(QcProgram::Xtb).and_then(|path| path.parent().map(PathBuf::from))
+}
+
+/// The remembered layout, or the sectioned one when nothing is saved.
+///
+/// Never errors: an unreadable or absent config is "nothing chosen yet", which
+/// is the default, not a failure worth interrupting anyone for.
+pub fn load_layout() -> crate::qchem_panel::PanelLayout {
+    use crate::qchem_panel::PanelLayout;
+    let Some(base) = config_dir() else {
+        return PanelLayout::Sections;
+    };
+    match std::fs::read_to_string(base.join(LAYOUT_FILE))
+        .unwrap_or_default()
+        .trim()
+    {
+        "classic" => PanelLayout::Classic,
+        _ => PanelLayout::Sections,
+    }
+}
+
+/// Best-effort save, like the executable paths: forgetting a layout across
+/// restarts is an annoyance, never a reason to interrupt a session.
+pub fn save_layout(layout: crate::qchem_panel::PanelLayout) {
+    use crate::qchem_panel::PanelLayout;
+    let Some(base) = config_dir() else {
+        return;
+    };
+    let _ = std::fs::create_dir_all(&base);
+    let text = match layout {
+        PanelLayout::Classic => "classic",
+        PanelLayout::Sections => "sections",
+    };
+    let _ = std::fs::write(base.join(LAYOUT_FILE), text);
+}
