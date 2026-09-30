@@ -451,6 +451,10 @@ pub struct EditorRotateState {
 #[derive(Resource, Clone)]
 pub struct ZMatrixBuilderState {
     pub zmat: Vec<ZAtom>,
+    /// Whether the single-atom form is showing. Choosing "Single atom..."
+    /// in the insert list opens it; the chosen element becomes the inserted
+    /// fragment's name, so the panel keeps one row for "what".
+    pub atom_form_open: bool,
     /// Whether the Z-matrix window is showing. The table is the tallest thing
     /// the builder can draw and most sessions never need it, so it is out of
     /// the panel and behind this flag.
@@ -562,6 +566,7 @@ impl Default for ZMatrixBuilderState {
         Self {
             zmat: Vec::new(),
             zmat_window_open: false,
+            atom_form_open: false,
             cleanup_report: None,
             hydrogen_state: Default::default(),
             last_click: None,
@@ -1032,8 +1037,56 @@ fn place_and_derive_fragment(
     clearance
 }
 
-fn find_fragment(name: &str) -> Option<&'static fragments::FragmentDef> {
-    fragments::FRAGMENTS.iter().find(|f| f.name == name)
+/// The label of the entry that inserts one atom rather than a group.
+///
+/// It sits at the top of the same list as the built-in fragments, because a
+/// single atom *is* a fragment of one atom: `-Cl`, `-Br` and `-I` in that list
+/// are already exactly that, and they go in through the same code. Keeping
+/// atoms and groups apart bought two panels doing one job.
+pub const SINGLE_ATOM_ENTRY: &str = "Single atom\u{2026}";
+
+/// Said when a button that acts on the selection is pressed with nothing
+/// selected. The buttons stay enabled and say this, because a press that
+/// cannot register looks exactly like one that did nothing.
+const NOTHING_SELECTED: &str = "No atom selected. Left-click an atom in the 3D view, or a \
+     row index in the Z-matrix, then press this again.";
+
+/// Offered in the single-atom form. Typing is always allowed, so this is a
+/// shortcut for the elements a structure is usually built from, not a limit.
+const COMMON_ELEMENTS: &[&str] = &[
+    "H", "B", "C", "N", "O", "F", "Si", "P", "S", "Cl", "Br", "I",
+];
+
+/// A fragment the panel can insert: one of the built-in list, or a single atom
+/// built on the spot from an element symbol.
+///
+/// Owned rather than `&'static` so an atom chosen at runtime is the same kind
+/// of thing as `-CH3`. Only the geometry is ever used; the name the user chose
+/// is already in `frag_name`.
+pub struct ChosenFragment {
+    pub xyz: String,
+}
+
+/// Resolve the name shown in the panel to something insertable.
+///
+/// `Atom: X` builds a one-atom fragment at the origin; that atom is its own
+/// connector, which is what the attachment code expects of the first atom.
+fn find_fragment(name: &str) -> Option<ChosenFragment> {
+    if let Some(symbol) = name.strip_prefix("Atom: ") {
+        let symbol = symbol.trim();
+        if symbol.is_empty() {
+            return None;
+        }
+        return Some(ChosenFragment {
+            xyz: format!(" {symbol}     0.000000     0.000000     0.000000\n"),
+        });
+    }
+    fragments::FRAGMENTS
+        .iter()
+        .find(|f| f.name == name)
+        .map(|f| ChosenFragment {
+            xyz: f.xyz.to_string(),
+        })
 }
 
 fn ensure_zmat_edit_buffers(zmat_state: &mut ZMatrixBuilderState) {
@@ -1758,7 +1811,7 @@ fn commit_fragment_connect(
     let angle_ref = None;
     let dihedral_ref = None;
 
-    let (_n, symbols, _coords) = parse_xyz_angstrom(frag.xyz);
+    let (_n, symbols, _coords) = parse_xyz_angstrom(&frag.xyz);
     let connector_symbol = symbols.get(0).cloned().unwrap_or_else(|| "C".to_string());
     let r_new = covalent_radius_angstrom(&connector_symbol);
     let r_ref = covalent_radius_angstrom(&mol.atoms[bond_ref]);
@@ -1777,7 +1830,7 @@ fn commit_fragment_connect(
     // describes the geometry that was actually adopted.
     let (_fragment_indices, clearance) = add_fragment_to_zmat(
         &mut zmat_state.zmat,
-        frag.xyz,
+        &frag.xyz,
         Some((bond_ref, angle_ref, dihedral_ref)),
         bond_len,
         frag_angle_deg,
@@ -2428,62 +2481,94 @@ pub fn builder_ui_contents(
                 ui.separator();
                 ui.add_space(6.0);
 
-                ui.label("Add atom (pick references)");
+                // ONE insert section, for atoms and groups alike.
+                //
+                // These were two panels doing the same job: choose a thing,
+                // say how it attaches, press a button. A single atom is a
+                // fragment of one atom -- -Cl, -Br and -I in the list already
+                // are exactly that -- so they are one code path now, and
+                // "Single atom..." is simply the first entry in the list.
+                ui.label("Insert");
+
+                let inserting_atom = zmat_state.frag_name.starts_with("Atom: ");
+
                 ui.horizontal(|ui| {
-                    let row_h = ui.spacing().interact_size.y;
-                    ui.add_sized([0.0, row_h], egui::Label::new("Symbol"));
-                    ui.add_sized(
-                        [32.0, row_h],
-                        egui::TextEdit::singleline(&mut zmat_state.new_symbol),
-                    );
+                    ui.label("What");
+                    egui::ComboBox::from_id_salt("frag_combo")
+                        .selected_text(zmat_state.frag_name.clone())
+                        .show_ui(ui, |ui| {
+                            // Choosing this opens the element form. The name
+                            // becomes "Atom: X" only once an element is
+                            // actually set, so a half-made choice cannot be
+                            // inserted.
+                            if ui
+                                .selectable_label(inserting_atom, SINGLE_ATOM_ENTRY)
+                                .clicked()
+                            {
+                                zmat_state.atom_form_open = true;
+                            }
+                            ui.separator();
+                            for frag in fragments::FRAGMENTS {
+                                ui.selectable_value(
+                                    &mut zmat_state.frag_name,
+                                    frag.name.to_string(),
+                                    frag.name,
+                                );
+                            }
+                        });
+                    if inserting_atom && ui.small_button("change\u{2026}").clicked() {
+                        zmat_state.atom_form_open = true;
+                    }
                 });
+
                 ui.horizontal(|ui| {
                     ui.label("Bond");
-                    egui::ComboBox::from_id_salt("zmat_new_bond_order")
-                        .selected_text(zmat_state.new_bond_order.label())
+                    egui::ComboBox::from_id_salt("frag_bond_order")
+                        .selected_text(zmat_state.frag_bond_order.label())
                         .show_ui(ui, |ui| {
                             for &bo in &[BondOrder::Single, BondOrder::Double, BondOrder::Triple] {
                                 if ui
                                     .selectable_value(
-                                        &mut zmat_state.new_bond_order,
+                                        &mut zmat_state.frag_bond_order,
                                         bo,
                                         bo.label(),
                                     )
                                     .clicked()
                                 {
-                                    zmat_state.new_angle_deg = bo.default_angle();
-                                    zmat_state.new_dihedral_deg = bo.default_dihedral();
+                                    zmat_state.frag_angle_deg = bo.default_angle();
+                                    zmat_state.frag_dihedral_deg = bo.default_dihedral();
                                 }
                             }
                         });
                 });
                 ui.horizontal(|ui| {
                     ui.label("Angle (deg)");
-                    ui.add(egui::DragValue::new(&mut zmat_state.new_angle_deg).speed(0.1));
+                    ui.add(egui::DragValue::new(&mut zmat_state.frag_angle_deg).speed(0.1));
                     ui.add_space(12.0);
                     ui.label("Dihedral (deg)");
-                    ui.add(egui::DragValue::new(&mut zmat_state.new_dihedral_deg).speed(0.1));
+                    ui.add(egui::DragValue::new(&mut zmat_state.frag_dihedral_deg).speed(0.1));
                 });
 
+                ui.add_space(4.0);
                 ui.horizontal(|ui| {
                     if zmat_state.zmat.is_empty() {
-                        // Nothing to bond to yet, so there is no atom to pick:
-                        // the very first atom is just dropped in directly.
-                        if ui.button("Add Atom").clicked() {
-                            let symbol = zmat_state.new_symbol.trim().to_string();
-                            if symbol.is_empty() {
-                                zmat_state.last_error =
-                                    Some("Atom symbol cannot be empty.".to_string());
-                            } else {
-                                zmat_state.zmat.push(ZAtom {
-                                    symbol,
-                                    bond_ref: None,
-                                    bond_len: 0.0,
-                                    angle_ref: None,
-                                    angle_deg: 0.0,
-                                    dihedral_ref: None,
-                                    dihedral_deg: 0.0,
-                                });
+                        // Nothing exists to attach to, so there is no selection
+                        // to make: the first thing is dropped in where it
+                        // stands. One atom or twelve, the same path.
+                        if ui.button("Place").clicked() {
+                            if let Some(frag) = find_fragment(&zmat_state.frag_name) {
+                                zmat_state.last_frag_snapshot = Some(zmat_state.zmat.clone());
+                                zmat_state.frag_undo_visible = true;
+                                let frag_angle_deg = zmat_state.frag_angle_deg;
+                                let frag_dihedral_deg = zmat_state.frag_dihedral_deg;
+                                add_fragment_to_zmat(
+                                    &mut zmat_state.zmat,
+                                    &frag.xyz,
+                                    None,
+                                    0.0,
+                                    frag_angle_deg,
+                                    frag_dihedral_deg,
+                                );
                                 let coords = zmat2xyz::zmat_to_xyz(&zmat_state.zmat);
                                 mol.atoms = zmat_state
                                     .zmat
@@ -2496,52 +2581,51 @@ pub fn builder_ui_contents(
                                 settings.bond_topology_dirty = true;
                                 zmat_state.edit_refresh = true;
                                 zmat_state.last_error = None;
+                            } else {
+                                zmat_state.last_error =
+                                    Some("Choose what to insert first.".to_string());
                             }
                         }
                     } else {
-                        // An armed tool, like the bond-axis rotation below:
-                        // pressing the button starts collecting the new atom's
-                        // references by clicking them, rather than acting on
-                        // whatever happened to be selected. An angle and a
-                        // dihedral only mean something against stated
-                        // reference atoms, so those are picked, not guessed.
-                        let explicit_armed =
-                            zmat_state.add_atom_active && !zmat_state.add_atom_auto;
-                        let auto_armed = zmat_state.add_atom_active && zmat_state.add_atom_auto;
-
-                        let label = if explicit_armed { "Cancel" } else { "Add Atom" };
+                        // Two buttons, not a mode dropdown. Which one you press
+                        // is the whole decision, and it is visible in the press
+                        // rather than remembered from a setting made earlier.
+                        //
+                        // Both stay enabled with nothing selected and say so
+                        // when pressed: a press that cannot register looks
+                        // exactly like one that did nothing.
                         if ui
-                            .button(label)
-                            .on_hover_text(
-                                "Pick the bond, angle and dihedral reference atoms yourself; \
-                                 the values set above are used exactly as given.",
-                            )
+                            .button("Add to selection")
+                            .on_hover_text("Attaches it to the selected atom.")
                             .clicked()
                         {
-                            zmat_state.add_atom_active = !explicit_armed;
-                            zmat_state.add_atom_auto = false;
-                            zmat_state.add_atom_picks.clear();
-                            zmat_state.add_atom_status = None;
+                            if zmat_state.selected_index.is_none() {
+                                zmat_state.last_error = Some(NOTHING_SELECTED.to_string());
+                            } else {
+                                zmat_state.frag_mode = FragmentInsertMode::Connect;
+                                commit_fragment_connect(zmat_state, mol, settings);
+                            }
                         }
-
-                        let label = if auto_armed { "Cancel" } else { "Add Atom (auto)" };
                         if ui
-                            .button(label)
-                            .on_hover_text(
-                                "Pick only the atom to bond to. Beavyr sets the distance from \
-                                 the covalent radii and the angle from the host's own geometry \
-                                 -- completing a tetrahedron or a trigonal centre where one is \
-                                 there to complete, and from VSEPR on the remaining valence \
-                                 where it is not.",
-                            )
+                            .button("Replace selection")
+                            .on_hover_text("Replaces the selected atom with it.")
                             .clicked()
                         {
-                            zmat_state.add_atom_active = !auto_armed;
-                            zmat_state.add_atom_auto = !auto_armed;
-                            zmat_state.add_atom_picks.clear();
-                            zmat_state.add_atom_status = None;
+                            if zmat_state.selected_index.is_none() {
+                                zmat_state.last_error = Some(NOTHING_SELECTED.to_string());
+                            } else {
+                                zmat_state.frag_mode = FragmentInsertMode::Replace;
+                                commit_fragment_replace(zmat_state, mol, settings, state);
+                            }
                         }
                     }
+
+                    // The way out of a placement you did not want, right where
+                    // you just looked.
+                    if zmat_state.frag_undo_visible && ui.button("Undo").clicked() {
+                        undo_last_fragment(zmat_state, mol, settings);
+                    }
+
                     if ui.button("Remove Last").clicked() {
                         if zmat_state.zmat.pop().is_some() {
                             let coords = zmat2xyz::zmat_to_xyz(&zmat_state.zmat);
@@ -2558,6 +2642,36 @@ pub fn builder_ui_contents(
                         }
                     }
                 });
+
+                // Placing one atom against reference atoms you pick yourself.
+                // "Add to selection" works the placement out; this is for when
+                // the bond, angle and dihedral partners have to be stated
+                // exactly. Only for a single atom: a group's own geometry
+                // already fixes everything but where it joins.
+                if inserting_atom && !zmat_state.zmat.is_empty() {
+                    ui.horizontal(|ui| {
+                        let armed = zmat_state.add_atom_active && !zmat_state.add_atom_auto;
+                        if ui
+                            .button(if armed { "Cancel" } else { "Pick references\u{2026}" })
+                            .on_hover_text(
+                                "Pick the bond, angle and dihedral reference atoms yourself; \
+                                 the values set above are used exactly as given.",
+                            )
+                            .clicked()
+                        {
+                            zmat_state.add_atom_active = !armed;
+                            zmat_state.add_atom_auto = false;
+                            zmat_state.add_atom_picks.clear();
+                            zmat_state.add_atom_status = None;
+                            // The explicit path reads its own copies of these.
+                            // They are one set of numbers on screen, so they
+                            // must be one set of numbers underneath.
+                            zmat_state.new_angle_deg = zmat_state.frag_angle_deg;
+                            zmat_state.new_dihedral_deg = zmat_state.frag_dihedral_deg;
+                            zmat_state.new_bond_order = zmat_state.frag_bond_order;
+                        }
+                    });
+                }
 
                 if zmat_state.add_atom_active {
                     // The automatic mode needs one reference only; that is the
@@ -2603,179 +2717,6 @@ pub fn builder_ui_contents(
                     }
                 }
 
-                ui.add_space(8.0);
-                ui.separator();
-                ui.add_space(6.0);
-
-                ui.label("Add fragment");
-                ui.horizontal(|ui| {
-                    ui.label("Mode");
-                    if ui
-                        .selectable_value(
-                            &mut zmat_state.frag_mode,
-                            FragmentInsertMode::Connect,
-                            "Connect",
-                        )
-                        .clicked()
-                    {
-                        zmat_state.last_error = None;
-                    }
-                    if ui
-                        .selectable_value(
-                            &mut zmat_state.frag_mode,
-                            FragmentInsertMode::Replace,
-                            "Replace",
-                        )
-                        .clicked()
-                    {
-                        zmat_state.last_error = None;
-                    }
-                });
-                ui.horizontal(|ui| {
-                    ui.label("Fragment");
-                    egui::ComboBox::from_id_salt("frag_combo")
-                        .selected_text(zmat_state.frag_name.clone())
-                        .show_ui(ui, |ui| {
-                            for frag in fragments::FRAGMENTS {
-                                ui.selectable_value(
-                                    &mut zmat_state.frag_name,
-                                    frag.name.to_string(),
-                                    frag.name,
-                                );
-                            }
-                        });
-                });
-                if matches!(zmat_state.frag_mode, FragmentInsertMode::Connect) {
-                    ui.horizontal(|ui| {
-                        ui.label("Bond");
-                        egui::ComboBox::from_id_salt("frag_bond_order")
-                            .selected_text(zmat_state.frag_bond_order.label())
-                            .show_ui(ui, |ui| {
-                                for &bo in
-                                    &[BondOrder::Single, BondOrder::Double, BondOrder::Triple]
-                                {
-                                    if ui
-                                        .selectable_value(
-                                            &mut zmat_state.frag_bond_order,
-                                            bo,
-                                            bo.label(),
-                                        )
-                                        .clicked()
-                                    {
-                                        zmat_state.frag_angle_deg = bo.default_angle();
-                                        zmat_state.frag_dihedral_deg = bo.default_dihedral();
-                                    }
-                                }
-                            });
-                    });
-                    ui.horizontal(|ui| {
-                        ui.label("Angle (deg)");
-                        ui.add(egui::DragValue::new(&mut zmat_state.frag_angle_deg).speed(0.1));
-                        ui.add_space(12.0);
-                        ui.label("Dihedral (deg)");
-                        ui.add(egui::DragValue::new(&mut zmat_state.frag_dihedral_deg).speed(0.1));
-                    });
-                }
-
-                ui.horizontal(|ui| {
-                    if zmat_state.zmat.is_empty() {
-                        // Nothing exists yet to attach to, so there is no atom
-                        // to select: the first fragment in an empty editor is
-                        // just dropped in directly.
-                        if ui.button("Add Fragment").clicked() {
-                            if let Some(frag) = find_fragment(&zmat_state.frag_name) {
-                                zmat_state.last_frag_snapshot = Some(zmat_state.zmat.clone());
-                                zmat_state.frag_undo_visible = true;
-                                let frag_angle_deg = zmat_state.frag_angle_deg;
-                                let frag_dihedral_deg = zmat_state.frag_dihedral_deg;
-                                // First fragment in an empty editor: nothing to
-                                // collide with, so no relaxation.
-                                add_fragment_to_zmat(
-                                    &mut zmat_state.zmat,
-                                    frag.xyz,
-                                    None,
-                                    0.0,
-                                    frag_angle_deg,
-                                    frag_dihedral_deg,
-                                );
-                                let coords = zmat2xyz::zmat_to_xyz(&zmat_state.zmat);
-                                mol.atoms = zmat_state
-                                    .zmat
-                                    .iter()
-                                    .map(|atom| atom.symbol.clone())
-                                    .collect();
-                                mol.pos = coords;
-                                mol.recompute_bonds(2.0, 3.0);
-                                settings.geometry_dirty = true;
-                                settings.bond_topology_dirty = true;
-                                zmat_state.edit_refresh = true;
-                                zmat_state.last_error = None;
-                            } else {
-                                zmat_state.last_error = Some("Fragment not found.".to_string());
-                            }
-                        }
-                        if zmat_state.frag_undo_visible
-                            && ui.button("Undo Fragment").clicked()
-                        {
-                            undo_last_fragment(zmat_state, mol, settings);
-                        }
-                        return;
-                    }
-
-                    // Acts at once on the selected atom -- left-clicking an
-                    // atom already selects and highlights it, so a second
-                    // picking step would be asking for the same click twice.
-                    //
-                    // The button stays enabled with nothing selected, and says
-                    // so when pressed. Disabling it instead is what made this
-                    // look broken: a press that cannot register is
-                    // indistinguishable from one that did nothing.
-                    let label = match zmat_state.frag_mode {
-                        FragmentInsertMode::Connect => "Add Fragment",
-                        FragmentInsertMode::Replace => "Replace Atom",
-                    };
-                    if ui
-                        .button(label)
-                        .on_hover_text(match zmat_state.frag_mode {
-                            FragmentInsertMode::Connect => {
-                                "Attaches the fragment to the selected atom."
-                            }
-                            FragmentInsertMode::Replace => {
-                                "Replaces the selected atom with the fragment."
-                            }
-                        })
-                        .clicked()
-                    {
-                        if zmat_state.selected_index.is_none() {
-                            zmat_state.last_error = Some(
-                                "No atom selected. Left-click an atom in the 3D view, or a \
-                                 row index in the Z-matrix, then press this again."
-                                    .to_string(),
-                            );
-                        } else {
-                            match zmat_state.frag_mode {
-                                FragmentInsertMode::Connect => {
-                                    commit_fragment_connect(zmat_state, mol, settings)
-                                }
-                                FragmentInsertMode::Replace => {
-                                    commit_fragment_replace(zmat_state, mol, settings, state)
-                                }
-                            }
-                        }
-                    }
-
-                    // Right next to "Add Fragment", so the way out of a
-                    // placement you did not want is where you just looked.
-                    // It stays until it is used or until a structural edit
-                    // makes the snapshot stale -- clicking elsewhere no
-                    // longer takes it away.
-                    if zmat_state.frag_undo_visible
-                        && ui.button("Undo Fragment").clicked()
-                    {
-                        undo_last_fragment(zmat_state, mol, settings);
-                    }
-                });
-
                 // Why a press did nothing, said where the press happened. The
                 // panel's other error line sits above the Z-matrix table,
                 // which in a scrolling window is off-screen by the time these
@@ -2803,6 +2744,57 @@ pub fn builder_ui_contents(
                     ui.weak(format!("Fragment scan min distance: {:.3} Å", score));
                 }
             });
+
+            // The single-atom form. An element is chosen here rather than in
+            // the panel, so the panel keeps one "What" row whether the thing
+            // being inserted is one atom or a whole group.
+            let mut atom_form_open = zmat_state.atom_form_open;
+            let mut close_form = false;
+            egui::Window::new("Single atom")
+                .open(&mut atom_form_open)
+                .resizable(false)
+                .collapsible(false)
+                .show(&ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label("Element");
+                        egui::ComboBox::from_id_salt("atom_form_element")
+                            .width(56.0)
+                            .selected_text(zmat_state.new_symbol.clone())
+                            .show_ui(ui, |ui| {
+                                for sym in COMMON_ELEMENTS {
+                                    ui.selectable_value(
+                                        &mut zmat_state.new_symbol,
+                                        sym.to_string(),
+                                        *sym,
+                                    );
+                                }
+                            });
+                        ui.label("or type");
+                        ui.add(
+                            egui::TextEdit::singleline(&mut zmat_state.new_symbol)
+                                .desired_width(48.0),
+                        );
+                    });
+                    ui.add_space(6.0);
+                    ui.horizontal(|ui| {
+                        let symbol = zmat_state.new_symbol.trim().to_string();
+                        if ui
+                            .add_enabled(!symbol.is_empty(), egui::Button::new("Use this"))
+                            .on_disabled_hover_text("Choose or type an element symbol.")
+                            .clicked()
+                        {
+                            zmat_state.frag_name = format!("Atom: {symbol}");
+                            zmat_state.last_error = None;
+                            close_form = true;
+                        }
+                        if ui.button("Cancel").clicked() {
+                            close_form = true;
+                        }
+                    });
+                });
+            // Closing from inside the window needs its own flag: `open` is
+            // already borrowed by the frame above.
+            zmat_state.atom_form_open = atom_form_open && !close_form;
 
             // The Z-matrix, in its own window. Drawn after the panel body so
             // the panel's borrows of zmat_state have ended; `open` needs a
@@ -3555,12 +3547,33 @@ C   2.050   1.450   0.000
         xyz_to_zmat(&symbols, &positions)
     }
 
+    /// A single atom is a fragment of one atom, and goes in through the same
+    /// path as -CH3. This is what lets the panel have one Insert section
+    /// instead of two, which is the whole point of the merge.
+    #[test]
+    fn a_single_atom_resolves_as_a_one_atom_fragment() {
+        let frag = find_fragment("Atom: N").expect("an element makes a fragment");
+        let (n, symbols, _coords) = parse_xyz_angstrom(&frag.xyz);
+        assert_eq!(n, 1, "one atom");
+        assert_eq!(symbols, vec!["N".to_string()]);
+
+        // The built-in list still resolves, unchanged.
+        assert!(find_fragment("-CH3").is_some());
+        assert!(find_fragment("-Phenyl").is_some());
+
+        // And nothing insertable comes back from a name that names nothing.
+        // A blank symbol must not become a blank atom in the structure.
+        assert!(find_fragment("Atom: ").is_none());
+        assert!(find_fragment("Atom:").is_none());
+        assert!(find_fragment("-NotAFragment").is_none());
+    }
+
     fn splice_methyl(attach_index: usize) -> (Vec<ZAtom>, Vec<usize>) {
         let mut zmat = host_zmat();
         let fragment = find_fragment("-CH3").expect("-CH3 is a built-in fragment");
         let (indices, _clearance) = add_fragment_to_zmat(
             &mut zmat,
-            fragment.xyz,
+            &fragment.xyz,
             Some((attach_index, None, None)),
             1.54,
             109.471,
@@ -3640,7 +3653,7 @@ C   2.050   1.450   0.000
         let fragment = find_fragment("-CH3").unwrap();
         let (indices, reported) = add_fragment_to_zmat(
             &mut zmat,
-            fragment.xyz,
+            &fragment.xyz,
             Some((attach_index, None, None)),
             1.54,
             109.471,
@@ -3704,7 +3717,7 @@ C   2.050   1.450   0.000
         let fragment = find_fragment("-CH3").unwrap();
         let (indices, _clearance) = add_fragment_to_zmat(
             &mut zmat,
-            fragment.xyz,
+            &fragment.xyz,
             Some((attach, None, None)),
             1.54,
             109.471,
@@ -3758,7 +3771,7 @@ C   2.050   1.450   0.000
     #[test]
     fn every_builtin_fragment_has_a_self_consistent_zmat() {
         for fragment in fragments::FRAGMENTS {
-            let (_n, symbols, coords) = parse_xyz_angstrom(fragment.xyz);
+            let (_n, symbols, coords) = parse_xyz_angstrom(&fragment.xyz);
             let frag_coords: Vec<Vec3> = coords
                 .into_iter()
                 .map(|v| Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32))
@@ -3805,7 +3818,7 @@ C   2.050   1.450   0.000
             let attach = 1usize;
             let (indices, _clearance) = add_fragment_to_zmat(
                 &mut zmat,
-                fragment.xyz,
+                &fragment.xyz,
                 Some((attach, None, None)),
                 1.5,
                 109.471,
@@ -3839,7 +3852,7 @@ C   2.050   1.450   0.000
     #[test]
     fn nh2_fragment_is_a_pyramidal_amine_not_a_planar_one() {
         let frag = find_fragment("-NH2").expect("-NH2 is a built-in fragment");
-        let (_n, symbols, coords) = parse_xyz_angstrom(frag.xyz);
+        let (_n, symbols, coords) = parse_xyz_angstrom(&frag.xyz);
         let positions: Vec<Vec3> = coords
             .into_iter()
             .map(|v| Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32))
@@ -3871,7 +3884,7 @@ C   2.050   1.450   0.000
     #[test]
     fn ch3_fragment_is_tetrahedral_at_moldens_bond_length() {
         let frag = find_fragment("-CH3").expect("-CH3 is a built-in fragment");
-        let (_n, symbols, coords) = parse_xyz_angstrom(frag.xyz);
+        let (_n, symbols, coords) = parse_xyz_angstrom(&frag.xyz);
         let positions: Vec<Vec3> = coords
             .into_iter()
             .map(|v| Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32))
@@ -3911,7 +3924,7 @@ C   2.050   1.450   0.000
             ("-SH", vec!["S", "H"]),
         ] {
             let frag = find_fragment(name).unwrap_or_else(|| panic!("{name} should be built in"));
-            let (_n, symbols, _coords) = parse_xyz_angstrom(frag.xyz);
+            let (_n, symbols, _coords) = parse_xyz_angstrom(&frag.xyz);
             assert_eq!(symbols, expected_atoms, "{name} atom list");
 
             let (_n2, symbols2, coords2) = parse_xyz_angstrom(host);
@@ -3924,7 +3937,7 @@ C   2.050   1.450   0.000
             let attach = 1usize;
             let (indices, _clearance) = add_fragment_to_zmat(
                 &mut zmat,
-                frag.xyz,
+                &frag.xyz,
                 Some((attach, None, None)),
                 1.5,
                 109.471,
@@ -3986,7 +3999,7 @@ C   0.700  -1.212   0.000
         let ch3 = find_fragment("-CH3").unwrap();
         let (methyl_indices, _clearance) = add_fragment_to_zmat(
             &mut zmat,
-            ch3.xyz,
+            &ch3.xyz,
             Some((0, None, None)),
             1.51,
             109.471,
@@ -4069,7 +4082,7 @@ mod conjugation_tests {
 
         let vinyl = find_fragment("-CH=CH2").expect("-CH=CH2 is a built-in fragment");
         let (first_indices, _clearance) =
-            add_fragment_to_zmat(&mut zmat, vinyl.xyz, Some((0, None, None)), 1.51, 120.0, 180.0);
+            add_fragment_to_zmat(&mut zmat, &vinyl.xyz, Some((0, None, None)), 1.51, 120.0, 180.0);
 
         // Identify C1 (the connector, bonded to the host) and C2 (its double
         // bond partner) by role rather than assuming a fixed index order.
@@ -4178,7 +4191,7 @@ C   2.053   1.450   0.000
         assert_eq!(real_neighbors.len(), 2, "fixture sanity: two existing neighbours");
 
         let (indices, _clearance) =
-            add_fragment_to_zmat(&mut zmat, methyl.xyz, Some((attach, None, None)), 1.54, 109.471, 180.0);
+            add_fragment_to_zmat(&mut zmat, &methyl.xyz, Some((attach, None, None)), 1.54, 109.471, 180.0);
         let out = zmat2xyz::zmat_to_xyz(&zmat);
         let connector = indices[0];
 
@@ -4977,7 +4990,7 @@ mod editor_flow_tests {
 
         // A methyl, then a bare carbon on it: CH3-C.
         let frag = find_fragment("-CH3").unwrap();
-        add_fragment_to_zmat(&mut zmat_state.zmat, frag.xyz, None, 0.0, 109.5, 180.0);
+        add_fragment_to_zmat(&mut zmat_state.zmat, &frag.xyz, None, 0.0, 109.5, 180.0);
         mol.pos = zmat2xyz::zmat_to_xyz(&zmat_state.zmat);
         mol.atoms = zmat_state.zmat.iter().map(|a| a.symbol.clone()).collect();
         mol.recompute_bonds(2.0, 3.0);
@@ -5219,7 +5232,7 @@ mod editor_flow_tests {
         let mut mol = Molecule::empty();
         let mut zmat_state = ZMatrixBuilderState::default();
         let frag = find_fragment("-CH3").unwrap();
-        add_fragment_to_zmat(&mut zmat_state.zmat, frag.xyz, None, 0.0, 109.5, 180.0);
+        add_fragment_to_zmat(&mut zmat_state.zmat, &frag.xyz, None, 0.0, 109.5, 180.0);
         mol.pos = zmat2xyz::zmat_to_xyz(&zmat_state.zmat);
         mol.atoms = zmat_state.zmat.iter().map(|a| a.symbol.clone()).collect();
         mol.recompute_bonds(2.0, 3.0);
@@ -5381,7 +5394,7 @@ mod editor_flow_tests {
         let frag = find_fragment(&zmat_state.frag_name).unwrap();
         add_fragment_to_zmat(
             &mut zmat_state.zmat,
-            frag.xyz,
+            &frag.xyz,
             None,
             0.0,
             zmat_state.frag_angle_deg,
@@ -5529,7 +5542,7 @@ mod zmat_edit_tests {
     #[test]
     fn two_aromatic_rings_twist_out_of_plane() {
         let phenyl = find_fragment("-Phenyl").expect("-Phenyl is a built-in fragment");
-        let (_n, symbols, coords) = parse_xyz_angstrom(phenyl.xyz);
+        let (_n, symbols, coords) = parse_xyz_angstrom(&phenyl.xyz);
         let positions: Vec<Vec3> = coords
             .iter()
             .map(|v| Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32))
