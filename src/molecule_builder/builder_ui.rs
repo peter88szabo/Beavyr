@@ -3917,13 +3917,11 @@ fn fragment_editor_form(
     }
 
     ui.add_space(6.0);
-    // No ceiling on how far a fragment may go. The slider's scale only sets
-    // how far one drag reaches, and it grows with the value, so dragging to
-    // the end and dragging again keeps going; a number typed into the box is
-    // taken as it is, however large.
-    let max_len = (state.base_axis_len * 3.0)
-        .max(state.axis_len_target * 1.5)
-        .max(5.0);
+    // Two scales. The slider keeps a small one, up to twice the starting
+    // length, so a drag gives fine control. The number in its box is not
+    // limited at all: any value typed there is used as it is, however large,
+    // and negative too.
+    let max_len = (state.base_axis_len * 2.0).max(0.5);
     ui.add_enabled_ui(ready, |ui| {
         ui.add(
             egui::Slider::new(&mut state.angle_deg, -180.0..=180.0)
