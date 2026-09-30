@@ -1981,7 +1981,7 @@ pub fn set_selected_atom(
 /// The placement search fills in every reference and direction that a
 /// hand-picked angle/dihedral atom used to supply, via `host_reference_chain`
 /// and the valence-aware direction rules.
-fn commit_fragment_connect(
+pub(crate) fn commit_fragment_connect(
     zmat_state: &mut ZMatrixBuilderState,
     mol: &mut Molecule,
     settings: &mut MolSettings,

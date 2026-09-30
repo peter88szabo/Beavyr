@@ -2157,103 +2157,20 @@ pub fn ui_panel(
             });
 
         let mut builder_open = ui_layout.builder_open;
-        // Opens on the right, because the button that opens it lives on the
-        // right edge and appearing on the left meant crossing the whole
-        // window to reach it.
-        //
-        // Opening the editor gives it a height that shows everything in it.
-        // After that the window is the user's: bigger, smaller, whatever they
-        // drag it to. Nothing here constrains it.
-        //
-        // A default size cannot do the first part -- it applies once, egui
-        // stores the result, and the next row added to the panel leaves that
-        // stored size short. So the height is measured as the panel draws and
-        // applied as a minimum for exactly one frame, which grows the window
-        // to fit and is then dropped. From the second frame on there is no
-        // minimum at all, so dragging it smaller works and the scroll area
-        // inside takes over.
-        //
-        // The measurement resets when the window is closed, so every opening
-        // fits whatever the panel holds by then.
-        const EDITOR_WIDTH: f32 = 360.0;
-        const EDITOR_MARGIN: f32 = 16.0;
-        let viewport = ctx.viewport_rect();
-        let editor_max_height = (viewport.height() - 2.0 * EDITOR_MARGIN).max(200.0);
-        // Room for the title bar and the window's own padding, which the
-        // measured content height does not include.
-        const EDITOR_CHROME: f32 = 42.0;
-        let content_key = egui::Id::new("molecule_editor_content_height");
-        let fitted_key = egui::Id::new("molecule_editor_fitted");
-        let was_open_key = egui::Id::new("molecule_editor_was_open");
-
-        // A fresh opening starts the fit again.
-        if !ctx.data(|d| d.get_temp::<bool>(was_open_key)).unwrap_or(false) {
-            ctx.data_mut(|d| {
-                d.remove::<f32>(content_key);
-                d.remove::<bool>(fitted_key);
-            });
-        }
-
-        let measured = ctx.data(|d| d.get_temp::<f32>(content_key)).unwrap_or(0.0);
-        let already_fitted = ctx.data(|d| d.get_temp::<bool>(fitted_key)).unwrap_or(false);
-        // Applied on the one frame after the panel has been measured, then
-        // never again: this grows the window to fit and then gets out of the
-        // way, rather than becoming a floor the user cannot drag below.
-        let fit_now = !already_fitted && measured > 0.0;
-        if fit_now {
-            ctx.data_mut(|d| d.insert_temp(fitted_key, true));
-        }
-
-        let mut builder_window = egui::Window::new("Molecule Editor")
-            .id(egui::Id::new("molecule_editor_window_v8"))
-            .open(&mut builder_open)
-            .resizable(true)
-            .default_width(EDITOR_WIDTH)
-            .default_pos([
-                (viewport.right() - EDITOR_WIDTH - EDITOR_MARGIN).max(viewport.left()),
-                viewport.top() + EDITOR_MARGIN,
-            ]);
-        if fit_now {
-            // Room for the Newly Placed Fragment section from the start. It
-            // only appears once a fragment is placed, so measuring the panel
-            // at opening leaves it out; its full height -- heading, axis and
-            // moving lines, three sliders, the buttons and the note -- is
-            // reserved here so it is visible the moment it appears.
-            const PLACED_EDITOR_HEIGHT: f32 = 290.0;
-            let placed_shown = zmat_state.placed_editor.moving.is_some();
-            let reserve = if placed_shown { 0.0 } else { PLACED_EDITOR_HEIGHT };
-            builder_window = builder_window.min_height(
-                (measured + EDITOR_CHROME + reserve).min(editor_max_height),
+        let placed_shown = zmat_state.placed_editor.moving.is_some();
+        let builder_window = molecule_editor_window(&ctx, &mut builder_open, placed_shown, |ui| {
+            let change = builder_ui_contents(
+                ui, &mut editor_rotate_state, &mut zmat_state, &mut mol,
+                &mut settings, &mut structure_history, &mut traj,
             );
-        }
-        let builder_window = builder_window
-            .show(&ctx, |ui| {
-                let inner = egui::ScrollArea::vertical()
-                    .auto_shrink([false, true])
-                    .max_height(editor_max_height)
-                    .show(ui, |ui| {
-                        let change = builder_ui_contents(
-                            ui, &mut editor_rotate_state, &mut zmat_state, &mut mol,
-                            &mut settings, &mut structure_history, &mut traj,
-                        );
-                        if change.happened() {
-                            xtb_freq_panel_state.selected_mode = None;
-                            xyz_buf.current_file = None;
-                            // Only a genuinely different structure re-frames
-                            // the camera. An edit in place leaves the view
-                            // alone.
-                            ev_changed.write(MoleculeChanged::parse_xyz(change.recenter()));
-                        }
-                    });
-                // What the panel actually came to this frame, for the window
-                // to be at least that tall on the next one.
-                ui.ctx()
-                    .data_mut(|d| d.insert_temp(content_key, inner.content_size.y));
-            });
-        // Remembered so that closing and reopening measures again. Reading
-        // `builder_open` after the window has drawn also catches the title
-        // bar's own close button.
-        ctx.data_mut(|d| d.insert_temp(was_open_key, builder_open));
+            if change.happened() {
+                xtb_freq_panel_state.selected_mode = None;
+                xyz_buf.current_file = None;
+                // Only a genuinely different structure re-frames the camera.
+                // An edit in place leaves the view alone.
+                ev_changed.write(MoleculeChanged::parse_xyz(change.recenter()));
+            }
+        });
         if let Some(window) = &builder_window {
             window_rects.push(window.response.rect);
         }
@@ -2547,6 +2464,39 @@ fn menu_row(
             body(ui);
         });
     }
+}
+
+/// The Molecule Editor window.
+///
+/// Opens on the right, where its button is, at a fixed starting height tall
+/// enough for everything in the panel, the Newly Placed Fragment section
+/// included. Only the starting size: the window stays freely resizable.
+pub(crate) fn molecule_editor_window(
+    ctx: &egui::Context,
+    open: &mut bool,
+    _placed_shown: bool,
+    add_contents: impl FnOnce(&mut egui::Ui),
+) -> Option<egui::InnerResponse<Option<()>>> {
+    const EDITOR_WIDTH: f32 = 360.0;
+    const EDITOR_HEIGHT: f32 = 950.0;
+    const EDITOR_MARGIN: f32 = 16.0;
+    let viewport = ctx.viewport_rect();
+    let height = EDITOR_HEIGHT.min(viewport.height() - 2.0 * EDITOR_MARGIN);
+    egui::Window::new("Molecule Editor")
+        // New id so this starting size replaces any size remembered before.
+        .id(egui::Id::new("molecule_editor_window_v9"))
+        .open(open)
+        .resizable(true)
+        .default_size([EDITOR_WIDTH, height])
+        .default_pos([
+            (viewport.right() - EDITOR_WIDTH - EDITOR_MARGIN).max(viewport.left()),
+            viewport.top() + EDITOR_MARGIN,
+        ])
+        .show(ctx, |ui| {
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .show(ui, add_contents);
+        })
 }
 
 pub(crate) fn apply_xyz_text(
