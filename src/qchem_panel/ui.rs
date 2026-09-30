@@ -440,14 +440,15 @@ fn level_of_theory(ui: &mut egui::Ui, panel: &mut QcPanelState, running: bool) -
         }
     }
 
-    // A dispersion correction, for a density functional that does not already
-    // carry one.
-    if panel.program == QcProgram::Orca && panel.needs_functional() {
-        method_ui::orca_dispersion_row(ui, &mut panel.config, running, "qc_panel");
-    }
+    // No dispersion row here. `orca_functional_row` above already draws one,
+    // under the same condition and with the same id prefix, so a second call
+    // put the dropdown on screen twice and handed egui two widgets claiming
+    // one id -- which is what the error was.
 
-    // Anything the dropdowns do not cover.
-    if panel.program == QcProgram::Orca {
+    // Anything the dropdowns do not cover. Only where the functional row did
+    // not already draw it: that row ends with its own Extra keywords, so for
+    // a density functional this would be the second one.
+    if panel.program == QcProgram::Orca && !panel.needs_functional() {
         ui.horizontal(|ui| {
             ui.label("Extra keywords");
             ui.add_enabled(
