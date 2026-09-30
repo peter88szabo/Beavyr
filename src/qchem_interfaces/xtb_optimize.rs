@@ -1527,7 +1527,7 @@ fn parse_final_energy(trajectory_text: &str) -> Option<f64> {
 /// the program; only the command line and the files to read back differ, and
 /// both of those are the only things that branch below.
 #[allow(clippy::too_many_arguments)]
-fn run_optimize_cancellable(
+pub(crate) fn run_optimize_cancellable(
     program: QcProgram,
     binary: &Path,
     workdir: &Path,

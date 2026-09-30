@@ -270,7 +270,7 @@ pub fn command(
 }
 
 /// Where this program leaves its gradient.
-fn gradient_path(program: QcProgram, workdir: &Path) -> PathBuf {
+pub(crate) fn gradient_path(program: QcProgram, workdir: &Path) -> PathBuf {
     match program {
         QcProgram::Orca => super::orca_run::job_files(workdir).engrad,
         QcProgram::Psi4 | QcProgram::Psi4Py => super::psi4_run::job_files(workdir).gradient,

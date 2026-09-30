@@ -95,10 +95,10 @@ pub struct FrequencyResult {
 }
 
 #[derive(Clone)]
-struct RawFrequencyOutput {
+pub(crate) struct RawFrequencyOutput {
     atoms: Vec<String>,
     coords_bohr: Vec<f64>,
-    hessian: Array2<f64>,
+    pub(crate) hessian: Array2<f64>,
     vib_lines: Vec<super::hessian_file::VibSpectrumLine>,
     gradient_bohr: Option<Vec<f64>>,
     /// Masses the source file stated, when it states them. An ORCA `.hess`
@@ -297,7 +297,7 @@ fn dreiding_hessian(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn run_hess_cancellable(
+pub(crate) fn run_hess_cancellable(
     program: QcProgram,
     binary: &Path,
     workdir: &Path,
@@ -1508,6 +1508,63 @@ pub(crate) fn load_hessian_from_path(
             return false;
         }
     };
+    adopt_hessian(source, file_scale, path, freq_panel, freq_task)
+}
+
+/// A bare `$hessian` matrix, loaded against the geometry it was computed at.
+///
+/// Sparrow, PySCF, DREIDING, xTB and Behemoth all hand the Quantum Chemistry
+/// panel their matrix this way. It carries no atoms and no coordinates of its
+/// own, so the ORCA/Gaussian reader above refused every one of them and their
+/// frequency jobs never reached the Vibrations panel. The caller supplies the
+/// geometry, which it has: it is the structure it sent.
+pub(crate) fn load_bare_hessian_from_path(
+    path: &std::path::Path,
+    atoms: &[String],
+    coords_angstrom: &[f64],
+    freq_panel: &mut XtbFreqPanelState,
+    freq_task: &mut XtbFrequencyTask,
+) -> bool {
+    let parsed = std::fs::read_to_string(path)
+        .map_err(|e| format!("cannot read {}: {e}", path.display()))
+        .and_then(|text| {
+            super::hessian_file::parse_turbomole_hessian(&text, atoms.len())
+                .map_err(|e| format!("{}: {e}", path.display()))
+        });
+    let hessian = match parsed {
+        Ok(matrix) => matrix,
+        Err(err) => {
+            freq_task.last_message = Some(err);
+            freq_task.last_is_error = true;
+            return false;
+        }
+    };
+    let raw = RawFrequencyOutput {
+        atoms: atoms.to_vec(),
+        coords_bohr: coords_angstrom.iter().map(|c| c * ANGSTROM_TO_BOHR).collect(),
+        hessian,
+        vib_lines: Vec::new(),
+        gradient_bohr: None,
+        masses_amu: None,
+        ir_intensities_km_mol: None,
+    };
+    adopt_hessian(
+        HessianSource::Computed(Box::new(raw)),
+        None,
+        path,
+        freq_panel,
+        freq_task,
+    )
+}
+
+/// Take a loaded Hessian into the Vibrations panel and analyse it.
+fn adopt_hessian(
+    source: HessianSource,
+    file_scale: Option<f64>,
+    path: &std::path::Path,
+    freq_panel: &mut XtbFreqPanelState,
+    freq_task: &mut XtbFrequencyTask,
+) -> bool {
     if let Some(scale) = file_scale {
         freq_panel.frequency_scale = scale;
     }
@@ -3802,14 +3859,29 @@ mod tests {
         assert!(!traj.frames.is_empty());
     }
 
+    /// Sparrow, PySCF, DREIDING, xTB and Behemoth all hand over a bare
+    /// `$hessian` matrix with no atoms of its own. The ORCA/Gaussian reader
+    /// turned every one away, so those frequency jobs never reached the
+    /// Vibrations panel. Loaded against its geometry, it now gives modes.
+    #[test]
+    fn a_bare_hessian_reaches_the_vibrations_panel() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+        let path = root.join("h2o2_hessian");
+        let geometry = std::fs::read_to_string(root.join("h2o2_hessian_geometry.xyz")).unwrap();
+        let (_n, atoms, coords) = parse_xyz_angstrom(&geometry);
+        let coords: Vec<f64> = coords.into_iter().flatten().collect();
 
+        assert!(read_hessian_file(&path).is_err(), "the old reader cannot take it");
 
-
-
-
-
-
-
-
+        let mut panel = XtbFreqPanelState::default();
+        let mut task = XtbFrequencyTask::default();
+        assert!(
+            load_bare_hessian_from_path(&path, &atoms, &coords, &mut panel, &mut task),
+            "{:?}",
+            task.last_message
+        );
+        let result = task.result.as_ref().expect("an analysis");
+        assert_eq!(result.atoms.len(), 4);
+    }
 }
 

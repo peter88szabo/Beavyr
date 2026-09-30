@@ -198,6 +198,14 @@ fn run_cancellable(
     if program == QcProgram::Dreiding {
         return run_dreiding(job, workdir, atoms, positions_angstrom);
     }
+    // xTB and Behemoth take their level of theory from the settings, not from
+    // a method choice, so they are dispatched before the method is demanded.
+    if matches!(program, QcProgram::Xtb | QcProgram::Behemoth) {
+        return run_xtb_family(
+            program, job, binary, workdir, atoms, positions_angstrom, charge, multiplicity,
+            config, cancel, child_slot,
+        );
+    }
 
     let method = method.ok_or_else(|| "Choose a method first.".to_string())?;
 
@@ -221,12 +229,11 @@ fn run_cancellable(
                 wavefunction, hand_written, cancel, child_slot,
             );
         }
-        // The rest reach their own panels, which already do these jobs. Adding
-        // them here untested would be worse than saying so.
+        // Every program is handled above; this is only reached by a program
+        // added to the list without a runner, which should say so plainly.
         _ => {
             return Err(format!(
-                "{} is not wired into this panel yet. Use the Geometry Optimization or \
-                 Vibrations panel for it, or choose ORCA or Psi4 here.",
+                "{} has no runner in this panel yet.",
                 program.label()
             ))
         }
@@ -926,6 +933,222 @@ fn run_dreiding(
 }
 
 /// The last frame of a multi-frame XYZ, as its own single-frame XYZ.
+/// Runs an xTB or Behemoth job.
+///
+/// Both have long had their own optimiser, Hessian and gradient code in
+/// Beavyr, written for the panels that used to run them. This drives that same
+/// code, so a job here is the same calculation it always was: the optimiser's
+/// run, the Hessian runner's matrix, and the gradient module's energy.
+#[allow(clippy::too_many_arguments)]
+fn run_xtb_family(
+    program: QcProgram,
+    job: JobType,
+    binary: &Path,
+    workdir: &Path,
+    atoms: &[String],
+    positions_angstrom: &[f64],
+    charge: i32,
+    multiplicity: i32,
+    config: &MethodConfig,
+    cancel: &AtomicBool,
+    child_slot: &Mutex<Option<Child>>,
+) -> Result<QcRunOutput, String> {
+    use crate::forcefield::dreiding::objective::BOHR_TO_ANGSTROM;
+    use crate::qchem_interfaces::{gradient, xtb_freq, xtb_optimize};
+
+    if matches!(job, JobType::TransitionState | JobType::Irc | JobType::TdDft) {
+        return Err(format!("{} cannot do {} from this panel.", program.label(), job.label()));
+    }
+
+    let positions: Vec<bevy::prelude::Vec3> = positions_angstrom
+        .chunks_exact(3)
+        .map(|p| bevy::prelude::Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32))
+        .collect();
+    // Dummies are placeholders and never reach the program.
+    let (kept_atoms, kept_positions) = crate::molecule::without_dummies(atoms, &positions);
+    let input_xyz = xtb_optimize::write_xyz_string(&kept_atoms, &kept_positions);
+    let uhf = (multiplicity - 1).max(0);
+
+    let mut log = String::new();
+    let mut final_energy = None;
+    let mut trajectory_text = None;
+    let mut saveable: Vec<(&'static str, PathBuf)> = Vec::new();
+
+    // One energy, with its gradient: the gradient module's own run.
+    if matches!(job, JobType::SinglePoint | JobType::Gradient) {
+        let dir = workdir.join("energy");
+        let coords_bohr: Vec<f64> = kept_positions
+            .iter()
+            .flat_map(|p| {
+                [
+                    p.x as f64 / BOHR_TO_ANGSTROM,
+                    p.y as f64 / BOHR_TO_ANGSTROM,
+                    p.z as f64 / BOHR_TO_ANGSTROM,
+                ]
+            })
+            .collect();
+        gradient::prepare(program, &dir, &kept_atoms, &coords_bohr, charge, multiplicity, config)?;
+        let mut command = gradient::command(program, binary, &dir, charge, multiplicity, config)?;
+        let stdout_path = dir.join("program.stdout");
+        let stdout = fs::File::create(&stdout_path)
+            .map_err(|e| format!("Failed to create the output file: {e}"))?;
+        let stderr = fs::File::create(dir.join("program.stderr"))
+            .map_err(|e| format!("Failed to create the error file: {e}"))?;
+        command.stdout(Stdio::from(stdout)).stderr(Stdio::from(stderr));
+        let status = spawn_and_wait(command, program.label(), cancel, child_slot)?;
+        log = fs::read_to_string(&stdout_path).unwrap_or_default();
+        if !status.success() {
+            return Err(format!(
+                "{} stopped with an error ({status}). The run directory {} has its output.",
+                program.label(),
+                dir.display()
+            ));
+        }
+        let (energy, _gradient) = gradient::read(program, &dir, kept_atoms.len(), &log)?;
+        final_energy = Some(energy);
+        if job == JobType::Gradient {
+            let path = gradient::gradient_path(program, &dir);
+            if path.is_file() {
+                saveable.push(("Gradient ($grad)", path));
+            }
+        }
+    }
+
+    // An optimisation: the optimiser's own run, its path translated into
+    // Beavyr's trajectory format so the player and the energy plot read it.
+    if job.produces_trajectory() {
+        let output = xtb_optimize::run_optimize_cancellable(
+            program,
+            binary,
+            &workdir.join("opt"),
+            &input_xyz,
+            charge,
+            uhf,
+            multiplicity,
+            config,
+            cancel,
+            child_slot,
+        )?;
+        final_energy = output.final_energy_hartree;
+        log = output.log;
+        trajectory_text = Some(beavyr_trajectory(
+            &output.trajectory_text,
+            &output
+                .energy_history
+                .iter()
+                .map(|point| point.energy_hartree)
+                .collect::<Vec<_>>(),
+        ));
+    }
+
+    // The Hessian, at whichever geometry we ended up with, written as a bare
+    // `$hessian` matrix like every other backend's.
+    let hessian_path = if job.produces_frequencies() || job == JobType::Hessian {
+        let geometry = trajectory_text
+            .as_deref()
+            .and_then(last_frame_xyz)
+            .unwrap_or_else(|| input_xyz.clone());
+        let (_n, symbols, _coords) = crate::molecule::parse_xyz_angstrom(&geometry);
+        let raw = xtb_freq::run_hess_cancellable(
+            program,
+            binary,
+            &workdir.join("hess"),
+            &geometry,
+            &symbols,
+            charge,
+            uhf,
+            multiplicity,
+            false,
+            config,
+            cancel,
+            child_slot,
+        )?;
+        if log.is_empty() {
+            log = fs::read_to_string(workdir.join("hess").join("xtb.stdout")).unwrap_or_default();
+        }
+        let mut text = String::from("$hessian\n");
+        for row in raw.hessian.rows() {
+            for value in row {
+                text.push_str(&format!(" {value:22.14e}"));
+            }
+            text.push('\n');
+        }
+        text.push_str("$end\n");
+        let path = workdir.join("hessian.txt");
+        fs::write(&path, text).map_err(|e| format!("Failed to write the Hessian: {e}"))?;
+        saveable.push(("Hessian ($hessian)", path.clone()));
+        Some(path)
+    } else {
+        None
+    };
+
+    Ok(QcRunOutput {
+        molden_path: None,
+        job,
+        program,
+        log,
+        energetics: Energetics {
+            final_energy_hartree: final_energy,
+            ..Default::default()
+        },
+        scf: Vec::new(),
+        converged: job.produces_trajectory().then_some(true),
+        trajectory_text,
+        kept_dir: (hessian_path.is_some() || !saveable.is_empty())
+            .then(|| workdir.to_path_buf()),
+        hessian_path: job.produces_frequencies().then(|| hessian_path.clone()).flatten(),
+        saveable,
+    })
+}
+
+/// A multi-frame XYZ with each frame's comment rewritten as
+/// `cycle <n> E = <value> Eh`, the one format the trajectory player and the
+/// energy plot both read.
+///
+/// xTB writes its own comments (` energy: -5.07 gnorm: ...`), which nothing in
+/// the panel's reader understands, so an optimisation's energy plot came out
+/// empty. The energies are taken from the optimiser's own history where it
+/// has one for the frame, and from the comment's `energy:` otherwise. A frame
+/// already in Beavyr's format is left alone.
+fn beavyr_trajectory(text: &str, energies: &[f64]) -> String {
+    let lines: Vec<&str> = text.lines().collect();
+    let mut out = String::new();
+    let mut index = 0;
+    let mut frame = 0;
+    while index < lines.len() {
+        let Ok(natoms) = lines[index].trim().parse::<usize>() else {
+            index += 1;
+            continue;
+        };
+        // A frame is the count line, a comment, then one line per atom; a
+        // truncated last frame is dropped rather than written short.
+        if index + natoms + 2 > lines.len() {
+            break;
+        }
+        let comment = lines.get(index + 1).copied().unwrap_or("");
+        let energy = energies.get(frame).copied().or_else(|| {
+            let after = comment.split("energy:").nth(1)?;
+            after.split_whitespace().next()?.parse::<f64>().ok()
+        });
+        out.push_str(&format!("{natoms}\n"));
+        match energy {
+            _ if comment.trim_start().starts_with("cycle") => {
+                out.push_str(comment);
+            }
+            Some(value) => out.push_str(&format!("cycle {} E = {value:.12} Eh", frame + 1)),
+            None => out.push_str(comment),
+        }
+        out.push('\n');
+        for line in lines.iter().skip(index + 2).take(natoms) {
+            out.push_str(line);
+            out.push('\n');
+        }
+        index += natoms + 2;
+        frame += 1;
+    }
+    out
+}
+
 fn last_frame_xyz(trajectory: &str) -> Option<String> {
     let lines: Vec<&str> = trajectory.lines().collect();
     let natoms: usize = lines.first()?.trim().parse().ok()?;
@@ -1104,6 +1327,77 @@ fn run_psi4(
 
 #[cfg(test)]
 mod tests {
+
+    /// Reported: xTB could not be run from this panel at all. It was sent to
+    /// "not wired into this panel yet -- use the Geometry Optimization panel",
+    /// and that panel no longer exists. A run now reaches xTB itself: with an
+    /// executable that is not there, the failure is starting xTB, not being
+    /// turned away.
+    #[test]
+    fn xtb_is_dispatched_rather_than_turned_away() {
+        let dir = std::env::temp_dir().join("beavyr_xtb_dispatch_test");
+        let _ = fs::remove_dir_all(&dir);
+        let cancel = AtomicBool::new(false);
+        let child = Mutex::new(None);
+        for job in [JobType::SinglePoint, JobType::Optimize, JobType::Frequencies] {
+            let result = run_cancellable(
+                QcProgram::Xtb,
+                None,
+                job,
+                Path::new("/nonexistent/beavyr-test/xtb"),
+                &dir,
+                &["O".to_string(), "H".to_string(), "H".to_string()],
+                &[0.0, 0.0, 0.0, 0.96, 0.0, 0.0, -0.24, 0.93, 0.0],
+                0,
+                1,
+                &MethodConfig::default(),
+                ExcitedStateOptions::default(),
+                false,
+                None,
+                &cancel,
+                &child,
+            );
+            let error = result.err().unwrap_or_default();
+            assert!(
+                !error.contains("not wired") && !error.contains("no runner"),
+                "{job:?}: {error}"
+            );
+            assert!(!error.is_empty(), "{job:?}: a missing executable must be an error");
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// xTB's own trajectory comments (` energy: ... gnorm: ...`) mean nothing
+    /// to the energy plot, which reads `cycle <n> E = <v> Eh`. Rewritten, the
+    /// energies come through -- from the optimiser's history where it has
+    /// one, from the comment where it does not.
+    #[test]
+    fn xtb_trajectory_comments_are_rewritten_for_the_energy_plot() {
+        let xtbopt = "\
+3
+ energy: -5.070000000000 gnorm: 0.020000000000 xtb: 6.5.1
+O 0.0 0.0 0.0
+H 0.96 0.0 0.0
+H -0.24 0.93 0.0
+3
+ energy: -5.080000000000 gnorm: 0.001000000000 xtb: 6.5.1
+O 0.0 0.0 0.0
+H 0.95 0.0 0.0
+H -0.24 0.92 0.0
+";
+        let from_history = beavyr_trajectory(xtbopt, &[-5.07, -5.08]);
+        let energies = crate::qchem_interfaces::behemoth::parse_trajectory_energies(&from_history);
+        assert_eq!(energies, vec![-5.07, -5.08]);
+
+        let from_comments = beavyr_trajectory(xtbopt, &[]);
+        let energies = crate::qchem_interfaces::behemoth::parse_trajectory_energies(&from_comments);
+        assert_eq!(energies, vec![-5.07, -5.08]);
+
+        // Geometry untouched, frame count unchanged.
+        assert_eq!(from_history.lines().count(), xtbopt.lines().count());
+        assert!(from_history.contains("H 0.95 0.0 0.0"));
+    }
+
     use super::*;
 
     /// A force field has no level of theory to choose, so its method is rightly
@@ -1308,11 +1602,49 @@ pub fn poll_qc_run(
             // Beavyr's own projection and eigensolver -- so the modes animate
             // and the thermochemistry follows that panel's own controls.
             if let Some(path) = &output.hessian_path {
-                if crate::qchem_interfaces::xtb_freq::load_hessian_from_path(
-                    path,
-                    &mut freq_panel,
-                    &mut freq_task,
-                ) {
+                // ORCA's `.hess` carries its own geometry. Everything else is a
+                // bare `$hessian` matrix, loaded against the structure it was
+                // computed at: the last frame of an optimisation, or the
+                // structure that was sent.
+                let bare = fs::read_to_string(path)
+                    .map(|text| !text.contains("$atoms"))
+                    .unwrap_or(false);
+                let loaded = if bare {
+                    let (atoms, coords) = match output
+                        .trajectory_text
+                        .as_deref()
+                        .and_then(last_frame_xyz)
+                    {
+                        Some(frame) => {
+                            let (_n, symbols, coords) =
+                                crate::molecule::parse_xyz_angstrom(&frame);
+                            (symbols, coords.into_iter().flatten().collect::<Vec<f64>>())
+                        }
+                        None => {
+                            let (symbols, positions) =
+                                crate::molecule::without_dummies(&mol.atoms, &mol.pos);
+                            let coords = positions
+                                .iter()
+                                .flat_map(|p| [p.x as f64, p.y as f64, p.z as f64])
+                                .collect::<Vec<f64>>();
+                            (symbols, coords)
+                        }
+                    };
+                    crate::qchem_interfaces::xtb_freq::load_bare_hessian_from_path(
+                        path,
+                        &atoms,
+                        &coords,
+                        &mut freq_panel,
+                        &mut freq_task,
+                    )
+                } else {
+                    crate::qchem_interfaces::xtb_freq::load_hessian_from_path(
+                        path,
+                        &mut freq_panel,
+                        &mut freq_task,
+                    )
+                };
+                if loaded {
                     layout.open[crate::ui_layout::Tab::Vibrations.index()] = true;
                 }
             }
