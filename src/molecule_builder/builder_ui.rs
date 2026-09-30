@@ -1087,6 +1087,56 @@ pub struct ChosenFragment {
     pub xyz: String,
 }
 
+/// What the next click in the 3D view will do.
+///
+/// Three things want the same click -- adding an atom against references, the
+/// fragment editor's axis and side, and plain selection -- and nothing on
+/// screen used to say which was listening. That is the "losing track of the
+/// mode" complaint: the state existed, it was just invisible.
+///
+/// Ordered by who actually consumes the click. An armed add-atom tool takes
+/// it before the fragment editor does, and the editor before selection, so
+/// the line has to report them in that order or it will describe a listener
+/// that is not listening.
+pub fn next_click_meaning(zmat_state: &ZMatrixBuilderState, editor: &EditorRotateState) -> String {
+    if zmat_state.add_atom_active {
+        let needed = if zmat_state.add_atom_auto {
+            1
+        } else {
+            add_atom_picks_required(zmat_state.zmat.len())
+        };
+        let picked = zmat_state.add_atom_picks.len();
+        let symbol = zmat_state.new_symbol.trim();
+        let what = if symbol.is_empty() { "an atom" } else { symbol };
+        if picked >= needed {
+            return format!("Adding {what}: all references picked.");
+        }
+        let role = match picked {
+            0 => "bond",
+            1 => "angle",
+            _ => "dihedral",
+        };
+        return format!(
+            "Adding {what}: click the {role} reference atom ({} of {needed}).",
+            picked + 1
+        );
+    }
+    if editor.active {
+        return match editor.picks.len() {
+            0 => "Fragment editor: click the first atom of the bond axis.".to_string(),
+            1 => "Fragment editor: click the second atom of the bond axis.".to_string(),
+            2 => "Fragment editor: click an atom on the side you want to move.".to_string(),
+            _ => "Fragment editor: axis and side are set.".to_string(),
+        };
+    }
+    match (zmat_state.selected_index, &zmat_state.selected_symbol) {
+        (Some(idx), Some(symbol)) => {
+            format!("Selected {symbol}{}. Click another atom to select it instead.", idx + 1)
+        }
+        _ => "Click an atom to select it; click the background to clear.".to_string(),
+    }
+}
+
 /// Snapshot the structure before an action changes it, so one Undo can
 /// reverse it afterwards. Called at the moment an action is known to be going
 /// ahead, never before a check that might refuse it -- a history full of steps
@@ -2490,17 +2540,9 @@ pub fn builder_ui_contents(
                 cleanup_row(ui, &mut zmat_state, &mut mol, &mut settings);
 
                 ui.add_space(6.0);
-                // One line saying what "Add Atom" and "Add Fragment" will act
-                // on. It replaces the old per-section picking hints: there is
-                // only one selection now, however it was made.
-                match (zmat_state.selected_index, &zmat_state.selected_symbol) {
-                    (Some(idx), Some(symbol)) => {
-                        ui.label(format!("Selected: {symbol}{}", idx + 1));
-                    }
-                    _ => {
-                        ui.weak("Click an atom to select it; click the background to clear.");
-                    }
-                }
+                // What the next click will do, always. Three things want the
+                // same click and nothing used to say which was listening.
+                ui.label(egui::RichText::new(next_click_meaning(zmat_state, state)).strong());
                 ui.add_space(6.0);
                 ui.separator();
                 ui.add_space(6.0);
@@ -6518,6 +6560,68 @@ H   1.1405   1.0087  -0.1781
                 now.distance(*before) < 1.0e-5,
                 "atom {i} did not come back: {now:?} vs {before:?}"
             );
+        }
+    }
+
+    /// The line must name the listener that will actually consume the click.
+    ///
+    /// Three things want the same click. Naming the wrong one is worse than
+    /// naming none: it tells the user to click for something that is not
+    /// listening, and the click goes somewhere else entirely.
+    #[test]
+    fn the_next_click_line_names_the_listener_that_consumes_it() {
+        let mut zmat = ZMatrixBuilderState::default();
+        let mut editor = EditorRotateState::default();
+
+        // Nothing armed: the click selects.
+        let line = next_click_meaning(&zmat, &editor);
+        assert!(line.contains("select"), "{line}");
+
+        // The fragment editor takes clicks once it is picking.
+        editor.active = true;
+        let line = next_click_meaning(&zmat, &editor);
+        assert!(line.contains("Fragment editor"), "{line}");
+        assert!(line.contains("first atom"), "{line}");
+
+        // ...and it says which pick is wanted next, as they arrive.
+        editor.picks.push(0);
+        assert!(next_click_meaning(&zmat, &editor).contains("second atom"));
+        editor.picks.push(1);
+        assert!(next_click_meaning(&zmat, &editor).contains("side you want to move"));
+
+        // An armed add-atom tool takes the click before the editor does,
+        // because that is the order the click actually reaches them in.
+        zmat.add_atom_active = true;
+        zmat.new_symbol = "N".to_string();
+        let line = next_click_meaning(&zmat, &editor);
+        assert!(line.starts_with("Adding N"), "{line}");
+        assert!(!line.contains("Fragment editor"), "{line}");
+    }
+
+    /// Whatever the state, the line says something. A blank line where the
+    /// explanation should be is the failure this whole change is about.
+    #[test]
+    fn the_next_click_line_is_never_empty() {
+        let mut zmat = ZMatrixBuilderState::default();
+        let mut editor = EditorRotateState::default();
+        for add_atom in [false, true] {
+            for auto in [false, true] {
+                for picks in 0..4 {
+                    for editor_active in [false, true] {
+                        zmat.add_atom_active = add_atom;
+                        zmat.add_atom_auto = auto;
+                        zmat.add_atom_picks = (0..picks).collect();
+                        editor.active = editor_active;
+                        editor.picks = (0..picks).collect();
+                        let line = next_click_meaning(&zmat, &editor);
+                        assert!(
+                            !line.trim().is_empty(),
+                            "silent for add_atom={add_atom} auto={auto} picks={picks} \
+                             editor={editor_active}"
+                        );
+                    }
+                }
+            }
         }
     }
 
