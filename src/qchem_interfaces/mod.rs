@@ -2,6 +2,7 @@ pub mod capabilities;
 pub mod config;
 pub mod behemoth;
 pub mod gaussian_log;
+pub mod gradient;
 pub mod hessian_file;
 pub mod job;
 pub mod method;

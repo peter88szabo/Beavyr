@@ -27,7 +27,7 @@ pub const SCRIPT_FILE: &str = "run_sparrow.py";
 /// The geometry the script reads, since SCINE reads a structure from a file.
 pub const GEOMETRY_FILE: &str = "geometry.xyz";
 /// The gradient, as a Turbomole `$grad` block Beavyr already reads.
-pub const GRADIENT_FILE: &str = "gradient";
+pub const GRADIENT_FILE: &str = "sparrow.grad";
 /// The Hessian, behind a `$hessian` header.
 pub const HESSIAN_FILE: &str = "hessian.txt";
 /// The molecular orbitals, when asked for.
@@ -157,7 +157,7 @@ coords = calculator.structure.positions  # bohr, which is what both files want
             r#"
 # Turbomole `$grad`, the layout Beavyr already reads.
 g = results.gradients
-with open("gradient", "w") as handle:
+with open("sparrow.grad", "w") as handle:
     handle.write("$grad          cartesian gradients\n")
     handle.write("  cycle =      1    SCF energy =  %20.14f   |dE/dxyz| =  0.000000\n" % energy)
     for symbol, xyz in zip(symbols, coords):

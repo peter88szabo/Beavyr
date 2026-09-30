@@ -376,28 +376,57 @@ pub fn panel(
             egui::ComboBox::from_id_salt("ts_program")
                 .selected_text(state.program.label())
                 .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut state.program, QcProgram::Xtb, "xTB");
-                    ui.selectable_value(&mut state.program, QcProgram::Behemoth, "Behemoth");
+                    // Every program that can give an energy and a gradient.
+                    // A force field is refused, with the reason on hover
+                    // rather than by being absent -- a missing entry reads as
+                    // an oversight where a disabled one reads as a decision.
+                    for program in QcProgram::ALL {
+                        match crate::qchem_interfaces::gradient::unsupported_reason(program) {
+                            None => {
+                                ui.selectable_value(
+                                    &mut state.program,
+                                    program,
+                                    program.label(),
+                                );
+                            }
+                            Some(reason) => {
+                                ui.add_enabled_ui(false, |ui| {
+                                    let _ = ui.selectable_label(false, program.label());
+                                })
+                                .response
+                                .on_disabled_hover_text(reason);
+                            }
+                        }
+                    }
                 });
             ui.label("Charge");
             ui.add(egui::DragValue::new(&mut state.charge).range(-100..=100));
             ui.label("Multiplicity");
             ui.add(egui::DragValue::new(&mut state.multiplicity).range(1..=100));
         });
-        let executable = if state.program == QcProgram::Xtb {
-            &mut state.xtb_path
-        } else {
-            &mut state.behemoth_path
-        };
-        ui.horizontal(|ui| {
-            ui.label("Executable");
-            ui.add(egui::TextEdit::singleline(executable).desired_width(270.0));
-            if ui.button("Browse…").clicked() {
-                if let Some(path) = crate::recent_dir::pick_file(crate::recent_dir::open()) {
-                    *executable = path.to_string_lossy().into_owned();
+        // A Python backend has no executable to point at; it is reached
+        // through the python3 of the environment Beavyr was launched in, and
+        // whether that can import it is answered here before a run starts.
+        let python_ready = crate::qchem_interfaces::xtb_optimize::python_environment_row(
+            ui,
+            state.program,
+            state.is_running(),
+        );
+        if state.program.needs_binary_path() {
+            let program = state.program;
+            ui.horizontal(|ui| {
+                ui.label("Executable");
+                let executable = state.path_mut(program);
+                ui.add(egui::TextEdit::singleline(executable).desired_width(270.0));
+                if ui.button("Browse…").clicked() {
+                    if let Some(path) = crate::recent_dir::pick_file(crate::recent_dir::open()) {
+                        *executable = path.to_string_lossy().into_owned();
+                    }
                 }
-            }
-        });
+            });
+            crate::qchem_interfaces::config::save_path(program, state.path_for(program));
+        }
+        let _ = python_ready;
         let atoms = state
             .reactant
             .as_ref()

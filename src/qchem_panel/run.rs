@@ -115,6 +115,9 @@ impl QcRunTask {
         config: MethodConfig,
         excited: ExcitedStateOptions,
         wavefunction: bool,
+        // The input as the user wrote it, when they chose to write it. Sent
+        // exactly as it stands, in place of anything generated.
+        hand_written: Option<String>,
     ) {
         if self.is_running() {
             return;
@@ -148,6 +151,7 @@ impl QcRunTask {
                 &config,
                 excited,
                 wavefunction,
+                hand_written.as_deref(),
                 &task_cancel,
                 &task_child,
             )
@@ -178,6 +182,7 @@ fn run_cancellable(
     config: &MethodConfig,
     excited: ExcitedStateOptions,
     wavefunction: bool,
+    hand_written: Option<&str>,
     cancel: &AtomicBool,
     child_slot: &Mutex<Option<Child>>,
 ) -> Result<QcRunOutput, String> {
@@ -201,19 +206,19 @@ fn run_cancellable(
         QcProgram::Psi4 | QcProgram::Psi4Py => {
             return run_psi4(
                 program, method, job, binary, workdir, atoms, positions_angstrom, charge,
-                multiplicity, config, excited, wavefunction, cancel, child_slot,
+                multiplicity, config, excited, wavefunction, hand_written, cancel, child_slot,
             );
         }
         QcProgram::SparrowPy => {
             return run_sparrow(
                 job, workdir, atoms, positions_angstrom, charge, multiplicity, config,
-                wavefunction, cancel, child_slot,
+                wavefunction, hand_written, cancel, child_slot,
             );
         }
         QcProgram::PySCF => {
             return run_pyscf(
                 job, workdir, atoms, positions_angstrom, charge, multiplicity, config, excited,
-                wavefunction, cancel, child_slot,
+                wavefunction, hand_written, cancel, child_slot,
             );
         }
         // The rest reach their own panels, which already do these jobs. Adding
@@ -228,16 +233,22 @@ fn run_cancellable(
     }
 
     let files = orca_run::job_files(workdir);
-    let input = orca_run::panel_input_text(
-        job,
-        method,
-        charge,
-        multiplicity,
-        config,
-        excited,
-        &config.orca_extra,
-        &orca_run::xyz_body(atoms, positions_angstrom),
-    );
+    // A hand-written input is sent exactly as it stands. Nothing is appended
+    // and nothing is checked: the point of the editor is that it reaches
+    // things no set of controls does, so second-guessing it would defeat it.
+    let input = match hand_written {
+        Some(text) => text.to_string(),
+        None => orca_run::panel_input_text(
+            job,
+            method,
+            charge,
+            multiplicity,
+            config,
+            excited,
+            &config.orca_extra,
+            &orca_run::xyz_body(atoms, positions_angstrom),
+        ),
+    };
     fs::write(&files.input, &input).map_err(|e| format!("Failed to write the ORCA input: {e}"))?;
 
     let stdout = fs::File::create(&files.output)
@@ -379,6 +390,7 @@ fn run_sparrow(
     multiplicity: i32,
     config: &MethodConfig,
     wavefunction: bool,
+    hand_written: Option<&str>,
     cancel: &AtomicBool,
     child_slot: &Mutex<Option<Child>>,
 ) -> Result<QcRunOutput, String> {
@@ -418,7 +430,7 @@ fn run_sparrow(
     };
     let log = run_sparrow_once(
         property_job, &files, workdir, atoms, &geometry, charge, multiplicity, config,
-        wavefunction, cancel, child_slot,
+        wavefunction, hand_written, cancel, child_slot,
     )?;
 
     let hessian_path = job
@@ -473,6 +485,7 @@ fn run_sparrow_once(
     multiplicity: i32,
     config: &MethodConfig,
     wavefunction: bool,
+    hand_written: Option<&str>,
     cancel: &AtomicBool,
     child_slot: &Mutex<Option<Child>>,
 ) -> Result<String, String> {
@@ -485,7 +498,9 @@ fn run_sparrow_once(
     .map_err(|e| format!("Failed to write the Sparrow geometry: {e}"))?;
     fs::write(
         &files.script,
-        sparrow_run::script_text(job, charge, multiplicity, config, wavefunction),
+        hand_written.map(str::to_string).unwrap_or_else(|| {
+            sparrow_run::script_text(job, charge, multiplicity, config, wavefunction)
+        }),
     )
     .map_err(|e| format!("Failed to write the Sparrow script: {e}"))?;
 
@@ -561,6 +576,10 @@ fn optimise_with_beavyr(
                 // only the final geometry's, written by the call after the
                 // optimisation finishes.
                 false,
+                // Each step is generated: a hand-written script would compute
+                // the same geometry every time and the optimiser would never
+                // move.
+                None,
                 self.cancel,
                 self.child_slot,
             )
@@ -652,6 +671,7 @@ fn run_pyscf(
     config: &MethodConfig,
     excited: ExcitedStateOptions,
     wavefunction: bool,
+    hand_written: Option<&str>,
     cancel: &AtomicBool,
     child_slot: &Mutex<Option<Child>>,
 ) -> Result<QcRunOutput, String> {
@@ -670,9 +690,12 @@ fn run_pyscf(
     let files = pyscf_run::job_files(workdir);
     fs::write(
         &files.script,
-        pyscf_run::script_text(
-            job, charge, multiplicity, config, excited, wavefunction, atoms, positions_angstrom,
-        ),
+        hand_written.map(str::to_string).unwrap_or_else(|| {
+            pyscf_run::script_text(
+                job, charge, multiplicity, config, excited, wavefunction, atoms,
+                positions_angstrom,
+            )
+        }),
     )
     .map_err(|e| format!("Failed to write the PySCF script: {e}"))?;
 
@@ -934,6 +957,7 @@ fn run_psi4(
     config: &MethodConfig,
     excited: ExcitedStateOptions,
     wavefunction: bool,
+    hand_written: Option<&str>,
     cancel: &AtomicBool,
     child_slot: &Mutex<Option<Child>>,
 ) -> Result<QcRunOutput, String> {
@@ -941,20 +965,25 @@ fn run_psi4(
 
     let files = psi4_run::job_files(workdir);
     let route = crate::qchem_interfaces::xtb_optimize::psi4_route(program);
+    // Sent exactly as written when the user wrote it.
     let (path, text) = match route {
         Route::Executable => (
             files.input.clone(),
-            psi4_run::input_text(
-                job, method, charge, multiplicity, config, excited, wavefunction, atoms,
-                positions_angstrom,
-            ),
+            hand_written.map(str::to_string).unwrap_or_else(|| {
+                psi4_run::input_text(
+                    job, method, charge, multiplicity, config, excited, wavefunction, atoms,
+                    positions_angstrom,
+                )
+            }),
         ),
         Route::Python => (
             files.script.clone(),
-            psi4_run::script_text(
-                job, method, charge, multiplicity, config, excited, wavefunction, atoms,
-                positions_angstrom,
-            ),
+            hand_written.map(str::to_string).unwrap_or_else(|| {
+                psi4_run::script_text(
+                    job, method, charge, multiplicity, config, excited, wavefunction, atoms,
+                    positions_angstrom,
+                )
+            }),
         ),
     };
     fs::write(&path, text).map_err(|e| format!("Failed to write the Psi4 job: {e}"))?;
@@ -1104,6 +1133,8 @@ mod tests {
             ExcitedStateOptions::default(),
             // A force field has no orbitals to write.
             false,
+            // Built from the controls, not written by hand.
+            None,
             &AtomicBool::new(false),
             &Mutex::new(None),
         );

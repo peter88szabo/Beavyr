@@ -46,7 +46,7 @@ pub const MOLDEN_FILE: &str = "orbitals.molden.input";
 // goes to, so there are no names for them here.
 
 /// The gradient, as a Turbomole `$grad` block Beavyr already reads.
-pub const GRADIENT_FILE: &str = "gradient";
+pub const GRADIENT_FILE: &str = "pyscf.grad";
 /// The excited states, written by the script in a format of our own.
 pub const SPECTRUM_FILE: &str = "spectrum.txt";
 
@@ -226,7 +226,7 @@ if not numpy.isfinite(energy):
             r#"
 g = mf.nuc_grad_method().kernel()
 coords = mol.atom_coords()
-with open("gradient", "w") as handle:
+with open("pyscf.grad", "w") as handle:
     handle.write("$grad          cartesian gradients\n")
     handle.write("  cycle =      1    SCF energy =  %20.14f   |dE/dxyz| =  0.000000\n" % energy)
     for symbol, xyz in zip(ATOMS, coords):

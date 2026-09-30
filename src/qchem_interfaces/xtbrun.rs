@@ -151,13 +151,31 @@ fn build_command_args(
 /// directory overwrite each other's files. Passing one in means a caller can give every
 /// calculation its own -- which is what makes it safe to drive xTB in a loop, or from several
 /// threads at once, as re-ranking a set of conformers does.
+/// What one xTB call produced, and whether it is what was asked for.
+#[derive(Debug, Clone, PartialEq)]
+pub struct XtbCall {
+    pub energy: f64,
+    pub gradient: Vec<f64>,
+    /// Set when the requested method failed and the retry produced this
+    /// number instead.
+    ///
+    /// The retry is not the same calculation. It switches to the GFN-FF force
+    /// field at a raised electronic temperature and loose accuracy, which is a
+    /// reasonable way to get *an* answer out of a structure whose
+    /// self-consistent field will not converge -- but it is a different energy
+    /// surface, and its total energies are not on the same scale as GFN2's.
+    /// Ranking one against the others without saying so would put a conformer
+    /// somewhere meaningless and look like a result, so every caller is told.
+    pub fell_back: bool,
+}
+
 pub fn call_xtb_in(
     workdir: &Path,
     q_bohr: &[f64],
     atoms: &[String],
     qcinput: &QcInput,
     arg: &str,
-) -> Result<(f64, Vec<f64>), String> {
+) -> Result<XtbCall, String> {
     if qcinput.path.as_os_str().is_empty() {
         return Err("XTB path is empty".to_string());
     }
@@ -187,7 +205,9 @@ pub fn call_xtb_in(
 
     let mut stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let mut ok = output.status.success();
+    let mut fell_back = false;
     if !ok {
+        fell_back = true;
         let restart_args = build_command_args(
             inputfile,
             qcinput.charge,
@@ -210,13 +230,13 @@ pub fn call_xtb_in(
     }
 
     let energy = parse_xtb_energy(&stdout)?;
-    let grad = if arg == "--grad" {
+    let gradient = if arg == "--grad" {
         parse_xtb_grad(&gradfile, atoms.len())?
     } else {
         vec![0.0; atoms.len() * 3]
     };
 
-    Ok((energy, grad))
+    Ok(XtbCall { energy, gradient, fell_back })
 }
 
 /// Runs xTB in the process's own working directory.
@@ -228,13 +248,13 @@ pub fn call_xtb(
     atoms: &[String],
     qcinput: &QcInput,
     arg: &str,
-) -> Result<(f64, Vec<f64>), String> {
+) -> Result<XtbCall, String> {
     call_xtb_in(Path::new("."), q_bohr, atoms, qcinput, arg)
 }
 
 pub fn xtb_force(q_bohr: &[f64], atoms: &[String], qcinput: &QcInput) -> Result<Vec<f64>, String> {
-    let (_energy, grad) = call_xtb(q_bohr, atoms, qcinput, "--grad")?;
-    Ok(grad.into_iter().map(|g| -g).collect())
+    let call = call_xtb(q_bohr, atoms, qcinput, "--grad")?;
+    Ok(call.gradient.into_iter().map(|g| -g).collect())
 }
 
 pub fn xtb_energy(
@@ -244,7 +264,7 @@ pub fn xtb_energy(
     qcinput: &QcInput,
 ) -> Result<f64, String> {
     let arg = if qcinput.wfu { "--molden" } else { "--dipole" };
-    let (energy, _grad) = call_xtb(q_bohr, atoms, qcinput, arg)?;
+    let energy = call_xtb(q_bohr, atoms, qcinput, arg)?.energy;
 
     if qcinput.wfu {
         fs::copy("molden.input", file_wf)
@@ -301,6 +321,35 @@ mod tests {
             "          | GRADIENT NORM               0.017706027413 Eh/a |\n"
         );
         assert_eq!(parse_xtb_energy(summary).unwrap(), -0.327_368_812_180);
+    }
+
+    /// The retry is a different calculation and says so.
+    ///
+    /// It switches to the GFN-FF force field at a raised electronic
+    /// temperature, which is a reasonable way to get a number out of a
+    /// structure whose self-consistent field will not converge. What is not
+    /// reasonable is returning it as though the requested method produced it:
+    /// a force-field total is not on the same scale as a GFN2 one, so ranking
+    /// the two together puts a conformer somewhere meaningless and looks like
+    /// a result. Every caller is told, and this is what tells them.
+    #[test]
+    fn the_retry_switches_method_and_must_be_reported() {
+        let plain = build_command_args("in.xyz", 0, 1, "--grad", "", false);
+        let retry = build_command_args("in.xyz", 0, 1, "--grad", "", true);
+
+        // The requested method is GFN2 by default, and the retry is not it.
+        assert!(!plain.iter().any(|a| a == "--gfnff"), "{plain:?}");
+        assert!(retry.iter().any(|a| a == "--gfnff"), "{retry:?}");
+        // And it loosens the calculation besides.
+        assert!(retry.iter().any(|a| a == "--etemp"), "{retry:?}");
+        assert!(retry.iter().any(|a| a == "--acc"), "{retry:?}");
+
+        // A result that did not fall back says so, so a caller can tell the
+        // two apart without inspecting the arguments.
+        let honest = XtbCall { energy: -1.0, gradient: vec![0.0; 3], fell_back: false };
+        assert!(!honest.fell_back);
+        let substituted = XtbCall { energy: -1.0, gradient: vec![0.0; 3], fell_back: true };
+        assert!(substituted.fell_back);
     }
 
     /// Output with no energy must be an error, not a zero -- which would quietly rank a conformer

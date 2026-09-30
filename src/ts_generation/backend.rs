@@ -2,7 +2,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -11,7 +11,7 @@ use anyhow::{bail, Context, Result};
 
 use crate::forcefield::dreiding::objective::BOHR_TO_ANGSTROM;
 use crate::optimizer::traits::Objective;
-use crate::qchem_interfaces::{behemoth, method, program::QcProgram, xtbrun};
+use crate::qchem_interfaces::{gradient, method, program::QcProgram};
 
 #[derive(Default)]
 pub struct RunControl {
@@ -83,56 +83,30 @@ impl EnergyGradient {
                 return Ok((*energy, gradient.clone()));
             }
         }
-        fs::create_dir_all(&self.workdir)?;
-        // Preserve f64 precision at the optimizer boundary; viewer coordinates are f32.
-        fs::write(
-            self.workdir.join("geometry.xyz"),
-            xyz(&self.atoms, x, "TS generation energy/gradient"),
-        )?;
-        let gradient_path = self.workdir.join("gradient");
-        if gradient_path.exists() {
-            fs::remove_file(&gradient_path)?;
-        }
-        let mut command = match self.config.program {
-            QcProgram::Xtb => {
-                let mut command = Command::new(&self.config.binary);
-                command
-                    .current_dir(&self.workdir)
-                    .arg("geometry.xyz")
-                    .arg("--grad")
-                    .arg("--chrg")
-                    .arg(self.config.charge.to_string())
-                    .arg("--uhf")
-                    .arg((self.config.multiplicity - 1).to_string())
-                    .args(method::xtb_method_args(&self.config.method))
-                    .arg("-P")
-                    .arg(self.config.method.nproc.max(1).to_string());
-                command
-            }
-            QcProgram::Behemoth => behemoth::gradient_command(
-                &self.config.binary,
-                &self.workdir,
-                "geometry.xyz",
-                self.config.charge,
-                self.config.multiplicity,
-                &self.config.method,
-            ),
-            QcProgram::Dreiding => bail!("Choose xTB or Behemoth for the reaction energy surface."),
-            // ORCA and PySCF reach the optimizer and frequency panels first;
-            // the reaction-path tools follow in their own stage. Refusing here
-            // is deliberate: a path must use one energy surface throughout, so
-            // quietly running a different program would be worse than saying
-            // this is not wired up yet.
-            QcProgram::Orca
-            | QcProgram::PySCF
-            | QcProgram::Psi4
-            | QcProgram::Psi4Py
-            | QcProgram::SparrowPy => bail!(
-                "{} is not yet available for the reaction energy surface. Use xTB or Behemoth \
-                 here for now.",
-                self.config.program.label()
-            ),
-        };
+        // One shared "energy and gradient at this geometry", so every program
+        // reaches the reaction path the same way and the walk cannot differ
+        // from what an optimisation of the same structure would do.
+        gradient::prepare(
+            self.config.program,
+            &self.workdir,
+            &self.atoms,
+            x,
+            self.config.charge,
+            self.config.multiplicity,
+            &self.config.method,
+        )
+        .map_err(anyhow::Error::msg)?;
+
+        let mut command = gradient::command(
+            self.config.program,
+            &self.config.binary,
+            &self.workdir,
+            self.config.charge,
+            self.config.multiplicity,
+            &self.config.method,
+        )
+        .map_err(anyhow::Error::msg)?;
+
         let stdout_path = self.workdir.join("gradient.stdout");
         let stderr_path = self.workdir.join("gradient.stderr");
         command
@@ -179,31 +153,21 @@ impl EnergyGradient {
                 .rev()
                 .find(|l| !l.trim().is_empty())
                 .unwrap_or("see gradient.stdout and gradient.stderr");
-            // A reaction path must use one energy surface throughout. Do not fall
-            // back to a different xTB method when a single-point calculation fails.
+            // A reaction path must use one energy surface throughout. Do not
+            // fall back to a different method when a single point fails.
             bail!(
                 "{} energy/gradient failed ({status}): {detail}",
                 self.config.program.label()
             );
         }
         let stdout = fs::read_to_string(&stdout_path)?;
-        let (energy, gradient) = match self.config.program {
-            QcProgram::Xtb => (
-                xtbrun::parse_xtb_energy(&stdout).map_err(anyhow::Error::msg)?,
-                xtbrun::parse_xtb_grad(&gradient_path, self.atoms.len())
-                    .map_err(anyhow::Error::msg)?,
-            ),
-            QcProgram::Behemoth => {
-                behemoth::parse_gradient(&stdout, self.atoms.len()).map_err(anyhow::Error::msg)?
-            }
-            // Unreachable: both returned above, before a process was started.
-            QcProgram::Dreiding
-            | QcProgram::Orca
-            | QcProgram::PySCF
-            | QcProgram::Psi4
-            | QcProgram::Psi4Py
-            | QcProgram::SparrowPy => unreachable!(),
-        };
+        let (energy, gradient) = gradient::read(
+            self.config.program,
+            &self.workdir,
+            self.atoms.len(),
+            &stdout,
+        )
+        .map_err(anyhow::Error::msg)?;
         if !energy.is_finite()
             || gradient.len() != x.len()
             || gradient.iter().any(|v| !v.is_finite())

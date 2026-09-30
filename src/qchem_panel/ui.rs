@@ -122,8 +122,108 @@ fn body(
     }
 
     ui.separator();
+    input_row(ui, panel, mol, running);
+
+    ui.separator();
     run_row(ui, panel, task, opt_panel, mol, running, python_ready, level_ok, electronic.is_ok());
     results_row(ui, panel, task);
+}
+
+/// The input file: save it, or write it by hand.
+///
+/// The controls above cover what most runs need. Every one of these programs
+/// can do things no set of dropdowns will reach -- a solvent model, an
+/// embedding, a scan written in Python -- and the honest answer to that is a
+/// box to type in, not another row of widgets.
+fn input_row(ui: &mut egui::Ui, panel: &mut QcPanelState, mol: &Molecule, running: bool) {
+    if !panel.has_input_file() {
+        // xTB, Behemoth and Sparrow are driven by settings rather than by a
+        // file, and DREIDING runs in this process, so there is nothing to edit
+        // or save for any of them.
+        return;
+    }
+
+    let positions: Vec<f64> = mol
+        .pos
+        .iter()
+        .flat_map(|p| [p.x as f64, p.y as f64, p.z as f64])
+        .collect();
+
+    ui.horizontal(|ui| {
+        let was = panel.advanced;
+        ui.add_enabled(
+            !running,
+            egui::Checkbox::new(&mut panel.advanced, "Edit the input directly"),
+        );
+        // Opening the box fills it from what the controls would have written,
+        // so editing starts from something that runs rather than a blank page.
+        if panel.advanced && !was && panel.advanced_text.trim().is_empty() {
+            panel.advanced_text = panel.generated_input(&mol.atoms, &positions);
+        }
+
+        if ui
+            .add_enabled(!running, egui::Button::new("Save input\u{2026}"))
+            .on_hover_text("Write this input to a file without running it.")
+            .clicked()
+        {
+            let text = if panel.advanced {
+                panel.advanced_text.clone()
+            } else {
+                panel.generated_input(&mol.atoms, &positions)
+            };
+            if let Some(target) = rfd::FileDialog::new()
+                .set_file_name(panel.input_file_name())
+                .save_file()
+            {
+                let _ = std::fs::write(target, text);
+            }
+        }
+    });
+
+    if !panel.advanced {
+        return;
+    }
+
+    ui.horizontal(|ui| {
+        if ui
+            .add_enabled(!running, egui::Button::new("Rebuild from the settings above"))
+            .on_hover_text("Replaces what is in the box. Anything typed here is lost.")
+            .clicked()
+        {
+            panel.advanced_text = panel.generated_input(&mol.atoms, &positions);
+        }
+        ui.label(
+            egui::RichText::new(format!("written as {}", panel.input_file_name()))
+                .small()
+                .weak(),
+        );
+    });
+
+    // What the controls above no longer decide, said plainly. A box that
+    // silently overrode the dropdowns beside it would be the worst of both.
+    ui.label(
+        egui::RichText::new(
+            "This text is sent exactly as it stands. The method, basis and job controls above \
+             no longer apply, including the geometry, so a structure changed on screen will \
+             not reach the calculation until you rebuild.",
+        )
+        .small()
+        .color(egui::Color32::from_rgb(230, 170, 90)),
+    );
+
+    egui::ScrollArea::vertical()
+        .max_height(260.0)
+        .id_salt("qc_panel_advanced_input")
+        .show(ui, |ui| {
+            ui.add_enabled(
+                !running,
+                egui::TextEdit::multiline(&mut panel.advanced_text)
+                    .font(egui::TextStyle::Monospace)
+                    .desired_width(f32::INFINITY)
+                    .desired_rows(14)
+                    .code_editor(),
+            );
+        });
 }
 
 /// The one button that opens the calculation summary.
@@ -569,6 +669,7 @@ fn run_row(
                         panel.config.clone(),
                         panel.excited,
                         panel.wavefunction,
+                        panel.advanced.then(|| panel.advanced_text.clone()),
                     );
                 }
                 Err(err) => {
@@ -639,6 +740,96 @@ mod tests {
         state.config.basis = "cc-pVTZ-F12".to_string();
         adopt_method_defaults(&mut state, QcMethod::CcsdTF12);
         assert_eq!(state.config.basis, "cc-pVTZ-F12");
+    }
+
+    /// The editor shows the input that would actually be sent. An editor
+    /// showing something else would be worse than no editor, because what you
+    /// edited and what ran would silently differ.
+    #[test]
+    fn the_editor_starts_from_what_would_be_sent() {
+        let mut state = panel();
+        state.program = QcProgram::Orca;
+        state.method = Some(QcMethod::Dft);
+        state.config.functional = "M062X".to_string();
+        state.config.basis = "def2-TZVP".to_string();
+        state.job = JobType::Optimize;
+
+        let atoms: Vec<String> = ["O", "H", "H"].iter().map(|s| s.to_string()).collect();
+        let water = [0.0, 0.0, 0.1173, 0.0, 0.7572, -0.4692, 0.0, -0.7572, -0.4692];
+        let text = state.generated_input(&atoms, &water);
+
+        // Everything the controls said, in ORCA's own spelling.
+        assert!(text.contains("! M062X def2-TZVP Opt"), "{text}");
+        assert!(text.contains("* xyz 0 1"), "{text}");
+        assert!(text.contains("0.1173"), "the geometry is in it: {text}");
+    }
+
+    /// Only the programs driven by an input file offer one to edit or save.
+    /// xTB and Behemoth take everything on their command lines and DREIDING
+    /// runs in this process, so for those there is nothing to show.
+    #[test]
+    fn only_file_driven_programs_offer_an_input() {
+        let mut state = panel();
+        for program in [
+            QcProgram::Orca,
+            QcProgram::Psi4,
+            QcProgram::Psi4Py,
+            QcProgram::PySCF,
+        ] {
+            state.set_program(program);
+            assert!(state.has_input_file(), "{program:?}");
+            assert!(!state.input_file_name().is_empty(), "{program:?}");
+        }
+        // Driven by settings, not by a file. Sparrow belongs here despite
+        // Beavyr generating a script for it: that script is this program's
+        // scaffolding, not an input format Sparrow has.
+        for program in [
+            QcProgram::Xtb,
+            QcProgram::Behemoth,
+            QcProgram::Dreiding,
+            QcProgram::SparrowPy,
+        ] {
+            state.set_program(program);
+            assert!(!state.has_input_file(), "{program:?}");
+        }
+    }
+
+    /// Each program's input is offered under the name it is actually written
+    /// as, so a saved file can be run again by hand without renaming.
+    #[test]
+    fn the_suggested_name_is_the_one_it_is_written_as() {
+        let mut state = panel();
+        for (program, name) in [
+            (QcProgram::Orca, "orca_job.inp"),
+            (QcProgram::Psi4, "input.dat"),
+            (QcProgram::Psi4Py, "run_psi4.py"),
+            (QcProgram::PySCF, "run_pyscf.py"),
+        ] {
+            state.set_program(program);
+            assert_eq!(state.input_file_name(), name, "{program:?}");
+        }
+    }
+
+    /// A Python-driven program's input is a Python script, and ORCA's is not.
+    /// Getting these the wrong way round would hand a program a file it cannot
+    /// read.
+    #[test]
+    fn the_generated_input_is_in_the_right_language() {
+        let atoms: Vec<String> = ["O", "H", "H"].iter().map(|s| s.to_string()).collect();
+        let water = [0.0, 0.0, 0.1173, 0.0, 0.7572, -0.4692, 0.0, -0.7572, -0.4692];
+
+        let mut state = panel();
+        state.set_program(QcProgram::PySCF);
+        state.method = Some(QcMethod::Dft);
+        let pyscf = state.generated_input(&atoms, &water);
+        assert!(pyscf.contains("gto.M("), "{pyscf}");
+        assert!(!pyscf.starts_with('!'), "{pyscf}");
+
+        state.set_program(QcProgram::Orca);
+        state.method = Some(QcMethod::Dft);
+        let orca = state.generated_input(&atoms, &water);
+        assert!(orca.contains("%pal nprocs"), "{orca}");
+        assert!(!orca.contains("gto.M("), "{orca}");
     }
 
     /// Switching program resets the level of theory but keeps what describes

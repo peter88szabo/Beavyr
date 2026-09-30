@@ -50,6 +50,9 @@ pub struct XtbObjective<'a> {
     input: QcInput,
     /// Counted so a caller can report how much external work something cost.
     pub calls: usize,
+    /// Set the moment any call in this objective's life fell back to the force
+    /// field, so the caller can say the number it got is not what it asked for.
+    pub fell_back: bool,
 }
 
 impl<'a> XtbObjective<'a> {
@@ -77,6 +80,7 @@ impl<'a> XtbObjective<'a> {
                 wfu: false,
             },
             calls: 0,
+            fell_back: false,
         }
     }
 }
@@ -211,15 +215,18 @@ impl Objective for XtbObjective<'_> {
     fn energy(&mut self, x: &[f64]) -> Result<f64> {
         self.calls += 1;
         // `--dipole` is the cheapest single-point argument that still prints the total energy.
-        call_xtb_in(&self.workdir, x, self.atoms, &self.input, "--dipole")
-            .map(|(energy, _)| energy)
-            .map_err(|e| anyhow!("{e}"))
+        let call = call_xtb_in(&self.workdir, x, self.atoms, &self.input, "--dipole")
+            .map_err(|e| anyhow!("{e}"))?;
+        self.fell_back |= call.fell_back;
+        Ok(call.energy)
     }
 
     fn gradient(&mut self, x: &[f64], grad: &mut [f64]) -> Result<()> {
         self.calls += 1;
-        let (_, gradient) = call_xtb_in(&self.workdir, x, self.atoms, &self.input, "--grad")
+        let call = call_xtb_in(&self.workdir, x, self.atoms, &self.input, "--grad")
             .map_err(|e| anyhow!("{e}"))?;
+        self.fell_back |= call.fell_back;
+        let gradient = call.gradient;
         if gradient.len() != grad.len() {
             return Err(anyhow!(
                 "xTB returned {} gradient components for {} coordinates",
@@ -234,8 +241,10 @@ impl Objective for XtbObjective<'_> {
     fn energy_gradient(&mut self, x: &[f64], grad: &mut [f64]) -> Result<f64> {
         self.calls += 1;
         // One call for both, which halves the number of process launches.
-        let (energy, gradient) = call_xtb_in(&self.workdir, x, self.atoms, &self.input, "--grad")
+        let call = call_xtb_in(&self.workdir, x, self.atoms, &self.input, "--grad")
             .map_err(|e| anyhow!("{e}"))?;
+        self.fell_back |= call.fell_back;
+        let (energy, gradient) = (call.energy, call.gradient);
         if gradient.len() != grad.len() {
             return Err(anyhow!(
                 "xTB returned {} gradient components for {} coordinates",
@@ -273,6 +282,15 @@ pub struct Refinement {
     pub xtb_calls: usize,
     /// How many conformers changed places in the ranking.
     pub reordered: usize,
+    /// Which conformers, by their position in the list, got an energy from the
+    /// force-field retry rather than from the method that was asked for.
+    ///
+    /// Not an error: the retry is how a structure whose self-consistent field
+    /// will not converge still produces a number. But it is a different energy
+    /// surface, so these are not comparable with the rest and their place in
+    /// the ranking means nothing. Reported so the user can see which, rather
+    /// than being left to wonder why one conformer sits oddly.
+    pub fell_back: Vec<usize>,
 }
 
 /// Re-optimises the leading conformers with GFN2-xTB and re-ranks the set.
@@ -294,6 +312,7 @@ pub fn refine_with_xtb(
             refined: 0,
             xtb_calls: 0,
             reordered: 0,
+            fell_back: Vec::new(),
         });
     }
 
@@ -324,12 +343,18 @@ pub fn refine_with_xtb(
 
     let mut energies = Vec::with_capacity(take);
     let mut calls = 0usize;
+    // Which conformers got a force-field number instead of the method asked
+    // for, recorded per conformer rather than as a single flag: knowing that
+    // "one of these is not comparable" without knowing which would be worse
+    // than useless.
+    let mut fell_back: Vec<usize> = Vec::new();
     for (index, positions) in before.iter().enumerate() {
         let mut objective = XtbObjective {
             workdir: scratch.join(format!("conformer_{index:03}")),
             atoms: &outcome.atoms,
             input: input.clone(),
             calls: 0,
+            fell_back: false,
         };
         let x_bohr: Vec<f64> = positions
             .iter()
@@ -337,6 +362,9 @@ pub fn refine_with_xtb(
             .collect();
         let result = minimize_cartesian(x_bohr, &mut objective, refine_options())?;
         calls += objective.calls;
+        if objective.fell_back {
+            fell_back.push(index);
+        }
         energies.push((index, result.energy, result.x));
     }
 
@@ -396,10 +424,19 @@ pub fn refine_with_xtb(
     }
     outcome.refined_with_xtb = true;
 
+    // Recorded against the new order, since that is the list the user reads.
+    let fell_back = order
+        .iter()
+        .enumerate()
+        .filter(|(_, was)| fell_back.contains(was))
+        .map(|(at, _)| at)
+        .collect();
+
     Ok(Refinement {
         refined: take,
         xtb_calls: calls,
         reordered,
+        fell_back,
     })
 }
 

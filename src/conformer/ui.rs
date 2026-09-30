@@ -898,6 +898,34 @@ fn refinement_row(ui: &mut egui::Ui, run: &mut ConformerRun, outcome: &Conformer
                 ))
                 .small(),
             );
+
+            // The retry is a different energy surface. Saying so is the whole
+            // point: a force-field total is not comparable with a GFN2 one, so
+            // wherever these conformers landed in the ranking means nothing,
+            // and a number that looks ordinary is the easiest kind to trust by
+            // mistake.
+            if !report.fell_back.is_empty() {
+                let places: Vec<String> = report
+                    .fell_back
+                    .iter()
+                    .map(|index| (index + 1).to_string())
+                    .collect();
+                ui.colored_label(
+                    egui::Color32::from_rgb(230, 170, 90),
+                    egui::RichText::new(format!(
+                        "\u{26a0} Conformer{} {} did not converge with the method asked for. \
+                         xTB retried {} with the GFN-FF force field, so {} energ{} are from a \
+                         different surface and {} place in this ranking is not meaningful.",
+                        if places.len() == 1 { "" } else { "s" },
+                        places.join(", "),
+                        if places.len() == 1 { "it" } else { "them" },
+                        if places.len() == 1 { "its" } else { "their" },
+                        if places.len() == 1 { "y" } else { "ies" },
+                        if places.len() == 1 { "its" } else { "their" },
+                    ))
+                    .small(),
+                );
+            }
         }
         Some(Err(problem)) => {
             ui.colored_label(

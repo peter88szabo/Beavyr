@@ -126,8 +126,10 @@ pub struct TsGeneration {
     pub method: method::MethodConfig,
     pub charge: i32,
     pub multiplicity: i32,
-    pub xtb_path: String,
-    pub behemoth_path: String,
+    /// One remembered path per program that needs an executable, so switching
+    /// program switches paths rather than overwriting the one set for the
+    /// other. The same shape the optimizer panel uses.
+    pub paths: Vec<(QcProgram, String)>,
     pub output: Option<GenerationOutput>,
     pub energy_plot_open: bool,
     pub help_open: bool,
@@ -157,8 +159,11 @@ impl Default for TsGeneration {
             method: method::MethodConfig::default(),
             charge: 0,
             multiplicity: 1,
-            xtb_path: path(QcProgram::Xtb, "xtb"),
-            behemoth_path: path(QcProgram::Behemoth, "behemoth"),
+            paths: QcProgram::ALL
+                .iter()
+                .filter(|p| p.needs_binary_path())
+                .map(|&p| (p, path(p, p.binary_hint())))
+                .collect(),
             output: None,
             energy_plot_open: false,
             help_open: false,
@@ -185,6 +190,28 @@ impl TsGeneration {
 
     pub fn elapsed(&self) -> Option<Duration> {
         self.started.map(|t| t.elapsed()).or(self.duration)
+    }
+
+    /// The remembered path for `program`, or empty where it needs none.
+    pub fn path_for(&self, program: QcProgram) -> &str {
+        self.paths
+            .iter()
+            .find(|(p, _)| *p == program)
+            .map(|(_, path)| path.as_str())
+            .unwrap_or("")
+    }
+
+    /// Editable access, so the one text field always writes to the program it
+    /// is showing.
+    pub fn path_mut(&mut self, program: QcProgram) -> &mut String {
+        if !self.paths.iter().any(|(p, _)| *p == program) {
+            self.paths.push((program, String::new()));
+        }
+        self.paths
+            .iter_mut()
+            .find(|(p, _)| *p == program)
+            .map(|(_, path)| path)
+            .expect("just inserted if missing")
     }
 
     pub fn input_options(&self) -> Result<RdaOptions> {
@@ -231,10 +258,8 @@ impl TsGeneration {
             bail!("A TS generation is already running.");
         }
         let options = self.input_options()?;
-        let configured = match self.program {
-            QcProgram::Xtb => &self.xtb_path,
-            _ => &self.behemoth_path,
-        };
+        let configured = self.path_for(self.program).to_string();
+        let configured = &configured;
         let binary =
             resolve_program_executable(self.program, configured).map_err(anyhow::Error::msg)?;
         // Subprocesses change directory; resolve relative executable paths first.

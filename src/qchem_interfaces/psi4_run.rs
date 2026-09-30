@@ -43,7 +43,7 @@ pub const GEOMETRY_FILE: &str = "final.xyz";
 /// The Hessian, behind a `$hessian` header.
 pub const HESSIAN_FILE: &str = "hessian.txt";
 /// The gradient, as a Turbomole `$grad` block.
-pub const GRADIENT_FILE: &str = "gradient";
+pub const GRADIENT_FILE: &str = "psi4.grad";
 /// The excited states, written by the script in a format of our own.
 pub const SPECTRUM_FILE: &str = "spectrum.txt";
 /// The molecular orbitals, when asked for.
@@ -229,7 +229,7 @@ g = grad.to_array()
 coords = mol.geometry().to_array()
 # Turbomole `$grad`, which Beavyr already reads: the coordinates first, then
 # one gradient line per atom, both in bohr.
-with open("gradient", "w") as handle:
+with open("psi4.grad", "w") as handle:
     handle.write("$grad          cartesian gradients\n")
     handle.write("  cycle =      1    SCF energy =  %20.14f   |dE/dxyz| =  0.000000\n" % energy)
     for symbol, xyz in zip(ATOMS, coords):
@@ -412,40 +412,6 @@ pub fn parse_energy(text: &str) -> Option<f64> {
         })
         .next_back()
         .and_then(|rest| rest.trim().parse().ok())
-}
-
-/// One excited state, as the script wrote it.
-///
-/// Read but not yet displayed. A Psi4 TD-DFT run writes this file and the panel
-/// offers it to save, but its roots do not reach the UV-Vis panel yet: that
-/// panel is filled from an ORCA-shaped result, and turning these into one is
-/// its own piece of work. Saying so here is better than a reader that looks
-/// complete and is never called.
-#[allow(dead_code)]
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct SpectrumRoot {
-    pub root: usize,
-    pub energy_ev: f64,
-    pub oscillator_strength: f64,
-}
-
-/// Reads the spectrum file the script wrote. See [`SpectrumRoot`].
-#[allow(dead_code)]
-pub fn parse_spectrum(text: &str) -> Vec<SpectrumRoot> {
-    text.lines()
-        .filter(|line| !line.trim_start().starts_with('#'))
-        .filter_map(|line| {
-            let fields: Vec<&str> = line.split_whitespace().collect();
-            if fields.len() < 3 {
-                return None;
-            }
-            Some(SpectrumRoot {
-                root: fields[0].parse().ok()?,
-                energy_ev: fields[1].parse().ok()?,
-                oscillator_strength: fields[2].parse().ok()?,
-            })
-        })
-        .collect()
 }
 
 /// The last thing said before giving up, for a message worth reading.
@@ -707,19 +673,6 @@ mod tests {
         assert!(parse_energy("energy -76.123456789012\n").is_some());
         assert!(parse_energy("BEAVYR_ENERGY -76.123456789012\n").is_some());
         assert_eq!(parse_energy("nothing here\n"), None);
-    }
-
-    /// The spectrum file the script writes, read back.
-    #[test]
-    fn the_spectrum_is_read_back() {
-        let text = "# root  energy_eV  oscillator_strength\n1 7.6110000000 0.0123000000\n2 9.5130000000 0.0000000000\n";
-        let roots = parse_spectrum(text);
-        assert_eq!(roots.len(), 2);
-        assert_eq!(roots[0].root, 1);
-        assert!((roots[0].energy_ev - 7.611).abs() < 1.0e-6);
-        assert!((roots[1].oscillator_strength).abs() < 1.0e-12);
-        // The comment line is not a root.
-        assert!(parse_spectrum("# only a header\n").is_empty());
     }
 
     /// A composite brings its own basis, and the body says so rather than

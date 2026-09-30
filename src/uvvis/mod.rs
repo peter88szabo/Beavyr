@@ -211,6 +211,36 @@ mod tests {
         assert!((result.states[0].energy_ev - 7.611).abs() < 1.0e-9);
     }
 
+    /// A Psi4 run started from inside Beavyr reaches the panel by the same
+    /// route as a file the user produced.
+    ///
+    /// Its `tdscf_excitations` prints through Psi4's own output channel, so
+    /// what lands in `psi4.out` is the layout this reader was written against.
+    /// Asserted here because the panel hands that log straight to
+    /// `detect_and_parse`, and nothing else checks the two agree.
+    #[test]
+    fn a_psi4_run_started_here_reaches_the_panel() {
+        // Shaped as the generated script's own output: Psi4's banner, then
+        // what `tdscf_excitations` prints.
+        let log = concat!(
+            "    Psi4 1.11 release\n",
+            "  Psi4 started on somehost\n",
+            "                        Tamm-Dancoff approximation\n",
+            "\n",
+            "Excited State    1 (1 B2):   0.27971 au   162.97 nm f =  0.0123\n",
+            "    4 (B2) -> 5 (A1)     0.68901\n",
+            "Excited State    2 (1 A1):   0.34959 au   130.39 nm f =  0.0000\n",
+            "BEAVYR_ENERGY -76.321074727877\n",
+        );
+        let result = detect_and_parse(log, Path::new("Psi4 run")).expect("a Psi4 spectrum");
+        assert!(result.program.starts_with("Psi4"), "{}", result.program);
+        assert_eq!(result.states.len(), 2);
+        assert_eq!(result.method, "TD-DFT/TDA");
+        // Atomic units in, electronvolts out.
+        assert!(result.states[0].energy_ev > 7.0, "{:?}", result.states[0]);
+        assert_eq!(result.states[0].oscillator_strength, Some(0.0123));
+    }
+
     /// A file none of the readers recognises says so, and names what Beavyr
     /// does read -- more use than refusing without explanation.
     #[test]
