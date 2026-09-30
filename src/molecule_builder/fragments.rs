@@ -205,6 +205,50 @@ pub const FRAG_SH: &str = r#"
  H     1.336000     0.000000     0.000000
 "#;
 
+/// Cyclopentadienyl, centred on a dummy.
+///
+/// The first atom is the connector, and here it is the ring's centre rather
+/// than one of its carbons, so the ring attaches through its centroid --
+/// which is how a Cp ring bonds to a metal. Attaching through a carbon would
+/// build an eta-1 sigma complex, not ferrocene.
+///
+/// Planar, C-C 1.43 A (aromatic Cp), C-H 1.08 A pointing radially outward.
+/// The dummy at the centre is scaffolding: it never reaches a calculation,
+/// and cleaning up the geometry removes it.
+pub const FRAG_CP_CENTERED: &str = r#"
+ X     0.000000     0.000000     0.000000
+ C     1.216431     0.000000     0.000000
+ C     0.375898     1.156894     0.000000
+ C    -0.984113     0.715000     0.000000
+ C    -0.984113    -0.715000     0.000000
+ C     0.375898    -1.156894     0.000000
+ H     2.296431     0.000000     0.000000
+ H     0.709636     2.184035     0.000000
+ H    -1.857851     1.349808     0.000000
+ H    -1.857851    -1.349808     0.000000
+ H     0.709636    -2.184035     0.000000
+"#;
+
+/// Benzene, centred on a dummy, for eta-6 sandwich complexes.
+///
+/// Planar, C-C 1.39 A, C-H 1.08 A radially outward, with the connector at the
+/// centroid for the same reason as the cyclopentadienyl ring above.
+pub const FRAG_BENZENE_CENTERED: &str = r#"
+ X     0.000000     0.000000     0.000000
+ C     1.390000     0.000000     0.000000
+ C     0.695000     1.203775     0.000000
+ C    -0.695000     1.203775     0.000000
+ C    -1.390000     0.000000     0.000000
+ C    -0.695000    -1.203775     0.000000
+ C     0.695000    -1.203775     0.000000
+ H     2.470000     0.000000     0.000000
+ H     1.235000     2.139083     0.000000
+ H    -1.235000     2.139083     0.000000
+ H    -2.470000     0.000000     0.000000
+ H    -1.235000    -2.139083     0.000000
+ H     1.235000    -2.139083     0.000000
+"#;
+
 pub const FRAGMENTS: &[FragmentDef] = &[
     FragmentDef {
         name: "-CH3",
@@ -277,5 +321,13 @@ pub const FRAGMENTS: &[FragmentDef] = &[
     FragmentDef {
         name: "-SH",
         xyz: FRAG_SH,
+    },
+    FragmentDef {
+        name: "5-Ring centered",
+        xyz: FRAG_CP_CENTERED,
+    },
+    FragmentDef {
+        name: "6-Ring centered",
+        xyz: FRAG_BENZENE_CENTERED,
     },
 ];

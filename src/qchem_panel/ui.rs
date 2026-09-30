@@ -107,6 +107,22 @@ fn body(
     resources_row(ui, panel, running);
 
     // The charge and multiplicity have to describe a real electronic state.
+    // Dummies are scaffolding and never reach the program. Said on screen,
+    // because the run is about to be on fewer atoms than are on the display
+    // and a silent difference between the two is how a result gets
+    // misattributed to the wrong structure.
+    let dummies = crate::molecule::dummy_count(&mol.atoms);
+    if dummies > 0 {
+        ui.label(
+            egui::RichText::new(match dummies {
+                1 => "1 dummy atom is a placeholder and is left out of the calculation.".to_string(),
+                n => format!("{n} dummy atoms are placeholders and are left out of the calculation."),
+            })
+            .small()
+            .weak(),
+        );
+    }
+
     let electronic = validate_electronic_state(mol, panel.charge, panel.multiplicity);
     if let Err(error) = &electronic {
         ui.colored_label(

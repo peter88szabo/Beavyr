@@ -1114,7 +1114,22 @@ const NOTHING_SELECTED: &str = "No atom selected. Left-click an atom in the 3D v
 /// Offered in the single-atom form. Typing is always allowed, so this is a
 /// shortcut for the elements a structure is usually built from, not a limit.
 const COMMON_ELEMENTS: &[&str] = &[
-    "H", "B", "C", "N", "O", "F", "Si", "P", "S", "Cl", "Br", "I",
+    // X first: a dummy is not an element, but it is what you reach for when
+    // placing something, and hunting for it at the end of a list of real
+    // elements would be the wrong shape.
+    crate::molecule::DUMMY_SYMBOL,
+    "H",
+    "B",
+    "C",
+    "N",
+    "O",
+    "F",
+    "Si",
+    "P",
+    "S",
+    "Cl",
+    "Br",
+    "I",
 ];
 
 /// A fragment the panel can insert: one of the built-in list, or a single atom
@@ -2449,7 +2464,20 @@ fn cleanup_row(
             )
             .clicked()
         {
-            zmat_state.cleanup_report = Some(run_cleanup(mol, settings));
+            record_step(zmat_state, mol, "cleaned up the geometry");
+            let report = run_cleanup(mol, settings);
+            if report.is_ok() {
+                // Every coordinate moved and dummies may have gone, so the
+                // Z-matrix built from the old structure no longer describes
+                // this one.
+                zmat_state.zmat = zmat2xyz::xyz_to_zmat(&mol.atoms, &mol.pos);
+                zmat_state.edit_refresh = true;
+                set_selected_atom(zmat_state, &mol.atoms, None);
+            } else {
+                // Nothing changed, so nothing to undo.
+                let _ = zmat_state.history.undo(current_step(zmat_state, mol));
+            }
+            zmat_state.cleanup_report = Some(report);
         }
         if ui
             .add_enabled(
@@ -2480,6 +2508,20 @@ fn cleanup_row(
 fn run_cleanup(mol: &mut Molecule, settings: &mut MolSettings) -> Result<String, String> {
     use crate::forcefield::dreiding::objective::{cleanup_options, relax_angstrom};
     use crate::forcefield::dreiding::DreidingTopology;
+
+    // Cleaning up the geometry is where the scaffolding comes down. A dummy
+    // marks a place to build against; once the structure is built it has no
+    // business in it, DREIDING has no type for it, and leaving it would carry
+    // it into every later calculation. So it is removed from the structure,
+    // not merely hidden from the force field.
+    let dummies_removed = crate::molecule::dummy_count(&mol.atoms);
+    if dummies_removed > 0 {
+        let (atoms, positions) = crate::molecule::without_dummies(&mol.atoms, &mol.pos);
+        mol.atoms = atoms;
+        mol.pos = positions;
+        mol.bonds.clear();
+        mol.hydrogen_bonds.clear();
+    }
 
     // Perceived at the standard threshold rather than at whatever the viewport is set to: a
     // generous display setting bonds atoms that are merely close, which mistypes every atom and
@@ -2526,7 +2568,12 @@ fn run_cleanup(mol: &mut Molecule, settings: &mut MolSettings) -> Result<String,
         } else {
             " Stopped before converging -- run it again, or hand it to an optimiser."
         }
-    ) + &radical)
+    ) + &radical
+        + &match dummies_removed {
+            0 => String::new(),
+            1 => " One dummy atom was removed.".to_string(),
+            n => format!(" {n} dummy atoms were removed."),
+        })
 }
 
 pub fn builder_ui_contents(
@@ -3897,6 +3944,115 @@ C   2.050   1.450   0.000
             .map(|v| Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32))
             .collect();
         xyz_to_zmat(&symbols, &positions)
+    }
+
+    /// A centred ring must attach through its centre, with the ring square
+    /// to the bond.
+    ///
+    /// Attaching through a carbon builds an eta-1 sigma complex; leaving the
+    /// ring tilted builds nothing real at all. Either looks plausible enough
+    /// on screen that it would go unnoticed until the calculation gave a
+    /// strange answer, which is why this is asserted rather than eyeballed.
+    #[test]
+    fn a_centred_ring_attaches_face_on() {
+        for (name, ring_atoms) in [("5-Ring centered", 5usize), ("6-Ring centered", 6)] {
+            let frag = find_fragment(name).expect("in the fragment list");
+            let mut zmat = host_zmat();
+            let attach = 0usize;
+            let (indices, _clearance) = add_fragment_to_zmat(
+                &mut zmat,
+                &frag.xyz,
+                Some((attach, None, None)),
+                1.65,
+                109.471,
+                180.0,
+            );
+            let coords = zmat2xyz::zmat_to_xyz(&zmat);
+
+            assert_eq!(zmat[indices[0]].symbol, "X", "{name}: the centre is the connector");
+
+            let centre = coords[indices[0]];
+            let host = coords[attach];
+            let axis = (centre - host).normalize();
+            let carbons: Vec<Vec3> = indices[1..=ring_atoms].iter().map(|&i| coords[i]).collect();
+
+            // Regular: every carbon the same distance from the centre.
+            let first = (carbons[0] - centre).length();
+            for c in &carbons {
+                assert!(
+                    ((*c - centre).length() - first).abs() < 1.0e-3,
+                    "{name}: the ring is not regular"
+                );
+            }
+            // Face-on: every spoke from the centre is square to the bond.
+            for c in &carbons {
+                let spoke = (*c - centre).normalize();
+                assert!(
+                    spoke.dot(axis).abs() < 1.0e-2,
+                    "{name}: the ring is tilted, spoke.axis = {}",
+                    spoke.dot(axis)
+                );
+            }
+        }
+    }
+
+    /// The centre dummy has to be bonded, both to its own ring and to the
+    /// atom it was attached to.
+    ///
+    /// That is what the fragment editor works from: picking the host and the
+    /// dummy as the axis only finds a ring to rotate if the bonds say the
+    /// ring is on the dummy's side. Bonds come from the summed covalent radii
+    /// times a scale, so the dummy's radius decides this, and a radius too
+    /// small leaves the ring floating unattached with nothing to turn.
+    #[test]
+    fn the_centre_dummy_is_bonded_to_its_ring_and_its_host() {
+        for (name, ring_atoms) in [("5-Ring centered", 5usize), ("6-Ring centered", 6)] {
+            let frag = find_fragment(name).expect("in the fragment list");
+            // An iron atom, because that is what a centred ring is for. A
+            // carbon host at a metal-centroid distance would be too far to
+            // bond and the test would be measuring the wrong thing.
+            let mut zmat = vec![ZAtom {
+                symbol: "Fe".to_string(),
+                bond_ref: None,
+                bond_len: 0.0,
+                angle_ref: None,
+                angle_deg: 0.0,
+                dihedral_ref: None,
+                dihedral_deg: 0.0,
+            }];
+            let (indices, _clearance) = add_fragment_to_zmat(
+                &mut zmat,
+                &frag.xyz,
+                Some((0, None, None)),
+                1.65,
+                109.471,
+                180.0,
+            );
+            let coords = zmat2xyz::zmat_to_xyz(&zmat);
+            let symbols: Vec<String> = zmat.iter().map(|a| a.symbol.clone()).collect();
+            let mut xyz = format!("{}\n\n", symbols.len());
+            for (symbol, p) in symbols.iter().zip(&coords) {
+                xyz.push_str(&format!("{symbol} {} {} {}\n", p.x, p.y, p.z));
+            }
+            let mut mol = Molecule::from_xyz(&xyz);
+            // The standard perception scale, the one the cleanup uses -- not
+            // the loose display setting, which bonds anything near anything.
+            mol.recompute_bonds(1.2, 2.5);
+
+            let centre = indices[0];
+            let bonded = |a: usize, b: usize| {
+                mol.bonds
+                    .iter()
+                    .any(|&(i, j, _)| (i == a && j == b) || (i == b && j == a))
+            };
+            assert!(bonded(centre, 0), "{name}: the centre is not bonded to its host");
+            for &carbon in &indices[1..=ring_atoms] {
+                assert!(
+                    bonded(centre, carbon),
+                    "{name}: the centre is not bonded to ring atom {carbon}"
+                );
+            }
+        }
     }
 
     /// The tiles skip the fragments that are one atom, because choosing an

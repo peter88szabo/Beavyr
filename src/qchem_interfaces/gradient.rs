@@ -48,9 +48,18 @@ pub fn unsupported_reason(program: QcProgram) -> Option<&'static str> {
 }
 
 /// An XYZ file, from coordinates in bohr.
+/// The structure as an XYZ file, for a program to read.
+///
+/// Dummies are left out, and the header counts what is written: they are
+/// positions the user built against, and no program here accepts one.
 pub fn xyz_text(atoms: &[String], coords_bohr: &[f64], comment: &str) -> String {
-    let mut text = format!("{}\n{comment}\n", atoms.len());
-    for (symbol, xyz) in atoms.iter().zip(coords_bohr.chunks_exact(3)) {
+    let kept: Vec<(&String, &[f64])> = atoms
+        .iter()
+        .zip(coords_bohr.chunks_exact(3))
+        .filter(|(symbol, _)| !crate::molecule::is_dummy(symbol))
+        .collect();
+    let mut text = format!("{}\n{comment}\n", kept.len());
+    for (symbol, xyz) in kept {
         text.push_str(&format!(
             "{symbol:<3} {:16.10} {:16.10} {:16.10}\n",
             xyz[0] * BOHR_TO_ANGSTROM,

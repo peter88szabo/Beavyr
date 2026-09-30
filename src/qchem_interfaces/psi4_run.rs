@@ -145,6 +145,12 @@ pub fn method_name<'a>(method: QcMethod, functional: &'a str) -> &'a str {
 fn geometry_block(charge: i32, multiplicity: i32, atoms: &[String], positions: &[f64]) -> String {
     let mut block = format!("{charge} {}\\n", multiplicity.max(1));
     for (index, symbol) in atoms.iter().enumerate() {
+        // A position the user built against, not an atom. Psi4 would stop on
+        // it, and it contributes no electrons to the charge and multiplicity
+        // written above.
+        if crate::molecule::is_dummy(symbol) {
+            continue;
+        }
         let base = index * 3;
         block.push_str(&format!(
             "{symbol} {:.10} {:.10} {:.10}\\n",

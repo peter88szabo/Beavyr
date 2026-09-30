@@ -357,6 +357,50 @@ pub fn parse_xyz_first_frame_angstrom(xyz: &str) -> (Vec<String>, Vec<Vec<f64>>,
 }
 
 /// Covalent radii in Å (no Bohr conversion anymore)
+/// The placeholder element: not an atom, a position.
+///
+/// A dummy marks a point in space so a fragment can be built against it -- the
+/// centre of a cyclopentadienyl ring, so the ring bonds to a metal through its
+/// centroid rather than through one carbon. It is scaffolding, and it never
+/// reaches a quantum-chemistry program: every writer that produces calculation
+/// input strips it, and cleaning up the geometry removes it from the structure
+/// for good.
+pub const DUMMY_SYMBOL: &str = "X";
+
+/// Whether this symbol names a dummy rather than an element.
+///
+/// `X` and `Xx` both, and case-insensitively, because a symbol can arrive
+/// typed by hand as well as chosen from the list.
+pub fn is_dummy(symbol: &str) -> bool {
+    let symbol = symbol.trim();
+    symbol.eq_ignore_ascii_case("x") || symbol.eq_ignore_ascii_case("xx")
+}
+
+/// The same atoms and positions with the dummies taken out.
+///
+/// Every path that hands a structure to a program goes through this. A dummy
+/// reaching ORCA or xTB is not a small error: the program stops on an unknown
+/// element, and the user finds out after the queue, not before it.
+pub fn without_dummies(atoms: &[String], positions: &[Vec3]) -> (Vec<String>, Vec<Vec3>) {
+    let mut kept_atoms = Vec::with_capacity(atoms.len());
+    let mut kept_positions = Vec::with_capacity(positions.len());
+    for (index, symbol) in atoms.iter().enumerate() {
+        if is_dummy(symbol) {
+            continue;
+        }
+        kept_atoms.push(symbol.clone());
+        if let Some(position) = positions.get(index) {
+            kept_positions.push(*position);
+        }
+    }
+    (kept_atoms, kept_positions)
+}
+
+/// How many dummies are in this structure, for saying so before a run.
+pub fn dummy_count(atoms: &[String]) -> usize {
+    atoms.iter().filter(|symbol| is_dummy(symbol)).count()
+}
+
 pub fn covalent_radius_angstrom(sym: &str) -> f32 {
     match sym {
         "H" => 0.45,
@@ -462,6 +506,16 @@ pub fn covalent_radius_angstrom(sym: &str) -> f32 {
         "Md" => 1.73,
         "No" => 1.76,
         "Lr" => 1.61,
+        // Bonds are perceived from the summed radii times a scale, so this
+        // number decides what a dummy connects to -- and it has to connect,
+        // or the fragment editor cannot find the ring on the far side of a
+        // metal-centroid bond and there is nothing to rotate.
+        //
+        // 0.45 puts the cutoff against carbon at 1.44 A at the standard
+        // scale of 1.2: far enough to reach a benzene centroid (1.39 A) and
+        // a cyclopentadienyl one (1.22 A), and a metal at 1.65 A, while
+        // staying close enough to a bond length not to reach across a gap.
+        "X" | "Xx" => 0.45,
         _ => 0.77,
     }
 }
@@ -919,5 +973,48 @@ mod tests {
             "expected an H···O contact into the second water, got {:?}",
             mol.hydrogen_bonds
         );
+    }
+
+    /// A dummy is a position, not an atom, and everything that counts atoms
+    /// has to agree about that.
+    #[test]
+    fn dummies_are_recognised_however_they_are_written() {
+        for spelling in ["X", "x", "Xx", "xx", " X "] {
+            assert!(is_dummy(spelling), "{spelling:?} names a dummy");
+        }
+        for element in ["C", "H", "Xe", "Zn", "N"] {
+            assert!(!is_dummy(element), "{element} is an element");
+        }
+        // Xe starts with an X and is a real element; getting this wrong would
+        // silently drop xenon from every calculation.
+        assert!(!is_dummy("Xe"));
+    }
+
+    /// Stripping keeps the atoms and their positions in step. A filter that
+    /// dropped a symbol but kept its coordinates would shift every atom after
+    /// it onto the wrong place -- a structure that still looks like a
+    /// structure.
+    #[test]
+    fn stripping_dummies_keeps_atoms_and_positions_together() {
+        let atoms = syms(&["Fe", "X", "C", "X", "O"]);
+        let positions = vec![
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(1.0, 0.0, 0.0),
+            Vec3::new(2.0, 0.0, 0.0),
+            Vec3::new(3.0, 0.0, 0.0),
+            Vec3::new(4.0, 0.0, 0.0),
+        ];
+        let (kept_atoms, kept_positions) = without_dummies(&atoms, &positions);
+        assert_eq!(kept_atoms, syms(&["Fe", "C", "O"]));
+        assert_eq!(
+            kept_positions,
+            vec![
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(2.0, 0.0, 0.0),
+                Vec3::new(4.0, 0.0, 0.0),
+            ]
+        );
+        assert_eq!(dummy_count(&atoms), 2);
+        assert_eq!(dummy_count(&kept_atoms), 0);
     }
 }

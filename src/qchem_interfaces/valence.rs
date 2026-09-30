@@ -63,9 +63,22 @@ pub fn validate_electronic_state(
             "There is no structure to optimize.".to_string(),
         ));
     }
+    // A structure that is only dummies is not a structure. Said separately,
+    // because "there is nothing to calculate" is a different problem from an
+    // empty screen and the user has different work to do about it.
+    if mol.atoms.iter().all(|symbol| crate::molecule::is_dummy(symbol)) {
+        return Err(ElectronicStateError(
+            "This structure is only dummy atoms; there is nothing to calculate.".to_string(),
+        ));
+    }
 
     let mut electrons: i64 = 0;
     for symbol in &mol.atoms {
+        // A dummy is a position, not an atom: no nucleus, no electrons, and
+        // it is stripped from the input before any program sees it.
+        if crate::molecule::is_dummy(symbol) {
+            continue;
+        }
         let Some(z) = atomic_number(symbol) else {
             return Err(ElectronicStateError(format!(
                 "xTB cannot use the non-element atom label {symbol:?}."
@@ -264,9 +277,29 @@ mod tests {
 
     #[test]
     fn unknown_element_is_rejected() {
-        let m = mol(&["Xx"], &[]);
+        // Not "Xx": that now names a dummy, which is skipped on purpose.
+        let m = mol(&["Zq"], &[]);
         let err = validate_electronic_state(&m, 0, 1).unwrap_err();
-        assert!(err.0.contains("Xx"));
+        assert!(err.0.contains("Zq"), "{}", err.0);
+    }
+
+    /// A dummy contributes no electrons and is stripped before any program
+    /// sees it, so it must not be counted and must not be rejected. Counting
+    /// it would throw off the parity check and refuse a perfectly ordinary
+    /// spin state.
+    #[test]
+    fn a_dummy_is_not_counted_and_not_rejected() {
+        // Water, plus a dummy marking somewhere the user is building.
+        let with_dummy = mol(&["O", "H", "H", "X"], &[(0, 1), (0, 2)]);
+        let without = mol(&["O", "H", "H"], &[(0, 1), (0, 2)]);
+        let (a, _) = validate_electronic_state(&with_dummy, 0, 1).expect("a dummy is allowed");
+        let (b, _) = validate_electronic_state(&without, 0, 1).expect("plain water is allowed");
+        assert_eq!(a, b, "the dummy changed the electron count");
+
+        // And a structure that is nothing but dummies has nothing to run.
+        let only = mol(&["X", "X"], &[]);
+        let err = validate_electronic_state(&only, 0, 1).unwrap_err();
+        assert!(err.0.contains("dummy"), "{}", err.0);
     }
 
     /// The exact regression case from the design spec: hydrogen peroxide is

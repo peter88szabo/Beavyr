@@ -1175,9 +1175,16 @@ pub fn python_environment_row(
     ready
 }
 
+/// The structure as an XYZ file, for a program to read.
+///
+/// Dummies are left out, and the count in the header counts what is written.
+/// A dummy is a position the user put there to build against, not an atom;
+/// every program this feeds would stop on the unknown element, after the
+/// queue rather than before it.
 pub fn write_xyz_string(atoms: &[String], pos: &[Vec3]) -> String {
+    let (atoms, pos) = crate::molecule::without_dummies(atoms, pos);
     let mut out = format!("{}\n\n", atoms.len());
-    for (symbol, p) in atoms.iter().zip(pos) {
+    for (symbol, p) in atoms.iter().zip(&pos) {
         out.push_str(&format!(
             "{symbol:<3} {:>15.8} {:>15.8} {:>15.8}\n",
             p.x, p.y, p.z
@@ -2102,5 +2109,35 @@ H 0.0 0.0 0.74
         assert_eq!(frames[0].atoms.len(), 4);
 
         let _ = fs::remove_dir_all(&workdir);
+    }
+
+    /// A dummy must never reach a program, and the count in the header must
+    /// count what was actually written.
+    ///
+    /// Every backend here stops on an unknown element, and it stops after the
+    /// job has been queued and started -- so this is the difference between
+    /// seeing the mistake now and seeing it in an hour.
+    #[test]
+    fn write_xyz_string_leaves_out_the_dummies() {
+        let atoms: Vec<String> = ["Fe", "X", "C", "X"].iter().map(|s| s.to_string()).collect();
+        let pos = vec![
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(0.0, 0.0, 1.65),
+            Vec3::new(1.2, 0.0, 1.65),
+            Vec3::new(0.0, 0.0, -1.65),
+        ];
+        let xyz = write_xyz_string(&atoms, &pos);
+        let mut lines = xyz.lines();
+
+        let count: usize = lines.next().unwrap().trim().parse().unwrap();
+        assert_eq!(count, 2, "the header counts what is written, not what was passed");
+        let _comment = lines.next();
+        let written: Vec<&str> = lines.filter(|l| !l.trim().is_empty()).collect();
+        assert_eq!(written.len(), 2);
+        assert!(written[0].starts_with("Fe"), "{:?}", written[0]);
+        assert!(written[1].starts_with("C"), "{:?}", written[1]);
+
+        // And the kept atoms keep their own coordinates, not a neighbour's.
+        assert!(written[1].contains("1.2"), "carbon moved: {:?}", written[1]);
     }
 }
