@@ -622,7 +622,7 @@ impl Default for ZMatrixBuilderState {
     fn default() -> Self {
         Self {
             zmat: Vec::new(),
-            fragment_tiles: false,
+            fragment_tiles: true,
             confirm_clear: false,
             skip_next_sync: false,
             history: super::history::BuilderHistory::default(),
@@ -2610,7 +2610,7 @@ pub fn builder_ui_contents(
             {
                 let previous_atom_count = mol.atoms.len();
                 let mut hydrogens_changed = false;
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     hydrogens_changed = super::hydrogens::buttons(
                         ui,
                         &mut zmat_state.hydrogen_state,
@@ -2661,7 +2661,7 @@ pub fn builder_ui_contents(
                 // far the tallest thing the builder draws, and most editing
                 // sessions never open it, so it does not belong in the panel.
                 // It is the same table, with the same editing, moved.
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     if ui
                         .button("Open Z-matrix")
                         .on_hover_text("Edit the internal coordinates in a separate window.")
@@ -2705,7 +2705,7 @@ pub fn builder_ui_contents(
                 // the element row would still run and overwrite it.
                 let inserting_atom = zmat_state.frag_name.starts_with("Atom: ");
 
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     ui.label("What");
                     if zmat_state.fragment_tiles {
                         // The tiles below are the chooser; this only reports
@@ -2714,7 +2714,7 @@ pub fn builder_ui_contents(
                         ui.label(egui::RichText::new(zmat_state.frag_name.clone()).strong());
                     } else {
                     egui::ComboBox::from_id_salt("frag_combo")
-                        .width(150.0)
+                        .width(128.0)
                         .selected_text(zmat_state.frag_name.clone())
                         .show_ui(ui, |ui| {
                             // Choosing this opens the element form. The name
@@ -2783,7 +2783,7 @@ pub fn builder_ui_contents(
                         // that has no tile of its own gets inserted.
                         if ui
                             .add_sized(
-                                [96.0, 26.0],
+                                [78.0, 24.0],
                                 egui::Button::new(SINGLE_ATOM_ENTRY).selected(inserting_atom),
                             )
                             .clicked()
@@ -2799,7 +2799,7 @@ pub fn builder_ui_contents(
                             let selected = zmat_state.frag_name == frag.name;
                             if ui
                                 .add_sized(
-                                    [96.0, 26.0],
+                                    [78.0, 24.0],
                                     egui::Button::new(frag.name).selected(selected),
                                 )
                                 .clicked()
@@ -2819,7 +2819,7 @@ pub fn builder_ui_contents(
                 // Recomputed, because the dropdown or a tile above may have
                 // just changed the answer.
                 if zmat_state.frag_name.starts_with("Atom: ") {
-                    ui.horizontal(|ui| {
+                    ui.horizontal_wrapped(|ui| {
                         ui.label("Element");
                         egui::ComboBox::from_id_salt("atom_element")
                             .width(56.0)
@@ -2848,7 +2848,7 @@ pub fn builder_ui_contents(
                         format!("Atom: {}", zmat_state.new_symbol.trim());
                 }
 
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     ui.label("Angle (deg)");
                     ui.add(egui::DragValue::new(&mut zmat_state.frag_angle_deg).speed(0.1));
                     ui.add_space(12.0);
@@ -2857,7 +2857,7 @@ pub fn builder_ui_contents(
                 });
 
                 ui.add_space(4.0);
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     if zmat_state.zmat.is_empty() {
                         // Nothing exists to attach to, so there is no selection
                         // to make: the first thing is dropped in where it
@@ -3033,7 +3033,7 @@ pub fn builder_ui_contents(
                 // after -- which is what made six separate Undos untrustworthy.
                 ui.add_space(6.0);
                 ui.separator();
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     let undo_name = zmat_state.history.next_undo().map(str::to_string);
                     let redo_name = zmat_state.history.next_redo().map(str::to_string);
                     if ui

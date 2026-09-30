@@ -2181,11 +2181,11 @@ pub fn ui_panel(
         // and reserving most of the screen for it wasted the space. `default_*`
         // only apply the first time -- egui remembers wherever the user drags
         // it afterwards, hence the id change to let this default take once.
-        const EDITOR_WIDTH: f32 = 440.0;
+        const EDITOR_WIDTH: f32 = 360.0;
         const EDITOR_MARGIN: f32 = 16.0;
         let viewport = ctx.viewport_rect();
         let builder_window = egui::Window::new("Molecule Editor")
-            .id(egui::Id::new("molecule_editor_window_v2"))
+            .id(egui::Id::new("molecule_editor_window_v3"))
             .open(&mut builder_open)
             .resizable(true)
             .default_width(EDITOR_WIDTH)
