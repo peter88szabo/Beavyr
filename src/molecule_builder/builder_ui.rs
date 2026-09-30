@@ -438,12 +438,31 @@ pub struct EditorRotateState {
     pub status: Option<String>,          // selection or topology feedback
     pub angle_deg: f32,                  // degrees
     pub axis_len_target: f32,            // Å, absolute axis length target
-    pub axis_pair: Option<(usize, usize)>,
     pub bend_angle_deg: f32, // degrees
-    pub bend_ref: Option<(usize, usize, usize)>,
-    pub last_rotate_snapshot: Option<Vec<Vec3>>, // undo buffer
-    pub last_translate_snapshot: Option<Vec<Vec3>>, // undo buffer
-    pub last_bend_snapshot: Option<Vec<Vec3>>,   // undo buffer
+    /// The geometry as it stood before the current, uncommitted edit.
+    ///
+    /// The three operations are previewed live by recomputing from this every
+    /// time a number changes, so what is on screen is always `base` plus the
+    /// three values -- never the result of applying one of them twice. Cancel
+    /// restores it exactly, which is why there is nothing to undo mid-edit.
+    pub base_pos: Option<Vec<Vec3>>,
+    /// Which axis, side and third atom `base_pos` was taken for. A new pick
+    /// means a new base, and the three numbers start again from the geometry.
+    pub base_ref: Option<(usize, usize, usize, RotateSide)>,
+    /// The three values the preview currently on screen was built from, so a
+    /// frame that changed nothing does not rewrite the structure.
+    pub preview_values: Option<(f32, f32, f32)>,
+    /// The axis length and the bend angle the base geometry had. The two
+    /// sliders are absolute targets, so "unchanged" has to be measured
+    /// against the base rather than against zero.
+    pub base_axis_len: f32,
+    pub base_bend_deg: f32,
+    /// One undo buffer, taken at Apply. There were three -- one per operation
+    /// -- and with three of them pressing Undo did not reliably reverse what
+    /// was last done.
+    pub last_apply_snapshot: Option<Vec<Vec3>>,
+    pub window_open: bool,
+    pub thresholds_window_open: bool,
     pub bond_th_hx: f32,                         // Å
     pub bond_th_xx: f32,                         // Å
 }
@@ -1336,12 +1355,15 @@ impl EditorRotateState {
             status: None,
             angle_deg: 0.0,
             axis_len_target: 0.0,
-            axis_pair: None,
             bend_angle_deg: 0.0,
-            bend_ref: None,
-            last_rotate_snapshot: None,
-            last_translate_snapshot: None,
-            last_bend_snapshot: None,
+            base_pos: None,
+            base_ref: None,
+            preview_values: None,
+            base_axis_len: 0.0,
+            base_bend_deg: 0.0,
+            last_apply_snapshot: None,
+            window_open: false,
+            thresholds_window_open: false,
             bond_th_hx: 1.4,
             bond_th_xx: 1.8,
         };
@@ -3264,245 +3286,317 @@ pub fn builder_ui_contents(
             ui.add_space(8.0);
             ui.separator();
             ui.add_space(8.0);
-            ui.collapsing("Fragment Editor", |ui| {
-                ui.horizontal(|ui| {
-                    if ui
-                        .button(if state.active {
-                            "Deactivate"
-                        } else {
-                            "Activate"
-                        })
-                        .clicked()
-                    {
-                        state.active = !state.active;
-                        if !state.active {
-                            state.picks.clear();
-                            state.chosen_side = None;
-                            state.status = None;
-                        }
-                    }
-                    if ui.button("Reset").clicked() {
-                        state.reset();
-                    }
+            // The fragment editor and the bond thresholds each get a window.
+            // Both were stacked into the panel, and the editor alone was three
+            // sections, three action buttons and three Undos tall.
+            ui.horizontal(|ui| {
+                if ui
+                    .button("Fragment editor\u{2026}")
+                    .on_hover_text("Rotate, stretch or bend part of the structure about a bond.")
+                    .clicked()
+                {
+                    state.window_open = !state.window_open;
+                }
+                if ui.button("Bond thresholds\u{2026}").clicked() {
+                    state.thresholds_window_open = !state.thresholds_window_open;
+                }
+            });
+
+            let mut thresholds_open = state.thresholds_window_open;
+            egui::Window::new("Bond thresholds")
+                .open(&mut thresholds_open)
+                .resizable(false)
+                .show(&ctx, |ui| {
+                    ui.add(
+                        egui::Slider::new(&mut state.bond_th_hx, 0.6..=2.0).text("H\u{2013}X (\u{c5})"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut state.bond_th_xx, 1.0..=3.0).text("X\u{2013}X (\u{c5})"),
+                    );
                 });
+            state.thresholds_window_open = thresholds_open;
 
-                ui.separator();
-                ui.label("Bond-axis Fragment Rotation");
-                ui.monospace(format!("Picks: {:?}", state.picks));
+            fragment_editor_window(&ctx, state, mol, settings);
+    replaced
+}
 
-                if state.picks.len() < 2 {
-                    ui.weak("Pick two atoms in 3D to define the bond axis (A then B).");
-                } else if state.picks.len() == 2 {
-                    ui.weak("Pick a third atom on the side you want to rotate.");
-                } else {
-                    match state.chosen_side {
-                        Some(RotateSide::A) => {
-                            ui.colored_label(egui::Color32::LIGHT_GREEN, "Chosen side: A")
-                        }
-                        Some(RotateSide::B) => {
-                            ui.colored_label(egui::Color32::LIGHT_GREEN, "Chosen side: B")
-                        }
-                        None => ui.weak("Chosen side: —"),
-                    };
-                }
 
-                if let Some(status) = &state.status {
-                    ui.colored_label(egui::Color32::LIGHT_RED, status);
-                }
+/// The side of the bond named by an atom the user actually picked, rather than
+/// by the enum's own letter. "the atom 7 side" is something they chose; "A" is
+/// an implementation detail leaking onto the screen.
+fn side_name(side: RotateSide, a: usize, b: usize) -> String {
+    let atom = if side == RotateSide::A { a } else { b };
+    format!("the atom {} side", atom + 1)
+}
 
-                ui.add_space(6.0);
-                ui.add(egui::Slider::new(&mut state.angle_deg, -180.0..=180.0).text("Angle (°)"));
-                ui.horizontal(|ui| {
-                    if ui.button("Rotate").clicked() && state.picks.len() >= 3 {
-                        let a = state.picks[0];
-                        let b = state.picks[1];
-                        if let Some(side) = state.chosen_side {
-                            if let Some(new_pos) = rotate_side_with_bonds(
-                                &mol.pos,
-                                &mol.bonds,
-                                a,
-                                b,
-                                side,
-                                state.angle_deg,
-                            ) {
-                                state.last_rotate_snapshot = Some(mol.pos.clone());
-                                mol.pos = new_pos;
-                                settings.coords_dirty = true;
-                                state.status = None;
-                            } else {
-                                state.status = Some(
-                                    "The selected bond no longer separates two fragments."
-                                        .to_string(),
-                                );
-                            }
-                        }
-                    }
-                    if ui.button("Undo").clicked() {
-                        if let Some(snapshot) = &state.last_rotate_snapshot {
-                            mol.pos = snapshot.clone();
-                            settings.coords_dirty = true;
-                        }
-                    }
-                });
+/// The angle atom `p` currently makes with the axis, which is where the bend
+/// slider has to start: it is an absolute target, so starting it anywhere else
+/// would bend the structure the instant the window opened.
+fn current_bend_deg(pos: &[Vec3], a: usize, b: usize, p: usize, side: RotateSide) -> f32 {
+    let center = if side == RotateSide::A { a } else { b };
+    let axis_vec = pos[b] - pos[a];
+    let axis_len = axis_vec.length();
+    let v = pos[p] - pos[center];
+    if axis_len > 1.0e-6 && v.length() > 1.0e-6 {
+        (axis_vec / axis_len)
+            .dot(v.normalize())
+            .clamp(-1.0, 1.0)
+            .acos()
+            .to_degrees()
+    } else {
+        0.0
+    }
+}
 
-                ui.add_space(6.0);
-                ui.separator();
-                ui.add_space(6.0);
-                ui.label("Translate along axis");
+/// Put the structure back as it stood before the uncommitted edit.
+fn revert_preview(state: &mut EditorRotateState, mol: &mut Molecule, settings: &mut MolSettings) {
+    if let Some(base) = state.base_pos.take() {
+        mol.pos = base;
+        settings.coords_dirty = true;
+    }
+    state.base_ref = None;
+    state.preview_values = None;
+    state.angle_deg = 0.0;
+}
 
-                let axis_len = if state.picks.len() >= 2 {
-                    let a = state.picks[0];
-                    let b = state.picks[1];
-                    mol.pos[a].distance(mol.pos[b])
-                } else {
-                    0.0
-                };
-                if state.picks.len() >= 2 {
-                    let pair = (state.picks[0], state.picks[1]);
-                    if state.axis_pair != Some(pair) {
-                        state.axis_pair = Some(pair);
-                        state.axis_len_target = axis_len;
-                    }
-                } else {
-                    state.axis_pair = None;
-                    state.axis_len_target = 0.0;
-                }
+/// Rebuild the on-screen geometry from the base and the three numbers.
+///
+/// Always from the base, never from what is on screen. Applying a rotation to
+/// an already-rotated structure would turn a slider into a ratchet: drag it to
+/// 30 degrees and back to zero and you would be 30 degrees from where you
+/// started.
+fn recompute_preview(
+    state: &mut EditorRotateState,
+    mol: &mut Molecule,
+    settings: &mut MolSettings,
+) {
+    let Some(base) = state.base_pos.clone() else {
+        return;
+    };
+    if state.picks.len() < 3 {
+        return;
+    }
+    let Some(side) = state.chosen_side else {
+        return;
+    };
+    let (a, b, p) = (state.picks[0], state.picks[1], state.picks[2]);
+    let values = (state.angle_deg, state.axis_len_target, state.bend_angle_deg);
+    if state.preview_values == Some(values) {
+        // Nothing moved this frame. Rewriting the structure anyway would mark
+        // the geometry dirty every frame the window is open.
+        return;
+    }
+    state.preview_values = Some(values);
 
-                let max_len = (axis_len * 2.0).max(0.5);
-                ui.add_enabled(
-                    state.picks.len() >= 2,
-                    egui::Slider::new(&mut state.axis_len_target, 0.0..=max_len)
-                        .text("Axis length (Å)"),
-                );
-                ui.horizontal(|ui| {
-                    if ui.button("Set Distance").clicked() && state.picks.len() >= 3 {
-                        let a = state.picks[0];
-                        let b = state.picks[1];
-                        let selected_atom = state.picks[2];
-                        let delta = state.axis_len_target - mol.pos[a].distance(mol.pos[b]);
-                        if delta.abs() > 1.0e-6 {
-                            if let Some(new_pos) = translate_fragment_containing_atom(
-                                &mol.pos,
-                                &mol.bonds,
-                                a,
-                                b,
-                                selected_atom,
-                                delta,
-                            ) {
-                                state.last_translate_snapshot = Some(mol.pos.clone());
-                                mol.pos = new_pos;
-                                settings.coords_dirty = true;
-                                state.status = None;
-                            } else {
-                                state.status = Some(
-                                    "The third-picked atom is not on a movable bond fragment."
-                                        .to_string(),
-                                );
-                            }
-                        }
-                    }
-                    if ui.button("Undo").clicked() {
-                        if let Some(snapshot) = &state.last_translate_snapshot {
-                            mol.pos = snapshot.clone();
-                            settings.coords_dirty = true;
-                        }
-                    }
-                });
+    let mut coords = base;
+    let mut failed: Option<&'static str> = None;
 
-                ui.add_space(6.0);
-                ui.separator();
-                ui.add_space(6.0);
-                ui.label("Bend relative to axis");
+    if state.angle_deg.abs() > 1.0e-6 {
+        match rotate_side_with_bonds(&coords, &mol.bonds, a, b, side, state.angle_deg) {
+            Some(next) => coords = next,
+            None => failed = Some("The selected bond no longer separates two fragments."),
+        }
+    }
+    if failed.is_none() && (state.axis_len_target - state.base_axis_len).abs() > 1.0e-6 {
+        let delta = state.axis_len_target - coords[a].distance(coords[b]);
+        if delta.abs() > 1.0e-6 {
+            match translate_fragment_containing_atom(&coords, &mol.bonds, a, b, p, delta) {
+                Some(next) => coords = next,
+                None => failed = Some("The third-picked atom is not on a movable bond fragment."),
+            }
+        }
+    }
+    if failed.is_none() && (state.bend_angle_deg - state.base_bend_deg).abs() > 1.0e-6 {
+        match bend_side_with_bonds(&coords, &mol.bonds, a, b, side, p, state.bend_angle_deg) {
+            Some(next) => coords = next,
+            None => failed = Some("The selected bond no longer separates two fragments."),
+        }
+    }
 
-                let bend_ready = state.picks.len() >= 3 && state.chosen_side.is_some();
-                if bend_ready {
-                    let a = state.picks[0];
-                    let b = state.picks[1];
-                    let p = state.picks[2];
-                    let ref_key = (a, b, p);
-                    if state.bend_ref != Some(ref_key) {
-                        if let Some(side) = state.chosen_side {
-                            let center = if side == RotateSide::A { a } else { b };
-                            let axis_vec = mol.pos[b] - mol.pos[a];
-                            let axis_len = axis_vec.length();
-                            let v = mol.pos[p] - mol.pos[center];
-                            if axis_len > 1.0e-6 && v.length() > 1.0e-6 {
-                                state.bend_angle_deg = (axis_vec / axis_len)
-                                    .dot(v.normalize())
-                                    .clamp(-1.0, 1.0)
-                                    .acos()
-                                    .to_degrees();
-                            } else {
-                                state.bend_angle_deg = 0.0;
-                            }
-                            state.bend_ref = Some(ref_key);
-                        }
-                    }
-                } else {
-                    state.bend_ref = None;
-                    state.bend_angle_deg = 0.0;
-                }
+    match failed {
+        Some(message) => state.status = Some(message.to_string()),
+        None => {
+            state.status = None;
+            mol.pos = coords;
+            settings.coords_dirty = true;
+        }
+    }
+}
 
-                ui.add_enabled(
-                    bend_ready,
-                    egui::Slider::new(&mut state.bend_angle_deg, 0.0..=180.0)
-                        .text("Axis angle (°)"),
-                );
-                ui.horizontal(|ui| {
-                    if ui.button("Set Angle").clicked() && state.picks.len() >= 3 {
-                        let a = state.picks[0];
-                        let b = state.picks[1];
-                        let p = state.picks[2];
-                        if let Some(side) = state.chosen_side {
-                            if let Some(new_pos) = bend_side_with_bonds(
-                                &mol.pos,
-                                &mol.bonds,
-                                a,
-                                b,
-                                side,
-                                p,
-                                state.bend_angle_deg,
-                            ) {
-                                state.last_bend_snapshot = Some(mol.pos.clone());
-                                mol.pos = new_pos;
-                                settings.coords_dirty = true;
-                                state.status = None;
-                            } else {
-                                state.status = Some(
-                                    "The selected bond no longer separates two fragments."
-                                        .to_string(),
-                                );
-                            }
-                        }
-                    }
-                    if ui.button("Undo").clicked() {
-                        if let Some(snapshot) = &state.last_bend_snapshot {
-                            mol.pos = snapshot.clone();
-                            settings.coords_dirty = true;
-                        }
-                    }
-                    if ui.button("Cancel").clicked() {
+/// The fragment editor, in one window and one form.
+///
+/// It was three stacked sections, each with its own action button and its own
+/// Undo. Rotating, stretching and bending about a bond are three numbers for
+/// the same choice of axis and side, so they are three sliders now: the
+/// structure follows as they move, nothing is committed until Apply, and
+/// Cancel restores exactly. One Undo, taken at Apply, because three of them
+/// were why pressing Undo did not reverse what was last done.
+fn fragment_editor_window(
+    ctx: &egui::Context,
+    state: &mut EditorRotateState,
+    mol: &mut Molecule,
+    settings: &mut MolSettings,
+) {
+    // A pick can outlive the atom it named -- a removal renumbers everything --
+    // so every index is checked before it indexes.
+    let in_range = state.picks.len() >= 3 && state.picks.iter().all(|&i| i < mol.pos.len());
+    let ready = in_range && state.chosen_side.is_some();
+
+    if ready {
+        let key = (
+            state.picks[0],
+            state.picks[1],
+            state.picks[2],
+            state.chosen_side.expect("checked by `ready`"),
+        );
+        if state.base_ref != Some(key) {
+            // A different axis or side. Whatever was being previewed for the
+            // old one is abandoned, not committed, and the three numbers start
+            // again from the geometry as it now stands.
+            if let Some(base) = state.base_pos.take() {
+                mol.pos = base;
+                settings.coords_dirty = true;
+            }
+            let (a, b, p) = (key.0, key.1, key.2);
+            state.base_pos = Some(mol.pos.clone());
+            state.base_ref = Some(key);
+            state.preview_values = None;
+            state.angle_deg = 0.0;
+            state.base_axis_len = mol.pos[a].distance(mol.pos[b]);
+            state.axis_len_target = state.base_axis_len;
+            state.base_bend_deg = current_bend_deg(&mol.pos, a, b, p, key.3);
+            state.bend_angle_deg = state.base_bend_deg;
+        }
+    } else if state.base_pos.is_some() {
+        revert_preview(state, mol, settings);
+    }
+
+    let mut open = state.window_open;
+    let mut apply = false;
+    let mut cancel = false;
+    let mut undo = false;
+    let mut reset = false;
+
+    egui::Window::new("Fragment Editor")
+        .open(&mut open)
+        .default_width(340.0)
+        .resizable(false)
+        .show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                if ui
+                    .button(if state.active { "Stop picking" } else { "Pick atoms" })
+                    .clicked()
+                {
+                    state.active = !state.active;
+                    if !state.active {
                         state.picks.clear();
                         state.chosen_side = None;
-                        state.status = None;
-                        state.angle_deg = 0.0;
-                        state.axis_len_target = 0.0;
-                        state.axis_pair = None;
-                        state.bend_angle_deg = 0.0;
-                        state.bend_ref = None;
-                        state.last_rotate_snapshot = None;
-                        state.last_translate_snapshot = None;
-                        state.last_bend_snapshot = None;
-                        state.active = false;
                     }
-                });
-
-                ui.collapsing("Bond thresholds (Å)", |ui| {
-                    ui.add(egui::Slider::new(&mut state.bond_th_hx, 0.6..=2.0).text("H–X (Å)"));
-                    ui.add(egui::Slider::new(&mut state.bond_th_xx, 1.0..=3.0).text("X–X (Å)"));
-                });
+                }
+                ui.weak("Click atoms in the 3D view.");
             });
-    replaced
+            ui.separator();
+
+            // What the picks have settled, and what is still wanted. Both on
+            // screen: a form that waits for a click without saying which one
+            // is a form that looks broken.
+            ui.monospace(match (state.picks.first(), state.picks.get(1)) {
+                (Some(a), Some(b)) => format!("Axis:   atom {} \u{2014} atom {}", a + 1, b + 1),
+                _ => "Axis:   not set".to_string(),
+            });
+            ui.monospace(
+                match (state.chosen_side, state.picks.first(), state.picks.get(1)) {
+                    (Some(side), Some(a), Some(b)) => {
+                        format!("Moving: {}", side_name(side, *a, *b))
+                    }
+                    _ => "Moving: not set".to_string(),
+                },
+            );
+            match state.picks.len() {
+                0 | 1 => ui.weak("Pick the two atoms of the bond axis."),
+                2 => ui.weak("Pick a third atom on the side you want to move."),
+                _ => ui.weak("The structure follows the sliders as you drag them."),
+            };
+            if let Some(status) = &state.status {
+                ui.colored_label(egui::Color32::LIGHT_RED, status);
+            }
+
+            ui.add_space(6.0);
+            let max_len = (state.base_axis_len * 2.0).max(0.5);
+            ui.add_enabled_ui(ready, |ui| {
+                ui.add(
+                    egui::Slider::new(&mut state.angle_deg, -180.0..=180.0)
+                        .text("Rotate about axis (\u{b0})"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut state.axis_len_target, 0.0..=max_len)
+                        .text("Axis length (\u{c5})"),
+                );
+                ui.add(
+                    egui::Slider::new(&mut state.bend_angle_deg, 0.0..=180.0)
+                        .text("Angle to axis (\u{b0})"),
+                );
+            });
+
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                apply = ui
+                    .add_enabled(ready, egui::Button::new("Apply"))
+                    .on_disabled_hover_text("Pick an axis and a side first.")
+                    .clicked();
+                cancel = ui
+                    .add_enabled(state.base_pos.is_some(), egui::Button::new("Cancel"))
+                    .on_disabled_hover_text("There is nothing in progress to cancel.")
+                    .clicked();
+                undo = ui
+                    .add_enabled(
+                        state.last_apply_snapshot.is_some(),
+                        egui::Button::new("Undo"),
+                    )
+                    .on_disabled_hover_text("Nothing has been applied yet.")
+                    .clicked();
+                reset = ui
+                    .button("Reset")
+                    .on_hover_text("Forget the picks and start again.")
+                    .clicked();
+            });
+            ui.weak("Nothing is written to the structure until Apply.");
+        });
+
+    if apply {
+        // What is on screen already *is* the result, so committing it is only
+        // a matter of stopping treating it as provisional. The base becomes
+        // the one undo buffer.
+        state.last_apply_snapshot = state.base_pos.take();
+        state.base_ref = None;
+        state.preview_values = None;
+        state.angle_deg = 0.0;
+        settings.geometry_dirty = true;
+        settings.bond_topology_dirty = true;
+    }
+    if cancel {
+        revert_preview(state, mol, settings);
+    }
+    if undo {
+        if let Some(snapshot) = state.last_apply_snapshot.take() {
+            mol.pos = snapshot;
+            settings.coords_dirty = true;
+            state.base_pos = None;
+            state.base_ref = None;
+            state.preview_values = None;
+        }
+    }
+
+    if reset {
+        revert_preview(state, mol, settings);
+        // reset() clears the window flag along with everything else; the
+        // window the button was pressed in should stay where it is.
+        state.reset();
+        state.window_open = open;
+    }
+
+    recompute_preview(state, mol, settings);
+    state.window_open = open;
 }
 
 /// The classic docked-left-panel presentation of the molecule editor.
@@ -6269,7 +6363,7 @@ mod cartesian_atom_deletion_tests {
         let mut editor = EditorRotateState {
             active: true,
             picks: vec![0],
-            last_rotate_snapshot: Some(mol.pos.clone()),
+            last_apply_snapshot: Some(mol.pos.clone()),
             ..Default::default()
         };
         assert!(delete_atom_cartesian(
@@ -6283,8 +6377,77 @@ mod cartesian_atom_deletion_tests {
         assert!(state.zmat.is_empty());
         assert!(state.selected_index.is_none() && state.last_frag_snapshot.is_none());
         assert!(!state.add_atom_active && state.add_atom_picks.is_empty());
-        assert!(!editor.active && editor.picks.is_empty() && editor.last_rotate_snapshot.is_none());
+        assert!(!editor.active && editor.picks.is_empty() && editor.last_apply_snapshot.is_none());
         assert_eq!(state.original_atoms.as_ref().unwrap(), &["C"]);
+    }
+
+    /// A slider is not a ratchet.
+    ///
+    /// Every preview is rebuilt from the base geometry, never from what is
+    /// already on screen. Without that, dragging the rotation to 30 degrees
+    /// and back to zero would leave the structure 30 degrees from where it
+    /// started, because each frame would rotate the previous frame's result
+    /// again -- and the live preview would quietly destroy the geometry.
+    #[test]
+    fn the_preview_returns_exactly_when_the_sliders_return() {
+        const ETHANE: &str = "\
+8
+ethane
+C  -0.7560   0.0000   0.0000
+C   0.7560   0.0000   0.0000
+H  -1.1404   0.6586   0.7845
+H  -1.1404   0.3501  -0.9626
+H  -1.1405  -1.0087   0.1781
+H   1.1404  -0.6586  -0.7845
+H   1.1404  -0.3501   0.9626
+H   1.1405   1.0087  -0.1781
+";
+        let mut mol = Molecule::from_xyz(ETHANE);
+        // The editor's own defaults. At 2.0/3.0 the hydrogens bond to each
+        // other, ethane becomes a cage, and the C-C bond separates nothing.
+        mol.recompute_bonds(1.4, 1.8);
+        let original = mol.pos.clone();
+        let mut settings = MolSettings::default();
+
+        let axis_len = mol.pos[0].distance(mol.pos[1]);
+        let mut state = EditorRotateState {
+            picks: vec![0, 1, 2],
+            chosen_side: Some(RotateSide::A),
+            base_pos: Some(mol.pos.clone()),
+            base_ref: Some((0, 1, 2, RotateSide::A)),
+            base_axis_len: axis_len,
+            axis_len_target: axis_len,
+            ..Default::default()
+        };
+        state.base_bend_deg = current_bend_deg(&mol.pos, 0, 1, 2, RotateSide::A);
+        state.bend_angle_deg = state.base_bend_deg;
+
+        // Drag the rotation out. Something must actually move, or the rest of
+        // the test would pass for the wrong reason.
+        state.angle_deg = 30.0;
+        recompute_preview(&mut state, &mut mol, &mut settings);
+        assert!(
+            state.status.is_none(),
+            "the rotation should succeed on ethane: {:?}",
+            state.status
+        );
+        assert!(
+            mol.pos
+                .iter()
+                .zip(&original)
+                .any(|(now, before)| now.distance(*before) > 1.0e-3),
+            "30 degrees about the C-C bond must move the hydrogens"
+        );
+
+        // And back.
+        state.angle_deg = 0.0;
+        recompute_preview(&mut state, &mut mol, &mut settings);
+        for (i, (now, before)) in mol.pos.iter().zip(&original).enumerate() {
+            assert!(
+                now.distance(*before) < 1.0e-5,
+                "atom {i} did not come back: {now:?} vs {before:?}"
+            );
+        }
     }
 
     #[test]
