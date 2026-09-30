@@ -2178,21 +2178,20 @@ pub fn ui_panel(
         // right edge and appearing on the left meant crossing the whole
         // window to reach it.
         //
-        // The window is never shorter than its contents.
+        // Opening the editor gives it a height that shows everything in it.
+        // After that the window is the user's: bigger, smaller, whatever they
+        // drag it to. Nothing here constrains it.
         //
-        // A *default* size cannot do this, and that was the mistake made
-        // three times here: a default applies on the first open, egui stores
-        // whatever size resulted, and the next row added to the panel makes
-        // that stored size too short again. The fit has to be re-asserted
-        // every frame, not chosen once.
+        // A default size cannot do the first part -- it applies once, egui
+        // stores the result, and the next row added to the panel leaves that
+        // stored size short. So the height is measured as the panel draws and
+        // applied as a minimum for exactly one frame, which grows the window
+        // to fit and is then dropped. From the second frame on there is no
+        // minimum at all, so dragging it smaller works and the scroll area
+        // inside takes over.
         //
-        // So the panel's height is measured as it is drawn and fed back as
-        // the window's minimum on the next frame -- one frame behind, which
-        // is invisible. The user can still make the window bigger, and
-        // dragging it smaller stops where the contents stop, which is the
-        // point. The cap is the screen: on a display too short for the panel
-        // the scroll area inside takes over rather than the window running
-        // off the bottom.
+        // The measurement resets when the window is closed, so every opening
+        // fits whatever the panel holds by then.
         const EDITOR_WIDTH: f32 = 360.0;
         const EDITOR_MARGIN: f32 = 16.0;
         let viewport = ctx.viewport_rect();
@@ -2201,20 +2200,41 @@ pub fn ui_panel(
         // measured content height does not include.
         const EDITOR_CHROME: f32 = 42.0;
         let content_key = egui::Id::new("molecule_editor_content_height");
-        let measured = ctx
-            .data(|d| d.get_temp::<f32>(content_key))
-            .unwrap_or(0.0);
-        let editor_min_height = (measured + EDITOR_CHROME).min(editor_max_height);
-        let builder_window = egui::Window::new("Molecule Editor")
-            .id(egui::Id::new("molecule_editor_window_v7"))
+        let fitted_key = egui::Id::new("molecule_editor_fitted");
+        let was_open_key = egui::Id::new("molecule_editor_was_open");
+
+        // A fresh opening starts the fit again.
+        if !ctx.data(|d| d.get_temp::<bool>(was_open_key)).unwrap_or(false) {
+            ctx.data_mut(|d| {
+                d.remove::<f32>(content_key);
+                d.remove::<bool>(fitted_key);
+            });
+        }
+
+        let measured = ctx.data(|d| d.get_temp::<f32>(content_key)).unwrap_or(0.0);
+        let already_fitted = ctx.data(|d| d.get_temp::<bool>(fitted_key)).unwrap_or(false);
+        // Applied on the one frame after the panel has been measured, then
+        // never again: this grows the window to fit and then gets out of the
+        // way, rather than becoming a floor the user cannot drag below.
+        let fit_now = !already_fitted && measured > 0.0;
+        if fit_now {
+            ctx.data_mut(|d| d.insert_temp(fitted_key, true));
+        }
+
+        let mut builder_window = egui::Window::new("Molecule Editor")
+            .id(egui::Id::new("molecule_editor_window_v8"))
             .open(&mut builder_open)
             .resizable(true)
             .default_width(EDITOR_WIDTH)
-            .min_height(editor_min_height)
             .default_pos([
                 (viewport.right() - EDITOR_WIDTH - EDITOR_MARGIN).max(viewport.left()),
                 viewport.top() + EDITOR_MARGIN,
-            ])
+            ]);
+        if fit_now {
+            builder_window =
+                builder_window.min_height((measured + EDITOR_CHROME).min(editor_max_height));
+        }
+        let builder_window = builder_window
             .show(&ctx, |ui| {
                 let inner = egui::ScrollArea::vertical()
                     .auto_shrink([false, true])
@@ -2238,6 +2258,10 @@ pub fn ui_panel(
                 ui.ctx()
                     .data_mut(|d| d.insert_temp(content_key, inner.content_size.y));
             });
+        // Remembered so that closing and reopening measures again. Reading
+        // `builder_open` after the window has drawn also catches the title
+        // bar's own close button.
+        ctx.data_mut(|d| d.insert_temp(was_open_key, builder_open));
         if let Some(window) = &builder_window {
             window_rects.push(window.response.rect);
         }
