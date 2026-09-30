@@ -2930,6 +2930,9 @@ pub fn builder_ui_contents(
             egui::Window::new("Z-matrix")
                 .open(&mut zmat_open)
                 .default_width(470.0)
+                .default_height(420.0)
+                // Both directions, and no minimum worth speaking of: how tall
+                // the table should be is the user's business, not this code's.
                 .resizable(true)
                 .show(&ctx, |ui| {
                     // Rebuilding the table from the structure belongs with the
@@ -2950,10 +2953,13 @@ pub fn builder_ui_contents(
                         let mut preview_indices: Option<Vec<usize>> = None;
                         let mut grid_rect: Option<egui::Rect> = None;
                         let col_idx = [20.0, 28.0, 28.0, 68.0, 28.0, 60.0, 28.0, 60.0];
-                        let row_height = 22.0;
-                        let max_height = row_height * 15.0;
+                        // No height cap. The 15-row limit here was from
+                        // when the table lived inside the panel and had to
+                        // leave room for everything below it. In a window of
+                        // its own there is nothing below it, and the cap only
+                        // stopped the window being dragged taller.
                         egui::ScrollArea::vertical()
-                            .max_height(max_height)
+                            .auto_shrink([false, false])
                             .show(ui, |ui| {
                                 let grid_resp = egui::Grid::new("zmat_rows")
                                     .striped(true)
