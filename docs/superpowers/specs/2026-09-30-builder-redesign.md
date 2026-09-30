@@ -1,7 +1,7 @@
 # Molecule builder and fragment editor redesign
 
 **Date:** 2026-09-30
-**Status:** approved in chat by Peter, implementing on branch `builder-redesign`
+**Status:** implemented on branch `builder-redesign`, awaiting Peter's test
 **Supersedes:** the stage-2 sketch in the withdrawn panel-usability spec
 
 ## Why
@@ -67,3 +67,30 @@ switch: reverting is `git checkout master`.
 The rules go in plain functions with tests away from the drawing code: which
 actions a selection supports, what the next-click line reads, and that undo
 followed by redo returns the structure unchanged for every step type.
+
+## What was built
+
+All six changes, one commit each so any of them can be bisected or reverted
+on its own:
+
+| Commit | Change |
+|---|---|
+| `dfb1900` | Z-matrix table into its own window, still fully editable |
+| `251c17f` | one Insert section; Add and Replace as two buttons |
+| `0cd632e` | fragment editor as one window, one form, live preview |
+| `1df470c` | one Undo and Redo over every action |
+| `72a4a36` | the line saying what the next click will do |
+
+Bond thresholds moved to their own window as part of the fragment editor
+commit; they used to be nested *inside* the fragment editor, which is not
+where anyone would look for them.
+
+Suite: 1195 passing, 0 failing, 22 ignored. The only warnings under
+`molecule_builder/` are `min_clearance` and `centroid_excluding`, both already
+unused before this work.
+
+### Capabilities kept
+
+Nothing was removed. "Add Atom (auto)" is what "Add to selection" does for a
+single atom; picking bond, angle and dihedral references by hand is still
+there as "Pick references..."; the Z-matrix edits exactly as before.
