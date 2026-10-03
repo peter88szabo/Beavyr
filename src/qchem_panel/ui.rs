@@ -22,7 +22,7 @@ use crate::qchem_interfaces::xtb_optimize::{
 
 #[path = "modern_ui.rs"]
 mod modern_ui;
-pub(crate) use modern_ui::{docked_width, is_docked};
+pub(crate) use modern_ui::{docked_width, input_editor_window, is_docked};
 
 /// Draws the panel and starts a run when the button is pressed.
 #[allow(clippy::too_many_arguments)]

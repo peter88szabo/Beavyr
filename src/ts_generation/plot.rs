@@ -75,12 +75,14 @@ pub fn window(ctx: &egui::Context, state: &mut TsGeneration) -> Option<egui::Rec
         return None;
     };
     egui::Window::new("Poor Man's NEB Energy")
+        .frame(crate::ui_style::window_frame(ctx))
         .id(egui::Id::new("poormans_neb_energy_window"))
         .open(&mut state.energy_plot_open)
         .resizable(true)
         .default_size([620.0, 400.0])
         .min_size([440.0, 300.0])
         .show(ctx, |ui| {
+            crate::ui_style::modern(ui);
             ui.label(&output.method);
             let Some(profile) = Profile::from_output(output) else {
                 ui.label("No finite NEB energy profile is available.");

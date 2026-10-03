@@ -12,6 +12,9 @@ use std::path::{Path, PathBuf};
 
 use crate::scene::LAYER_MAIN;
 
+#[path = "exporting/image_panel.rs"]
+pub(crate) mod ui;
+
 #[derive(Component)]
 pub(crate) struct ExportCamera;
 

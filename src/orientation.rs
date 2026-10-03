@@ -18,14 +18,6 @@ use ndarray::Array2;
 use crate::molecule::atomic_mass_amu;
 use crate::normalmode::linalg_shim::{Backend, LinAlg};
 
-/// Which item of the floating "Orientation" menu is expanded into its choices.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MenuItem {
-    Orient,
-    Mirror,
-    Flip,
-}
-
 /// A coordinate plane.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Plane {

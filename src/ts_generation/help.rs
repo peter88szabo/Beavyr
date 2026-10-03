@@ -96,12 +96,14 @@ pub fn window(ctx: &egui::Context, open: &mut bool) -> Option<egui::Rect> {
         return None;
     }
     egui::Window::new("TS Generation — How To Use")
+        .frame(crate::ui_style::window_frame(ctx))
         .id(egui::Id::new("ts_generation_how_to_use"))
         .open(open)
         .resizable(true)
         .default_size([680.0, 650.0])
         .min_size([420.0, 300.0])
         .show(ctx, |ui| {
+            crate::ui_style::modern(ui);
             egui::ScrollArea::vertical()
                 .id_salt("ts_help_scroll")
                 .show(ui, contents);

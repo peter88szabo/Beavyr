@@ -20,6 +20,7 @@ use crate::settings::MolSettings;
 use crate::trajectory::{self, TrajectoryState};
 
 use bevy_egui::egui;
+use crate::ui_style::ResponseExt;
 
 use super::config;
 use super::method::MethodConfig;
@@ -449,9 +450,30 @@ pub fn xtb_optimization_panel(
     // to optimize.
     animating: bool,
 ) {
+    ui.scope(|ui| {
+        crate::ui_style::modern(ui);
+        crate::ui_style::heading(
+            ui,
+            "Optimize a structure",
+            "Choose an energy model and relax the displayed geometry.",
+        );
+        optimization_panel_body(ui, panel_state, task, mol, animating);
+    });
+}
+
+fn optimization_panel_body(
+    ui: &mut egui::Ui,
+    panel_state: &mut XtbPanelState,
+    task: &mut XtbOptimizationTask,
+    mol: &Molecule,
+    // Whether a trajectory or mode animation is playing. While one is, the
+    // molecule on screen is a frame of it, not the structure the user means
+    // to optimize.
+    animating: bool,
+) {
     let running = task.is_running();
 
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         ui.label("Charge");
         if ui
             .add_enabled(
@@ -474,7 +496,7 @@ pub fn xtb_optimization_panel(
         }
         if ui
             .add_enabled(!running, egui::Button::new("Reset to defaults"))
-            .clicked()
+            .clicked_once()
         {
             panel_state.charge = 0;
             panel_state.multiplicity = 1;
@@ -482,7 +504,7 @@ pub fn xtb_optimization_panel(
         }
     });
 
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         ui.label("Program");
         let before = panel_state.program;
         egui::ComboBox::from_id_salt("opt_program")
@@ -520,7 +542,7 @@ pub fn xtb_optimization_panel(
             .weak(),
         );
     } else {
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             let program = panel_state.program;
             ui.label(format!("{} path", program.label()));
             let response = ui.add_enabled(
@@ -534,7 +556,7 @@ pub fn xtb_optimization_panel(
             }
             if ui
                 .add_enabled(!running, egui::Button::new("Browse…"))
-                .clicked()
+                .clicked_once()
             {
                 let mut dlg = rfd::FileDialog::new();
                 if let Some(dir) = std::path::Path::new(panel_state.path())
@@ -595,7 +617,7 @@ pub fn xtb_optimization_panel(
         }
     }
 
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         let can_optimize = !running
             && !mol.atoms.is_empty()
             && uhf.is_some()
@@ -613,7 +635,7 @@ pub fn xtb_optimization_panel(
             } else {
                 "Nothing to optimize with the current structure and electronic state."
             })
-            .clicked()
+            .clicked_once()
         {
             panel_state.show_warnings = true;
             let program = panel_state.program;
@@ -639,13 +661,13 @@ pub fn xtb_optimization_panel(
                 _ => {}
             }
         }
-        if running && ui.button("Cancel").clicked() {
+        if running && ui.button("Cancel").clicked_once() {
             task.cancel_now();
         }
     });
 
     if running {
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             let elapsed = task.elapsed().unwrap_or_default();
             ui.weak(format!("Running… {}", format_elapsed(elapsed)));
             let log = task
@@ -705,14 +727,14 @@ pub fn xtb_optimization_panel(
         .filter(|_| task.last_program == Some(QcProgram::Behemoth))
         .map(|log| OptimizationReport::from_log(log, task.last_duration));
 
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         if !task.last_energy_history.is_empty() {
             let label = if panel_state.energy_plot_open {
                 "Hide Energy Plot"
             } else {
                 "Show Energy Plot"
             };
-            if ui.button(label).clicked() {
+            if ui.button(label).clicked_once() {
                 panel_state.energy_plot_open = !panel_state.energy_plot_open;
             }
         }
@@ -722,7 +744,7 @@ pub fn xtb_optimization_panel(
             } else {
                 "Show Optimization Summary"
             };
-            if ui.button(label).clicked() {
+            if ui.button(label).clicked_once() {
                 panel_state.summary_open = !panel_state.summary_open;
             }
         }
@@ -796,12 +818,14 @@ pub(crate) fn optimization_summary_window(
         return;
     }
     egui::Window::new("Optimization Summary")
+        .frame(crate::ui_style::window_frame(ctx))
         .open(open)
         .resizable(true)
         .default_size([620.0, 420.0])
         .show(ctx, |ui| {
+            crate::ui_style::modern(ui);
             let summary = &report.summary;
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 if summary.converged {
                     ui.colored_label(egui::Color32::from_rgb(80, 180, 100), "\u{2714} Converged");
                 } else {
@@ -921,10 +945,12 @@ pub(crate) fn energy_history_window(
         return;
     }
     egui::Window::new("xTB Optimization Energy")
+        .frame(crate::ui_style::window_frame(ctx))
         .open(open)
         .resizable(true)
         .default_size([420.0, 300.0])
         .show(ctx, |ui| {
+            crate::ui_style::modern(ui);
             let status = if run_failed {
                 "This run did not converge; the plot shows the energy up to                  where it stopped."
             } else {

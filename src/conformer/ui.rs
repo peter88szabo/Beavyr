@@ -6,6 +6,8 @@
 //! search can find. What is left is how hard to look, and whether to re-rank the answers with
 //! xTB.
 
+use crate::ui_style::ResponseExt;
+
 use bevy::prelude::*;
 use bevy_egui::egui;
 
@@ -28,89 +30,112 @@ pub fn conformer_panel(
     traj: &mut TrajectoryState,
     settings: &MolSettings,
 ) -> bool {
+    ui.scope(|ui| {
+        crate::ui_style::modern(ui);
+        crate::ui_style::heading(
+            ui,
+            "Find stable conformers",
+            "Choose the energy model and how thoroughly to search.",
+        );
+        panel_body(ui, run, mol, traj, settings)
+    })
+    .inner
+}
+
+fn panel_body(
+    ui: &mut egui::Ui,
+    run: &mut ConformerRun,
+    mol: &mut Molecule,
+    traj: &mut TrajectoryState,
+    settings: &MolSettings,
+) -> bool {
     let mut loaded = false;
 
-    // --- Engine -------------------------------------------------------------------------------
-    ui.horizontal(|ui| {
-        ui.label("Energies");
-        egui::ComboBox::from_id_salt("conformer_engine")
-            .selected_text(run.settings.engine.label())
-            .show_ui(ui, |ui| {
-                for engine in SearchEngine::ALL {
-                    ui.selectable_value(&mut run.settings.engine, engine, engine.label());
-                }
-            });
-        ui.label(
-            egui::RichText::new(run.settings.engine.speed_note())
-                .small()
-                .weak(),
-        );
-    });
-
-    engine_path_rows(ui, run);
-    if run.settings.engine.needs_xtb() || run.settings.engine.needs_behemoth() {
+    crate::ui_style::group(ui, "Energy model", |ui| {
+        // --- Engine -------------------------------------------------------------------------------
         ui.horizontal(|ui| {
-            ui.label("Charge");
-            ui.add_enabled(
-                !run.is_running(),
-                egui::DragValue::new(&mut run.settings.charge).range(-10..=10),
-            );
-            ui.label("Multiplicity");
-            ui.add_enabled(
-                !run.is_running(),
-                egui::DragValue::new(&mut run.settings.multiplicity).range(1..=10),
-            );
+            ui.label("Engine");
+            egui::ComboBox::from_id_salt("conformer_engine")
+                .selected_text(run.settings.engine.label())
+                .show_ui(ui, |ui| {
+                    for engine in SearchEngine::ALL {
+                        ui.selectable_value(&mut run.settings.engine, engine, engine.label());
+                    }
+                });
         });
-    }
+        ui.small(run.settings.engine.speed_note());
 
-    ui.add_space(6.0);
-
-    // --- How hard to look ---------------------------------------------------------------------
-    ui.label(egui::RichText::new("Search effort").strong());
-    ui.horizontal(|ui| {
-        for level in [
-            Thoroughness::Quick,
-            Thoroughness::Normal,
-            Thoroughness::Thorough,
-        ] {
-            if ui
-                .selectable_label(run.settings.thoroughness == level, level.label())
-                .on_hover_text(level.description())
-                .clicked()
-            {
-                run.settings.thoroughness = level;
-            }
+        engine_path_rows(ui, run);
+        if run.settings.engine.needs_xtb() || run.settings.engine.needs_behemoth() {
+            ui.horizontal(|ui| {
+                ui.label("Charge");
+                ui.add_enabled(
+                    !run.is_running(),
+                    egui::DragValue::new(&mut run.settings.charge).range(-10..=10),
+                );
+                ui.label("Multiplicity");
+                ui.add_enabled(
+                    !run.is_running(),
+                    egui::DragValue::new(&mut run.settings.multiplicity).range(1..=10),
+                );
+            });
         }
     });
-    ui.add_space(4.0);
-    ui.checkbox(&mut run.settings.reproducible, "Repeatable")
-        .on_hover_text(
-            "Fixes the random seed, so running the search again on the same structure gives \
-             the same conformers.",
-        );
 
-    ui.add_space(4.0);
-    ui.horizontal(|ui| {
-        ui.label("Optimiser");
-        egui::ComboBox::from_id_salt("conformer_local_optimiser")
-            .selected_text(run.settings.local_optimizer.label())
-            .show_ui(ui, |ui| {
-                for method in LocalOptimizer::ALL {
-                    ui.selectable_value(
-                        &mut run.settings.local_optimizer,
-                        method,
-                        method.label(),
+    crate::ui_style::group(ui, "Search effort", |ui| {
+        // --- How hard to look ---------------------------------------------------------------------
+        let effort_width = (ui.available_width() - 16.0) / 3.0;
+        ui.horizontal(|ui| {
+            for level in [
+                Thoroughness::Quick,
+                Thoroughness::Normal,
+                Thoroughness::Thorough,
+            ] {
+                if ui
+                    .add_sized(
+                        [effort_width, 34.0],
+                        egui::Button::new(level.label())
+                            .selected(run.settings.thoroughness == level),
                     )
-                    .on_hover_text(method.description());
+                    .on_hover_text(level.description())
+                    .clicked_once()
+                {
+                    run.settings.thoroughness = level;
                 }
-            });
-    });
+            }
+        });
+        ui.add_space(4.0);
+        ui.checkbox(&mut run.settings.reproducible, "Repeatable")
+            .on_hover_text(
+                "Fixes the random seed, so running the search again on the same structure gives \
+             the same conformers.",
+            );
 
-    ui.add_space(4.0);
-    let cores = available_cores();
-    ui.horizontal(|ui| {
-        ui.label("Cores");
-        ui.add_enabled(
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            ui.label("Optimiser");
+            egui::ComboBox::from_id_salt("conformer_local_optimiser")
+                .selected_text(run.settings.local_optimizer.label())
+                .show_ui(ui, |ui| {
+                    for method in LocalOptimizer::ALL {
+                        ui.selectable_value(
+                            &mut run.settings.local_optimizer,
+                            method,
+                            method.label(),
+                        )
+                        .on_hover_text(method.description());
+                    }
+                });
+        });
+
+        ui.add_space(4.0);
+        let cores = available_cores().min(4);
+        if !run.is_running() {
+            run.settings.ncore = run.settings.ncore.clamp(1, cores);
+        }
+        ui.horizontal(|ui| {
+            ui.label("Cores");
+            ui.add_enabled(
             !run.is_running(),
             egui::DragValue::new(&mut run.settings.ncore)
                 .speed(1.0)
@@ -121,24 +146,21 @@ pub fn conformer_panel(
              so this scales almost linearly. It does not change the answer: with a fixed seed the \
              same conformers come back on any number of cores.",
         );
-        ui.label(egui::RichText::new(format!("of {cores} available")).weak().small());
-    });
+            ui.label(egui::RichText::new(format!("up to {cores}")).weak().small());
+        });
 
-    ui.add_space(4.0);
-    ui.horizontal(|ui| {
-        ui.label("Keep within");
-        ui.add(
-            egui::DragValue::new(&mut run.settings.energy_window_kcal)
-                .speed(0.5)
-                .range(1.0..=50.0)
-                .suffix(" kcal/mol"),
-        );
-        ui.label("of the best");
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            ui.label("Keep within");
+            ui.add(
+                egui::DragValue::new(&mut run.settings.energy_window_kcal)
+                    .speed(0.5)
+                    .range(1.0..=50.0)
+                    .suffix(" kcal/mol"),
+            );
+            ui.label("of the best");
+        });
     });
-
-    ui.add_space(8.0);
-    ui.separator();
-    ui.add_space(8.0);
 
     // --- Run ----------------------------------------------------------------------------------
     //
@@ -169,22 +191,28 @@ pub fn conformer_panel(
         .then(|| resolved_binary.clone())
         .flatten();
 
-    ui.horizontal(|ui| {
-        let have_engine = engine_binary.is_none() || resolved_binary.is_some();
-        let can_run = !run.is_running() && !mol.atoms.is_empty() && have_engine;
-        if ui
-            .add_enabled(can_run, egui::Button::new("Search for conformers"))
-            .clicked()
-        {
-            run.start(mol);
-        }
-        if run.is_running() {
+    let have_engine = engine_binary.is_none() || resolved_binary.is_some();
+    let can_run = !run.is_running() && !mol.atoms.is_empty() && have_engine;
+    if ui
+        .add_enabled(
+            can_run,
+            crate::ui_style::primary(
+                egui::RichText::new("Search for conformers").color(egui::Color32::WHITE),
+            )
+            .min_size([ui.available_width(), 36.0].into()),
+        )
+        .clicked_once()
+    {
+        run.start(mol);
+    }
+    if run.is_running() {
+        ui.horizontal(|ui| {
             ui.spinner();
             if let Some(elapsed) = run.elapsed() {
-                ui.label(format!("{:.1} s", elapsed.as_secs_f64()));
+                ui.label(format!("Searching · {:.1} s", elapsed.as_secs_f64()));
             }
-        }
-    });
+        });
+    }
 
     if mol.atoms.is_empty() {
         ui.label(
@@ -209,7 +237,9 @@ pub fn conformer_panel(
         ui.add_space(8.0);
         ui.separator();
         ui.add_space(8.0);
-        loaded |= results_section(ui, run, &outcome, mol, traj, settings);
+        loaded |= crate::ui_style::group(ui, "", |ui| {
+            results_section(ui, run, &outcome, mol, traj, settings)
+        });
     }
 
     loaded
@@ -244,7 +274,11 @@ fn results_section(
     ui.label(format!(
         "{} conformer{} from {freedom}, in {:.1} s on {} core{}.",
         outcome.conformers.len(),
-        if outcome.conformers.len() == 1 { "" } else { "s" },
+        if outcome.conformers.len() == 1 {
+            ""
+        } else {
+            "s"
+        },
         outcome.elapsed.as_secs_f64(),
         outcome.workers,
         if outcome.workers == 1 { "" } else { "s" }
@@ -305,7 +339,7 @@ fn results_section(
                 "Puts every conformer in the Trajectory tool, so they can be stepped through \
                  or played as an animation.",
             )
-            .clicked()
+            .clicked_once()
         {
             load_as_trajectory(outcome, mol, traj, settings);
             loaded = true;
@@ -313,7 +347,7 @@ fn results_section(
         if ui
             .button("Save as XYZ trajectory")
             .on_hover_text("One XYZ frame per conformer, ordered by energy.")
-            .clicked()
+            .clicked_once()
         {
             save_trajectory(outcome);
         }
@@ -325,6 +359,7 @@ fn results_section(
         .show(ui, |ui| {
             egui::Grid::new("conformer_table")
                 .num_columns(4)
+                .spacing([18.0, 8.0])
                 .striped(true)
                 .show(ui, |ui| {
                     ui.label(egui::RichText::new("#").strong());
@@ -343,7 +378,13 @@ fn results_section(
                         } else {
                             ui.label(egui::RichText::new("< 0.1 %").weak());
                         }
-                        if ui.selectable_label(showing, "Show").clicked() {
+                        if ui
+                            .add(
+                                egui::Button::new(if showing { "Viewing" } else { "View" })
+                                    .selected(showing),
+                            )
+                            .clicked_once()
+                        {
                             mol.set_pos(
                                 conformer
                                     .positions_angstrom
@@ -351,10 +392,7 @@ fn results_section(
                                     .map(|c| Vec3::new(c[0] as f32, c[1] as f32, c[2] as f32))
                                     .collect(),
                             );
-                            mol.recompute_bonds(
-                                settings.bond_thresh_scale,
-                                settings.hbond_cutoff,
-                            );
+                            mol.recompute_bonds(settings.bond_thresh_scale, settings.hbond_cutoff);
                             run.previewing = Some(index);
                             loaded = true;
                         }
@@ -375,7 +413,7 @@ fn results_section(
     ui.add_space(8.0);
     ui.separator();
     ui.add_space(6.0);
-    citation(ui);
+    ui.collapsing("References", |ui| citation(ui));
 
     loaded
 }
@@ -405,11 +443,15 @@ fn citation(ui: &mut egui::Ui) {
     );
     ui.add_space(2.0);
     ui.horizontal(|ui| {
-        ui.label(egui::RichText::new("doi:10.1021/acs.jcim.5b00243").small().weak());
+        ui.label(
+            egui::RichText::new("doi:10.1021/acs.jcim.5b00243")
+                .small()
+                .weak(),
+        );
         if ui
             .small_button("Copy")
             .on_hover_text("Copies the full reference to the clipboard.")
-            .clicked()
+            .clicked_once()
         {
             ui.ctx().copy_text(CITATION.to_string());
         }
@@ -451,7 +493,7 @@ fn program_path_row(ui: &mut egui::Ui, running: bool, program: QcProgram, path: 
         }
         if ui
             .add_enabled(!running, egui::Button::new("Browse…"))
-            .clicked()
+            .clicked_once()
         {
             let mut dialog = rfd::FileDialog::new();
             if let Some(directory) = std::path::Path::new(path.as_str())
@@ -571,8 +613,11 @@ fn trail_section(ui: &mut egui::Ui, run: &mut ConformerRun, mol: &Molecule) {
                     && !run.is_trailing()
                     && !run.is_running();
                 if ui
-                    .add_enabled(ready, egui::Button::new("Search transition-state conformers"))
-                    .clicked()
+                    .add_enabled(
+                        ready,
+                        egui::Button::new("Search transition-state conformers"),
+                    )
+                    .clicked_once()
                 {
                     if let Ok(binary) = &resolved {
                         run.start_trail(mol, binary.clone());
@@ -648,29 +693,20 @@ fn active_bond_editor(ui: &mut egui::Ui, run: &mut ConformerRun, mol: &Molecule)
         if sensible {
             let distance = (mol.pos[a - 1] - mol.pos[b - 1]).length();
             ui.label(
-                egui::RichText::new(format!(
-                    "{} - {} ({:.2} Å)",
-                    name(a),
-                    name(b),
-                    distance
-                ))
-                .small(),
+                egui::RichText::new(format!("{} - {} ({:.2} Å)", name(a), name(b), distance))
+                    .small(),
             );
         }
         if ui
             .add_enabled(sensible && !run.is_trailing(), egui::Button::new("Add"))
-            .clicked()
+            .clicked_once()
         {
             let bond = crate::conformer::afir::ActiveBond { a: a - 1, b: b - 1 };
             // Adding the same pair twice would double the force on it.
-            let already = run
-                .trail
-                .active
-                .iter()
-                .any(|existing| {
-                    (existing.a, existing.b) == (bond.a, bond.b)
-                        || (existing.a, existing.b) == (bond.b, bond.a)
-                });
+            let already = run.trail.active.iter().any(|existing| {
+                (existing.a, existing.b) == (bond.a, bond.b)
+                    || (existing.a, existing.b) == (bond.b, bond.a)
+            });
             if !already {
                 run.trail.active.push(bond);
             }
@@ -693,7 +729,7 @@ fn active_bond_editor(ui: &mut egui::Ui, run: &mut ConformerRun, mol: &Molecule)
                 egui::RichText::new(format!("{} - {}{distance}", name(bond.a), name(bond.b)))
                     .small(),
             );
-            if ui.small_button("Remove").clicked() {
+            if ui.small_button("Remove").clicked_once() {
                 remove = Some(index);
             }
         });
@@ -811,7 +847,7 @@ fn trail_results(ui: &mut egui::Ui, outcome: &crate::conformer::tstrail::TrailOu
     if ui
         .small_button("Copy")
         .on_hover_text("Copies the reference to the clipboard.")
-        .clicked()
+        .clicked_once()
     {
         ui.ctx()
             .copy_text(crate::conformer::tstrail::CITATION.to_string());
@@ -847,7 +883,7 @@ fn refinement_row(ui: &mut egui::Ui, run: &mut ConformerRun, outcome: &Conformer
                 !run.is_refining() && !outcome.refined_with_xtb,
                 egui::Button::new("All"),
             )
-            .clicked()
+            .clicked_once()
         {
             run.refine_top = available.max(1);
         }
@@ -866,7 +902,7 @@ fn refinement_row(ui: &mut egui::Ui, run: &mut ConformerRun, outcome: &Conformer
                  conformer energies are where a generic force field is weakest, so this is \
                  usually worth the wait.",
             )
-            .clicked()
+            .clicked_once()
         {
             if let Ok(binary) = &resolved {
                 run.start_refinement(binary.clone());

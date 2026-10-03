@@ -93,10 +93,18 @@ the Z-matrix, including when later rows referenced the deleted atom.
 Clearing, replacing, or editing the geometry also removes orbital/density
 surfaces that belong to the previous structure.
 
+The **Structure (XYZ)** panel keeps file actions in a compact toolbar and gives
+the remaining window space to coordinates. The atom count and formula share
+one line; hover over it for molecular weight and the file path. **View** contains
+atom labels, hydrogen bonds and centering. Editing keeps **Apply coordinates**,
+**Reset**, and **Clear** visible below the scrollable draft.
+
+![Compact Structure panel with a large coordinate area](Images/StructureModern.png)
+
 Right-click the background for the whole-molecule tools: recentre the view,
-toggle hydrogen bonds, and **Orient / Mirror / Flip** the structure into a
-chosen coordinate plane or about a chosen axis. Orient and Flip keep a chiral
-molecule as it was; Mirror deliberately gives you its enantiomer.
+choose **Representation**, toggle hydrogen bonds, or open **Orientation** for
+**Orient to plane**, **Mirror across plane**, and **Flip around axis**. Orient
+and Flip keep a chiral molecule as it was; Mirror gives you its enantiomer.
 
 ### Quantum Chemistry
 
@@ -108,13 +116,19 @@ you whether the executable or Python environment is available.
 
 Choose **Energy**, **Optimize**, **Frequencies**, or **Optimize + frequencies**;
 **More…** offers the other supported calculations. Search the program's method,
-functional and basis lists by name or keyword. Resources, additional options,
-and direct input editing expand when needed. The action and status stay at the
+functional and basis lists by name or keyword. Charge, multiplicity, CPU cores
+and memory stay visible above the scrolling settings. Additional options
+expand when needed; manual input opens in a separate editor. The action and status stay at the
 bottom while the settings scroll, and resources are limited to four cores.
 
 The **Classic** option restores the previous calculator form. Both layouts use
 the same code selection, settings, custom input and running calculation. For
 Classic from startup, launch with `BEAVYR_CLASSIC_QC=1`.
+
+**Edit input…** opens a large, resizable editor with **Save input…**, **Run input**,
+**Sync from settings**, and **Close editor**. Closing keeps the draft active.
+Sync replaces it with input generated from the current controls and molecule;
+**Use settings** returns to generated input while retaining the manual draft.
 
 ![Modern Quantum Chemistry calculator with a prominent code selector and fixed calculation action](Images/QuantumChemistryModern.png)
 
@@ -134,7 +148,8 @@ force field. Optimization runs in the background so the viewer stays responsive.
    launcher, and choose **Optimize**.
 2. Choose the code and method. For an external program, use **Configure…** and
    **Browse…** to select its executable. Check the structure's **Charge** and
-   **Multiplicity** before starting, and expand **Resources** to set the cores.
+   **Multiplicity** before starting, and set **CPU cores** and **Memory (MB)**
+   directly in the setup header.
 3. Click **Start optimization**. After completion, open **Trajectory** to inspect the
    optimization steps, or **Show Energy Plot** to see the energy history when
    available. Use **Save to history** in Molecule Editor to retain the result.
@@ -148,6 +163,9 @@ first. Loading another structure or pressing **Clear Display** preserves the
 structure you are leaving, including unsaved drawings and edits. The newly
 loaded standalone structure is saved too. Click **Load** beside an entry to
 put its coordinates back on screen.
+
+Search by name or formula. Each saved version has a compact card showing its
+name, composition and age, with **Load** alongside it.
 
 Editing and trajectory playback do not create history entries. Use **Save to
 history** at the top of **Molecule Editor** to keep a particular edited or
@@ -167,6 +185,10 @@ are in `$XDG_CONFIG_HOME/beavyr/structure_history` or
 
 Plays multi-frame XYZ — MD, optimisation paths, IRC, a set of conformers — 
 forwards or backwards, looping, at a chosen frame rate, with a frame slider.
+
+The panel separates **Trajectory file**, **Playback**, and **Frame overlays**.
+Use **First**, **Previous**, **Next**, and **Last** to navigate, or **Play** and
+**Play backward** for motion. Playback modes and speed remain beside the controls.
 
 Frames can also be overlaid on the current structure rather than played: a
 solid overlay and a transparent "ghost" overlay, each with its own stride, so
@@ -195,6 +217,9 @@ force field for a quick check) or load a Hessian someone else computed.
 
 Use **Load Hessian…** to open a supported frequency file, then click
 **Animate** beside a mode to see the corresponding molecular motion.
+**Analysis settings** starts collapsed; expand it to adjust analysis and
+thermochemistry. The mode table highlights the playing mode, and
+**Calculate frequencies** opens the calculation settings.
 
 ![Frequency Analysis showing normal-mode frequencies and animation of an imaginary mode](Images/Vibrations.png)
 
@@ -207,10 +232,16 @@ resolution, opacity, per-lobe colours, and a wireframe overlay. The sampled
 field is retained, so dragging the isovalue slider only re-meshes rather than
 re-evaluating the basis from scratch.
 
-Open **Surface Tools**, click **Load .molden file**, and choose **Orbitals**,
+Open **Surface Tools**, click **Load Molden…**, and choose **Orbitals**,
 **Electron density**, or **Spin density**. For an orbital, select a row in the
 list and, for an open-shell calculation, choose **Alpha** or **Beta** spin.
 Adjust **Isovalue** and **Surface resolution**, then choose **Solid** or **Mesh**.
+The orbital list fills the remaining window height, with **HOMO** and **LUMO**
+marked on their rows. The default orbital isovalue is **0.07**; isovalue,
+visibility and opacity stay above the list. **Surface detail and colors** opens
+the resolution, solid/mesh style and lobe color controls.
+
+![Modern Surface Tools panel with isovalue, visibility and opacity above the orbital browser](Images/SurfaceToolsModern.png)
 
 *Solid view with the selected orbital and separate colours for its two phases.*
 
@@ -225,17 +256,19 @@ Adjust **Isovalue** and **Surface resolution**, then choose **Solid** or **Mesh*
 Reads excited states — energies and oscillator strengths — from an ORCA
 TD-DFT output, and plots the absorption spectrum against wavelength or energy
 with the same four line shapes UV-Vis needs, over a settable energy window.
-Export the curve for a figure.
+The wavelength plot starts with a **5.0 nm** width. Export the curve for a figure.
 
-Click **Load ORCA output…** to load excited states, expand a state to inspect
+Click **Load output…** to load excited states, expand a state to inspect
 its orbital contributions, or click **Show Absorption Spectrum** to plot them.
 Load the corresponding Molden file in **Surface Tools** to inspect the orbitals.
+**Calculate spectrum** opens the calculation controls; it stays open during a
+run so the cancellation control remains available.
 
 ![UV-Vis tool showing excited-state energies and expanded orbital contributions alongside an orbital surface](Images/ExcitedTool.png)
 
 ### Transition-State Initial Guess Generation
 
-The **⇌ TS Generation** button on the left icon rail opens RDA and Poor Man's
+The **TS Generation** button on the left icon rail opens RDA and Poor Man's
 NEB. Both use the Rust optimizers with energy and
 gradient calculations supplied by an installed xTB executable.
 
@@ -296,7 +329,9 @@ lengths — not the single length a conventional constrained search would be
 stuck with.
 
 Open **Conformer Search**, choose the energy method and search effort, then
-click **Search for conformers**. Use **Show** beside a result to inspect it,
+click **Search for conformers**. The energy model and search effort have
+separate sections, with three effort presets and visible core controls.
+Use **View** beside a result to inspect it,
 **Load as trajectory** to browse the set, or **Save as XYZ trajectory** to export it.
 
 ![Conformer Search showing search settings, relative energies, populations, and controls to display or export conformers](Images/Confsearch.png)
@@ -307,9 +342,10 @@ Distances, angles and dihedrals by clicking atoms. Left-drag orbits the
 camera, so a click is distinguished from a drag by how far the pointer
 travelled. Per-measurement and global styling, labels drawn next to the line.
 
-Open **Measurements** and choose **New distance**, **New angle**, or the
-dihedral control, then click two, three, or four atoms respectively. Use
+Open **Measurements** and choose **New distance**, **New angle**, or
+**New dihedral**, then click two, three, or four atoms respectively. Use
 **Hide** or **Delete** beside a measurement to manage the labels on screen.
+Each measurement type has its own section, with its picking action visible.
 
 ![Measurements panel with atom-picking controls and labelled distances on a molecular structure](Images/Measurment.png)
 
@@ -319,6 +355,11 @@ Six representations: ball-and-stick, rounded sticks, low-resolution balls and
 lines, lines only, backbone trace, space-filling. Per-element visibility
 filters, atom and bond scaling, bond radius as a fraction of the smaller
 covalent radius, uniform or atom-split bond colours.
+
+The Representation panel presents the six styles as a two-column chooser,
+followed by the size and detail controls for the selected style. Appearance
+opens **Colors and materials** first; **Atom and bond size**, **Lighting**, and
+**Element visibility** have separate expandable sections.
 
 Colour schemes: CPK, Jmol, VMD, Molden, Molden0, or a custom scheme you name,
 save, and optionally load at startup. Material controls (metallic, roughness,
@@ -340,6 +381,11 @@ with their own colour, thickness and dash geometry.
   radical.
 * **Export Image** — PNG or JPEG of the viewport, or of a selected area of
   it.
+
+The Export Image panel groups **File format**, **Resolution**, and **Framing**.
+Choose PNG or JPG, set the pixel dimensions and print DPI, then **Select area**
+and drag a rectangle in the 3D view. **Export image** becomes available once
+the region is selected; **Redraw area** and **Clear area** adjust the framing.
 
 ## Opening files
 

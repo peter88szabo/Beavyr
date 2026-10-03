@@ -89,6 +89,9 @@ pub fn method_config_ui(
     running: bool,
     id_prefix: &str,
 ) -> bool {
+    if !running {
+        config.nproc = config.nproc.clamp(1, 4);
+    }
     let issues = validate(program, config, charge_multiplicity, atoms);
     let blocked = is_blocked(&issues);
 
@@ -375,10 +378,10 @@ pub fn method_config_ui(
                         );
                     }
                     if fields.nproc {
-                        ui.label("nproc");
+                        ui.label("CPU cores");
                         ui.add_enabled(
                             !running,
-                            egui::DragValue::new(&mut config.nproc).speed(1.0).range(1..=1024),
+                            egui::DragValue::new(&mut config.nproc).speed(1.0).range(1..=4),
                         );
                     }
                 });

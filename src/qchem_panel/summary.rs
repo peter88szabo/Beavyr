@@ -42,10 +42,12 @@ pub fn summary_window(
     // long calculation loses the only view of what came back.
     let mut still_open = *open;
     egui::Window::new("Calculation summary")
+        .frame(crate::ui_style::window_frame(ctx))
         .open(&mut still_open)
         .default_size([470.0, 520.0])
         .vscroll(true)
         .show(ctx, |ui| {
+            crate::ui_style::modern(ui);
             header(ui, output, duration);
             ui.separator();
 
@@ -114,10 +116,12 @@ fn confirm_close_window(
         .count();
 
     egui::Window::new("Close the calculation summary?")
+        .frame(crate::ui_style::window_frame(ctx))
         .collapsible(false)
         .resizable(false)
         .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
         .show(ctx, |ui| {
+            crate::ui_style::modern(ui);
             ui.label("This is the only record of the run in Beavyr. Closing it discards it.");
             if unsaved > 0 {
                 ui.label(
@@ -219,10 +223,7 @@ fn saveable_files(ui: &mut egui::Ui, output: &QcRunOutput) {
                     .file_name()
                     .map(|name| name.to_string_lossy().to_string())
                     .unwrap_or_else(|| "orca_output".to_string());
-                if let Some(target) = rfd::FileDialog::new()
-                    .set_file_name(suggested)
-                    .save_file()
-                {
+                if let Some(target) = rfd::FileDialog::new().set_file_name(suggested).save_file() {
                     // A copy, not a move: the panel may still need the original,
                     // and a second Save should work as well as the first.
                     if let Err(err) = std::fs::copy(path, &target) {
@@ -243,7 +244,9 @@ fn header(ui: &mut egui::Ui, output: &QcRunOutput, duration: Option<std::time::D
         ui.strong(output.job.label());
         ui.weak(format!("\u{2014} {}", output.program.label()));
         if let Some(duration) = duration {
-            ui.weak(crate::qchem_interfaces::xtb_optimize::format_elapsed(duration));
+            ui.weak(crate::qchem_interfaces::xtb_optimize::format_elapsed(
+                duration,
+            ));
         }
     });
 
@@ -417,6 +420,9 @@ mod tests {
     #[test]
     fn a_static_job_shows_the_scf_history() {
         assert_eq!(JobType::SinglePoint.summary_kind(), SummaryKind::ScfOnly);
-        assert_eq!(JobType::Optimize.summary_kind(), SummaryKind::GeometryCycles);
+        assert_eq!(
+            JobType::Optimize.summary_kind(),
+            SummaryKind::GeometryCycles
+        );
     }
 }

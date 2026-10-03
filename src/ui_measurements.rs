@@ -1,3 +1,4 @@
+use crate::ui_style::ResponseExt;
 use bevy::prelude::*;
 use bevy_egui::egui;
 
@@ -12,17 +13,37 @@ pub fn measurements_panel(
     mol: &Molecule,
     _settings: &MolSettings,
 ) {
+    ui.scope(|ui| {
+        crate::ui_style::modern(ui);
+        crate::ui_style::heading(
+            ui,
+            "Measure the geometry",
+            "Pick atoms in order to measure a distance, angle or dihedral.",
+        );
+        panel_body(ui, measurements, mol, _settings);
+    });
+}
+
+fn panel_body(
+    ui: &mut egui::Ui,
+    measurements: &mut Measurements,
+    mol: &Molecule,
+    _settings: &MolSettings,
+) {
     // =======================
     // Distance panel
     // =======================
-    ui.collapsing("Distance", |ui| {
+    crate::ui_style::group(ui, "Distance", |ui| {
         // Controls
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             // Highlighted status (not a toggle)
             active_status_pill(ui, measurements.is_active);
 
             // Start exclusive picking for distance
-            if ui.button("New distance").clicked() {
+            if ui
+                .add(crate::ui_style::primary("New distance"))
+                .clicked_once()
+            {
                 measurements.is_active = true;
                 measurements.pending = None;
 
@@ -32,7 +53,7 @@ pub fn measurements_panel(
                 measurements.dihedral_active = false;
                 measurements.pending_dihedral.clear();
             }
-            if ui.button("Clear all").clicked() {
+            if ui.button("Clear all").clicked_once() {
                 measurements.clear();
             }
         });
@@ -40,12 +61,12 @@ pub fn measurements_panel(
         // Pending first atom indicator
         if let Some(i) = measurements.pending {
             let name = mol.atoms.get(i).map(|s| s.as_str()).unwrap_or("?");
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.colored_label(
                     egui::Color32::from_rgb(255, 64, 200),
                     format!("First atom: {}({})", name, i + 1),
                 );
-                if ui.button("Cancel").clicked() {
+                if ui.button("Cancel").clicked_once() {
                     measurements.pending = None;
                     measurements.is_active = false; // cancel picking
                 }
@@ -53,7 +74,7 @@ pub fn measurements_panel(
         }
 
         // Global style
-        ui.collapsing("Change Distance Style", |ui| {
+        crate::ui_style::collapsible_group(ui, "Distance appearance", false, |ui| {
             ui.separator();
             ui.label("Global style");
             ui.add(egui::Slider::new(&mut measurements.line_width, 1.0..=20.0).text("Line width"));
@@ -142,11 +163,11 @@ pub fn measurements_panel(
     // Angle panel
     // =======================
     ui.add_space(4.0);
-    ui.collapsing("Angle", |ui| {
-        ui.horizontal(|ui| {
+    crate::ui_style::group(ui, "Angle", |ui| {
+        ui.horizontal_wrapped(|ui| {
             active_status_pill(ui, measurements.angle_active);
 
-            if ui.button("New angle").clicked() {
+            if ui.add(crate::ui_style::primary("New angle")).clicked_once() {
                 measurements.angle_active = true;
                 measurements.pending_angle.clear();
 
@@ -155,7 +176,7 @@ pub fn measurements_panel(
                 measurements.dihedral_active = false;
                 measurements.pending_dihedral.clear();
             }
-            if ui.button("Clear all").clicked() {
+            if ui.button("Clear all").clicked_once() {
                 measurements.clear_angles();
             }
         });
@@ -166,12 +187,12 @@ pub fn measurements_panel(
                 let name = mol.atoms.get(idx).map(|s| s.as_str()).unwrap_or("?");
                 labels.push(format!("{}({})", name, idx + 1));
             }
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.colored_label(
                     egui::Color32::from_rgb(200, 200, 80),
                     format!("Picked: {}", labels.join(" - ")),
                 );
-                if ui.button("Cancel").clicked() {
+                if ui.button("Cancel").clicked_once() {
                     measurements.pending_angle.clear();
                     measurements.angle_active = false;
                 }
@@ -203,14 +224,14 @@ pub fn measurements_panel(
                                 &[a.a, a.b, a.c],
                             );
 
-                            ui.horizontal(|ui| {
+                            ui.horizontal_wrapped(|ui| {
                                 // Highlight toggle at the BEGINNING of the row
                                 let label = if is_hl { "Hide" } else { "Show" };
                                 let mut btn = egui::Button::new(label);
                                 if is_hl {
                                     btn = btn.fill(egui::Color32::from_rgb(60, 120, 200));
                                 }
-                                if ui.add(btn).clicked() {
+                                if ui.add(btn).clicked_once() {
                                     if is_hl {
                                         req_clear = true;
                                     } else {
@@ -230,7 +251,7 @@ pub fn measurements_panel(
                                     a.degrees
                                 ));
                                 ui.add_space(8.0);
-                                if ui.button("Delete").clicked() {
+                                if ui.button("Delete").clicked_once() {
                                     to_delete.push(id);
                                 }
                             });
@@ -254,11 +275,14 @@ pub fn measurements_panel(
     // Dihedral panel
     // =======================
     ui.add_space(4.0);
-    ui.collapsing("Dihedral", |ui| {
-        ui.horizontal(|ui| {
+    crate::ui_style::group(ui, "Dihedral", |ui| {
+        ui.horizontal_wrapped(|ui| {
             active_status_pill(ui, measurements.dihedral_active);
 
-            if ui.button("New dihedral").clicked() {
+            if ui
+                .add(crate::ui_style::primary("New dihedral"))
+                .clicked_once()
+            {
                 measurements.dihedral_active = true;
                 measurements.pending_dihedral.clear();
 
@@ -267,7 +291,7 @@ pub fn measurements_panel(
                 measurements.angle_active = false;
                 measurements.pending_angle.clear();
             }
-            if ui.button("Clear all").clicked() {
+            if ui.button("Clear all").clicked_once() {
                 measurements.clear_dihedrals();
             }
         });
@@ -278,12 +302,12 @@ pub fn measurements_panel(
                 let name = mol.atoms.get(idx).map(|s| s.as_str()).unwrap_or("?");
                 labels.push(format!("{}({})", name, idx + 1));
             }
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.colored_label(
                     egui::Color32::from_rgb(80, 200, 200),
                     format!("Picked: {}", labels.join(" - ")),
                 );
-                if ui.button("Cancel").clicked() {
+                if ui.button("Cancel").clicked_once() {
                     measurements.pending_dihedral.clear();
                     measurements.dihedral_active = false;
                 }
@@ -316,14 +340,14 @@ pub fn measurements_panel(
                                 &[dmeas.a, dmeas.b, dmeas.c, dmeas.d],
                             );
 
-                            ui.horizontal(|ui| {
+                            ui.horizontal_wrapped(|ui| {
                                 // Highlight toggle at the BEGINNING of the row
                                 let label = if is_hl { "Hide" } else { "Show" };
                                 let mut btn = egui::Button::new(label);
                                 if is_hl {
                                     btn = btn.fill(egui::Color32::from_rgb(60, 120, 200));
                                 }
-                                if ui.add(btn).clicked() {
+                                if ui.add(btn).clicked_once() {
                                     if is_hl {
                                         req_clear = true;
                                     } else {
@@ -345,7 +369,7 @@ pub fn measurements_panel(
                                     dmeas.degrees
                                 ));
                                 ui.add_space(8.0);
-                                if ui.button("Delete").clicked() {
+                                if ui.button("Delete").clicked_once() {
                                     to_delete.push(id);
                                 }
                             });
@@ -456,9 +480,9 @@ fn pair_row(ui: &mut egui::Ui, pair: &mut MeasurePair, mol: &Molecule) -> bool {
     let name_b = mol.atoms.get(pair.b).map(|s| s.as_str()).unwrap_or("?");
     let mut delete_me = false;
 
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         let eye = if pair.visible { "Hide" } else { "Show" };
-        if ui.button(eye).clicked() {
+        if ui.button(eye).clicked_once() {
             pair.visible = !pair.visible;
         }
 
@@ -476,7 +500,7 @@ fn pair_row(ui: &mut egui::Ui, pair: &mut MeasurePair, mol: &Molecule) -> bool {
 
         ui.separator();
 
-        if ui.button("Delete").clicked() {
+        if ui.button("Delete").clicked_once() {
             delete_me = true;
         }
     });

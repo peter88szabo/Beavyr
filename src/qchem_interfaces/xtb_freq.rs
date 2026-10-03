@@ -16,6 +16,7 @@ use std::time::{Duration, Instant};
 use bevy::prelude::*;
 use bevy::tasks::{block_on, futures_lite::future, AsyncComputeTaskPool, Task};
 use bevy_egui::egui;
+use crate::ui_style::ResponseExt;
 use ndarray::Array2;
 
 use crate::molecule::{atomic_mass_amu, parse_xyz_angstrom, Molecule};
@@ -1661,6 +1662,35 @@ pub fn xtb_frequency_panel(
     mol: &Molecule,
     traj: &mut TrajectoryState,
 ) {
+    ui.scope(|ui| {
+        crate::ui_style::modern(ui);
+        crate::ui_style::heading(
+            ui,
+            "Explore vibrational modes",
+            "Load a Hessian or calculate frequencies for the current structure.",
+        );
+        if ui
+            .add_enabled(
+                !freq_task.is_running(),
+                crate::ui_style::primary("Load Hessian…")
+                    .min_size([ui.available_width(), 36.0].into()),
+            )
+            .clicked()
+        {
+            load_hessian_from_dialog(freq_panel, freq_task);
+        }
+        frequency_panel_body(ui, freq_panel, freq_task, opt_panel, mol, traj);
+    });
+}
+
+fn frequency_panel_body(
+    ui: &mut egui::Ui,
+    freq_panel: &mut XtbFreqPanelState,
+    freq_task: &mut XtbFrequencyTask,
+    opt_panel: &super::xtb_optimize::XtbPanelState,
+    mol: &Molecule,
+    traj: &mut TrajectoryState,
+) {
     let running = freq_task.is_running();
     // A playing trajectory or mode animation puts a distorted frame on
     // screen. Computing a Hessian for it would use that frame's geometry, and
@@ -1683,133 +1713,135 @@ pub fn xtb_frequency_panel(
     // of 1.0, or 273 K instead of 298 K.
     let mut reanalyze = false;
 
-    ui.horizontal(|ui| {
-        let mut reaction_path = freq_panel.eckart_mode == EckartMode::ReactionPath;
-        if ui
-            .add_enabled(
-                !running,
-                egui::Checkbox::new(
-                    &mut reaction_path,
-                    "Reaction-path projection",
-                ),
-            )
-            .changed()
-        {
-            freq_panel.eckart_mode = if reaction_path {
-                EckartMode::ReactionPath
-            } else {
-                EckartMode::VibRot
-            };
-            reanalyze = true;
-        }
-    });
-
-    // The projection needs a gradient, and no Hessian file carries one, so the
-    // field appears with the projection and the analysis will not run without
-    // it. Shown only when the projection is on: it is meaningless otherwise.
-    if freq_panel.eckart_mode == EckartMode::ReactionPath {
+    crate::ui_style::collapsible_group(ui, "Analysis settings", false, |ui| {
         ui.horizontal(|ui| {
-            ui.label("Gradient file");
-            match &freq_panel.gradient_file_name {
-                Some(name) => {
-                    ui.colored_label(egui::Color32::from_rgb(80, 180, 100), format!("\u{2714} {name}"));
-                }
-                None => {
-                    ui.colored_label(
-                        egui::Color32::from_rgb(230, 120, 90),
-                        "\u{26a0} required \u{2014} the Hessian file has no gradient in it",
-                    );
-                }
-            }
+            let mut reaction_path = freq_panel.eckart_mode == EckartMode::ReactionPath;
             if ui
-                .add_enabled(!running, egui::Button::new("Load .engrad\u{2026}"))
-                .on_hover_text(
-                    "ORCA writes the gradient to a separate .engrad file. It must be from the \
-                     same geometry as the Hessian, which is checked when it is loaded.",
+                .add_enabled(
+                    !running,
+                    egui::Checkbox::new(&mut reaction_path, "Reaction-path projection"),
                 )
-                .clicked()
-                && load_gradient_from_dialog(freq_panel, freq_task)
+                .changed()
             {
+                freq_panel.eckart_mode = if reaction_path {
+                    EckartMode::ReactionPath
+                } else {
+                    EckartMode::VibRot
+                };
                 reanalyze = true;
             }
         });
-    }
 
-    ui.horizontal(|ui| {
-        ui.label("Temperature (K)");
-        reanalyze |= ui
-            .add_enabled(
-                !running,
-                egui::DragValue::new(&mut freq_panel.thermo_temp_k).range(1.0..=2000.0),
-            )
-            .changed();
-        ui.label("Cutoff (cm⁻¹)");
-        reanalyze |= ui
-            .add_enabled(
-                !running,
-                egui::DragValue::new(&mut freq_panel.thermo_freq_cutoff_cm1).range(0.0..=500.0),
-            )
-            .changed();
-    });
+        // The projection needs a gradient, and no Hessian file carries one, so the
+        // field appears with the projection and the analysis will not run without
+        // it. Shown only when the projection is on: it is meaningless otherwise.
+        if freq_panel.eckart_mode == EckartMode::ReactionPath {
+            ui.horizontal(|ui| {
+                ui.label("Gradient file");
+                match &freq_panel.gradient_file_name {
+                    Some(name) => {
+                        ui.colored_label(
+                            egui::Color32::from_rgb(80, 180, 100),
+                            format!("\u{2714} {name}"),
+                        );
+                    }
+                    None => {
+                        ui.colored_label(
+                            egui::Color32::from_rgb(230, 120, 90),
+                            "\u{26a0} required \u{2014} the Hessian file has no gradient in it",
+                        );
+                    }
+                }
+                if ui
+                    .add_enabled(!running, egui::Button::new("Load .engrad\u{2026}"))
+                    .on_hover_text(
+                        "ORCA writes the gradient to a separate .engrad file. It must be from the \
+                     same geometry as the Hessian, which is checked when it is loaded.",
+                    )
+                    .clicked()
+                    && load_gradient_from_dialog(freq_panel, freq_task)
+                {
+                    reanalyze = true;
+                }
+            });
+        }
 
-    ui.horizontal(|ui| {
-        ui.label("Symmetry number \u{3c3}");
-        let response = ui.add_enabled(
-            !running,
-            egui::DragValue::new(&mut freq_panel.rot_symmetry)
-                .range(1.0..=120.0)
-                .speed(1.0)
-                .fixed_decimals(0),
-        );
-        reanalyze |= response.changed();
-        response.on_hover_text(
-            "Rotational symmetry number for the thermochemistry. 1 for an \
+        ui.horizontal(|ui| {
+            ui.label("Temperature (K)");
+            reanalyze |= ui
+                .add_enabled(
+                    !running,
+                    egui::DragValue::new(&mut freq_panel.thermo_temp_k).range(1.0..=2000.0),
+                )
+                .changed();
+            ui.label("Cutoff (cm⁻¹)");
+            reanalyze |= ui
+                .add_enabled(
+                    !running,
+                    egui::DragValue::new(&mut freq_panel.thermo_freq_cutoff_cm1).range(0.0..=500.0),
+                )
+                .changed();
+        });
+
+        ui.horizontal(|ui| {
+            ui.label("Symmetry number \u{3c3}");
+            let response = ui.add_enabled(
+                !running,
+                egui::DragValue::new(&mut freq_panel.rot_symmetry)
+                    .range(1.0..=120.0)
+                    .speed(1.0)
+                    .fixed_decimals(0),
+            );
+            reanalyze |= response.changed();
+            response.on_hover_text(
+                "Rotational symmetry number for the thermochemistry. 1 for an \
              asymmetric molecule, 2 for water, 3 for ammonia, 6 for BF3, \
              12 for benzene or methane, 24 for SF6.",
-        );
-        let label = if freq_panel.symmetry_table_open {
-            "Hide SymNum vs PointGroup"
-        } else {
-            "Show SymNum vs PointGroup"
-        };
-        if ui
-            .add(egui::Button::new(egui::RichText::new(label).small()))
-            .clicked()
-        {
-            freq_panel.symmetry_table_open = !freq_panel.symmetry_table_open;
-        }
-    });
-    // Drawn here rather than with the result windows: the table is a
-    // reference, useful before any Hessian exists.
-    symmetry_number_window(
-        &ui.ctx().clone(),
-        &mut freq_panel.symmetry_table_open,
-        &mut freq_panel.rot_symmetry,
-        &mut reanalyze,
-    );
-
-    ui.horizontal(|ui| {
-        ui.label("Frequency scale");
-        let response = ui.add_enabled(
-            !running,
-            egui::DragValue::new(&mut freq_panel.frequency_scale)
-                .range(0.5..=1.5)
-                .speed(0.001)
-                .fixed_decimals(4),
-        );
-        reanalyze |= response.changed();
-        response.on_hover_text(
-            "Empirical scaling applied to every frequency, and to the \
-             thermochemistry computed from them. 1.0 = raw harmonic values.",
-        );
-        if freq_panel.frequency_scale != 1.0
-            && ui
-                .add_enabled(!running, egui::Button::new("Reset to 1.0"))
+            );
+            let label = if freq_panel.symmetry_table_open {
+                "Hide reference"
+            } else {
+                "Symmetry reference"
+            };
+            if ui
+                .add(egui::Button::new(egui::RichText::new(label).small()))
                 .clicked()
-        {
-            freq_panel.frequency_scale = 1.0;
-            reanalyze = true;
-        }
+            {
+                freq_panel.symmetry_table_open = !freq_panel.symmetry_table_open;
+            }
+        });
+        // Drawn here rather than with the result windows: the table is a
+        // reference, useful before any Hessian exists.
+        symmetry_number_window(
+            &ui.ctx().clone(),
+            &mut freq_panel.symmetry_table_open,
+            &mut freq_panel.rot_symmetry,
+            &mut reanalyze,
+        );
+
+        ui.horizontal(|ui| {
+            ui.label("Frequency scale");
+            let response = ui.add_enabled(
+                !running,
+                egui::DragValue::new(&mut freq_panel.frequency_scale)
+                    .range(0.5..=1.5)
+                    .speed(0.001)
+                    .fixed_decimals(4),
+            );
+            reanalyze |= response.changed();
+            response.on_hover_text(
+                "Empirical scaling applied to every frequency, and to the \
+             thermochemistry computed from them. 1.0 = raw harmonic values.",
+            );
+            if freq_panel.frequency_scale != 1.0
+                && ui
+                    .add_enabled(!running, egui::Button::new("Reset to 1.0"))
+                    .clicked()
+            {
+                freq_panel.frequency_scale = 1.0;
+                reanalyze = true;
+            }
+        });
     });
 
     // Two ways to get a Hessian, kept visually apart because they need
@@ -1820,69 +1852,69 @@ pub fn xtb_frequency_panel(
     // now that one can be loaded, and its charge/multiplicity controls are
     // only in the way until someone actually wants them. Forced open while a
     // run is in flight, so Cancel cannot be hidden behind a closed header.
-    egui::CollapsingHeader::new(egui::RichText::new("Run Freq Calc").strong())
+    egui::CollapsingHeader::new(egui::RichText::new("Calculate frequencies").strong())
         .default_open(false)
         .open(running.then_some(true))
         .show(ui, |ui| {
-        ui.horizontal(|ui| {
-            ui.label("Program");
-            let before = freq_panel.program;
-            egui::ComboBox::from_id_salt("freq_program")
-                .selected_text(freq_panel.program.label())
-                .show_ui(ui, |ui| {
-                    for program in QcProgram::ALL {
-                        ui.selectable_value(&mut freq_panel.program, program, program.label());
-                    }
-                });
-            // Each program reads its own catalogue and they do not translate
-            // between each other, so switching resets the level of theory to
-            // the new program's default rather than carrying over a name it
-            // would reject.
-            if freq_panel.program != before {
-                crate::qchem_interfaces::method::adopt_program_defaults(
-                    &mut freq_panel.method,
-                    freq_panel.program,
+            ui.horizontal(|ui| {
+                ui.label("Program");
+                let before = freq_panel.program;
+                egui::ComboBox::from_id_salt("freq_program")
+                    .selected_text(freq_panel.program.label())
+                    .show_ui(ui, |ui| {
+                        for program in QcProgram::ALL {
+                            ui.selectable_value(&mut freq_panel.program, program, program.label());
+                        }
+                    });
+                // Each program reads its own catalogue and they do not translate
+                // between each other, so switching resets the level of theory to
+                // the new program's default rather than carrying over a name it
+                // would reject.
+                if freq_panel.program != before {
+                    crate::qchem_interfaces::method::adopt_program_defaults(
+                        &mut freq_panel.method,
+                        freq_panel.program,
+                    );
+                }
+                if freq_panel.program.runs_in_process() {
+                    ui.weak("built in");
+                } else if freq_panel.program.python_module().is_some() {
+                    ui.weak("run through python3");
+                } else {
+                    ui.weak("path set in Geometry Optimization");
+                }
+            });
+
+            // Blocked before the run when the launch environment cannot import the
+            // backend, for the same reason as in the optimizer panel.
+            let python_ready = crate::qchem_interfaces::xtb_optimize::python_environment_row(
+                ui,
+                freq_panel.program,
+                running,
+            );
+            ui.horizontal(|ui| {
+                ui.label("Charge");
+                ui.add_enabled(
+                    !running,
+                    egui::DragValue::new(&mut freq_panel.charge).range(-10..=10),
                 );
-            }
+                ui.label("Multiplicity");
+                ui.add_enabled(
+                    !running,
+                    egui::DragValue::new(&mut freq_panel.multiplicity).range(1..=10),
+                );
+                if ui
+                    .add_enabled(!running, egui::Button::new("Reset to defaults"))
+                    .clicked()
+                {
+                    freq_panel.charge = 0;
+                    freq_panel.multiplicity = 1;
+                    freq_panel.show_warnings = false;
+                }
+            });
+
             if freq_panel.program.runs_in_process() {
-                ui.weak("built in");
-            } else if freq_panel.program.python_module().is_some() {
-                ui.weak("run through python3");
-            } else {
-                ui.weak("path set in Geometry Optimization");
-            }
-        });
-
-        // Blocked before the run when the launch environment cannot import the
-        // backend, for the same reason as in the optimizer panel.
-        let python_ready = crate::qchem_interfaces::xtb_optimize::python_environment_row(
-            ui,
-            freq_panel.program,
-            running,
-        );
-        ui.horizontal(|ui| {
-            ui.label("Charge");
-            ui.add_enabled(
-                !running,
-                egui::DragValue::new(&mut freq_panel.charge).range(-10..=10),
-            );
-            ui.label("Multiplicity");
-            ui.add_enabled(
-                !running,
-                egui::DragValue::new(&mut freq_panel.multiplicity).range(1..=10),
-            );
-            if ui
-                .add_enabled(!running, egui::Button::new("Reset to defaults"))
-                .clicked()
-            {
-                freq_panel.charge = 0;
-                freq_panel.multiplicity = 1;
-                freq_panel.show_warnings = false;
-            }
-        });
-
-        if freq_panel.program.runs_in_process() {
-            ui.label(
+                ui.label(
                 egui::RichText::new(
                     "Frequencies and normal modes, but no infrared intensities: an intensity is \
                      the dipole derivative along a mode, and this force field has no charge \
@@ -1892,119 +1924,110 @@ pub fn xtb_frequency_panel(
                 .small()
                 .weak(),
             );
-        }
-
-        // The same block the optimizer draws, from the same implementation.
-        // Placed after the multiplicity row because its validation depends on
-        // it: a correlated method needs a closed shell.
-        let method_blocked = method_config_ui(
-            ui,
-            freq_panel.program,
-            &mut freq_panel.method,
-            freq_panel.multiplicity,
-            &mol.atoms,
-            running,
-            "freq",
-        );
-
-        // Same check the optimizer runs: a multiplicity that cannot be made
-        // from this many electrons would have xTB fail (or worse, converge to
-        // something meaningless) several minutes into a Hessian.
-        let validation =
-            validate_electronic_state(mol, freq_panel.charge, freq_panel.multiplicity);
-        let (uhf, warnings) = match &validation {
-            Ok((uhf, warnings)) => (Some(*uhf), warnings.as_slice()),
-            Err(_) => (None, &[][..]),
-        };
-        if animating {
-            ui.weak("Playback is running \u{2014} stop it to run a calculation.");
-        } else if let Err(err) = &validation {
-            // A hard error explains why the button is disabled, so it shows
-            // straight away rather than waiting for a click that cannot land.
-            ui.colored_label(egui::Color32::from_rgb(220, 80, 80), err.to_string());
-        } else if freq_panel.show_warnings {
-            if !warnings.is_empty() {
-                ui.colored_label(
-                    egui::Color32::from_rgb(210, 160, 40),
-                    super::valence::BONDING_WARNING,
-                );
             }
-        }
 
-        ui.horizontal(|ui| {
-            let can_run = !running
-                && !mol.atoms.is_empty()
-                && uhf.is_some()
-                && !animating
-                && !method_blocked
-                && python_ready;
-            let mut button =
-                ui.add_enabled(
+            // The same block the optimizer draws, from the same implementation.
+            // Placed after the multiplicity row because its validation depends on
+            // it: a correlated method needs a closed shell.
+            let method_blocked = method_config_ui(
+                ui,
+                freq_panel.program,
+                &mut freq_panel.method,
+                freq_panel.multiplicity,
+                &mol.atoms,
+                running,
+                "freq",
+            );
+
+            // Same check the optimizer runs: a multiplicity that cannot be made
+            // from this many electrons would have xTB fail (or worse, converge to
+            // something meaningless) several minutes into a Hessian.
+            let validation =
+                validate_electronic_state(mol, freq_panel.charge, freq_panel.multiplicity);
+            let (uhf, warnings) = match &validation {
+                Ok((uhf, warnings)) => (Some(*uhf), warnings.as_slice()),
+                Err(_) => (None, &[][..]),
+            };
+            if animating {
+                ui.weak("Playback is running \u{2014} stop it to run a calculation.");
+            } else if let Err(err) = &validation {
+                // A hard error explains why the button is disabled, so it shows
+                // straight away rather than waiting for a click that cannot land.
+                ui.colored_label(egui::Color32::from_rgb(220, 80, 80), err.to_string());
+            } else if freq_panel.show_warnings {
+                if !warnings.is_empty() {
+                    ui.colored_label(
+                        egui::Color32::from_rgb(210, 160, 40),
+                        super::valence::BONDING_WARNING,
+                    );
+                }
+            }
+
+            ui.horizontal(|ui| {
+                let can_run = !running
+                    && !mol.atoms.is_empty()
+                    && uhf.is_some()
+                    && !animating
+                    && !method_blocked
+                    && python_ready;
+                let mut button = ui.add_enabled(
                     can_run,
                     egui::Button::new(format!("Run Freq Calc ({})", freq_panel.program.label())),
                 );
-            if animating {
-                button = button.on_disabled_hover_text(
-                    "Stop the animation first: the structure on screen is a frame of it.",
-                );
-            } else if mol.atoms.is_empty() {
-                button =
-                    button.on_disabled_hover_text("There is no structure on screen to analyze.");
-            } else if method_blocked {
-                button = button.on_disabled_hover_text(
-                    "This method cannot run on this structure -- see the note above.",
-                );
-            } else if !python_ready {
-                button = button.on_disabled_hover_text(
-                    "This backend needs a Python that can import it -- see the note above.",
-                );
-            }
-            if button.clicked() {
-                freq_panel.show_warnings = true;
-                let program = freq_panel.program;
-                let configured = opt_panel
-                    .paths
-                    .iter()
-                    .find(|(p, _)| *p == program)
-                    .map(|(_, path)| path.clone())
-                    .unwrap_or_default();
-                match super::xtb_optimize::resolve_program_executable(program, &configured) {
-                    Ok(binary) => {
-                        if let Some(uhf) = uhf {
-                            let need_gradient =
-                                freq_panel.eckart_mode == EckartMode::ReactionPath;
-                            freq_task.start(
-                                program,
-                                &binary,
-                                &mol.atoms,
-                                &mol.pos,
-                                freq_panel.charge,
-                                uhf,
-                                freq_panel.multiplicity,
-                                need_gradient,
-                                &freq_panel.method,
-                            );
+                if animating {
+                    button = button.on_disabled_hover_text(
+                        "Stop the animation first: the structure on screen is a frame of it.",
+                    );
+                } else if mol.atoms.is_empty() {
+                    button = button
+                        .on_disabled_hover_text("There is no structure on screen to analyze.");
+                } else if method_blocked {
+                    button = button.on_disabled_hover_text(
+                        "This method cannot run on this structure -- see the note above.",
+                    );
+                } else if !python_ready {
+                    button = button.on_disabled_hover_text(
+                        "This backend needs a Python that can import it -- see the note above.",
+                    );
+                }
+                if button.clicked() {
+                    freq_panel.show_warnings = true;
+                    let program = freq_panel.program;
+                    let configured = opt_panel
+                        .paths
+                        .iter()
+                        .find(|(p, _)| *p == program)
+                        .map(|(_, path)| path.clone())
+                        .unwrap_or_default();
+                    match super::xtb_optimize::resolve_program_executable(program, &configured) {
+                        Ok(binary) => {
+                            if let Some(uhf) = uhf {
+                                let need_gradient =
+                                    freq_panel.eckart_mode == EckartMode::ReactionPath;
+                                freq_task.start(
+                                    program,
+                                    &binary,
+                                    &mol.atoms,
+                                    &mol.pos,
+                                    freq_panel.charge,
+                                    uhf,
+                                    freq_panel.multiplicity,
+                                    need_gradient,
+                                    &freq_panel.method,
+                                );
+                            }
+                        }
+                        Err(err) => {
+                            freq_task.last_message = Some(err);
+                            freq_task.last_is_error = true;
                         }
                     }
-                    Err(err) => {
-                        freq_task.last_message = Some(err);
-                        freq_task.last_is_error = true;
-                    }
                 }
-            }
-            if running && ui.button("Cancel").clicked() {
-                freq_task.cancel_now();
-            }
+                if running && ui.button("Cancel").clicked() {
+                    freq_task.cancel_now();
+                }
+            });
         });
-    });
-
-    ui.add_space(6.0);
-    if ui
-        .add_enabled(!running, egui::Button::new("Load Hessian…"))
-        .clicked()
-    {
-        load_hessian_from_dialog(freq_panel, freq_task);
-    }
 
     if reanalyze {
         reanalyze_stored_hessian(freq_panel, freq_task);
@@ -2033,7 +2056,8 @@ pub fn xtb_frequency_panel(
         return;
     };
 
-    ui.separator();
+    ui.add_space(8.0);
+    ui.label(egui::RichText::new("Normal modes").size(18.0).strong());
     let eckart_label = match result.eckart_used {
         EckartMode::Off => "no projection",
         EckartMode::VibRot => "translations/rotations projected out",
@@ -2068,7 +2092,10 @@ pub fn xtb_frequency_panel(
     // The intensities belong to the file's own unprojected modes. Worth
     // showing, and worth not passing off as the projected ones'.
     if let Some(note) = &result.ir_provenance_note {
-        ui.colored_label(egui::Color32::from_rgb(210, 160, 40), format!("\u{26a0} {note}"));
+        ui.colored_label(
+            egui::Color32::from_rgb(210, 160, 40),
+            format!("\u{26a0} {note}"),
+        );
     }
     if let Some(scale) = result.frequency_scale {
         ui.weak(format!(
@@ -2076,12 +2103,13 @@ pub fn xtb_frequency_panel(
         ));
     }
 
-    egui::ScrollArea::vertical()
+    egui::ScrollArea::both()
         // Enough rows to scan a spectrum without scrolling for every one, while
         // leaving the thermochemistry and spectrum buttons below it in view.
         .max_height(340.0)
         .show(ui, |ui| {
             egui::Grid::new("xtb_freq_mode_list")
+                .spacing([14.0, 8.0])
                 .striped(true)
                 .show(ui, |ui| {
                     // With a reaction-path projection there are two answers
@@ -2165,21 +2193,24 @@ pub fn xtb_frequency_panel(
                         // that's currently playing?"
                         let is_animating_this_row =
                             freq_panel.selected_mode == Some(i) && traj.playing;
-                        let toggle_label = if is_animating_this_row { "Stop" } else { "Animate" };
+                        let toggle_label = if is_animating_this_row {
+                            "Stop"
+                        } else {
+                            "Animate"
+                        };
                         let animatable = result.is_animatable(i);
                         let button = ui
-                            .add_enabled(animatable, egui::Button::new(toggle_label))
+                            .add_enabled(
+                                animatable,
+                                egui::Button::new(toggle_label).selected(is_animating_this_row),
+                            )
                             .on_disabled_hover_text(
                                 "The file lists this mode's frequency but no displacement \
                                  vector, so there is nothing to animate.",
                             );
                         if button.clicked() {
                             if is_animating_this_row {
-                                stop_mode_animation(
-                                    traj,
-                                    &result.atoms,
-                                    &result.coords_angstrom,
-                                );
+                                stop_mode_animation(traj, &result.atoms, &result.coords_angstrom);
                             } else {
                                 freq_panel.selected_mode = Some(i);
                                 load_mode_animation(
@@ -2207,15 +2238,19 @@ pub fn xtb_frequency_panel(
         ui.horizontal(|ui| {
             ui.label("Amplitude (Å)");
             let amplitude_changed = ui
-                .add(egui::DragValue::new(&mut freq_panel.mode_amplitude_angstrom)
-                    .range(0.01..=50.0)
-                    .speed(0.01))
+                .add(
+                    egui::DragValue::new(&mut freq_panel.mode_amplitude_angstrom)
+                        .range(0.01..=50.0)
+                        .speed(0.01),
+                )
                 .changed();
             ui.label("Speed (fps)");
             let speed_changed = ui
-                .add(egui::DragValue::new(&mut freq_panel.mode_speed_fps)
-                    .range(1.0..=200.0)
-                    .speed(0.5))
+                .add(
+                    egui::DragValue::new(&mut freq_panel.mode_speed_fps)
+                        .range(1.0..=200.0)
+                        .speed(0.5),
+                )
                 .changed();
             if (amplitude_changed || speed_changed) && traj.playing {
                 if let Some(i) = freq_panel.selected_mode {
@@ -2283,6 +2318,7 @@ pub fn xtb_frequency_panel(
 ///
 /// Clicking a group sets the symmetry number, so the table is a chooser as
 /// well as a reference -- no retyping a number one has just read.
+
 fn symmetry_number_window(
     ctx: &egui::Context,
     open: &mut bool,
@@ -2293,10 +2329,12 @@ fn symmetry_number_window(
         return;
     }
     egui::Window::new("Symmetry Numbers")
+        .frame(crate::ui_style::window_frame(ctx))
         .open(open)
         .resizable(true)
         .default_size([560.0, 380.0])
         .show(ctx, |ui| {
+            crate::ui_style::modern(ui);
             ui.label(
                 egui::RichText::new("Rotational symmetry number \u{3c3} by point group").strong(),
             );
@@ -2307,7 +2345,7 @@ fn symmetry_number_window(
             ui.separator();
             egui::ScrollArea::both().show(ui, |ui| {
                 for (family, members) in crate::normalmode::symmetry_numbers::families() {
-                    ui.horizontal(|ui| {
+                    ui.horizontal_wrapped(|ui| {
                         ui.add_sized(
                             [58.0, 20.0],
                             egui::Label::new(egui::RichText::new(family).monospace().strong()),
@@ -2322,7 +2360,7 @@ fn symmetry_number_window(
                                         .selected(selected),
                                 )
                                 .on_hover_text(format!("Use \u{3c3} = {sigma:.0}"))
-                                .clicked()
+                                .clicked_once()
                             {
                                 *rot_symmetry = sigma;
                                 *reanalyze = true;
@@ -2344,10 +2382,12 @@ fn thermochemistry_window(ctx: &egui::Context, open: &mut bool, result: &Frequen
         return;
     }
     egui::Window::new("Thermochemistry")
+        .frame(crate::ui_style::window_frame(ctx))
         .open(open)
         .resizable(true)
         .default_size([620.0, 560.0])
         .show(ctx, |ui| {
+            crate::ui_style::modern(ui);
             let mut text = thermofuncs::format_thermo(
                 &result.thermo,
                 result.thermo_temp_k,
@@ -2362,15 +2402,14 @@ fn thermochemistry_window(ctx: &egui::Context, open: &mut bool, result: &Frequen
                 ui.colored_label(egui::Color32::from_rgb(150, 175, 210), note);
                 ui.add_space(4.0);
             }
-            if ui.button("Export .dat\u{2026}").clicked() {
+            if ui.button("Export .dat\u{2026}").clicked_once() {
                 export_thermochemistry(&text);
             }
             ui.separator();
             egui::ScrollArea::both().show(ui, |ui| {
                 ui.add(
                     egui::Label::new(
-                        egui::RichText::new(&text)
-                            .font(egui::FontId::monospace(THERMO_FONT_SIZE)),
+                        egui::RichText::new(&text).font(egui::FontId::monospace(THERMO_FONT_SIZE)),
                     )
                     // The table's alignment is the whole point; wrapping it to
                     // the window width would fold the columns into each other.
@@ -2401,11 +2440,13 @@ fn ir_spectrum_window(
         return;
     }
     egui::Window::new("IR Spectrum")
+        .frame(crate::ui_style::window_frame(ctx))
         .open(&mut freq_panel.spectrum_window_open)
         .resizable(true)
         .default_size([500.0, 340.0])
         .show(ctx, |ui| {
-            ui.horizontal(|ui| {
+            crate::ui_style::modern(ui);
+            ui.horizontal_wrapped(|ui| {
                 ui.label("Line shape");
                 for kind in BroadeningKind::ALL {
                     ui.selectable_value(&mut freq_panel.spectrum_broadening, kind, kind.label());
@@ -2415,8 +2456,7 @@ fn ir_spectrum_window(
                 ui.add_enabled_ui(!freq_panel.spectrum_broadening.is_sticks(), |ui| {
                     ui.label("Width (cm\u{207b}\u{b9})");
                     ui.add(
-                        egui::DragValue::new(&mut freq_panel.spectrum_width_cm1)
-                            .range(0.5..=200.0),
+                        egui::DragValue::new(&mut freq_panel.spectrum_width_cm1).range(0.5..=200.0),
                     );
                 });
             });
@@ -2440,10 +2480,13 @@ fn ir_spectrum_window(
             const AXIS_MARGIN_CM1: f64 = 100.0;
             const TICK_STEP_CM1: f64 = 500.0;
             let x_min = 0.0f64;
-            let x_max = peaks.iter().map(|&(f, _)| f).fold(f64::NEG_INFINITY, f64::max)
+            let x_max = peaks
+                .iter()
+                .map(|&(f, _)| f)
+                .fold(f64::NEG_INFINITY, f64::max)
                 + AXIS_MARGIN_CM1;
 
-            if ui.button("Export .dat\u{2026}").clicked() {
+            if ui.button("Export .dat\u{2026}").clicked_once() {
                 // Sticks export the raw predicted (frequency, intensity)
                 // pairs as-is -- there is no continuous curve to resample,
                 // so the fixed 0.5 cm^-1 grid used for the broadened shapes
@@ -3884,4 +3927,3 @@ mod tests {
         assert_eq!(result.atoms.len(), 4);
     }
 }
-

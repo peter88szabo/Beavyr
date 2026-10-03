@@ -1,17 +1,14 @@
 //! The UV-Vis tool's panel and its absorption-spectrum window.
 
+use crate::ui_style::ResponseExt;
 use bevy_egui::egui;
 
-use super::excited_state::{
-    spectrum_functionals, visible_fields, ExcitedStateMethod,
-};
+use super::excited_state::{spectrum_functionals, visible_fields, ExcitedStateMethod};
 use super::run::SpectrumTask;
 use super::types::{ExcitedState, TddftResult};
 use super::{SpectrumUnit, UvVisState};
 use crate::molecule::Molecule;
-use crate::qchem_interfaces::method::{
-    basis_label, is_blocked, Severity, BASIS_GROUPS,
-};
+use crate::qchem_interfaces::method::{basis_label, is_blocked, Severity, BASIS_GROUPS};
 use crate::qchem_interfaces::xtb_optimize::format_elapsed;
 use crate::spectrum::broadening::{format_spectrum_dat, format_spectrum_sticks, BroadeningKind};
 use crate::spectrum::plot::{draw_spectrum, SpectrumAxis};
@@ -31,250 +28,235 @@ fn run_block(
     animating: bool,
 ) {
     let running = task.is_running();
-    egui::CollapsingHeader::new(egui::RichText::new("Run Calculation").strong())
-        .default_open(false)
-        .open(running.then_some(true))
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                // A fixed label, not a dropdown: Behemoth is the only program
-                // Beavyr can run an excited-state calculation with, and a
-                // dropdown of one would misrepresent the choice available.
-                ui.label("Program");
-                ui.label(egui::RichText::new("Behemoth").strong());
-                ui.weak("\u{2014} path set in Geometry Optimization");
-            });
-            if behemoth_path.trim().is_empty() {
-                ui.colored_label(
-                    egui::Color32::from_rgb(210, 160, 40),
-                    "No Behemoth path set. Set it in the Geometry Optimization panel.",
-                );
-            }
+    if !running {
+        state.reference.nproc = state.reference.nproc.clamp(1, 4);
+    }
+    ui.horizontal_wrapped(|ui| {
+        // A fixed label, not a dropdown: Behemoth is the only program
+        // Beavyr can run an excited-state calculation with, and a
+        // dropdown of one would misrepresent the choice available.
+        ui.label("Program");
+        ui.label(egui::RichText::new("Behemoth").strong());
+        ui.weak("\u{2014} configured in Quantum Chemistry");
+    });
+    if behemoth_path.trim().is_empty() {
+        ui.colored_label(
+            egui::Color32::from_rgb(210, 160, 40),
+            "No Behemoth path set. Set it in the Quantum Chemistry panel.",
+        );
+    }
 
-            ui.horizontal(|ui| {
-                ui.label("Method");
-                ui.add_enabled_ui(!running, |ui| {
-                    egui::ComboBox::from_id_salt("uvvis_method")
-                        .selected_text(state.run_config.method.label())
-                        .show_ui(ui, |ui| {
-                            for method in ExcitedStateMethod::ALL {
-                                ui.selectable_value(
-                                    &mut state.run_config.method,
-                                    method,
-                                    method.label(),
-                                );
-                            }
-                        });
-                });
-            });
-            ui.weak(state.run_config.method.description());
-
-            let fields = visible_fields(&state.run_config);
-
-            if fields.xtb4stda_path {
-                ui.horizontal(|ui| {
-                    ui.label("xtb4stda");
-                    ui.add_enabled(
-                        !running,
-                        egui::TextEdit::singleline(&mut state.run_config.xtb4stda_path)
-                            .desired_width(200.0)
-                            .hint_text("xtb4stda"),
-                    );
-                    if ui.add_enabled(!running, egui::Button::new("Browse\u{2026}")).clicked() {
-                        if let Some(path) =
-                            crate::recent_dir::pick_file(crate::recent_dir::open())
-                        {
-                            state.run_config.xtb4stda_path = path.display().to_string();
-                        }
+    ui.horizontal_wrapped(|ui| {
+        ui.label("Method");
+        ui.add_enabled_ui(!running, |ui| {
+            egui::ComboBox::from_id_salt("uvvis_method")
+                .selected_text(state.run_config.method.label())
+                .show_ui(ui, |ui| {
+                    for method in ExcitedStateMethod::ALL {
+                        ui.selectable_value(&mut state.run_config.method, method, method.label());
                     }
                 });
-            }
+        });
+    });
+    ui.weak(state.run_config.method.description());
 
-            if fields.functional {
-                ui.horizontal(|ui| {
-                    ui.label("Functional");
-                    ui.add_enabled_ui(!running, |ui| {
-                        let selected = spectrum_functionals()
-                            .iter()
-                            .find(|f| f.cli.eq_ignore_ascii_case(&state.reference.functional))
-                            .map(|f| f.label.to_string())
-                            .unwrap_or_else(|| state.reference.functional.clone());
-                        egui::ComboBox::from_id_salt("uvvis_functional")
-                            .selected_text(selected)
-                            .show_ui(ui, |ui| {
-                                // Hybrids only: the engine refuses a
-                                // functional with no exact exchange.
-                                for entry in spectrum_functionals() {
-                                    let mut chosen = state.reference.functional.clone();
-                                    if ui
-                                        .selectable_value(
-                                            &mut chosen,
-                                            entry.cli.to_string(),
-                                            entry.label,
-                                        )
-                                        .clicked()
-                                    {
-                                        state.reference.functional = entry.cli.to_string();
-                                    }
-                                }
-                            });
-                    });
-                });
-            }
+    let fields = visible_fields(&state.run_config);
 
-            if fields.basis {
-                ui.horizontal(|ui| {
-                    ui.label("Basis set");
-                    ui.add_enabled_ui(!running, |ui| {
-                        egui::ComboBox::from_id_salt("uvvis_basis")
-                            .selected_text(basis_label(&state.reference.basis))
-                            .show_ui(ui, |ui| {
-                                for (i, group) in BASIS_GROUPS.iter().enumerate() {
-                                    if i > 0 {
-                                        ui.separator();
-                                    }
-                                    ui.weak(group.name);
-                                    for (label, cli) in group.sets {
-                                        let mut chosen = state.reference.basis.clone();
-                                        if ui
-                                            .selectable_value(
-                                                &mut chosen,
-                                                cli.to_string(),
-                                                *label,
-                                            )
-                                            .clicked()
-                                        {
-                                            state.reference.basis = cli.to_string();
-                                        }
-                                    }
-                                }
-                            });
-                    });
-                });
-            }
-
-            ui.horizontal(|ui| {
-                ui.label("Roots");
-                ui.add_enabled(
-                    !running,
-                    egui::DragValue::new(&mut state.run_config.roots).range(1..=200),
-                );
-                ui.label("Energy window (eV)");
-                ui.add_enabled(
-                    !running,
-                    egui::DragValue::new(&mut state.run_config.emax_ev)
-                        .speed(0.5)
-                        .range(1.0..=100.0),
-                );
-                if fields.tda {
-                    ui.add_enabled(
-                        !running,
-                        egui::Checkbox::new(&mut state.run_config.tda, "Tamm-Dancoff (TDA)"),
-                    );
-                }
-            });
-
-            ui.horizontal(|ui| {
-                ui.label("Charge");
-                ui.add_enabled(
-                    !running,
-                    egui::DragValue::new(&mut state.charge).range(-10..=10),
-                );
-                ui.label("Multiplicity");
-                ui.add_enabled(
-                    !running,
-                    egui::DragValue::new(&mut state.multiplicity).range(1..=10),
-                );
-            });
-
-            ui.horizontal(|ui| {
-                ui.label("Memory (MB)");
-                ui.add_enabled(
-                    !running,
-                    egui::DragValue::new(&mut state.reference.memory_mb)
-                        .speed(64.0)
-                        .range(64..=1_048_576),
-                );
-                ui.label("nproc");
-                ui.add_enabled(
-                    !running,
-                    egui::DragValue::new(&mut state.reference.nproc).range(1..=1024),
-                );
-            });
-
-            let issues = super::excited_state::validate(
-                &state.run_config,
-                &state.reference,
-                state.multiplicity,
-                &mol.atoms,
+    if fields.xtb4stda_path {
+        ui.horizontal_wrapped(|ui| {
+            ui.label("xtb4stda");
+            ui.add_enabled(
+                !running,
+                egui::TextEdit::singleline(&mut state.run_config.xtb4stda_path)
+                    .desired_width(200.0)
+                    .hint_text("xtb4stda"),
             );
-            for issue in &issues {
-                match issue.severity {
-                    Severity::Block => {
-                        ui.colored_label(
-                            egui::Color32::from_rgb(230, 120, 90),
-                            format!("\u{26a0} {}", issue.message),
-                        );
-                    }
-                    Severity::Note => {
-                        ui.weak(&issue.message);
-                    }
+            if ui
+                .add_enabled(!running, egui::Button::new("Browse\u{2026}"))
+                .clicked_once()
+            {
+                if let Some(path) = crate::recent_dir::pick_file(crate::recent_dir::open()) {
+                    state.run_config.xtb4stda_path = path.display().to_string();
                 }
-            }
-            let blocked = is_blocked(&issues);
-
-            if animating {
-                ui.weak("Playback is running \u{2014} stop it to run a calculation.");
-            }
-
-            ui.horizontal(|ui| {
-                let can_run = !running
-                    && !mol.atoms.is_empty()
-                    && !animating
-                    && !blocked
-                    && !behemoth_path.trim().is_empty();
-                let button = ui.add_enabled(can_run, egui::Button::new("Run Spectrum"));
-                if mol.atoms.is_empty() {
-                    button
-                        .clone()
-                        .on_disabled_hover_text("There is no structure on screen.");
-                } else if animating {
-                    button.clone().on_disabled_hover_text(
-                        "Stop the animation first: the structure on screen is a frame of it.",
-                    );
-                } else if blocked {
-                    button
-                        .clone()
-                        .on_disabled_hover_text("See the note above.");
-                }
-                if button.clicked() {
-                    task.start(
-                        std::path::Path::new(behemoth_path.trim()),
-                        &mol.atoms,
-                        &mol.pos,
-                        state.charge,
-                        state.multiplicity,
-                        &state.run_config,
-                        &state.reference,
-                    );
-                }
-                if running {
-                    if ui.button("Cancel").clicked() {
-                        task.cancel();
-                    }
-                    let elapsed = task.elapsed().unwrap_or_default();
-                    ui.weak(format!("Running\u{2026} {}", format_elapsed(elapsed)));
-                }
-            });
-
-            if let Some(message) = &task.last_message {
-                let color = if task.last_is_error {
-                    egui::Color32::from_rgb(220, 80, 80)
-                } else {
-                    egui::Color32::from_rgb(80, 180, 100)
-                };
-                ui.colored_label(color, message);
             }
         });
+    }
+
+    if fields.functional {
+        ui.horizontal_wrapped(|ui| {
+            ui.label("Functional");
+            ui.add_enabled_ui(!running, |ui| {
+                let selected = spectrum_functionals()
+                    .iter()
+                    .find(|f| f.cli.eq_ignore_ascii_case(&state.reference.functional))
+                    .map(|f| f.label.to_string())
+                    .unwrap_or_else(|| state.reference.functional.clone());
+                egui::ComboBox::from_id_salt("uvvis_functional")
+                    .selected_text(selected)
+                    .show_ui(ui, |ui| {
+                        // Hybrids only: the engine refuses a
+                        // functional with no exact exchange.
+                        for entry in spectrum_functionals() {
+                            let mut chosen = state.reference.functional.clone();
+                            if ui
+                                .selectable_value(&mut chosen, entry.cli.to_string(), entry.label)
+                                .clicked_once()
+                            {
+                                state.reference.functional = entry.cli.to_string();
+                            }
+                        }
+                    });
+            });
+        });
+    }
+
+    if fields.basis {
+        ui.horizontal_wrapped(|ui| {
+            ui.label("Basis set");
+            ui.add_enabled_ui(!running, |ui| {
+                egui::ComboBox::from_id_salt("uvvis_basis")
+                    .selected_text(basis_label(&state.reference.basis))
+                    .show_ui(ui, |ui| {
+                        for (i, group) in BASIS_GROUPS.iter().enumerate() {
+                            if i > 0 {
+                                ui.separator();
+                            }
+                            ui.weak(group.name);
+                            for (label, cli) in group.sets {
+                                let mut chosen = state.reference.basis.clone();
+                                if ui
+                                    .selectable_value(&mut chosen, cli.to_string(), *label)
+                                    .clicked_once()
+                                {
+                                    state.reference.basis = cli.to_string();
+                                }
+                            }
+                        }
+                    });
+            });
+        });
+    }
+
+    ui.horizontal_wrapped(|ui| {
+        ui.label("Roots");
+        ui.add_enabled(
+            !running,
+            egui::DragValue::new(&mut state.run_config.roots).range(1..=200),
+        );
+        ui.label("Energy window (eV)");
+        ui.add_enabled(
+            !running,
+            egui::DragValue::new(&mut state.run_config.emax_ev)
+                .speed(0.5)
+                .range(1.0..=100.0),
+        );
+        if fields.tda {
+            ui.add_enabled(
+                !running,
+                egui::Checkbox::new(&mut state.run_config.tda, "Tamm-Dancoff (TDA)"),
+            );
+        }
+    });
+
+    ui.horizontal_wrapped(|ui| {
+        ui.label("Charge");
+        ui.add_enabled(
+            !running,
+            egui::DragValue::new(&mut state.charge).range(-10..=10),
+        );
+        ui.label("Multiplicity");
+        ui.add_enabled(
+            !running,
+            egui::DragValue::new(&mut state.multiplicity).range(1..=10),
+        );
+    });
+
+    ui.horizontal_wrapped(|ui| {
+        ui.label("Memory (MB)");
+        ui.add_enabled(
+            !running,
+            egui::DragValue::new(&mut state.reference.memory_mb)
+                .speed(64.0)
+                .range(64..=1_048_576),
+        );
+        ui.label("CPU cores");
+        ui.add_enabled(
+            !running,
+            egui::DragValue::new(&mut state.reference.nproc).range(1..=4),
+        );
+    });
+
+    let issues = super::excited_state::validate(
+        &state.run_config,
+        &state.reference,
+        state.multiplicity,
+        &mol.atoms,
+    );
+    for issue in &issues {
+        match issue.severity {
+            Severity::Block => {
+                ui.colored_label(
+                    egui::Color32::from_rgb(230, 120, 90),
+                    format!("\u{26a0} {}", issue.message),
+                );
+            }
+            Severity::Note => {
+                ui.weak(&issue.message);
+            }
+        }
+    }
+    let blocked = is_blocked(&issues);
+
+    if animating {
+        ui.weak("Playback is running \u{2014} stop it to run a calculation.");
+    }
+
+    ui.horizontal_wrapped(|ui| {
+        let can_run = !running
+            && !mol.atoms.is_empty()
+            && !animating
+            && !blocked
+            && !behemoth_path.trim().is_empty();
+        let button = ui.add_enabled(can_run, crate::ui_style::primary("Calculate spectrum"));
+        if mol.atoms.is_empty() {
+            button
+                .clone()
+                .on_disabled_hover_text("There is no structure on screen.");
+        } else if animating {
+            button.clone().on_disabled_hover_text(
+                "Stop the animation first: the structure on screen is a frame of it.",
+            );
+        } else if blocked {
+            button.clone().on_disabled_hover_text("See the note above.");
+        }
+        if button.clicked_once() {
+            task.start(
+                std::path::Path::new(behemoth_path.trim()),
+                &mol.atoms,
+                &mol.pos,
+                state.charge,
+                state.multiplicity,
+                &state.run_config,
+                &state.reference,
+            );
+        }
+        if running {
+            if ui.button("Cancel").clicked_once() {
+                task.cancel();
+            }
+            let elapsed = task.elapsed().unwrap_or_default();
+            ui.weak(format!("Running\u{2026} {}", format_elapsed(elapsed)));
+        }
+    });
+
+    if let Some(message) = &task.last_message {
+        let color = if task.last_is_error {
+            egui::Color32::from_rgb(220, 80, 80)
+        } else {
+            egui::Color32::from_rgb(80, 180, 100)
+        };
+        ui.colored_label(color, message);
+    }
 }
 
 /// Draws the UV-Vis section: run a spectrum, or load one from an existing
@@ -293,21 +275,51 @@ pub fn uvvis_panel(
     behemoth_path: &str,
     animating: bool,
 ) {
-    run_block(ui, state, task, mol, behemoth_path, animating);
-
-    ui.add_space(8.0);
-    ui.horizontal(|ui| {
-        if ui.button("Load output\u{2026}").clicked() {
-            load_from_dialog(state);
-        }
-        if state.result.is_some() && ui.button("Clear").clicked() {
-            state.result = None;
-            state.load_error = None;
-            state.expanded_root = None;
-            state.spectrum_window_open = false;
-        }
+    ui.scope(|ui| {
+        crate::ui_style::modern(ui);
+        crate::ui_style::heading(
+            ui,
+            "Explore electronic excitations",
+            "Load TD-DFT output or calculate an absorption spectrum.",
+        );
+        panel_body(ui, state, task, mol, behemoth_path, animating);
     });
-    ui.weak("Or read an existing TD-DFT output \u{2014} full TD-DFT included. ORCA only for now.");
+}
+
+fn panel_body(
+    ui: &mut egui::Ui,
+    state: &mut UvVisState,
+    task: &mut SpectrumTask,
+    mol: &Molecule,
+    behemoth_path: &str,
+    animating: bool,
+) {
+    crate::ui_style::group(ui, "Spectrum data", |ui| {
+        ui.horizontal_wrapped(|ui| {
+            if ui
+                .add(crate::ui_style::primary("Load output…"))
+                .clicked_once()
+            {
+                load_from_dialog(state);
+            }
+            if state.result.is_some() && ui.button("Clear").clicked_once() {
+                state.result = None;
+                state.load_error = None;
+                state.expanded_root = None;
+                state.spectrum_window_open = false;
+            }
+        });
+        ui.small("Existing ORCA TD-DFT output, including full TD-DFT, is supported.");
+    });
+    crate::ui_style::card(ui).show(ui, |ui| {
+        ui.set_min_width(ui.available_width().max(0.0));
+        egui::CollapsingHeader::new(egui::RichText::new("Calculate spectrum").strong())
+            .default_open(false)
+            .open(task.is_running().then_some(true))
+            .show(ui, |ui| {
+                run_block(ui, state, task, mol, behemoth_path, animating)
+            });
+    });
 
     if let Some(err) = &state.load_error {
         ui.add_space(4.0);
@@ -327,44 +339,44 @@ pub fn uvvis_panel(
         return;
     };
 
-    ui.separator();
-    if let Some(name) = result.source.file_name() {
-        ui.label(
-            egui::RichText::new(name.to_string_lossy().to_string())
-                .strong()
-                .monospace(),
-        )
-        .on_hover_text(result.source.display().to_string());
-    }
-    ui.label(format!(
-        "{} \u{2022} {} \u{2022} {} root{}",
-        result.program,
-        result.method,
-        result.states.len(),
-        if result.states.len() == 1 { "" } else { "s" }
-    ));
-    if result.unrestricted {
-        match result.ground_state_s2 {
-            Some(s2) => ui.label(format!(
-                "Unrestricted reference, ground-state \u{27e8}S\u{b2}\u{27e9} = {s2:.4}"
-            )),
-            None => ui.label("Unrestricted reference"),
-        };
-    }
-    for note in &result.notes {
-        ui.colored_label(egui::Color32::from_rgb(190, 150, 60), note);
-    }
-
+    crate::ui_style::group(ui, "Calculation result", |ui| {
+        if let Some(name) = result.source.file_name() {
+            ui.label(
+                egui::RichText::new(name.to_string_lossy().to_string())
+                    .strong()
+                    .monospace(),
+            )
+            .on_hover_text(result.source.display().to_string());
+        }
+        ui.label(format!(
+            "{} \u{2022} {} \u{2022} {} root{}",
+            result.program,
+            result.method,
+            result.states.len(),
+            if result.states.len() == 1 { "" } else { "s" }
+        ));
+        if result.unrestricted {
+            match result.ground_state_s2 {
+                Some(s2) => ui.label(format!(
+                    "Unrestricted reference, ground-state \u{27e8}S\u{b2}\u{27e9} = {s2:.4}"
+                )),
+                None => ui.label("Unrestricted reference"),
+            };
+        }
+        for note in &result.notes {
+            ui.colored_label(egui::Color32::from_rgb(190, 150, 60), note);
+        }
+    });
     let has_intensities = result.has_intensities();
     ui.add_space(6.0);
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         let label = if *spectrum_window_open {
             "Hide Absorption Spectrum"
         } else {
             "Show Absorption Spectrum"
         };
         ui.add_enabled_ui(has_intensities, |ui| {
-            if ui.button(label).clicked() {
+            if ui.add(crate::ui_style::primary(label)).clicked_once() {
                 *spectrum_window_open = !*spectrum_window_open;
             }
         });
@@ -374,9 +386,7 @@ pub fn uvvis_panel(
     });
 
     ui.add_space(6.0);
-    ui.label(
-        egui::RichText::new("Click a root to see the orbital excitations behind it.").weak(),
-    );
+    ui.label(egui::RichText::new("Click a root to see the orbital excitations behind it.").weak());
     ui.add_space(2.0);
     state_table(ui, result, expanded_root);
 
@@ -438,8 +448,12 @@ fn state_table(ui: &mut egui::Ui, result: &TddftResult, expanded: &mut Option<us
         .auto_shrink([false, false])
         .show(ui, |ui| {
             ui.add(
-                egui::Label::new(egui::RichText::new(header_text(show_spin)).monospace().strong())
-                    .wrap_mode(egui::TextWrapMode::Extend),
+                egui::Label::new(
+                    egui::RichText::new(header_text(show_spin))
+                        .monospace()
+                        .strong(),
+                )
+                .wrap_mode(egui::TextWrapMode::Extend),
             );
             ui.separator();
             for st in &result.states {
@@ -482,12 +496,7 @@ fn state_row_text(st: &ExcitedState, show_spin: bool, is_open: bool) -> String {
     text
 }
 
-fn state_row(
-    ui: &mut egui::Ui,
-    st: &ExcitedState,
-    show_spin: bool,
-    expanded: &mut Option<usize>,
-) {
+fn state_row(ui: &mut egui::Ui, st: &ExcitedState, show_spin: bool, expanded: &mut Option<usize>) {
     let is_open = *expanded == Some(st.root);
     let row = ui.add(
         egui::Button::new(egui::RichText::new(state_row_text(st, show_spin, is_open)).monospace())
@@ -495,7 +504,7 @@ fn state_row(
             .selected(is_open)
             .wrap_mode(egui::TextWrapMode::Extend),
     );
-    if row.clicked() {
+    if row.clicked_once() {
         *expanded = if is_open { None } else { Some(st.root) };
     }
     // The energy in the other two units, and the transition dipole where the
@@ -586,17 +595,19 @@ pub fn uvvis_spectrum_window(ctx: &egui::Context, state: &mut UvVisState) {
     let result = result.as_ref().expect("checked just above");
     let mut open = *spectrum_window_open;
     egui::Window::new("UV-Vis Absorption Spectrum")
+        .frame(crate::ui_style::window_frame(ctx))
         .open(&mut open)
         .resizable(true)
         .default_size([560.0, 360.0])
         .show(ctx, |ui| {
-            ui.horizontal(|ui| {
+            crate::ui_style::modern(ui);
+            ui.horizontal_wrapped(|ui| {
                 ui.label("Line shape");
                 for kind in BroadeningKind::ALL {
                     ui.selectable_value(broadening, kind, kind.label());
                 }
             });
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.label("Axis");
                 ui.selectable_value(unit, SpectrumUnit::Nanometres, "nm");
                 ui.selectable_value(unit, SpectrumUnit::ElectronVolts, "eV");
@@ -605,9 +616,8 @@ pub fn uvvis_spectrum_window(ctx: &egui::Context, state: &mut UvVisState) {
                 // at the exact predicted positions.
                 let sticks = broadening.is_sticks();
                 let chosen = *unit;
-                // Each axis keeps its own width: 20 nm and 0.3 eV are both
-                // sensible, and carrying one over as the other would either
-                // flatten the spectrum or reduce it to spikes.
+                // Each axis keeps its own width, so changing units preserves
+                // the user's settings in both nm and eV.
                 let (range, speed) = match chosen {
                     SpectrumUnit::Nanometres => (0.5..=200.0, 0.5),
                     SpectrumUnit::ElectronVolts => (0.005..=2.0, 0.01),
@@ -632,7 +642,7 @@ pub fn uvvis_spectrum_window(ctx: &egui::Context, state: &mut UvVisState) {
             let states = result.states_with_intensity();
             let (x_min, x_max) = axis_range(&peaks, chosen);
 
-            if ui.button("Export .dat\u{2026}").clicked() {
+            if ui.button("Export .dat\u{2026}").clicked_once() {
                 export_dialog(*broadening, chosen, current_width, &peaks, x_min, x_max);
             }
 
@@ -676,7 +686,10 @@ fn hover_label(st: &ExcitedState) -> String {
 pub fn axis_range(peaks: &[(f64, f64)], unit: SpectrumUnit) -> (f64, f64) {
     let margin = unit.axis_margin();
     let lo = peaks.iter().map(|&(x, _)| x).fold(f64::INFINITY, f64::min);
-    let hi = peaks.iter().map(|&(x, _)| x).fold(f64::NEG_INFINITY, f64::max);
+    let hi = peaks
+        .iter()
+        .map(|&(x, _)| x)
+        .fold(f64::NEG_INFINITY, f64::max);
     if !lo.is_finite() || !hi.is_finite() {
         return (0.0, margin);
     }
@@ -792,11 +805,17 @@ mod tests {
     fn behemoths_orbital_names_do_not_widen_the_printed_line() {
         let behemoth = behemoth_parsed();
         let excitation = &behemoth.states[0].excitations[0];
-        assert!(excitation.from_label.is_some(), "Behemoth names its orbitals");
+        assert!(
+            excitation.from_label.is_some(),
+            "Behemoth names its orbitals"
+        );
         // The line uses the bare pair, as ORCA's does.
         let line = &excitation_lines(&behemoth.states[0])[0];
         assert!(line.contains(&excitation.label()), "{line}");
-        assert!(!line.contains("HOMO"), "the name belongs in the tooltip: {line}");
+        assert!(
+            !line.contains("HOMO"),
+            "the name belongs in the tooltip: {line}"
+        );
         // And the tooltip has it.
         assert!(excitation.described().contains("HOMO"));
     }
@@ -841,7 +860,10 @@ mod tests {
     #[test]
     fn an_empty_peak_list_still_gives_a_usable_range() {
         let (lo, hi) = axis_range(&[], SpectrumUnit::Nanometres);
-        assert!(hi > lo, "a degenerate axis would divide by zero when scaling");
+        assert!(
+            hi > lo,
+            "a degenerate axis would divide by zero when scaling"
+        );
     }
 
     /// The hover text is what identifies a band, so it must carry the root,
@@ -942,7 +964,11 @@ mod tests {
         // Root 10 mixes five contributions with three- and two-digit indices.
         let lines = excitation_lines(&result.states[9]);
         assert_eq!(lines.len(), 5);
-        assert!(lines[0].trim_start().starts_with("b87 --> b92"), "{:?}", lines[0]);
+        assert!(
+            lines[0].trim_start().starts_with("b87 --> b92"),
+            "{:?}",
+            lines[0]
+        );
         assert!(lines[0].contains("53.8 %"), "{:?}", lines[0]);
         let percent_column = |l: &String| l.rfind('%').unwrap();
         let first = percent_column(&lines[0]);
@@ -963,7 +989,10 @@ mod tests {
     fn a_restricted_state_shows_bare_orbital_indices() {
         let text = "TD-DFT/TDA EXCITED STATES\n\nSTATE  1:  E= 0.1 au 2.721 eV\n    45 ->  47  :  0.9\n\nend\n";
         let r = crate::uvvis::orca::parse_orca_tddft(text, Path::new("t.out")).unwrap();
-        assert_eq!(excitation_lines(&r.states[0])[0].trim(), "45 --> 47    90.0 %");
+        assert_eq!(
+            excitation_lines(&r.states[0])[0].trim(),
+            "45 --> 47    90.0 %"
+        );
     }
 
     /// Peak index must address the same state the plot drew, or every hover

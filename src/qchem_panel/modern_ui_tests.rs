@@ -55,14 +55,17 @@ impl Fixture {
             },
             |ui| {
                 let ctx = ui.ctx().clone();
-                qc_panel(
-                    &ctx,
-                    ui,
-                    &mut self.panel,
-                    &mut self.task,
-                    &mut self.opt,
-                    &self.mol,
-                );
+                if self.panel.open {
+                    qc_panel(
+                        &ctx,
+                        ui,
+                        &mut self.panel,
+                        &mut self.task,
+                        &mut self.opt,
+                        &self.mol,
+                    );
+                }
+                input_editor_window(&ctx, &mut self.panel, &mut self.task, &self.opt, &self.mol);
             },
         );
         output.textures_delta.clear();
@@ -234,6 +237,8 @@ fn code_chooser_and_action_stay_visible_with_long_input_at_laptop_height() {
                 "Quantum chemistry code",
                 "ORCA",
                 "Configure…",
+                "CPU cores",
+                "Memory (MB)",
                 "Start optimization",
             ] {
                 let rect = label_rect(&output, label)
@@ -306,4 +311,74 @@ fn resources_remain_within_the_four_core_limit_in_both_layouts() {
     fixture.panel.config.nproc = 64;
     fixture.frame(vec![], 720.0);
     assert_eq!(fixture.panel.config.nproc, 4);
+}
+
+#[test]
+fn floating_input_editor_keeps_the_draft_after_close_and_syncs_current_settings() {
+    let mut fixture = Fixture::new();
+    fixture.click("Edit input…");
+    assert!(fixture.panel.advanced);
+    fixture.frame(vec![egui::Event::Text("# manual change\n".into())], 720.0);
+    assert!(fixture.panel.advanced_text.contains("# manual change"));
+    let draft = fixture.panel.advanced_text.clone();
+    fixture.click("Close editor");
+    fixture.click("Edit input…");
+    assert_eq!(fixture.panel.advanced_text, draft);
+    fixture.panel.config.basis = "def2-TZVP".into();
+    fixture.panel.config.nproc = 3;
+    fixture.mol.pos[0] = Vec3::new(1.0, 2.0, 3.0);
+    fixture.click("Sync from settings");
+    assert_eq!(
+        fixture.panel.advanced_text,
+        fixture
+            .panel
+            .generated_input(&fixture.mol.atoms, &[1.0, 2.0, 3.0])
+    );
+    assert!(!fixture.panel.advanced_text.contains("# manual change"));
+    assert!(fixture.panel.advanced);
+}
+
+#[test]
+fn input_editor_works_with_setup_closed_and_does_not_launch_an_unavailable_code() {
+    let mut fixture = Fixture::new();
+    fixture.click("Edit input…");
+    fixture.panel.open = false;
+    fixture.frame(vec![], 600.0);
+    let output = fixture.frame(vec![], 600.0);
+    for label in [
+        "Save input…",
+        "Sync from settings",
+        "Run input",
+        "Close editor",
+    ] {
+        let rect = label_rect(&output, label).unwrap_or_else(|| panic!("Missing {label}"));
+        assert!(rect.top() >= 0.0 && rect.bottom() <= 600.0);
+        assert!(rect.left() >= 0.0 && rect.right() <= 1280.0);
+    }
+    fixture.click("Run input");
+    assert!(!fixture.task.is_running());
+    assert!(!fixture.panel.show_warnings);
+    fixture.click("Close editor");
+    assert!(
+        fixture.panel.advanced,
+        "closing keeps the manual input active"
+    );
+}
+
+#[test]
+fn changing_code_requires_explicit_input_sync_without_losing_the_old_draft() {
+    let mut fixture = Fixture::new();
+    fixture.click("Edit input…");
+    let draft = fixture.panel.advanced_text.clone();
+    fixture.panel.set_program(QcProgram::Psi4);
+    assert!(input_editor::program_mismatch(&fixture.ctx, &fixture.panel).is_some());
+    assert_eq!(fixture.panel.advanced_text, draft);
+    fixture.click("Sync from settings");
+    assert!(input_editor::program_mismatch(&fixture.ctx, &fixture.panel).is_none());
+    assert_eq!(
+        fixture.panel.advanced_text,
+        fixture
+            .panel
+            .generated_input(&fixture.mol.atoms, &[0.0, 0.0, 0.0])
+    );
 }

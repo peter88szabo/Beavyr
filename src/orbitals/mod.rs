@@ -163,7 +163,7 @@ impl Default for OrbitalState {
             spin: Spin::Alpha,
             selected: None,
             density: None,
-            isovalue: 0.10,
+            isovalue: Quantity::Orbital.default_isovalue(),
             resolution: DEFAULT_RESOLUTION,
             style: SurfaceStyle::Solid,
             mesh_density: DEFAULT_MESH_DENSITY,

@@ -33,9 +33,13 @@ mod trajectory;
 mod structure_history;
 mod ts_generation;
 mod ui;
+mod ui_background_menu;
 mod ui_icons;
 mod ui_layout;
 mod ui_measurements;
+mod ui_structure;
+mod ui_style;
+mod ui_view_panels;
 mod uvvis;
 mod vibronic;
 

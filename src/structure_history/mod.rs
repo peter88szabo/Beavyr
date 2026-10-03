@@ -3,6 +3,8 @@
 #[cfg(test)]
 mod tests;
 
+use crate::ui_style::ResponseExt;
+
 use crate::molecule::{composition, Molecule};
 use crate::trajectory::{parse_multi_xyz, TrajectoryState};
 use anyhow::{bail, Context, Result};
@@ -326,42 +328,66 @@ pub fn panel(
     if history.refreshed.elapsed() >= Duration::from_secs(2) {
         history.refresh();
     }
-    ui.label("The last 20 structures, saved across windows and sessions. Newest first.");
-    ui.small("Loading another structure or clearing the display preserves the previous one. Edits and trajectory playback do not add entries. Use Save to history in Molecule Editor to keep an edited version.");
-    status(ui, history);
-    if history.entries.is_empty() {
-        ui.weak("No saved structures yet.");
-    }
     let mut selected = None;
-    for (index, entry) in history.entries.iter().enumerate() {
-        ui.push_id(&entry.path, |ui| {
-            ui.group(|ui| {
-                ui.horizontal_wrapped(|ui| {
-                    if ui.button("Load").clicked() {
-                        selected = Some(entry.clone());
-                    }
-                    ui.strong(format!("{}. {}", index + 1, entry.name));
-                });
-                let comp = composition(&entry.snapshot.atoms);
-                ui.weak(format!("{} atoms · {}", comp.natoms, comp.formula));
-                let age = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_nanos()
-                    .saturating_sub(entry.saved)
-                    / 1_000_000_000;
-                ui.small(if age < 60 {
-                    "Saved just now".into()
-                } else if age < 3600 {
-                    format!("Saved {} min ago", age / 60)
-                } else if age < 86400 {
-                    format!("Saved {} h ago", age / 3600)
-                } else {
-                    format!("Saved {} days ago", age / 86400)
-                });
+    ui.scope(|ui| {
+        crate::ui_style::modern(ui);
+        crate::ui_style::heading(ui, "Your saved structures", "Newest first · shared across windows and sessions");
+        ui.horizontal(|ui| {
+            ui.small(format!("{} of 20 saved", history.entries.len()));
+            ui.menu_button("How history works", |ui| {
+                ui.set_max_width(320.0);
+                ui.label("Loading another structure or clearing the display preserves the previous one.");
+                ui.label("Use Save to history in Molecule Editor to keep an edited version. Edits and trajectory playback do not add entries automatically.");
             });
         });
-    }
+        let filter_id = egui::Id::new("recent_structures_search_v1");
+        let mut filter = ui.ctx().data_mut(|data| data.get_temp::<String>(filter_id).unwrap_or_default());
+        ui.add(egui::TextEdit::singleline(&mut filter)
+            .desired_width(f32::INFINITY).hint_text("Search by name or formula"));
+        ui.ctx().data_mut(|data| data.insert_temp(filter_id, filter.clone()));
+        status(ui, history);
+        let query = filter.trim().to_lowercase();
+        let mut matches = 0;
+        for (index, entry) in history.entries.iter().enumerate() {
+            let comp = composition(&entry.snapshot.atoms);
+            if !entry.name.to_lowercase().contains(&query) && !comp.formula.to_lowercase().contains(&query) {
+                continue;
+            }
+            matches += 1;
+            ui.push_id(&entry.path, |ui| {
+                crate::ui_style::group(ui, "", |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new(format!("{:02}", index + 1)).small().color(crate::ui_style::ACCENT));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.add(crate::ui_style::primary("Load")).clicked_once() {
+                                selected = Some(entry.clone());
+                            }
+                            ui.add(egui::Label::new(egui::RichText::new(&entry.name).strong()).truncate())
+                                .on_hover_text(&entry.name);
+                        });
+                    });
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(egui::RichText::new(&comp.formula).color(crate::ui_style::ACCENT));
+                        ui.small(format!("{} atoms", comp.natoms));
+                        let age = SystemTime::now()
+                            .duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos()
+                            .saturating_sub(entry.saved) / 1_000_000_000;
+                        ui.weak(if age < 60 { "Just now".into() }
+                            else if age < 3600 { format!("{} min ago", age / 60) }
+                            else if age < 86400 { format!("{} h ago", age / 3600) }
+                            else { format!("{} days ago", age / 86400) });
+                    });
+                });
+            });
+        }
+        if history.entries.is_empty() {
+            crate::ui_style::group(ui, "No saved structures yet", |ui| {
+                ui.small("Save a version from Molecule Editor to keep it here.");
+            });
+        } else if matches == 0 {
+            ui.weak("No structures match your search.");
+        }
+    });
     ui.ctx().request_repaint_after(Duration::from_secs(2));
     if let Some(entry) = selected {
         history.restore(entry, mol, traj);

@@ -61,7 +61,7 @@ impl Quantity {
     /// Isovalue to adopt when switching into this mode.
     pub fn default_isovalue(self) -> f32 {
         match self {
-            Quantity::Orbital => 0.10,
+            Quantity::Orbital => 0.07,
             Quantity::Density => 0.05,
             Quantity::SpinDensity => 0.01,
         }

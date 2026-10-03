@@ -162,9 +162,8 @@ impl Default for UvVisState {
             spectrum_window_open: false,
             unit: SpectrumUnit::Nanometres,
             broadening: BroadeningKind::Gaussian,
-            // Conventional starting points for a simulated UV-Vis band: broad
-            // enough that a dense root list reads as bands rather than grass.
-            width_nm: 20.0,
+            // Keep each axis's starting width in its own unit.
+            width_nm: 5.0,
             width_ev: 0.3,
             run_config: excited_state::ExcitedStateConfig::default(),
             // The spectrum engine takes only global hybrids, so the reference
@@ -265,20 +264,20 @@ mod tests {
         assert_eq!(SpectrumUnit::Nanometres.export_resolution(), 0.1);
     }
 
-    /// Switching axes must not carry a width of 20 nm over as 20 eV, which
+    /// Switching axes must not carry a width of 5 nm over as 5 eV, which
     /// would flatten the whole spectrum into one featureless hump.
     #[test]
     fn each_axis_keeps_its_own_width() {
         let mut state = UvVisState::default();
         let width = |s: &UvVisState| s.unit.width_of(s.width_nm, s.width_ev);
-        assert_eq!(width(&state), 20.0);
+        assert_eq!(width(&state), 5.0);
         state.unit = SpectrumUnit::ElectronVolts;
         assert_eq!(width(&state), 0.3);
         *state
             .unit
             .width_of_mut(&mut state.width_nm, &mut state.width_ev) = 0.8;
         state.unit = SpectrumUnit::Nanometres;
-        assert_eq!(width(&state), 20.0, "the nm width is untouched");
+        assert_eq!(width(&state), 5.0, "the nm width is untouched");
         state.unit = SpectrumUnit::ElectronVolts;
         assert_eq!(width(&state), 0.8);
     }

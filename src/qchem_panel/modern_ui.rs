@@ -1,10 +1,16 @@
 //! Modern calculation setup. Presentation state lives in egui; chemistry and
 //! running jobs remain shared with the Classic form in `ui`.
 
+use crate::ui_style::ResponseExt;
+
 use super::*;
-use crate::molecule::{composition, dummy_count};
+use crate::molecule::dummy_count;
 use crate::qchem_interfaces::{method, orca_method, psi4_method, pyscf_method, sparrow_method};
 use std::path::PathBuf;
+
+#[path = "input_editor.rs"]
+mod input_editor;
+pub(crate) use input_editor::show as input_editor_window;
 
 const ACCENT: egui::Color32 = egui::Color32::from_rgb(104, 174, 255);
 const WARNING: egui::Color32 = egui::Color32::from_rgb(230, 170, 90);
@@ -216,10 +222,10 @@ fn header(
             close = ui
                 .small_button("×")
                 .on_hover_text("Close setup; a running calculation continues")
-                .clicked();
+                .clicked_once();
             if ui
                 .small_button(if state.docked { "Float" } else { "Dock" })
-                .clicked()
+                .clicked_once()
             {
                 state.docked = !state.docked;
             }
@@ -250,37 +256,26 @@ fn header(
             state.basis_search.clear();
             state.binary_check = None;
         }
-        if ui.button("Configure…").clicked() {
+        if ui.button("Configure…").clicked_once() {
             state.configure = !state.configure;
         }
     });
     close
 }
 
-fn molecule_card(ui: &mut egui::Ui, panel: &mut QcPanelState, mol: &Molecule, running: bool) {
-    card(ui).show(ui, |ui| {
-        ui.set_min_width((ui.available_width() - 1.0).max(0.0));
-        let comp = composition(&mol.atoms);
-        let formula = if mol.atoms.is_empty() {
-            "No molecule loaded".to_owned()
-        } else {
-            comp.formula.replace(" : ", "")
-        };
-        ui.horizontal(|ui| {
-            ui.label(egui::RichText::new(formula).strong().color(ACCENT));
-            ui.small(format!(
-                "{} atoms",
-                mol.atoms.len().saturating_sub(dummy_count(&mol.atoms))
-            ));
-        });
-        charge_and_multiplicity(ui, panel, running);
-        let dummies = dummy_count(&mol.atoms);
-        if dummies > 0 {
-            ui.small(format!(
-                "{dummies} dummy atom(s) excluded from the calculation"
-            ));
-        }
-    });
+fn electronic_state_row(
+    ui: &mut egui::Ui,
+    panel: &mut QcPanelState,
+    mol: &Molecule,
+    running: bool,
+) {
+    charge_and_multiplicity(ui, panel, running);
+    let dummies = dummy_count(&mol.atoms);
+    if dummies > 0 {
+        ui.small(format!(
+            "{dummies} dummy atom(s) excluded from the calculation"
+        ));
+    }
 }
 
 fn job_choices(ui: &mut egui::Ui, panel: &mut QcPanelState, running: bool) {
@@ -299,7 +294,7 @@ fn job_choices(ui: &mut egui::Ui, panel: &mut QcPanelState, running: bool) {
                         if let Some(reason) = reason {
                             response.clone().on_disabled_hover_text(reason);
                         }
-                        if response.clicked() {
+                        if response.clicked_once() {
                             panel.job = job;
                             ui.close();
                         }
@@ -330,7 +325,7 @@ fn job_choices(ui: &mut egui::Ui, panel: &mut QcPanelState, running: bool) {
                     if let Some(reason) = reason {
                         response.clone().on_disabled_hover_text(reason);
                     }
-                    if response.clicked() {
+                    if response.clicked_once() {
                         panel.job = job;
                     }
                     if index % 2 == 1 {
@@ -412,7 +407,7 @@ fn picker(
                                 ui.push_id(index, |ui| {
                                     if ui
                                         .selectable_label(*value == choice.keyword, choice.label)
-                                        .clicked()
+                                        .clicked_once()
                                     {
                                         *value = choice.keyword.to_owned();
                                         ui.close();
@@ -430,7 +425,7 @@ fn picker(
                             {
                                 if ui
                                     .button(format!("Use custom: {}", search.trim()))
-                                    .clicked()
+                                    .clicked_once()
                                 {
                                     *value = search.trim().to_owned();
                                     ui.close();
@@ -710,46 +705,42 @@ fn configuration(
             if panel.program.needs_binary_path()
                 && ui
                     .add_enabled(!running, egui::Button::new("Check again"))
-                    .clicked()
+                    .clicked_once()
             {
                 state.binary_check = None;
             }
         });
-    if response.header_response.clicked() {
+    if response.header_response.clicked_once() {
         state.configure = !state.configure;
     }
 }
 
-fn optional_settings(ui: &mut egui::Ui, panel: &mut QcPanelState, mol: &Molecule, running: bool) {
-    egui::CollapsingHeader::new(format!(
-        "Resources · {} core(s) · {} MB",
-        panel.config.nproc, panel.config.memory_mb
-    ))
-    .id_salt("modern_qc_resources")
-    .show(ui, |ui| {
-        ui.add_enabled_ui(!running, |ui| {
-            ui.horizontal(|ui| {
-                ui.label("Cores");
-                ui.add(
-                    egui::DragValue::new(&mut panel.config.nproc)
-                        .range(1..=4)
-                        .speed(1.0),
-                );
-                ui.label("Memory (MB)");
-                ui.add(
-                    egui::DragValue::new(&mut panel.config.memory_mb)
-                        .range(256..=1_048_576)
-                        .speed(64.0),
-                );
-            });
+fn resources_row(ui: &mut egui::Ui, panel: &mut QcPanelState, running: bool) {
+    ui.add_enabled_ui(!running, |ui| {
+        ui.horizontal(|ui| {
+            ui.label("CPU cores");
+            ui.add(
+                egui::DragValue::new(&mut panel.config.nproc)
+                    .range(1..=4)
+                    .speed(1.0),
+            );
+            ui.label("Memory (MB)");
+            let memory = ui.add(
+                egui::DragValue::new(&mut panel.config.memory_mb)
+                    .range(256..=1_048_576)
+                    .speed(64.0),
+            );
+            if panel.program == QcProgram::Orca {
+                memory.on_hover_text(format!(
+                    "ORCA receives {} MB per core",
+                    (panel.config.memory_mb / panel.config.nproc).max(256)
+                ));
+            }
         });
-        if panel.program == QcProgram::Orca && panel.config.nproc > 1 {
-            ui.small(format!(
-                "ORCA receives {} MB per core",
-                (panel.config.memory_mb / panel.config.nproc).max(256)
-            ));
-        }
     });
+}
+
+fn optional_settings(ui: &mut egui::Ui, panel: &mut QcPanelState, running: bool) {
     egui::CollapsingHeader::new("Advanced options")
         .id_salt("modern_qc_advanced")
         .show(ui, |ui| {
@@ -764,16 +755,6 @@ fn optional_settings(ui: &mut egui::Ui, panel: &mut QcPanelState, mol: &Molecule
                 );
             }
         });
-    if panel.has_input_file() {
-        egui::CollapsingHeader::new(if panel.advanced {
-            "Input file · custom input active"
-        } else {
-            "Input file"
-        })
-        .id_salt("modern_qc_input")
-        .default_open(panel.advanced)
-        .show(ui, |ui| input_row(ui, panel, mol, running));
-    }
 }
 
 fn start_label(job: JobType) -> &'static str {
@@ -825,6 +806,7 @@ fn footer(
     code: &CodeStatus,
 ) {
     ui.separator();
+    input_editor::entry(ui, panel, mol, task.is_running());
     let summary = if panel.has_input_file() && panel.advanced {
         "Custom input is used exactly as written".to_owned()
     } else {
@@ -842,7 +824,8 @@ fn footer(
     )
     .on_hover_text(summary);
     let running = task.is_running();
-    let reason = blocking_reason(panel, mol, code);
+    let reason = input_editor::program_mismatch(ui.ctx(), panel)
+        .or_else(|| blocking_reason(panel, mol, code));
     let status = if running {
         format!(
             "Running · {}",
@@ -879,7 +862,7 @@ fn footer(
         ui.horizontal(|ui| {
             ui.spinner();
             ui.label("Calculation running");
-            if ui.button("Cancel calculation").clicked() {
+            if ui.button("Cancel calculation").clicked_once() {
                 task.cancel();
             }
         });
@@ -895,7 +878,7 @@ fn footer(
         if let Some(reason) = &reason {
             response.clone().on_disabled_hover_text(reason);
         }
-        if response.clicked() {
+        if response.clicked_once() {
             start_run(panel, task, opt_panel, mol);
         }
     }
@@ -906,7 +889,7 @@ fn footer(
             } else {
                 "View results ↗"
             })
-            .clicked()
+            .clicked_once()
         {
             panel.summary_open = !panel.summary_open;
         }
@@ -936,10 +919,11 @@ fn contents(
                 .small(),
             )
             .on_hover_text(&code.detail);
-        if response.clicked() {
+        if response.clicked_once() {
             state.configure = true;
         }
-        molecule_card(ui, panel, mol, task.is_running());
+        electronic_state_row(ui, panel, mol, task.is_running());
+        resources_row(ui, panel, task.is_running());
         if panel.has_input_file() && panel.advanced {
             ui.label(
                 egui::RichText::new(
@@ -950,7 +934,9 @@ fn contents(
             );
         }
         let remaining = ui.available_rect_before_wrap();
-        let footer_height = if task.last.is_some() { 150.0 } else { 112.0 };
+        let footer_height = 112.0
+            + if panel.has_input_file() { 38.0 } else { 0.0 }
+            + if task.last.is_some() { 38.0 } else { 0.0 };
         let body_bottom = (remaining.bottom() - footer_height - 8.0).max(remaining.top() + 70.0);
         let body_rect =
             egui::Rect::from_min_max(remaining.min, egui::pos2(remaining.right(), body_bottom));
@@ -976,7 +962,7 @@ fn contents(
                 }
                 job_choices(ui, panel, task.is_running());
                 theory_card(ui, &mut state, panel, task.is_running());
-                optional_settings(ui, panel, mol, task.is_running());
+                optional_settings(ui, panel, task.is_running());
                 if panel.show_warnings {
                     if let Ok((_, warnings)) =
                         validate_electronic_state(mol, panel.charge, panel.multiplicity)

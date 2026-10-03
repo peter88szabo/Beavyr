@@ -2,6 +2,7 @@
 
 use std::sync::atomic::Ordering;
 
+use crate::ui_style::ResponseExt;
 use bevy::prelude::Vec3;
 use bevy_egui::egui;
 
@@ -24,9 +25,13 @@ fn endpoint_row(
     is_error: &mut bool,
 ) -> bool {
     let mut displayed = false;
-    ui.group(|ui| {
-        ui.horizontal(|ui| {
-            ui.strong(if slot == "A" { "A — Reactant" } else { "B — Product" });
+    crate::ui_style::group(ui, "", |ui| {
+        ui.horizontal_wrapped(|ui| {
+            ui.strong(if slot == "A" {
+                "A — Reactant"
+            } else {
+                "B — Product"
+            });
             if endpoint.is_some() {
                 ui.colored_label(
                     egui::Color32::from_rgb(75, 190, 120),
@@ -37,7 +42,11 @@ fn endpoint_row(
             }
         });
         if let Some(endpoint) = endpoint.as_ref() {
-            ui.label(format!("{} — {} atoms", endpoint.name, endpoint.atoms.len()));
+            ui.label(format!(
+                "{} — {} atoms",
+                endpoint.name,
+                endpoint.atoms.len()
+            ));
         }
         ui.horizontal_wrapped(|ui| {
             if ui
@@ -46,7 +55,7 @@ fn endpoint_row(
                     egui::Button::new(format!("Use current as {slot}")),
                 )
                 .on_hover_text("Store a copy of the displayed structure, including any drawing or optimization changes. Pause trajectory playback first.")
-                .clicked()
+                .clicked_once()
             {
                 match Endpoint::capture(mol, &format!("{slot} from viewer")) {
                     Ok(captured) => {
@@ -60,7 +69,7 @@ fn endpoint_row(
                     }
                 }
             }
-            if ui.button(format!("Load {slot} XYZ…")).clicked() {
+            if ui.button(format!("Load {slot} XYZ…")).clicked_once() {
                 let dialog = crate::recent_dir::open().add_filter("XYZ structure", &["xyz"]);
                 if let Some(path) = crate::recent_dir::pick_file(dialog) {
                     match Endpoint::from_path(&path) {
@@ -79,7 +88,7 @@ fn endpoint_row(
             if ui
                 .add_enabled(endpoint.is_some(), egui::Button::new(format!("Show {slot}")))
                 .on_hover_text("Display the stored endpoint in the viewer for inspection, editing or optimization.")
-                .clicked()
+                .clicked_once()
             {
                 if let Some(endpoint) = endpoint.as_ref() {
                     displayed = show_frames(
@@ -98,7 +107,7 @@ fn endpoint_row(
 }
 
 fn text_row(ui: &mut egui::Ui, label: &str, text: &mut String, hint: &str) {
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         ui.label(label);
         ui.add(
             egui::TextEdit::singleline(text)
@@ -109,8 +118,6 @@ fn text_row(ui: &mut egui::Ui, label: &str, text: &mut String, hint: &str) {
 }
 
 fn reaction_controls(ui: &mut egui::Ui, parameters: &mut Parameters) {
-    ui.separator();
-    ui.strong("Reaction definition");
     egui::ComboBox::from_id_salt("ts_reaction_kind")
         .selected_text(parameters.reaction.label())
         .show_ui(ui, |ui| {
@@ -201,14 +208,14 @@ fn scalar_row(
     speed: f64,
     range: std::ops::RangeInclusive<f64>,
 ) {
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         ui.label(label);
         ui.add(egui::DragValue::new(value).speed(speed).range(range));
     });
 }
 
 fn count_row(ui: &mut egui::Ui, label: &str, value: &mut usize, min: usize) {
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         ui.label(label);
         ui.add(egui::DragValue::new(value).range(min..=10000));
     });
@@ -277,7 +284,7 @@ fn save(
     message: &mut Option<String>,
     is_error: &mut bool,
 ) {
-    if !ui.button(label).clicked() {
+    if !ui.button(label).clicked_once() {
         return;
     }
     let dialog = crate::recent_dir::save(name).add_filter(extension, &[extension]);
@@ -309,37 +316,54 @@ pub fn panel(
     mol: &mut Molecule,
     traj: &mut TrajectoryState,
 ) -> bool {
+    ui.scope(|ui| {
+        crate::ui_style::modern(ui);
+        crate::ui_style::heading(
+            ui,
+            "Build a transition-state guess",
+            "Capture the reactant and product, then choose a search method.",
+        );
+        panel_body(ui, state, mol, traj)
+    })
+    .inner
+}
+
+fn panel_body(
+    ui: &mut egui::Ui,
+    state: &mut TsGeneration,
+    mol: &mut Molecule,
+    traj: &mut TrajectoryState,
+) -> bool {
     let mut displayed = false;
     let running = state.is_running();
-    ui.label("Generate a TS guess between reactant A and product B using RDA or Poor Man's NEB.");
     if ui
-        .add(
-            egui::Button::new(
-                egui::RichText::new("How To Use")
-                    .strong()
-                    .color(egui::Color32::WHITE),
-            )
-            .fill(egui::Color32::from_rgb(35, 105, 170))
-            .stroke(egui::Stroke::new(
-                1.0,
-                egui::Color32::from_rgb(95, 178, 240),
-            ))
-            .min_size(egui::vec2(140.0, 32.0)),
-        )
+        .button("How To Use")
         .on_hover_text("Guide to endpoints, Reaction definition, and RDA / NEB controls.")
-        .clicked()
+        .clicked_once()
     {
         state.help_open = true;
     }
     ui.small("Draw or optimize A, capture it, then do the same for B. Captures stay stored while you edit the viewer. Use Show A/B to display a stored endpoint; capture again to keep subsequent edits.");
     ui.add_enabled_ui(!running, |ui| {
-        ui.horizontal(|ui| {
-            ui.selectable_value(&mut state.parameters.algorithm, Algorithm::Rda, "RDA");
-            ui.selectable_value(
-                &mut state.parameters.algorithm,
-                Algorithm::PoorMansNeb,
-                "Poor Man's NEB",
-            );
+        crate::ui_style::group(ui, "Search method", |ui| {
+            let width = (ui.available_width() - 8.0) / 2.0;
+            ui.horizontal_wrapped(|ui| {
+                for (algorithm, label) in [
+                    (Algorithm::Rda, "RDA"),
+                    (Algorithm::PoorMansNeb, "Poor Man's NEB"),
+                ] {
+                    if ui
+                        .add_sized(
+                            [width, 36.0],
+                            egui::Button::new(label)
+                                .selected(state.parameters.algorithm == algorithm),
+                        )
+                        .clicked_once()
+                    {
+                        state.parameters.algorithm = algorithm;
+                    }
+                }
+            });
         });
         displayed |= endpoint_row(
             ui,
@@ -364,88 +388,93 @@ pub fn panel(
                 state.reactant.is_some() && state.product.is_some(),
                 egui::Button::new("Swap reactant and product"),
             )
-            .clicked()
+            .clicked_once()
         {
             std::mem::swap(&mut state.reactant, &mut state.product);
         }
-        reaction_controls(ui, &mut state.parameters);
-        algorithm_controls(ui, &mut state.parameters);
-        ui.separator();
-        ui.strong("Energy and gradient calculation");
-        ui.horizontal(|ui| {
-            egui::ComboBox::from_id_salt("ts_program")
-                .selected_text(state.program.label())
-                .show_ui(ui, |ui| {
-                    // Every program that can give an energy and a gradient.
-                    // A force field is refused, with the reason on hover
-                    // rather than by being absent -- a missing entry reads as
-                    // an oversight where a disabled one reads as a decision.
-                    for program in QcProgram::ALL {
-                        match crate::qchem_interfaces::gradient::unsupported_reason(program) {
-                            None => {
-                                ui.selectable_value(
-                                    &mut state.program,
-                                    program,
-                                    program.label(),
-                                );
+        crate::ui_style::group(ui, "Reaction definition", |ui| {
+            reaction_controls(ui, &mut state.parameters);
+        });
+        crate::ui_style::group(ui, "Search controls", |ui| {
+            algorithm_controls(ui, &mut state.parameters);
+        });
+        crate::ui_style::group(ui, "Energy and gradient calculation", |ui| {
+            ui.horizontal_wrapped(|ui| {
+                egui::ComboBox::from_id_salt("ts_program")
+                    .selected_text(state.program.label())
+                    .show_ui(ui, |ui| {
+                        // Every program that can give an energy and a gradient.
+                        // A force field is refused, with the reason on hover
+                        // rather than by being absent -- a missing entry reads as
+                        // an oversight where a disabled one reads as a decision.
+                        for program in QcProgram::ALL {
+                            match crate::qchem_interfaces::gradient::unsupported_reason(program) {
+                                None => {
+                                    ui.selectable_value(
+                                        &mut state.program,
+                                        program,
+                                        program.label(),
+                                    );
+                                }
+                                Some(reason) => {
+                                    ui.add_enabled_ui(false, |ui| {
+                                        let _ = ui.selectable_label(false, program.label());
+                                    })
+                                    .response
+                                    .on_disabled_hover_text(reason);
+                                }
                             }
-                            Some(reason) => {
-                                ui.add_enabled_ui(false, |ui| {
-                                    let _ = ui.selectable_label(false, program.label());
-                                })
-                                .response
-                                .on_disabled_hover_text(reason);
-                            }
+                        }
+                    });
+                ui.label("Charge");
+                ui.add(egui::DragValue::new(&mut state.charge).range(-100..=100));
+                ui.label("Multiplicity");
+                ui.add(egui::DragValue::new(&mut state.multiplicity).range(1..=100));
+            });
+            // A Python backend has no executable to point at; it is reached
+            // through the python3 of the environment Beavyr was launched in, and
+            // whether that can import it is answered here before a run starts.
+            let python_ready = crate::qchem_interfaces::xtb_optimize::python_environment_row(
+                ui,
+                state.program,
+                state.is_running(),
+            );
+            if state.program.needs_binary_path() {
+                let program = state.program;
+                ui.horizontal_wrapped(|ui| {
+                    ui.label("Executable");
+                    let executable = state.path_mut(program);
+                    ui.add(egui::TextEdit::singleline(executable).desired_width(270.0));
+                    if ui.button("Browse…").clicked_once() {
+                        if let Some(path) = crate::recent_dir::pick_file(crate::recent_dir::open())
+                        {
+                            *executable = path.to_string_lossy().into_owned();
                         }
                     }
                 });
-            ui.label("Charge");
-            ui.add(egui::DragValue::new(&mut state.charge).range(-100..=100));
-            ui.label("Multiplicity");
-            ui.add(egui::DragValue::new(&mut state.multiplicity).range(1..=100));
+                crate::qchem_interfaces::config::save_path(program, state.path_for(program));
+            }
+            let _ = python_ready;
+            let atoms = state
+                .reactant
+                .as_ref()
+                .map(|e| e.atoms.as_slice())
+                .unwrap_or(&[]);
+            method_ui::method_config_ui(
+                ui,
+                state.program,
+                &mut state.method,
+                state.multiplicity,
+                atoms,
+                running,
+                "ts_generation",
+            );
         });
-        // A Python backend has no executable to point at; it is reached
-        // through the python3 of the environment Beavyr was launched in, and
-        // whether that can import it is answered here before a run starts.
-        let python_ready = crate::qchem_interfaces::xtb_optimize::python_environment_row(
-            ui,
-            state.program,
-            state.is_running(),
-        );
-        if state.program.needs_binary_path() {
-            let program = state.program;
-            ui.horizontal(|ui| {
-                ui.label("Executable");
-                let executable = state.path_mut(program);
-                ui.add(egui::TextEdit::singleline(executable).desired_width(270.0));
-                if ui.button("Browse…").clicked() {
-                    if let Some(path) = crate::recent_dir::pick_file(crate::recent_dir::open()) {
-                        *executable = path.to_string_lossy().into_owned();
-                    }
-                }
-            });
-            crate::qchem_interfaces::config::save_path(program, state.path_for(program));
-        }
-        let _ = python_ready;
-        let atoms = state
-            .reactant
-            .as_ref()
-            .map(|e| e.atoms.as_slice())
-            .unwrap_or(&[]);
-        method_ui::method_config_ui(
-            ui,
-            state.program,
-            &mut state.method,
-            state.multiplicity,
-            atoms,
-            running,
-            "ts_generation",
-        );
     });
 
     ui.separator();
     if running {
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             ui.spinner();
             let evaluations = state.control.evaluations.load(Ordering::Relaxed);
             let elapsed = state
@@ -463,7 +492,7 @@ pub fn panel(
                         "Cancel"
                     }),
                 )
-                .clicked()
+                .clicked_once()
             {
                 state.control.cancel();
             }
@@ -486,8 +515,11 @@ pub fn panel(
             "Generate RDA TS guess"
         };
         if ui
-            .add_enabled(problem.is_none(), egui::Button::new(label))
-            .clicked()
+            .add_enabled(
+                problem.is_none(),
+                crate::ui_style::primary(label).min_size(egui::vec2(ui.available_width(), 36.0)),
+            )
+            .clicked_once()
         {
             if let Err(error) = state.start() {
                 state.message = Some(error.to_string());
@@ -503,117 +535,118 @@ pub fn panel(
         }
     }
     if let Some(output) = &state.output {
-        ui.separator();
-        ui.strong(format!(
-            "{} result · {}",
-            output.algorithm.label(),
-            output.method
-        ));
-        ui.label(format!("TS guess energy: {:.9} Eh", output.energy_hartree));
-        ui.label(&output.guess.message);
-        ui.small("This is a TS guess. Optimize the saddle point and check its imaginary mode before treating it as a confirmed transition state.");
-        ui.horizontal_wrapped(|ui| {
-            if ui.button("Show TS guess").clicked() {
-                let positions = output
-                    .guess
-                    .q
-                    .as_chunks::<3>()
-                    .0
-                    .iter()
-                    .map(|q| {
-                        Vec3::new(
-                            (q[0] * BOHR_TO_ANGSTROM) as f32,
-                            (q[1] * BOHR_TO_ANGSTROM) as f32,
-                            (q[2] * BOHR_TO_ANGSTROM) as f32,
-                        )
-                    })
-                    .collect();
-                displayed = show_frames(
-                    vec![TrajectoryFrame {
-                        atoms: output.guess.atoms.clone(),
-                        pos: positions,
-                    }],
-                    mol,
-                    traj,
-                );
-            }
-            save(
-                ui,
-                "Save TS guess XYZ…",
-                &format!("{}_ts_guess.xyz", output.algorithm.file_stem()),
-                &output.guess_xyz,
-                "xyz",
-                &mut state.message,
-                &mut state.is_error,
-            );
-        });
-        ui.horizontal_wrapped(|ui| {
-            if ui.button("Show path in Trajectory").clicked() {
-                displayed = show_frames(output.frames.clone(), mol, traj);
-            }
-            save(
-                ui,
-                if output.algorithm == Algorithm::PoorMansNeb {
-                    "Save NEB trajectory XYZ…"
-                } else {
-                    "Save reaction path XYZ…"
-                },
-                &format!("{}_path.xyz", output.algorithm.file_stem()),
-                &output.path_xyz,
-                "xyz",
-                &mut state.message,
-                &mut state.is_error,
-            );
-        });
-        ui.label(format!(
-            "{} XYZ frames, including both endpoints.",
-            output.frames.len()
-        ));
-        ui.horizontal_wrapped(|ui| {
-            if let Some(profile) = &output.profile_dat {
-                if ui.button("Plot NEB energy").clicked() {
-                    state.energy_plot_open = true;
+        crate::ui_style::group(ui, "Generated result", |ui| {
+            ui.strong(format!(
+                "{} result · {}",
+                output.algorithm.label(),
+                output.method
+            ));
+            ui.label(format!("TS guess energy: {:.9} Eh", output.energy_hartree));
+            ui.label(&output.guess.message);
+            ui.small("This is a TS guess. Optimize the saddle point and check its imaginary mode before treating it as a confirmed transition state.");
+            ui.horizontal_wrapped(|ui| {
+                if ui.button("Show TS guess").clicked_once() {
+                    let positions = output
+                        .guess
+                        .q
+                        .as_chunks::<3>()
+                        .0
+                        .iter()
+                        .map(|q| {
+                            Vec3::new(
+                                (q[0] * BOHR_TO_ANGSTROM) as f32,
+                                (q[1] * BOHR_TO_ANGSTROM) as f32,
+                                (q[2] * BOHR_TO_ANGSTROM) as f32,
+                            )
+                        })
+                        .collect();
+                    displayed = show_frames(
+                        vec![TrajectoryFrame {
+                            atoms: output.guess.atoms.clone(),
+                            pos: positions,
+                        }],
+                        mol,
+                        traj,
+                    );
                 }
                 save(
                     ui,
-                    "Save NEB energy profile…",
-                    "poormans_neb_profile.dat",
-                    profile,
-                    "dat",
-                    &mut state.message,
-                    &mut state.is_error,
-                );
-            } else {
-                save(
-                    ui,
-                    "Save RDA search XYZ…",
-                    "rda_search.xyz",
-                    &output.search_xyz,
+                    "Save TS guess XYZ…",
+                    &format!("{}_ts_guess.xyz", output.algorithm.file_stem()),
+                    &output.guess_xyz,
                     "xyz",
                     &mut state.message,
                     &mut state.is_error,
                 );
-            }
-        });
-        egui::CollapsingHeader::new("Search points / relaxed images").show(ui, |ui| {
-            egui::ScrollArea::vertical()
-                .max_height(230.0)
-                .show(ui, |ui| {
-                    egui::Grid::new("ts_result_points")
-                        .striped(true)
-                        .show(ui, |ui| {
-                            ui.strong("Point");
-                            ui.strong("Energy (Eh)");
-                            ui.strong("Steps");
-                            ui.end_row();
-                            for point in &output.guess.points {
-                                ui.label(&point.label).on_hover_text(&point.message);
-                                ui.monospace(format!("{:.8}", point.energy));
-                                ui.label(point.nsteps.to_string());
+            });
+            ui.horizontal_wrapped(|ui| {
+                if ui.button("Show path in Trajectory").clicked_once() {
+                    displayed = show_frames(output.frames.clone(), mol, traj);
+                }
+                save(
+                    ui,
+                    if output.algorithm == Algorithm::PoorMansNeb {
+                        "Save NEB trajectory XYZ…"
+                    } else {
+                        "Save reaction path XYZ…"
+                    },
+                    &format!("{}_path.xyz", output.algorithm.file_stem()),
+                    &output.path_xyz,
+                    "xyz",
+                    &mut state.message,
+                    &mut state.is_error,
+                );
+            });
+            ui.label(format!(
+                "{} XYZ frames, including both endpoints.",
+                output.frames.len()
+            ));
+            ui.horizontal_wrapped(|ui| {
+                if let Some(profile) = &output.profile_dat {
+                    if ui.button("Plot NEB energy").clicked_once() {
+                        state.energy_plot_open = true;
+                    }
+                    save(
+                        ui,
+                        "Save NEB energy profile…",
+                        "poormans_neb_profile.dat",
+                        profile,
+                        "dat",
+                        &mut state.message,
+                        &mut state.is_error,
+                    );
+                } else {
+                    save(
+                        ui,
+                        "Save RDA search XYZ…",
+                        "rda_search.xyz",
+                        &output.search_xyz,
+                        "xyz",
+                        &mut state.message,
+                        &mut state.is_error,
+                    );
+                }
+            });
+            egui::CollapsingHeader::new("Search points / relaxed images").show(ui, |ui| {
+                egui::ScrollArea::vertical()
+                    .max_height(230.0)
+                    .show(ui, |ui| {
+                        egui::Grid::new("ts_result_points")
+                            .striped(true)
+                            .show(ui, |ui| {
+                                ui.strong("Point");
+                                ui.strong("Energy (Eh)");
+                                ui.strong("Steps");
                                 ui.end_row();
-                            }
-                        });
-                });
+                                for point in &output.guess.points {
+                                    ui.label(&point.label).on_hover_text(&point.message);
+                                    ui.monospace(format!("{:.8}", point.energy));
+                                    ui.label(point.nsteps.to_string());
+                                    ui.end_row();
+                                }
+                            });
+                    });
+            });
         });
     }
     displayed

@@ -15,9 +15,10 @@
 //! Nothing here draws chemistry -- it only decides *where* the existing
 //! panels go, so both layouts call exactly the same section bodies.
 
+use crate::ui_icons::{Icon, IconButton};
+use crate::ui_style::ResponseExt;
 use bevy::prelude::*;
 use bevy_egui::egui;
-use crate::ui_icons::{Icon, IconButton};
 
 /// Which section the drawer is showing. One tool per tab -- grouping
 /// several tools behind one icon just recreates the scrolling accordion the
@@ -97,9 +98,9 @@ impl Tab {
     /// more room than the short control lists.
     pub fn default_size(self) -> [f32; 2] {
         match self {
-            Tab::Structure => [420.0, 520.0],
-            Tab::RecentStructures => [420.0, 600.0],
-            Tab::Representation => [420.0, 480.0],
+            Tab::Structure => [500.0, 620.0],
+            Tab::RecentStructures => [460.0, 620.0],
+            Tab::Representation => [460.0, 520.0],
             Tab::Optimize => [430.0, 420.0],
             Tab::TsGeneration => [580.0, 720.0],
             // Wide and tall: the conformer table earns the room, one row per
@@ -107,15 +108,15 @@ impl Tab {
             Tab::Conformers => [520.0, 620.0],
             // Tall: two run blocks, the settings above them and a mode list
             // that is worth seeing more than a handful of rows of.
-            Tab::Vibrations => [470.0, 660.0],
+            Tab::Vibrations => [540.0, 660.0],
             Tab::UvVis => [560.0, 560.0],
-            Tab::Trajectory => [420.0, 520.0],
-            Tab::Compare => [380.0, 360.0],
-            Tab::Measure => [400.0, 460.0],
-            Tab::Surface => [360.0, 320.0],
-            Tab::Diagnostics => [420.0, 380.0],
-            Tab::Appearance => [420.0, 560.0],
-            Tab::Export => [400.0, 420.0],
+            Tab::Trajectory => [500.0, 620.0],
+            Tab::Compare => [480.0, 540.0],
+            Tab::Measure => [500.0, 640.0],
+            Tab::Surface => [520.0, 660.0],
+            Tab::Diagnostics => [500.0, 520.0],
+            Tab::Appearance => [520.0, 640.0],
+            Tab::Export => [460.0, 520.0],
         }
     }
 
@@ -179,6 +180,51 @@ pub fn section<R>(
     title: &str,
     add_contents: impl FnOnce(&mut egui::Ui) -> R,
 ) -> bool {
+    section_impl(
+        ui,
+        windowed,
+        open,
+        rects,
+        default_size,
+        title,
+        true,
+        add_contents,
+    )
+}
+
+/// A section whose body owns its scrolling, so toolbars stay visible while
+/// an editor uses the remaining window height.
+pub fn editor_section<R>(
+    ui: &mut egui::Ui,
+    windowed: bool,
+    open: &mut bool,
+    rects: &mut Vec<egui::Rect>,
+    default_size: [f32; 2],
+    title: &str,
+    add_contents: impl FnOnce(&mut egui::Ui) -> R,
+) -> bool {
+    section_impl(
+        ui,
+        windowed,
+        open,
+        rects,
+        default_size,
+        title,
+        false,
+        add_contents,
+    )
+}
+
+fn section_impl<R>(
+    ui: &mut egui::Ui,
+    windowed: bool,
+    open: &mut bool,
+    rects: &mut Vec<egui::Rect>,
+    default_size: [f32; 2],
+    title: &str,
+    scroll: bool,
+    add_contents: impl FnOnce(&mut egui::Ui) -> R,
+) -> bool {
     if windowed {
         if !*open {
             return false;
@@ -186,11 +232,14 @@ pub fn section<R>(
         let ctx = ui.ctx().clone();
         let mut still_open = *open;
         let response = egui::Window::new(title)
+            .frame(crate::ui_style::window_frame(&ctx))
             .open(&mut still_open)
             .resizable(true)
-            .vscroll(true)
+            .vscroll(scroll)
             .default_size(default_size)
+            .max_height((ctx.viewport_rect().height() - 64.0).max(240.0))
             .show(&ctx, |ui| {
+                crate::ui_style::modern(ui);
                 add_contents(ui);
             });
         *open = still_open;
@@ -203,7 +252,10 @@ pub fn section<R>(
         response.is_some()
     } else {
         ui.add_space(8.0);
-        let response = ui.collapsing(title, add_contents);
+        let response = ui.collapsing(title, |ui| {
+            crate::ui_style::modern(ui);
+            add_contents(ui)
+        });
         response.openness > 0.0
     }
 }
@@ -225,7 +277,7 @@ pub fn icon_rail(ui: &mut egui::Ui, open: &mut [bool; Tab::COUNT]) {
             let button = IconButton::new(tab.icon())
                 .label(tab.title())
                 .selected(is_open);
-            if ui.add(button).on_hover_text(tab.title()).clicked() {
+            if ui.add(button).on_hover_text(tab.title()).clicked_once() {
                 open[index] = !is_open;
             }
             ui.add_space(3.0);
@@ -236,6 +288,66 @@ pub fn icon_rail(ui: &mut egui::Ui, open: &mut [bool; Tab::COUNT]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn one_click_keeps_a_new_tool_window_open_across_layout_passes() {
+        let ctx = egui::Context::default();
+        let mut open = [false; Tab::COUNT];
+        let mut frame = |events| {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1280.0, 720.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    egui::Panel::left("test_tool_rail")
+                        .exact_size(50.0)
+                        .show(ui, |ui| {
+                            icon_rail(ui, &mut open);
+                        });
+                    if open[Tab::Structure.index()] {
+                        egui::Window::new("New tool window")
+                            .default_pos([200.0, 50.0])
+                            .show(&ctx, |ui| {
+                                ui.label("Tool controls");
+                            });
+                    }
+                },
+            );
+            output.textures_delta.clear();
+            output
+        };
+        frame(vec![]);
+        frame(vec![]);
+        let pos = egui::pos2(25.0, 25.0);
+        frame(vec![
+            egui::Event::PointerMoved(pos),
+            egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ]);
+        frame(vec![egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        frame(vec![]);
+        let output = frame(vec![]);
+        assert!(
+            open[Tab::Structure.index()],
+            "the layout retry must not toggle the window closed"
+        );
+        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::Shape::Text(text) if text.galley.text() == "Tool controls")));
+    }
 
     #[test]
     fn every_tab_has_an_icon_and_a_title() {
@@ -251,7 +363,11 @@ mod tests {
         let mut sorted = titles.clone();
         sorted.sort_unstable();
         sorted.dedup();
-        assert_eq!(sorted.len(), titles.len(), "duplicate tab titles: {titles:?}");
+        assert_eq!(
+            sorted.len(),
+            titles.len(),
+            "duplicate tab titles: {titles:?}"
+        );
     }
 
     #[test]

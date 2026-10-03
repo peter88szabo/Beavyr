@@ -7,13 +7,13 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::color_schemes::{color_scheme_map, ELEMENT_SYMBOLS};
-use crate::diagnostics::{self, DiagnosticSeverity};
+use crate::diagnostics;
 use crate::events::MoleculeChanged;
 use crate::molecule::{parse_xyz_first_frame_angstrom, Molecule};
-use crate::settings::{BondColorMode, ColorScheme, LightingMode, MolSettings, RepresentationMode};
+use crate::settings::{BondColorMode, ColorScheme, LightingMode, MolSettings};
 
 // Export UI + resources
-use crate::export_image::{ExportCounter, ExportFormat, ExportSelectArea, ExportSettings};
+use crate::export_image::{ExportCounter, ExportSelectArea, ExportSettings};
 
 // Measurements UI + resource
 use crate::measurements::Measurements;
@@ -23,6 +23,7 @@ use crate::molecule_builder::builder_ui::{
 use crate::qchem_interfaces::xtb_freq::xtb_frequency_panel;
 use crate::rmsd::ui::rmsd_panel;
 use crate::ui_layout::{icon_rail, section, Tab, UiLayout};
+use crate::ui_style::ResponseExt;
 use crate::qchem_interfaces::xtb_optimize::xtb_optimization_panel;
 use crate::trajectory;
 use crate::ui_measurements;
@@ -275,118 +276,38 @@ pub fn ui_panel(
                 .fixed_pos(pos_pts)
                 .order(egui::Order::Foreground)
                 .show(&ctx, |ui| {
-                    egui::Frame::popup(ui.style()).show(ui, |ui| {
+                    egui::Frame::popup(ui.style()).corner_radius(10).inner_margin(12).show(ui, |ui| {
                         if picked >= 0 {
                             ui.set_min_width(220.0);
                         }
                         ui.vertical(|ui| {
-                            ui.label("Background:");
-                            ui.horizontal(|ui| {
-                                if ui.button("Black").clicked() {
-                                    settings.bg_color = Color::srgb(0.0, 0.0, 0.0);
-                                    settings.lighting_dirty = true;
-                                }
-                                if ui.button("White").clicked() {
-                                    settings.bg_color = Color::srgb(1.0, 1.0, 1.0);
-                                    settings.lighting_dirty = true;
-                                }
-                            });
-                            if ui.button("Center molecule").clicked() {
-                                if let Some(c) = compute_centroid(&mol.pos) {
-                                    cam.target = c;
+                            if let Some(action) = crate::ui_background_menu::contents(
+                                ui, &mut settings, !mol.atoms.is_empty(),
+                            ) {
+                                use crate::ui_background_menu::Action;
+                                let positions = match action {
+                                    Action::Center => {
+                                        if let Some(center) = compute_centroid(&mol.pos) {
+                                            cam.target = center;
+                                        }
+                                        None
+                                    }
+                                    Action::Orient(plane) => Some(crate::orientation::orient(
+                                        &mol.atoms, &mol.pos, plane,
+                                    )),
+                                    Action::Mirror(plane) => Some(crate::orientation::mirror(
+                                        &mol.atoms, &mol.pos, plane,
+                                    )),
+                                    Action::Flip(axis) => Some(crate::orientation::flip(
+                                        &mol.atoms, &mol.pos, axis,
+                                    )),
+                                    Action::Close => None,
+                                };
+                                if let Some(positions) = positions {
+                                    mol.set_pos(positions);
+                                    ev_changed.write(MoleculeChanged::set_pos());
                                 }
                                 open = false;
-                            }
-                            {
-                                let hbond_label = if settings.show_hbonds {
-                                    "H-bonds Off"
-                                } else {
-                                    "H-bonds On"
-                                };
-                                if ui.button(hbond_label).clicked() {
-                                    settings.show_hbonds = !settings.show_hbonds;
-                                    open = false;
-                                }
-                            }
-
-                            ui.separator();
-                            ui.label(egui::RichText::new("Orientation").strong());
-                            {
-                                let expanded_id = egui::Id::new("rc_orient_expanded");
-                                let mut expanded = ctx.data_mut(|d| {
-                                    d.get_persisted::<Option<crate::orientation::MenuItem>>(
-                                        expanded_id,
-                                    )
-                                    .unwrap_or(None)
-                                });
-                                let mut apply: Option<Vec<Vec3>> = None;
-
-                                // Orient: lays the molecule flat by its principal axes. A proper
-                                // rotation -- chirality is unchanged.
-                                menu_row(
-                                    ui,
-                                    "Orient",
-                                    crate::orientation::MenuItem::Orient,
-                                    &mut expanded,
-                                    |ui| {
-                                        for plane in crate::orientation::Plane::ALL {
-                                            if ui.button(plane.label()).clicked() {
-                                                apply = Some(crate::orientation::orient(
-                                                    &mol.atoms, &mol.pos, plane,
-                                                ));
-                                            }
-                                        }
-                                    },
-                                );
-                                // Mirror: a reflection. Turns a chiral molecule into its
-                                // enantiomer, which is the point of offering it separately from
-                                // Orient and Flip.
-                                menu_row(
-                                    ui,
-                                    "Mirror",
-                                    crate::orientation::MenuItem::Mirror,
-                                    &mut expanded,
-                                    |ui| {
-                                        for plane in crate::orientation::Plane::ALL {
-                                            if ui.button(plane.label()).clicked() {
-                                                apply = Some(crate::orientation::mirror(
-                                                    &mol.atoms, &mol.pos, plane,
-                                                ));
-                                            }
-                                        }
-                                    },
-                                );
-                                // Flip: a 180-degree turn about an axis. Proper, like Orient --
-                                // the same molecule seen from the other side, not its mirror
-                                // image.
-                                menu_row(
-                                    ui,
-                                    "Flip",
-                                    crate::orientation::MenuItem::Flip,
-                                    &mut expanded,
-                                    |ui| {
-                                        for axis in crate::orientation::Axis::ALL {
-                                            if ui.button(axis.label()).clicked() {
-                                                apply = Some(crate::orientation::flip(
-                                                    &mol.atoms, &mol.pos, axis,
-                                                ));
-                                            }
-                                        }
-                                    },
-                                );
-
-                                if let Some(new_pos) = apply {
-                                    mol.set_pos(new_pos);
-                                    ev_changed.write(MoleculeChanged::set_pos());
-                                    open = false;
-                                    expanded = None;
-                                }
-                                ctx.data_mut(|d| {
-                                    d.insert_persisted::<Option<crate::orientation::MenuItem>>(
-                                        expanded_id,
-                                        expanded,
-                                    );
-                                });
                             }
 
                             if picked >= 0 {
@@ -417,7 +338,7 @@ pub fn ui_panel(
                                     open = false;
                                 }
                             }
-                            if ui.button("Cancel").clicked() {
+                            if ui.button("Close").clicked() {
                                 open = false;
                             }
                         });
@@ -456,7 +377,7 @@ pub fn ui_panel(
             // 1) Structure (XYZ)
             // ===========================
             ui.add_space(8.0);
-            section(
+            crate::ui_layout::editor_section(
                 ui,
                 windowed,
                 &mut open[Tab::Structure.index()],
@@ -464,253 +385,188 @@ pub fn ui_panel(
                 Tab::Structure.default_size(),
                 "Structure (XYZ)",
                 |ui| {
-                // What happened to files named on the command line. Shown
-                // here because the Structure panel is the one window that is
-                // always present, and a file that failed to load has nowhere
-                // else to say so -- an empty viewport with no explanation is
-                // exactly the silent failure this program avoids elsewhere.
-                if !startup_report.messages.is_empty() {
+                    let show_type_id = egui::Id::new("show_atom_type");
+                    let show_index_id = egui::Id::new("show_atom_index");
+                    let edit_mode_id = egui::Id::new("xyz_edit_mode");
+
+                    // load flags
+                    let (mut show_type, mut show_index, mut edit_mode) = ctx.data_mut(|d| {
+                        (
+                            d.get_persisted::<bool>(show_type_id).unwrap_or(false),
+                            d.get_persisted::<bool>(show_index_id).unwrap_or(false),
+                            d.get_persisted::<bool>(edit_mode_id).unwrap_or(false),
+                        )
+                    });
+
+                    ui.horizontal_wrapped(|ui| {
+                        let sel = ui.visuals().selection.bg_fill;
+                        let dim = ui.visuals().widgets.inactive.bg_fill;
+
+                        if ui.add(crate::ui_style::primary("Open XYZ…")).clicked_once() {
+                            let dlg = crate::recent_dir::open().add_filter("XYZ", &["xyz"]);
+                            if let Some(path) = crate::recent_dir::pick_file(dlg) {
+                                let previous = structure_history.before(&mol, &traj);
+                                match load_xyz_from_path(
+                                    &path,
+                                    &mut xyz_buf,
+                                    &mut traj,
+                                    &mut mol,
+                                    &mut settings,
+                                    &mut cam,
+                                    &mut ev_changed,
+                                ) {
+                                    Ok(_) => {
+                                        xtb_freq_panel_state.selected_mode = None;
+                                        let name =
+                                            path.file_name().unwrap_or_default().to_string_lossy();
+                                        structure_history.replaced(previous, &mol, &traj, &name);
+                                    }
+                                    Err(error) => xyz_buf.warning = Some(error),
+                                }
+                            }
+                        }
+
+                        if ui
+                            .add(
+                                egui::Button::new(if edit_mode {
+                                    "View mode"
+                                } else {
+                                    "Edit as text"
+                                })
+                                .fill(if edit_mode {
+                                    sel
+                                } else {
+                                    dim
+                                }),
+                            )
+                            .on_hover_text("Toggle free-form XYZ editing")
+                            .clicked_once()
+                        {
+                            edit_mode = !edit_mode;
+                            if edit_mode {
+                                // entering edit mode: prefill from live geometry
+                                xyz_buf.text = format_xyz_from_molecule(&mol);
+                            }
+                            ctx.data_mut(|d| d.insert_persisted(edit_mode_id, edit_mode));
+                        }
+
+                        if ui
+                            .button("Copy XYZ")
+                            .on_hover_text(
+                                "Copy the current molecule, including while editing a draft.",
+                            )
+                            .clicked_once()
+                        {
+                            let live = format_xyz_from_molecule(&mol);
+                            ctx.copy_text(live);
+                        }
+
+                        // The structure as it is on screen, to a file. Named after
+                        // the file it came from when there is one, so saving an
+                        // edited copy starts from a sensible name.
+                        if ui
+                            .add_enabled(!mol.atoms.is_empty(), egui::Button::new("Save XYZ"))
+                            .on_disabled_hover_text("There is no structure to save.")
+                            .clicked_once()
+                        {
+                            let suggested = xyz_buf
+                                .current_file
+                                .as_ref()
+                                .and_then(|path| path.file_name())
+                                .map(|name| name.to_string_lossy().to_string())
+                                .unwrap_or_else(|| "structure.xyz".to_string());
+                            let dlg =
+                                crate::recent_dir::save(&suggested).add_filter("XYZ", &["xyz"]);
+                            if let Some(path) = crate::recent_dir::save_file(dlg) {
+                                match std::fs::write(&path, format_xyz_from_molecule(&mol)) {
+                                    Ok(()) => xyz_buf.warning = None,
+                                    Err(error) => {
+                                        xyz_buf.warning = Some(format!(
+                                            "Could not save {}: {error}",
+                                            path.display()
+                                        ))
+                                    }
+                                }
+                            }
+                        }
+                    });
+
+                    ui.horizontal(|ui| {
+                        let summary_width = (ui.available_width() - 72.0).max(60.0);
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(summary_width, 30.0),
+                            egui::Layout::left_to_right(egui::Align::Center),
+                            |ui| {
+                                crate::ui_structure::summary(
+                                    ui,
+                                    &crate::molecule::composition(&mol.atoms),
+                                    xyz_buf.current_file.as_deref(),
+                                );
+                            },
+                        );
+                        ui.menu_button("View", |ui| {
+                            if ui.checkbox(&mut show_type, "Element symbols").changed() {
+                                ctx.data_mut(|d| d.insert_persisted(show_type_id, show_type));
+                            }
+                            if ui.checkbox(&mut show_index, "Atom numbers").changed() {
+                                ctx.data_mut(|d| d.insert_persisted(show_index_id, show_index));
+                            }
+                            ui.checkbox(&mut settings.show_hbonds, "Hydrogen bonds");
+                            if ui.button("Center molecule").clicked_once() {
+                                if let Some(c) = compute_centroid(&mol.pos) {
+                                    cam.target = c;
+                                }
+                                ui.close();
+                            }
+                            if startup_report.messages.iter().any(|(_, error)| !error) {
+                                ui.separator();
+                                for (message, is_error) in &startup_report.messages {
+                                    if !is_error {
+                                        ui.small(message);
+                                    }
+                                }
+                            }
+                        });
+                    });
+
+                    // Failed command-line loads and invalid drafts must remain
+                    // visible; successful file-loading details live in View.
                     for (message, is_error) in &startup_report.messages {
                         if *is_error {
                             ui.colored_label(egui::Color32::from_rgb(220, 110, 60), message);
-                        } else {
-                            ui.weak(message);
                         }
                     }
-                    ui.separator();
-                    ui.add_space(4.0);
-                }
-
-                // What the structure is made of, before anything is done to
-                // it. A formula one hydrogen short of the expected one is the
-                // cheapest possible way to catch a broken geometry, and it
-                // costs nothing to look at.
-                {
-                    let comp = crate::molecule::composition(&mol.atoms);
-                    if comp.natoms == 0 {
-                        ui.weak("No structure loaded.");
-                    } else {
-                        ui.horizontal_wrapped(|ui| {
-                            ui.strong(format!("{} atoms", comp.natoms));
-                            ui.separator();
-                            ui.monospace(&comp.formula);
-                        });
-                        match comp.mass_amu {
-                            Some(m) => {
-                                ui.weak(format!("Molecular weight {m:.3} g/mol"));
-                            }
-                            None => {
-                                // Never a partial weight: the user would read
-                                // it as the real one.
-                                ui.colored_label(
-                                    egui::Color32::from_rgb(200, 120, 40),
-                                    format!(
-                                        "No molecular weight -- unknown element{}: {}",
-                                        if comp.unknown.len() == 1 { "" } else { "s" },
-                                        comp.unknown.join(", ")
-                                    ),
-                                );
-                            }
-                        }
+                    if let Some(warn) = &xyz_buf.warning {
+                        ui.colored_label(
+                            egui::Color32::from_rgb(255, 170, 0),
+                            format!("Warning: {}", warn),
+                        );
                     }
-                    ui.add_space(6.0);
-                }
-
-                let show_type_id = egui::Id::new("show_atom_type");
-                let show_index_id = egui::Id::new("show_atom_index");
-                let edit_mode_id = egui::Id::new("xyz_edit_mode");
-
-                // load flags
-                let (mut show_type, mut show_index, mut edit_mode) = ctx.data_mut(|d| {
-                    (
-                        d.get_persisted::<bool>(show_type_id).unwrap_or(false),
-                        d.get_persisted::<bool>(show_index_id).unwrap_or(false),
-                        d.get_persisted::<bool>(edit_mode_id).unwrap_or(false),
-                    )
-                });
-
-                ui.horizontal(|ui| {
-                    let sel = ui.visuals().selection.bg_fill;
-                    let dim = ui.visuals().widgets.inactive.bg_fill;
-
-                    if ui
-                        .add(
-                            egui::Button::new("Show Atom Type")
-                                .fill(if show_type { sel } else { dim }),
-                        )
-                        .clicked()
-                    {
-                        show_type = !show_type;
-                        ctx.data_mut(|d| d.insert_persisted(show_type_id, show_type));
+                    if !edit_mode {
+                        refresh_live_xyz_cache(&mut xyz_buf, &mol);
                     }
-
-                    if ui
-                        .add(
-                            egui::Button::new("Show Atom Index")
-                                .fill(if show_index { sel } else { dim }),
-                        )
-                        .clicked()
-                    {
-                        show_index = !show_index;
-                        ctx.data_mut(|d| d.insert_persisted(show_index_id, show_index));
-                    }
-
-                });
-
-                ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    let sel = ui.visuals().selection.bg_fill;
-                    let dim = ui.visuals().widgets.inactive.bg_fill;
-
-                    if ui.button("Load XYZ file").clicked() {
-                        let dlg = crate::recent_dir::open().add_filter("XYZ", &["xyz"]);
-                        if let Some(path) = crate::recent_dir::pick_file(dlg) {
-                            let previous = structure_history.before(&mol, &traj);
-                            match load_xyz_from_path(&path, &mut xyz_buf, &mut traj, &mut mol,
-                                &mut settings, &mut cam, &mut ev_changed) {
-                                Ok(_) => {
-                                    xtb_freq_panel_state.selected_mode = None;
-                                    let name = path.file_name().unwrap_or_default().to_string_lossy();
-                                    structure_history.replaced(previous, &mol, &traj, &name);
-                                }
-                                Err(error) => xyz_buf.warning = Some(error),
-                            }
-                        }
-                    }
-
-                    if ui
-                        .add(
-                            egui::Button::new(if edit_mode { "View mode" } else { "Edit as text" })
-                                .fill(if edit_mode { sel } else { dim }),
-                        )
-                        .on_hover_text("Toggle free-form XYZ editing")
-                        .clicked()
-                    {
-                        edit_mode = !edit_mode;
-                        if edit_mode {
-                            // entering edit mode: prefill from live geometry
-                            xyz_buf.text = format_xyz_from_molecule(&mol);
-                        }
-                        ctx.data_mut(|d| d.insert_persisted(edit_mode_id, edit_mode));
-                    }
-
-                    if ui.button("Copy XYZ").clicked() {
-                        let live = format_xyz_from_molecule(&mol);
-                        ctx.copy_text(live);
-                    }
-
-                    // The structure as it is on screen, to a file. Named after
-                    // the file it came from when there is one, so saving an
-                    // edited copy starts from a sensible name.
-                    if ui
-                        .add_enabled(!mol.atoms.is_empty(), egui::Button::new("Save XYZ"))
-                        .on_disabled_hover_text("There is no structure to save.")
-                        .clicked()
-                    {
-                        let suggested = xyz_buf
-                            .current_file
-                            .as_ref()
-                            .and_then(|path| path.file_name())
-                            .map(|name| name.to_string_lossy().to_string())
-                            .unwrap_or_else(|| "structure.xyz".to_string());
-                        let dlg = crate::recent_dir::save(&suggested).add_filter("XYZ", &["xyz"]);
-                        if let Some(path) = crate::recent_dir::save_file(dlg) {
-                            match std::fs::write(&path, format_xyz_from_molecule(&mol)) {
-                                Ok(()) => xyz_buf.warning = None,
-                                Err(error) => {
-                                    xyz_buf.warning =
-                                        Some(format!("Could not save {}: {error}", path.display()))
-                                }
-                            }
-                        }
-                    }
-                });
-                ui.add_space(8.0);
-
-                if let Some(warn) = &xyz_buf.warning {
-                    ui.colored_label(
-                        egui::Color32::from_rgb(255, 170, 0),
-                        format!("Warning: {}", warn),
-                    );
-                }
-                let xyz_file_label = match &xyz_buf.current_file {
-                    Some(path) => format!("File: {}", path.display()),
-                    None => "File: (none)".to_string(),
-                };
-                ui.collapsing("Show Filename", |ui| {
-                    ui.weak(xyz_file_label);
-                });
-
-                if edit_mode {
-                    // ---- EDIT MODE ----
-                    ui.label("Paste or edit XYZ. Input is assumed in Å (Angstrom).");
-                    egui::ScrollArea::vertical()
-                        .max_height(260.0)
-                        .auto_shrink([false; 2])
-                        .show(ui, |ui| {
-                            ui.add(
-                                egui::TextEdit::multiline(&mut xyz_buf.text)
-                                    .desired_width(f32::INFINITY)
-                                    .code_editor()
-                                    .lock_focus(true),
-                            );
-                        });
-
-                    ui.horizontal(|ui| {
-                        if ui.button("Apply (Parse XYZ)").clicked() {
+                    let draft = &mut *xyz_buf;
+                    match crate::ui_structure::coordinates(
+                        ui,
+                        windowed,
+                        edit_mode,
+                        &mut draft.text,
+                        &draft.live_xyz_lines,
+                    ) {
+                        crate::ui_structure::CoordinateAction::Apply => {
                             traj.clear_for_structure();
                             xtb_freq_panel_state.selected_mode = None;
-                            xyz_buf.warning = apply_xyz_text(
-                                &xyz_buf.text,
-                                &mut mol,
-                                &mut cam,
-                                &mut ev_changed,
-                            );
+                            xyz_buf.warning =
+                                apply_xyz_text(&xyz_buf.text, &mut mol, &mut cam, &mut ev_changed);
                         }
-
-                        if ui.button("Clear text").clicked() {
-                            xyz_buf.text.clear();
-                        }
-
-                        if ui.button("Revert from live").clicked() {
+                        crate::ui_structure::CoordinateAction::Clear => xyz_buf.text.clear(),
+                        crate::ui_structure::CoordinateAction::Reset => {
                             xyz_buf.text = format_xyz_from_molecule(&mol);
                         }
-                    });
-
-                    ui.add_space(8.0);
-                    ui.weak("Tip: Use ‘Copy XYZ’ to copy the current live geometry without leaving edit mode.");
-                } else {
-                    // ---- VIEW MODE (LIVE XYZ) ----
-                    refresh_live_xyz_cache(&mut xyz_buf, &mol);
-                    ui.label("Live XYZ (read-only):");
-                    egui::ScrollArea::vertical()
-                        .max_height(260.0)
-                        .auto_shrink([false; 2])
-                        .show(ui, |ui| {
-                            ui.style_mut().override_text_style = Some(egui::TextStyle::Monospace);
-                            for label in &xyz_buf.live_xyz_lines {
-                                ui.monospace(label);
-                            }
-                        });
-
-                    ui.add_space(6.0);
-                    ui.horizontal(|ui| {
-                        if ui.button("Center molecule").clicked() {
-                            if let Some(c) = compute_centroid(&mol.pos) {
-                                cam.target = c;
-                            }
-                        }
-                        let hbond_label = if settings.show_hbonds {
-                            "H-bonds Off"
-                        } else {
-                            "H-bonds On"
-                        };
-                        if ui.button(hbond_label).clicked() {
-                            settings.show_hbonds = !settings.show_hbonds;
-                        }
-                    });
-                }
-            });
+                        crate::ui_structure::CoordinateAction::None => {}
+                    }
+                },
+            );
 
             ui.add_space(8.0);
             ui.separator();
@@ -718,16 +574,28 @@ pub fn ui_panel(
             // ===========================
             // Recent structures, shared between sessions and viewer windows.
             // ===========================
-            section(ui, windowed, &mut open[Tab::RecentStructures.index()], rects,
-                Tab::RecentStructures.default_size(), Tab::RecentStructures.title(), |ui| {
-                    if crate::structure_history::panel(ui, &mut structure_history, &mut mol, &mut traj) {
+            section(
+                ui,
+                windowed,
+                &mut open[Tab::RecentStructures.index()],
+                rects,
+                Tab::RecentStructures.default_size(),
+                Tab::RecentStructures.title(),
+                |ui| {
+                    if crate::structure_history::panel(
+                        ui,
+                        &mut structure_history,
+                        &mut mol,
+                        &mut traj,
+                    ) {
                         xtb_freq_panel_state.selected_mode = None;
                         xyz_buf.current_file = None;
                         xyz_buf.text = format_xyz_from_molecule(&mol);
                         mol.recompute_bonds(settings.bond_thresh_scale, settings.hbond_cutoff);
                         ev_changed.write(MoleculeChanged::parse_xyz(true));
                     }
-                });
+                },
+            );
             // ===========================
             // 1b) Geometry Optimization (xTB)
             // ===========================
@@ -740,14 +608,15 @@ pub fn ui_panel(
                 Tab::Optimize.default_size(),
                 "Geometry Optimization (xTB)",
                 |ui| {
-                xtb_optimization_panel(
-                    ui,
-                    &mut xtb_panel_state,
-                    &mut xtb_task,
-                    &mol,
-                    traj.playing,
-                );
-            });
+                    xtb_optimization_panel(
+                        ui,
+                        &mut xtb_panel_state,
+                        &mut xtb_task,
+                        &mol,
+                        traj.playing,
+                    );
+                },
+            );
             // ===========================
             // TS guess generation (RDA / Poor Man's NEB)
             // ===========================
@@ -761,9 +630,8 @@ pub fn ui_panel(
                 Tab::TsGeneration.title(),
                 |ui| {
                     let previous = structure_history.before(&mol, &traj);
-                    if crate::ts_generation::ui::panel(
-                        ui, &mut ts_generation, &mut mol, &mut traj,
-                    ) {
+                    if crate::ts_generation::ui::panel(ui, &mut ts_generation, &mut mol, &mut traj)
+                    {
                         structure_history.replaced(previous, &mol, &traj, "TS tool structure");
                         // An explicit TS/endpoint display replaces any vibration animation.
                         xtb_freq_panel_state.selected_mode = None;
@@ -826,28 +694,34 @@ pub fn ui_panel(
                 Tab::Vibrations.default_size(),
                 "Frequency Analysis",
                 |ui| {
-                xtb_frequency_panel(
-                    ui,
-                    &mut xtb_freq_panel_state,
-                    &mut xtb_freq_task,
-                    &xtb_panel_state,
-                    &mol,
-                    &mut traj,
-                );
-                // A Hessian loaded from a file arrives with its own geometry.
-                // Putting it on screen is what makes the mode list mean
-                // anything -- the program starts with an empty viewport, so
-                // otherwise there would be nothing for the modes to move.
-                if let Some((atoms, pos)) = xtb_freq_task.pending_geometry.take() {
-                    let previous = structure_history.before(&mol, &traj);
-                    traj.clear_for_structure();
-                    mol.atoms = atoms;
-                    mol.pos = pos;
-                    structure_history.replaced(previous, &mol, &traj, "Imported frequency structure");
-                    mol.recompute_bonds(settings.bond_thresh_scale, settings.hbond_cutoff);
-                    ev_changed.write(MoleculeChanged::parse_xyz(true));
-                }
-            });
+                    xtb_frequency_panel(
+                        ui,
+                        &mut xtb_freq_panel_state,
+                        &mut xtb_freq_task,
+                        &xtb_panel_state,
+                        &mol,
+                        &mut traj,
+                    );
+                    // A Hessian loaded from a file arrives with its own geometry.
+                    // Putting it on screen is what makes the mode list mean
+                    // anything -- the program starts with an empty viewport, so
+                    // otherwise there would be nothing for the modes to move.
+                    if let Some((atoms, pos)) = xtb_freq_task.pending_geometry.take() {
+                        let previous = structure_history.before(&mol, &traj);
+                        traj.clear_for_structure();
+                        mol.atoms = atoms;
+                        mol.pos = pos;
+                        structure_history.replaced(
+                            previous,
+                            &mol,
+                            &traj,
+                            "Imported frequency structure",
+                        );
+                        mol.recompute_bonds(settings.bond_thresh_scale, settings.hbond_cutoff);
+                        ev_changed.write(MoleculeChanged::parse_xyz(true));
+                    }
+                },
+            );
             // ===========================
             // 1c-bis) UV-Vis / TD-DFT
             // ===========================
@@ -865,9 +739,7 @@ pub fn ui_panel(
                     let behemoth_path = xtb_panel_state
                         .paths
                         .iter()
-                        .find(|(p, _)| {
-                            *p == crate::qchem_interfaces::program::QcProgram::Behemoth
-                        })
+                        .find(|(p, _)| *p == crate::qchem_interfaces::program::QcProgram::Behemoth)
                         .map(|(_, path)| path.clone())
                         .unwrap_or_default();
                     uvvis_panel(
@@ -892,157 +764,177 @@ pub fn ui_panel(
                 Tab::Trajectory.default_size(),
                 "Trajectory",
                 |ui| {
-                if ui.button("Load trajectory XYZ").clicked() {
-                    let dlg = crate::recent_dir::open().add_filter("XYZ", &["xyz"]);
-                    if let Some(path) = crate::recent_dir::pick_file(dlg) {
-                        traj.last_dir = path.parent().map(|p| p.to_path_buf());
-                        traj.current_file = Some(path.clone());
-                        xyz_buf.warning = None;
-                        if let Ok(text) = fs::read_to_string(&path) {
-                            match trajectory::parse_multi_xyz(&text) {
-                                Ok(frames) => {
-                                    let previous = structure_history.before(&mol, &traj);
-                                    traj.frames = frames;
+                    crate::ui_style::heading(
+                        ui,
+                        "Explore a trajectory",
+                        "Browse frames, play motion and compare overlays.",
+                    );
+                    crate::ui_style::group(ui, "Trajectory file", |ui| {
+                        if ui
+                            .add(crate::ui_style::primary("Open trajectory XYZ…"))
+                            .clicked_once()
+                        {
+                            let dlg = crate::recent_dir::open().add_filter("XYZ", &["xyz"]);
+                            if let Some(path) = crate::recent_dir::pick_file(dlg) {
+                                traj.last_dir = path.parent().map(|p| p.to_path_buf());
+                                traj.current_file = Some(path.clone());
+                                xyz_buf.warning = None;
+                                if let Ok(text) = fs::read_to_string(&path) {
+                                    match trajectory::parse_multi_xyz(&text) {
+                                        Ok(frames) => {
+                                            let previous = structure_history.before(&mol, &traj);
+                                            traj.frames = frames;
+                                            traj.current_frame = 0;
+                                            traj.playing = false;
+                                            traj.accum = 0.0;
+                                            traj.last_applied = None;
+                                            traj.overlay_dirty = true;
+                                            trajectory::apply_current_frame(
+                                                &mut traj,
+                                                &mut mol,
+                                                &mut settings,
+                                                &mut ev_changed,
+                                                true,
+                                                Some(&mut cam),
+                                            );
+                                            let name = path
+                                                .file_name()
+                                                .unwrap_or_default()
+                                                .to_string_lossy();
+                                            structure_history
+                                                .replaced(previous, &mol, &traj, &name);
+                                            xtb_freq_panel_state.selected_mode = None;
+                                            // `apply_current_frame` only reports a
+                                            // coordinate update — it runs for every
+                                            // playback frame too.  Loading a file
+                                            // replaces the structure, so say so, or
+                                            // stale measurements carry over.
+                                            // `false`: the call above already centred
+                                            // the camera.
+                                            ev_changed.write(MoleculeChanged::parse_xyz(false));
+                                        }
+                                        Err(_) => {}
+                                    }
+                                }
+                            }
+                        }
+
+                        let traj_file_label = match &traj.current_file {
+                            Some(path) => format!("File: {}", path.display()),
+                            None => "File: (none)".to_string(),
+                        };
+                        ui.collapsing("File location", |ui| {
+                            ui.weak(traj_file_label);
+                        });
+                    });
+
+                    if traj.frames.is_empty() {
+                        ui.weak("No trajectory loaded.");
+                    } else {
+                        let total = traj.frames.len();
+                        crate::ui_style::group(ui, "Playback", |ui| {
+                            ui.label(format!("Frame {}/{}", traj.current_frame + 1, total));
+
+                            let mut frame_display = (traj.current_frame + 1) as i32;
+                            if ui
+                                .add(
+                                    egui::Slider::new(&mut frame_display, 1..=total as i32)
+                                        .text("Frame"),
+                                )
+                                .changed()
+                            {
+                                traj.current_frame = (frame_display - 1) as usize;
+                                traj.playing = false;
+                                trajectory::apply_current_frame(
+                                    &mut traj,
+                                    &mut mol,
+                                    &mut settings,
+                                    &mut ev_changed,
+                                    false,
+                                    None,
+                                );
+                            }
+
+                            ui.horizontal_wrapped(|ui| {
+                                if ui.button("First").clicked_once() {
                                     traj.current_frame = 0;
                                     traj.playing = false;
-                                    traj.accum = 0.0;
-                                    traj.last_applied = None;
-                                    traj.overlay_dirty = true;
                                     trajectory::apply_current_frame(
                                         &mut traj,
                                         &mut mol,
                                         &mut settings,
                                         &mut ev_changed,
-                                        true,
-                                        Some(&mut cam),
+                                        false,
+                                        None,
                                     );
-                                    let name = path.file_name().unwrap_or_default().to_string_lossy();
-                                    structure_history.replaced(previous, &mol, &traj, &name);
-                                    xtb_freq_panel_state.selected_mode = None;
-                                    // `apply_current_frame` only reports a
-                                    // coordinate update — it runs for every
-                                    // playback frame too.  Loading a file
-                                    // replaces the structure, so say so, or
-                                    // stale measurements carry over.
-                                    // `false`: the call above already centred
-                                    // the camera.
-                                    ev_changed.write(MoleculeChanged::parse_xyz(false));
                                 }
-                                Err(_) => {}
-                            }
-                        }
-                    }
-                }
+                                if ui.button("Play backward").clicked_once() {
+                                    traj.direction = -1;
+                                    traj.playing = true;
+                                }
+                                if ui.button("Pause").clicked_once() {
+                                    traj.playing = false;
+                                }
+                                if ui.add(crate::ui_style::primary("Play")).clicked_once() {
+                                    traj.direction = 1;
+                                    traj.playing = true;
+                                }
+                                if ui.button("Last").clicked_once() {
+                                    traj.current_frame = total - 1;
+                                    traj.playing = false;
+                                    trajectory::apply_current_frame(
+                                        &mut traj,
+                                        &mut mol,
+                                        &mut settings,
+                                        &mut ev_changed,
+                                        false,
+                                        None,
+                                    );
+                                }
+                            });
 
-                let traj_file_label = match &traj.current_file {
-                    Some(path) => format!("File: {}", path.display()),
-                    None => "File: (none)".to_string(),
-                };
-                ui.collapsing("Show Filename", |ui| {
-                    ui.weak(traj_file_label);
-                });
+                            ui.horizontal_wrapped(|ui| {
+                                if ui.button("Previous").clicked_once() {
+                                    if traj.current_frame > 0 {
+                                        traj.current_frame -= 1;
+                                        traj.playing = false;
+                                        trajectory::apply_current_frame(
+                                            &mut traj,
+                                            &mut mol,
+                                            &mut settings,
+                                            &mut ev_changed,
+                                            false,
+                                            None,
+                                        );
+                                    }
+                                }
+                                if ui.button("Next").clicked_once() {
+                                    if traj.current_frame + 1 < total {
+                                        traj.current_frame += 1;
+                                        traj.playing = false;
+                                        trajectory::apply_current_frame(
+                                            &mut traj,
+                                            &mut mol,
+                                            &mut settings,
+                                            &mut ev_changed,
+                                            false,
+                                            None,
+                                        );
+                                    }
+                                }
+                            });
 
-                if traj.frames.is_empty() {
-                    ui.weak("No trajectory loaded.");
-                } else {
-                    let total = traj.frames.len();
-                    ui.label(format!("Frame {}/{}", traj.current_frame + 1, total));
-
-                    let mut frame_display = (traj.current_frame + 1) as i32;
-                    if ui
-                        .add(egui::Slider::new(&mut frame_display, 1..=total as i32).text("Frame"))
-                        .changed()
-                    {
-                        traj.current_frame = (frame_display - 1) as usize;
-                        traj.playing = false;
-                        trajectory::apply_current_frame(
-                            &mut traj,
-                            &mut mol,
-                            &mut settings,
-                            &mut ev_changed,
-                            false,
-                            None,
-                        );
-                    }
-
-                    ui.horizontal(|ui| {
-                        if ui.button("|◀").clicked() {
-                            traj.current_frame = 0;
-                            traj.playing = false;
-                            trajectory::apply_current_frame(
-                                &mut traj,
-                                &mut mol,
-                                &mut settings,
-                                &mut ev_changed,
-                                false,
-                                None,
-                            );
-                        }
-                        if ui.button("Play ◀").clicked() {
-                            traj.direction = -1;
-                            traj.playing = true;
-                        }
-                        if ui.button("Pause").clicked() {
-                            traj.playing = false;
-                        }
-                        if ui.button("Play ▶").clicked() {
-                            traj.direction = 1;
-                            traj.playing = true;
-                        }
-                        if ui.button("▶|").clicked() {
-                            traj.current_frame = total - 1;
-                            traj.playing = false;
-                            trajectory::apply_current_frame(
-                                &mut traj,
-                                &mut mol,
-                                &mut settings,
-                                &mut ev_changed,
-                                false,
-                                None,
-                            );
-                        }
-                    });
-
-                    ui.horizontal(|ui| {
-                        if ui.button("Step ◀").clicked() {
-                            if traj.current_frame > 0 {
-                                traj.current_frame -= 1;
-                                traj.playing = false;
-                                trajectory::apply_current_frame(
-                                    &mut traj,
-                                    &mut mol,
-                                    &mut settings,
-                                    &mut ev_changed,
-                                    false,
-                                    None,
+                            ui.horizontal_wrapped(|ui| {
+                                ui.label("Speed (fps)");
+                                ui.add(
+                                    egui::Slider::new(&mut traj.fps, 1.0..=100.0).show_value(true),
                                 );
-                            }
-                        }
-                        if ui.button("Step ▶").clicked() {
-                            if traj.current_frame + 1 < total {
-                                traj.current_frame += 1;
-                                traj.playing = false;
-                                trajectory::apply_current_frame(
-                                    &mut traj,
-                                    &mut mol,
-                                    &mut settings,
-                                    &mut ev_changed,
-                                    false,
-                                    None,
-                                );
-                            }
-                        }
-                    });
+                            });
 
-                    ui.horizontal(|ui| {
-                        ui.label("Speed (fps)");
-                        ui.add(egui::Slider::new(&mut traj.fps, 1.0..=100.0).show_value(true));
-                    });
-
-                    ui.horizontal(|ui| {
-                        let sel = ui.visuals().selection.bg_fill;
-                        let dim = ui.visuals().widgets.inactive.bg_fill;
-                        if ui
+                            ui.horizontal_wrapped(|ui| {
+                                let sel = ui.visuals().selection.bg_fill;
+                                let dim = ui.visuals().widgets.inactive.bg_fill;
+                                if ui
                             .add(
                                 egui::Button::new("Fixed bonds")
                                     .fill(if traj.fixed_bonds { sel } else { dim }),
@@ -1052,7 +944,7 @@ pub fn ui_panel(
                                  perceiving it per frame. Off by default -- a reactive \
                                  trajectory needs bonds that follow the reaction.",
                             )
-                            .clicked()
+                            .clicked_once()
                         {
                             traj.fixed_bonds = !traj.fixed_bonds;
                             traj.last_applied = None;
@@ -1060,109 +952,124 @@ pub fn ui_panel(
                                 traj.overlay_dirty = true;
                             }
                         }
-                    });
+                            });
 
-                    ui.horizontal(|ui| {
-                        let sel = ui.visuals().selection.bg_fill;
-                        let dim = ui.visuals().widgets.inactive.bg_fill;
+                            ui.horizontal_wrapped(|ui| {
+                                let sel = ui.visuals().selection.bg_fill;
+                                let dim = ui.visuals().widgets.inactive.bg_fill;
 
-                        let is_loop = matches!(traj.mode, trajectory::PlaybackMode::Loop);
-                        let is_once = matches!(traj.mode, trajectory::PlaybackMode::Once);
-                        let is_ping = matches!(traj.mode, trajectory::PlaybackMode::PingPong);
+                                let is_loop = matches!(traj.mode, trajectory::PlaybackMode::Loop);
+                                let is_once = matches!(traj.mode, trajectory::PlaybackMode::Once);
+                                let is_ping =
+                                    matches!(traj.mode, trajectory::PlaybackMode::PingPong);
 
-                        if ui
-                            .add(egui::Button::new("Loop").fill(if is_loop { sel } else { dim }))
-                            .clicked()
-                        {
-                            traj.mode = trajectory::PlaybackMode::Loop;
-                        }
-                        if ui
-                            .add(egui::Button::new("Once").fill(if is_once { sel } else { dim }))
-                            .clicked()
-                        {
-                            traj.mode = trajectory::PlaybackMode::Once;
-                        }
-                        if ui
-                            .add(egui::Button::new("Ping-pong").fill(if is_ping { sel } else { dim }))
-                            .clicked()
-                        {
-                            traj.mode = trajectory::PlaybackMode::PingPong;
-                        }
-                    });
+                                if ui
+                                    .add(egui::Button::new("Loop").fill(if is_loop {
+                                        sel
+                                    } else {
+                                        dim
+                                    }))
+                                    .clicked_once()
+                                {
+                                    traj.mode = trajectory::PlaybackMode::Loop;
+                                }
+                                if ui
+                                    .add(egui::Button::new("Once").fill(if is_once {
+                                        sel
+                                    } else {
+                                        dim
+                                    }))
+                                    .clicked_once()
+                                {
+                                    traj.mode = trajectory::PlaybackMode::Once;
+                                }
+                                if ui
+                                    .add(egui::Button::new("Ping-pong").fill(if is_ping {
+                                        sel
+                                    } else {
+                                        dim
+                                    }))
+                                    .clicked_once()
+                                {
+                                    traj.mode = trajectory::PlaybackMode::PingPong;
+                                }
+                            });
+                        });
+                        crate::ui_style::group(ui, "Frame overlays", |ui| {
+                            ui.horizontal_wrapped(|ui| {
+                                let sel = ui.visuals().selection.bg_fill;
+                                let dim = ui.visuals().widgets.inactive.bg_fill;
+                                ui.add_space(4.0);
+                                if ui
+                                    .add(
+                                        egui::Button::new("Show overlays")
+                                            .fill(if traj.overlay_enabled { sel } else { dim }),
+                                    )
+                                    .clicked_once()
+                                {
+                                    traj.overlay_enabled = !traj.overlay_enabled;
+                                    traj.overlay_dirty = true;
+                                }
+                            });
 
-                    ui.add_space(8.0);
-                    ui.separator();
-                    ui.add_space(8.0);
+                            ui.horizontal_wrapped(|ui| {
+                                ui.label("Full overlay stride");
+                                let mut stride_val = traj.overlay_full_stride as i32;
+                                if ui
+                                    .add(
+                                        egui::Slider::new(&mut stride_val, 0..=500)
+                                            .show_value(true),
+                                    )
+                                    .changed()
+                                {
+                                    traj.overlay_full_stride = stride_val.max(0) as usize;
+                                    traj.overlay_dirty = true;
+                                }
+                            });
 
-                    ui.horizontal(|ui| {
-                        let sel = ui.visuals().selection.bg_fill;
-                        let dim = ui.visuals().widgets.inactive.bg_fill;
-                        ui.add_space(4.0);
-                        if ui
-                            .add(egui::Button::new("Overlay").fill(if traj.overlay_enabled { sel } else { dim }))
-                            .clicked()
-                        {
-                            traj.overlay_enabled = !traj.overlay_enabled;
-                            traj.overlay_dirty = true;
-                        }
-                    });
+                            ui.horizontal_wrapped(|ui| {
+                                ui.label("Ghost overlay stride");
+                                let mut stride_val = traj.overlay_ghost_stride as i32;
+                                if ui
+                                    .add(
+                                        egui::Slider::new(&mut stride_val, 0..=500)
+                                            .show_value(true),
+                                    )
+                                    .changed()
+                                {
+                                    traj.overlay_ghost_stride = stride_val.max(0) as usize;
+                                    traj.overlay_dirty = true;
+                                }
+                            });
 
-                    ui.horizontal(|ui| {
-                        ui.label("Full overlay stride");
-                        let mut stride_val = traj.overlay_full_stride as i32;
-                        if ui
-                            .add(
-                                egui::Slider::new(&mut stride_val, 0..=500)
-                                    .show_value(true),
-                            )
-                            .changed()
-                        {
-                            traj.overlay_full_stride = stride_val.max(0) as usize;
-                            traj.overlay_dirty = true;
-                        }
-                    });
+                            ui.horizontal_wrapped(|ui| {
+                                let sel = ui.visuals().selection.bg_fill;
+                                let dim = ui.visuals().widgets.inactive.bg_fill;
+                                if ui
+                                    .add(
+                                        egui::Button::new("Keep last frame solid")
+                                            .fill(if traj.overlay_full_last { sel } else { dim }),
+                                    )
+                                    .clicked_once()
+                                {
+                                    traj.overlay_full_last = !traj.overlay_full_last;
+                                    traj.overlay_dirty = true;
+                                }
+                            });
 
-                    ui.horizontal(|ui| {
-                        ui.label("Ghost overlay stride");
-                        let mut stride_val = traj.overlay_ghost_stride as i32;
-                        if ui
-                            .add(
-                                egui::Slider::new(&mut stride_val, 0..=500)
-                                    .show_value(true),
-                            )
-                            .changed()
-                        {
-                            traj.overlay_ghost_stride = stride_val.max(0) as usize;
-                            traj.overlay_dirty = true;
-                        }
-                    });
-
-                    ui.horizontal(|ui| {
-                        let sel = ui.visuals().selection.bg_fill;
-                        let dim = ui.visuals().widgets.inactive.bg_fill;
-                        if ui
-                            .add(
-                                egui::Button::new("Full-last")
-                                    .fill(if traj.overlay_full_last { sel } else { dim }),
-                            )
-                            .clicked()
-                        {
-                            traj.overlay_full_last = !traj.overlay_full_last;
-                            traj.overlay_dirty = true;
-                        }
-                    });
-
-                    ui.horizontal(|ui| {
-                        ui.label("Ghost transparency");
-                        if ui
-                            .add(egui::Slider::new(&mut traj.ghost_alpha, 0.05..=0.8))
-                            .changed()
-                        {
-                            traj.overlay_dirty = true;
-                        }
-                    });
-                }
-            });
+                            ui.horizontal_wrapped(|ui| {
+                                ui.label("Ghost transparency");
+                                if ui
+                                    .add(egui::Slider::new(&mut traj.ghost_alpha, 0.05..=0.8))
+                                    .changed()
+                                {
+                                    traj.overlay_dirty = true;
+                                }
+                            });
+                        });
+                    }
+                },
+            );
             // ===========================
             // 1e) Structure Comparison (RMSD / Kabsch)
             // ===========================
@@ -1175,8 +1082,9 @@ pub fn ui_panel(
                 Tab::Compare.default_size(),
                 "Structure Comparison (RMSD)",
                 |ui| {
-                rmsd_panel(ui, &mut rmsd_state, &mut traj, &mut mol);
-            });
+                    rmsd_panel(ui, &mut rmsd_state, &mut traj, &mut mol);
+                },
+            );
             // ===========================
             // 2) Measurements
             // ===========================
@@ -1190,20 +1098,16 @@ pub fn ui_panel(
                 Tab::Measure.default_size(),
                 "Measurements",
                 |ui| {
-                ui_measurements::measurements_panel(
-                    ui,
-                    &mut measurements,
-                    &mol,
-                    &settings,
-                );
-            });
+                    ui_measurements::measurements_panel(ui, &mut measurements, &mol, &settings);
+                },
+            );
 
             // ===========================
             // 2b) Surface tools
             // ===========================
             ui.add_space(8.0);
             ui.separator();
-            section(
+            crate::ui_layout::editor_section(
                 ui,
                 windowed,
                 &mut open[Tab::Surface.index()],
@@ -1211,16 +1115,25 @@ pub fn ui_panel(
                 Tab::Surface.default_size(),
                 "Surface Tools",
                 |ui| {
-                let previous = structure_history.before(&mol, &traj);
-                if crate::orbitals::ui::orbital_panel(
-                    ui, &mut orbital_state, &mut mol, &mut settings, &mut ev_changed,
-                ) {
-                    traj.clear_for_structure();
-                    xtb_freq_panel_state.selected_mode = None;
-                    let name = orbital_state.file_name.clone().unwrap_or_else(|| "Molden structure".into());
-                    structure_history.replaced(previous, &mol, &traj, &name);
-                }
-            });
+                    let previous = structure_history.before(&mol, &traj);
+                    if crate::orbitals::ui::orbital_panel(
+                        ui,
+                        windowed,
+                        &mut orbital_state,
+                        &mut mol,
+                        &mut settings,
+                        &mut ev_changed,
+                    ) {
+                        traj.clear_for_structure();
+                        xtb_freq_panel_state.selected_mode = None;
+                        let name = orbital_state
+                            .file_name
+                            .clone()
+                            .unwrap_or_else(|| "Molden structure".into());
+                        structure_history.replaced(previous, &mol, &traj, &name);
+                    }
+                },
+            );
 
             // ===========================
             // 3) Diagnostics
@@ -1238,43 +1151,13 @@ pub fn ui_panel(
                 Tab::Diagnostics.default_size(),
                 "Diagnostics",
                 |ui| {
-                let report = &diagnostics_cache.report;
-                let warnings = report.warning_count();
-                let info = report.info_count();
-
-                if report.items.is_empty() {
-                    ui.weak("No valence, charge, isolation, or close-contact issues detected.");
-                } else {
-                    ui.horizontal(|ui| {
-                        ui.colored_label(
-                            egui::Color32::from_rgb(255, 170, 80),
-                            format!("Warnings: {}", warnings),
-                        );
-                        ui.weak(format!("Info: {}", info));
-                    });
-                    ui.add_space(4.0);
-                    egui::ScrollArea::vertical()
-                        .max_height(220.0)
-                        .auto_shrink([false; 2])
-                        .show(ui, |ui| {
-                            for item in &report.items {
-                                let color = match item.severity {
-                                    DiagnosticSeverity::Warning => {
-                                        egui::Color32::from_rgb(255, 170, 80)
-                                    }
-                                    DiagnosticSeverity::Info => egui::Color32::LIGHT_BLUE,
-                                };
-                                let prefix = match item.atom {
-                                    Some(idx) => format!("#{} ", idx + 1),
-                                    None => String::new(),
-                                };
-                                ui.colored_label(color, format!("{}{}", prefix, item.message));
-                            }
-                        });
-                    ui.add_space(4.0);
-                    ui.weak("Diagnostics use perceived single-bond connectivity; multiple bonds and formal charges may need chemical review.");
-                }
-            });
+                    crate::ui_view_panels::diagnostics_panel(
+                        ui,
+                        &diagnostics_cache.report,
+                        !mol.atoms.is_empty(),
+                    );
+                },
+            );
             diagnostics_cache.wanted = diagnostics_visible;
 
             // ===========================
@@ -1290,166 +1173,7 @@ pub fn ui_panel(
                 Tab::Representation.default_size(),
                 "Representation",
                 |ui| {
-                // `changed` = the entity set must be rebuilt (mode switch, atom
-                // visibility).  `mesh_changed` = same entities, different mesh
-                // handles, which is dramatically cheaper.
-                let mut changed = false;
-                let mut mesh_changed = false;
-
-                if mol.atoms.len() > 1000 {
-                    ui.weak("Large molecule: heavy mesh representations auto-switch to low-res.");
-                    ui.add_space(4.0);
-                }
-
-                changed |= ui
-                    .radio_value(
-                        &mut settings.representation,
-                        RepresentationMode::BallAndStick,
-                        "Ball & stick (best <2k atoms)",
-                    )
-                    .clicked();
-                changed |= ui
-                    .radio_value(
-                        &mut settings.representation,
-                        RepresentationMode::SpaceFilling,
-                        "Space-filling (CPK)",
-                    )
-                    .clicked();
-                changed |= ui
-                    .radio_value(
-                        &mut settings.representation,
-                        RepresentationMode::SticksRounded,
-                        "Sticks only (rounded joints)",
-                    )
-                    .clicked();
-                changed |= ui
-                    .radio_value(
-                        &mut settings.representation,
-                        RepresentationMode::LowResBallsAndLines,
-                        "Low-res balls + lines",
-                    )
-                    .clicked();
-                changed |= ui
-                    .radio_value(
-                        &mut settings.representation,
-                        RepresentationMode::LinesOnly,
-                        "Lines only",
-                    )
-                    .clicked();
-                changed |= ui
-                    .radio_value(
-                        &mut settings.representation,
-                        RepresentationMode::BackboneTrace,
-                        "Backbone/trace (non-H lines)",
-                    )
-                    .clicked();
-
-                if matches!(settings.representation, RepresentationMode::LowResBallsAndLines) {
-                    ui.add_space(6.0);
-                    if ui
-                        .add(
-                            egui::Slider::new(&mut settings.low_res_atom_resolution, 0..=6)
-                                .text("Low-res atom resolution"),
-                        )
-                        .changed()
-                    {
-                        mesh_changed = true;
-                    }
-                    if ui
-                        .add(
-                            egui::Slider::new(&mut settings.low_res_atom_scale, 0.2..=1.5)
-                                .text("Low-res atom scale"),
-                        )
-                        .changed()
-                    {
-                        mesh_changed = true;
-                    }
-                }
-
-                if matches!(settings.representation, RepresentationMode::SpaceFilling) {
-                    ui.add_space(6.0);
-                    if ui
-                        .add(
-                            egui::Slider::new(&mut settings.cpk_atom_resolution, 0..=10)
-                                .text("CPK atom resolution"),
-                        )
-                        .changed()
-                    {
-                        mesh_changed = true;
-                    }
-                    if ui
-                        .add(
-                            egui::Slider::new(&mut settings.cpk_atom_scale, 0.6..=2.6)
-                                .text("CPK atom scale"),
-                        )
-                        .changed()
-                    {
-                        mesh_changed = true;
-                    }
-                }
-
-                if matches!(settings.representation, RepresentationMode::SticksRounded) {
-                    ui.add_space(6.0);
-                    if ui
-                        .add(
-                            egui::Slider::new(&mut settings.stick_radius, 0.02..=0.40)
-                                .text("Stick thickness"),
-                        )
-                        .changed()
-                    {
-                        mesh_changed = true;
-                    }
-                }
-
-                if matches!(
-                    settings.representation,
-                    RepresentationMode::LowResBallsAndLines
-                        | RepresentationMode::LinesOnly
-                        | RepresentationMode::BackboneTrace
-                ) {
-                    ui.add_space(6.0);
-                    ui.add(
-                        egui::Slider::new(&mut settings.line_bond_thickness, 1.0..=50.0)
-                            .text("Line thickness"),
-                    );
-                }
-
-                if matches!(settings.representation, RepresentationMode::BackboneTrace) {
-                    ui.add_space(4.0);
-                    if ui
-                        .checkbox(&mut settings.trace_show_atoms, "Show trace atoms")
-                        .changed()
-                    {
-                        changed = true;
-                    }
-                    if settings.trace_show_atoms {
-                        if ui
-                            .add(
-                                egui::Slider::new(&mut settings.low_res_atom_resolution, 0..=6)
-                                    .text("Trace atom resolution"),
-                            )
-                            .changed()
-                        {
-                            mesh_changed = true;
-                        }
-                        if ui
-                            .add(
-                                egui::Slider::new(&mut settings.trace_atom_scale, 0.2..=1.5)
-                                    .text("Trace atom scale"),
-                            )
-                            .changed()
-                        {
-                            mesh_changed = true;
-                        }
-                    }
-                }
-
-                if changed {
-                    settings.geometry_dirty = true;
-                }
-                if mesh_changed {
-                    settings.meshes_dirty = true;
-                }
+                    crate::ui_view_panels::representation_panel(ui, &mut settings, mol.atoms.len());
                 },
             );
             ui.add_space(8.0);
@@ -1462,494 +1186,619 @@ pub fn ui_panel(
                 Tab::Appearance.default_size(),
                 "Appearance",
                 |ui| {
+                    ui.add_space(8.0);
 
-                ui.add_space(8.0);
-
-                ui.collapsing("Element Filter", |ui| {
-                    refresh_element_filter_cache(&mut xyz_buf, &mol);
-                    let extras = &xyz_buf.element_filter_extras;
-                    if mol.atoms.is_empty() {
-                        ui.weak("No atoms loaded.");
-                        return;
-                    }
-
-                    let mut changed = false;
-                    ui.horizontal(|ui| {
-                        if ui.button("Show all").clicked() {
-                            for block in [
-                                &ELEMENT_FILTER_S_BLOCK[..],
-                                &ELEMENT_FILTER_D_BLOCK[..],
-                                &ELEMENT_FILTER_P_BLOCK[..],
-                                &ELEMENT_FILTER_F_BLOCK[..],
-                            ] {
-                                for sym in block {
-                                    settings.element_visibility.insert((*sym).to_string(), true);
-                                }
+                    crate::ui_style::heading(
+                        ui,
+                        "Style the molecular view",
+                        "Colors, lighting, sizes and element visibility.",
+                    );
+                    crate::ui_style::collapsible_group(ui, "Colors and materials", true, |ui| {
+                        // Background quick picks + picker
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label("Background:");
+                            if ui.button("Black").clicked_once() {
+                                settings.bg_color = Color::srgb(0.0, 0.0, 0.0);
+                                settings.lighting_dirty = true;
                             }
-                            for sym in extras {
-                                settings.element_visibility.insert(sym.clone(), true);
+                            if ui.button("White").clicked_once() {
+                                settings.bg_color = Color::srgb(1.0, 1.0, 1.0);
+                                settings.lighting_dirty = true;
                             }
-                            changed = true;
-                        }
-                        if ui.button("Hide all").clicked() {
-                            for block in [
-                                &ELEMENT_FILTER_S_BLOCK[..],
-                                &ELEMENT_FILTER_D_BLOCK[..],
-                                &ELEMENT_FILTER_P_BLOCK[..],
-                                &ELEMENT_FILTER_F_BLOCK[..],
-                            ] {
-                                for sym in block {
-                                    settings.element_visibility.insert((*sym).to_string(), false);
-                                }
-                            }
-                            for sym in extras {
-                                settings.element_visibility.insert(sym.clone(), false);
-                            }
-                            changed = true;
-                        }
-                    });
-
-                    ui.add_space(4.0);
-                    ui.spacing_mut().item_spacing = egui::vec2(6.0, 4.0);
-                    egui::ScrollArea::vertical()
-                        .max_height(220.0)
-                        .show(ui, |ui| {
-                            let render_block = |ui: &mut egui::Ui,
-                                                block: &[&str],
-                                                settings: &mut MolSettings,
-                                                changed: &mut bool| {
-                                let cols = 4;
-                                let rows = (block.len() + cols - 1) / cols;
-                                for r in 0..rows {
-                                    ui.horizontal(|ui| {
-                                        for c in 0..cols {
-                                            let idx = r * cols + c;
-                                            if let Some(sym) = block.get(idx) {
-                                                let entry = settings
-                                                    .element_visibility
-                                                    .entry((*sym).to_string())
-                                                    .or_insert(true);
-                                                if ui.checkbox(entry, *sym).changed() {
-                                                    *changed = true;
-                                                }
-                                            } else {
-                                                ui.add_space(52.0);
-                                            }
-                                        }
-                                    });
-                                }
-                            };
-
-                            ui.label("Hydrogen");
-                            let h_block = ["H"];
-                            render_block(ui, &h_block, &mut settings, &mut changed);
-                            ui.separator();
-                            ui.label("P-block");
-                            render_block(ui, &ELEMENT_FILTER_P_BLOCK, &mut settings, &mut changed);
-                            ui.separator();
-                            ui.label("S-block");
-                            render_block(ui, &ELEMENT_FILTER_S_BLOCK, &mut settings, &mut changed);
-                            ui.separator();
-                            ui.label("D-block");
-                            render_block(ui, &ELEMENT_FILTER_D_BLOCK, &mut settings, &mut changed);
-                            ui.separator();
-                            ui.label("F-block");
-                            render_block(ui, &ELEMENT_FILTER_F_BLOCK, &mut settings, &mut changed);
-
-                            if !extras.is_empty() {
-                                ui.separator();
-                                ui.label("Other");
-                                let other: Vec<&str> = extras.iter().map(|s| s.as_str()).collect();
-                                render_block(ui, &other, &mut settings, &mut changed);
+                            ui.label("or pick:");
+                            let mut eg = color_to_egui(settings.bg_color);
+                            if ui.color_edit_button_srgba(&mut eg).changed() {
+                                settings.bg_color = egui_to_color(eg);
+                                settings.lighting_dirty = true;
                             }
                         });
 
-                    if changed {
-                        settings.geometry_dirty = true;
-                    }
-                });
-
-                ui.add_space(8.0);
-
-                ui.collapsing("Atom & Bond Scaling", |ui| {
-                    // Sizes only re-point mesh handles; the cutoff sliders are the
-                    // only ones here that change connectivity.
-                    let mut mesh_changed = false;
-                    let mut bond_topology_changed = false;
-                    let mut hbond_topology_changed = false;
-
-                    mesh_changed |= ui
-                        .add(egui::Slider::new(&mut settings.atom_scale, 0.1..=3.0).text("Atom scale"))
-                        .changed();
-                    mesh_changed |= ui
-                        .add(egui::Slider::new(&mut settings.atom_resolution, 0..=10).text("Atom resolution"))
-                        .changed();
-
-                    ui.add_space(8.0);
-                    ui.separator();
-                    ui.add_space(8.0);
-
-                    mesh_changed |= ui
-                        .add(
-                            egui::Slider::new(&mut settings.bond_radius_pct, 0.05..=1.0)
-                                .text("Bond radius (% of smaller atom)"),
-                        )
-                        .changed();
-
-                    bond_topology_changed |= ui
-                        .add(
-                            egui::Slider::new(&mut settings.bond_thresh_scale, 0.8..=3.0)
-                                .text("Bond cutoff × covalent radii"),
-                        )
-                        .changed();
-
-                    ui.add_space(8.0);
-                    ui.separator();
-                    ui.add_space(8.0);
-
-                    hbond_topology_changed |= ui
-                        .add(
-                            egui::Slider::new(&mut settings.hbond_cutoff, 1.2..=5.0)
-                                .text("Hydrogen bond cutoff in Å"),
-                        )
-                        .changed();
-
-                    // H-bond style
-                    ui.add(
-                        egui::Slider::new(&mut settings.hbond_thickness, 1.0..=80.0)
-                            .text("H-bond thickness"),
-                    );
-                    ui.add(
-                        egui::Slider::new(&mut settings.hbond_gap_scale, 0.2..=5.0)
-                            .text("H-bond dash gap scale"),
-                    );
-                    ui.add(
-                        egui::Slider::new(&mut settings.hbond_line_scale, 0.2..=5.0)
-                            .text("H-bond dash line scale"),
-                    );
-
-                    if bond_topology_changed {
-                        // `rebuild_if_dirty` recomputes connectivity itself; doing it
-                        // here as well meant two full bond passes in the same frame.
-                        settings.geometry_dirty = true;
-                        settings.bond_topology_dirty = true;
-                    } else if hbond_topology_changed {
-                        // H-bonds are drawn straight from `mol.hydrogen_bonds` as
-                        // gizmos, so no entity rebuild is needed — just the data.
-                        mol.recompute_bonds(settings.bond_thresh_scale, settings.hbond_cutoff);
-                    }
-                    if mesh_changed {
-                        settings.meshes_dirty = true;
-                    }
-                });
-
-                ui.add_space(8.0);
-
-                ui.collapsing("Color & Materials", |ui| {
-                    // Background quick picks + picker
-                    ui.horizontal(|ui| {
-                        ui.label("Background:");
-                        if ui.button("Black").clicked() {
-                            settings.bg_color = Color::srgb(0.0, 0.0, 0.0);
-                            settings.lighting_dirty = true;
-                        }
-                        if ui.button("White").clicked() {
-                            settings.bg_color = Color::srgb(1.0, 1.0, 1.0);
-                            settings.lighting_dirty = true;
-                        }
-                        ui.label("or pick:");
-                        let mut eg = color_to_egui(settings.bg_color);
-                        if ui.color_edit_button_srgba(&mut eg).changed() {
-                            settings.bg_color = egui_to_color(eg);
-                            settings.lighting_dirty = true;
-                        }
-                    });
-
-                    ui.add_space(6.0);
-                    ui.label("PBR material (atoms + bonds):");
-                    let mut mat_changed = false;
-                    mat_changed |= ui
-                        .add(egui::Slider::new(&mut settings.metallic, 0.0..=0.5).text("Metallic"))
-                        .changed();
-                    mat_changed |= ui
-                        .add(egui::Slider::new(&mut settings.roughness, 0.005..=1.0).text("Roughness"))
-                        .changed();
-                    mat_changed |= ui
-                        .add(egui::Slider::new(&mut settings.reflectance, 0.0..=1.0).text("Reflectance"))
-                        .changed();
-                    if mat_changed {
-                        settings.materials_dirty = true;
-                    }
-
-                    ui.add_space(6.0);
-                    ui.label("Colors:");
-                    ui.horizontal(|ui| {
-                        ui.label("Scheme:");
-                        egui::ComboBox::from_id_salt("scheme_combo")
-                            .selected_text(format!("{:?}", settings.scheme))
-                            .show_ui(ui, |ui| {
-                                for &sc in &[
-                                    ColorScheme::Custom,
-                                    ColorScheme::CPK,
-                                    ColorScheme::Jmol,
-                                    ColorScheme::VMD,
-                                    ColorScheme::Molden,
-                                    ColorScheme::Molden0,
-                                ] {
-                                    if ui
-                                        .selectable_label(settings.scheme == sc, format!("{:?}", sc))
-                                        .clicked()
-                                    {
-                                        settings.scheme = sc;
-                                        if sc != ColorScheme::Custom {
-                                            settings.element_colors = color_scheme_map(sc);
-                                            settings.custom_scheme_name.clear();
-                                        }
-                                        settings.materials_dirty = true;
-                                    }
-                                }
-
-                                // The user's own schemes, alongside the
-                                // built-ins: a saved scheme is a Custom one
-                                // with a name, so selecting it loads its
-                                // colours and adopts its name.
-                                let saved = crate::custom_schemes::list_saved();
-                                if !saved.is_empty() {
-                                    ui.separator();
-                                    for name in saved {
-                                        let selected = settings.scheme == ColorScheme::Custom
-                                            && settings.custom_scheme_name == name;
-                                        if ui.selectable_label(selected, &name).clicked() {
-                                            if let Some(colors) =
-                                                crate::custom_schemes::load(&name)
-                                            {
-                                                settings.element_colors = colors;
-                                                settings.scheme = ColorScheme::Custom;
-                                                settings.custom_scheme_name = name.clone();
-                                                settings.materials_dirty = true;
-                                            }
-                                        }
-                                    }
-                                }
-                            });
-                    });
-
-                    // Naming and saving. Editing any element colour above
-                    // already switches the scheme to Custom, so this is where
-                    // that edit becomes something the user keeps.
-                    ui.horizontal(|ui| {
-                        ui.label("Name:");
-                        ui.add(
-                            egui::TextEdit::singleline(&mut settings.custom_scheme_name)
-                                .desired_width(140.0)
-                                .hint_text("my scheme"),
-                        );
-                    });
-                    ui.horizontal(|ui| {
-                        let name = settings.custom_scheme_name.trim().to_string();
-                        let can_save = !name.is_empty();
-                        let save_now = ui
-                            .add_enabled(can_save, egui::Button::new("Save Color Scheme"))
-                            .on_disabled_hover_text("Give the scheme a name first.")
-                            .clicked();
-                        let save_default = ui
-                            .add_enabled(can_save, egui::Button::new("Save & Make Default"))
-                            .on_disabled_hover_text("Give the scheme a name first.")
-                            .on_hover_text("Also load this scheme when Beavyr starts.")
-                            .clicked();
-
-                        if save_now || save_default {
-                            match crate::custom_schemes::save(&name, &settings.element_colors) {
-                                Ok(saved_as) => {
-                                    settings.custom_scheme_name = saved_as.clone();
-                                    settings.scheme = ColorScheme::Custom;
-                                    let mut message = format!("Saved \u{201c}{saved_as}\u{201d}.");
-                                    if save_default {
-                                        match crate::custom_schemes::set_default(&saved_as) {
-                                            Ok(()) => message
-                                                .push_str(" It will load when Beavyr starts."),
-                                            Err(err) => {
-                                                message = err;
-                                            }
-                                        }
-                                    }
-                                    settings.scheme_message = Some(message);
-                                }
-                                Err(err) => settings.scheme_message = Some(err),
-                            }
-                        }
-
-                        // Deleting matters because the names are typed: a
-                        // mistyped scheme would otherwise sit in the list for
-                        // good.
-                        let exists = crate::custom_schemes::list_saved().contains(&name);
-                        if ui
-                            .add_enabled(exists, egui::Button::new("Delete"))
-                            .on_disabled_hover_text("No saved scheme by that name.")
-                            .clicked()
-                        {
-                            settings.scheme_message = match crate::custom_schemes::delete(&name) {
-                                Ok(()) => Some(format!("Deleted \u{201c}{name}\u{201d}.")),
-                                Err(err) => Some(err),
-                            };
-                        }
-                    });
-                    if let Some(message) = &settings.scheme_message {
-                        ui.weak(message);
-                    }
-
-                    ui.collapsing("Per-element overrides (active in Custom)", |ui| {
-                        ui.spacing_mut().item_spacing = egui::vec2(6.0, 4.0);
-                        egui::ScrollArea::vertical()
-                            .max_height(240.0)
-                            .show(ui, |ui| {
-                                let per_row = 6;
-                                for chunk in ELEMENT_SYMBOLS.chunks(per_row) {
-                                    ui.horizontal(|ui| {
-                                        for &sym in chunk {
-                                            if let Some(old) = settings.element_colors.get(sym).copied() {
-                                                let key = sym.to_string();
-                                                let mut col = color_to_egui(old);
-                                                ui.allocate_ui_with_layout(
-                                                    egui::vec2(70.0, 0.0),
-                                                    egui::Layout::left_to_right(egui::Align::Center),
-                                                    |ui| {
-                                                        ui.add_sized([22.0, 0.0], egui::Label::new(sym));
-                                                        if ui.color_edit_button_srgba(&mut col).changed() {
-                                                            settings
-                                                                .element_colors
-                                                                .insert(key.clone(), egui_to_color(col));
-                                                            settings.scheme = ColorScheme::Custom;
-                                                            settings.materials_dirty = true;
-                                                        }
-                                                    },
-                                                );
-                                            }
-                                        }
-                                    });
-                                }
-                            });
-                    });
-
-                    ui.add_space(8.0);
-                    ui.separator();
-
-                    // Bond appearance
-                    ui.label("Bond appearance:");
-                    ui.horizontal(|ui| {
-                        let sel = ui.visuals().selection.bg_fill;
-                        let dim = ui.visuals().widgets.inactive.bg_fill;
-
-                        let is_uniform = matches!(settings.bond_color_mode, BondColorMode::Uniform);
-                        let is_split   = matches!(settings.bond_color_mode, BondColorMode::AtomSplit);
-
-                        if ui
-                            .add(egui::Button::new("Uniform bonds").fill(if is_uniform { sel } else { dim }))
-                            .clicked()
-                        {
-                            settings.bond_color_mode = BondColorMode::Uniform;
-                            settings.geometry_dirty = true;
-                        }
-
-                        if ui
-                            .add(egui::Button::new("Atom-split bonds").fill(if is_split { sel } else { dim }))
-                            .clicked()
-                        {
-                            settings.bond_color_mode = BondColorMode::AtomSplit;
-                            settings.geometry_dirty = true;
-                        }
-                    });
-
-                    ui.horizontal(|ui| {
-                        ui.label("Uniform bond color:");
-                        let mut bc = color_to_egui(settings.uniform_bond_color);
-                        if ui.color_edit_button_srgba(&mut bc).changed() {
-                            settings.uniform_bond_color = egui_to_color(bc);
+                        ui.add_space(6.0);
+                        ui.label("PBR material (atoms + bonds):");
+                        let mut mat_changed = false;
+                        mat_changed |= ui
+                            .add(
+                                egui::Slider::new(&mut settings.metallic, 0.0..=0.5)
+                                    .text("Metallic"),
+                            )
+                            .changed();
+                        mat_changed |= ui
+                            .add(
+                                egui::Slider::new(&mut settings.roughness, 0.005..=1.0)
+                                    .text("Roughness"),
+                            )
+                            .changed();
+                        mat_changed |= ui
+                            .add(
+                                egui::Slider::new(&mut settings.reflectance, 0.0..=1.0)
+                                    .text("Reflectance"),
+                            )
+                            .changed();
+                        if mat_changed {
                             settings.materials_dirty = true;
                         }
+
+                        ui.add_space(6.0);
+                        ui.label("Colors:");
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label("Scheme:");
+                            egui::ComboBox::from_id_salt("scheme_combo")
+                                .selected_text(format!("{:?}", settings.scheme))
+                                .show_ui(ui, |ui| {
+                                    for &sc in &[
+                                        ColorScheme::Custom,
+                                        ColorScheme::CPK,
+                                        ColorScheme::Jmol,
+                                        ColorScheme::VMD,
+                                        ColorScheme::Molden,
+                                        ColorScheme::Molden0,
+                                    ] {
+                                        if ui
+                                            .selectable_label(
+                                                settings.scheme == sc,
+                                                format!("{:?}", sc),
+                                            )
+                                            .clicked_once()
+                                        {
+                                            settings.scheme = sc;
+                                            if sc != ColorScheme::Custom {
+                                                settings.element_colors = color_scheme_map(sc);
+                                                settings.custom_scheme_name.clear();
+                                            }
+                                            settings.materials_dirty = true;
+                                        }
+                                    }
+
+                                    // The user's own schemes, alongside the
+                                    // built-ins: a saved scheme is a Custom one
+                                    // with a name, so selecting it loads its
+                                    // colours and adopts its name.
+                                    let saved = crate::custom_schemes::list_saved();
+                                    if !saved.is_empty() {
+                                        ui.separator();
+                                        for name in saved {
+                                            let selected = settings.scheme == ColorScheme::Custom
+                                                && settings.custom_scheme_name == name;
+                                            if ui.selectable_label(selected, &name).clicked_once() {
+                                                if let Some(colors) =
+                                                    crate::custom_schemes::load(&name)
+                                                {
+                                                    settings.element_colors = colors;
+                                                    settings.scheme = ColorScheme::Custom;
+                                                    settings.custom_scheme_name = name.clone();
+                                                    settings.materials_dirty = true;
+                                                }
+                                            }
+                                        }
+                                    }
+                                });
+                        });
+
+                        // Naming and saving. Editing any element colour above
+                        // already switches the scheme to Custom, so this is where
+                        // that edit becomes something the user keeps.
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label("Name:");
+                            ui.add(
+                                egui::TextEdit::singleline(&mut settings.custom_scheme_name)
+                                    .desired_width(140.0)
+                                    .hint_text("my scheme"),
+                            );
+                        });
+                        ui.horizontal_wrapped(|ui| {
+                            let name = settings.custom_scheme_name.trim().to_string();
+                            let can_save = !name.is_empty();
+                            let save_now = ui
+                                .add_enabled(can_save, egui::Button::new("Save scheme"))
+                                .on_disabled_hover_text("Give the scheme a name first.")
+                                .clicked_once();
+                            let save_default = ui
+                                .add_enabled(can_save, egui::Button::new("Save as default"))
+                                .on_disabled_hover_text("Give the scheme a name first.")
+                                .on_hover_text("Also load this scheme when Beavyr starts.")
+                                .clicked_once();
+
+                            if save_now || save_default {
+                                match crate::custom_schemes::save(&name, &settings.element_colors) {
+                                    Ok(saved_as) => {
+                                        settings.custom_scheme_name = saved_as.clone();
+                                        settings.scheme = ColorScheme::Custom;
+                                        let mut message =
+                                            format!("Saved \u{201c}{saved_as}\u{201d}.");
+                                        if save_default {
+                                            match crate::custom_schemes::set_default(&saved_as) {
+                                                Ok(()) => message
+                                                    .push_str(" It will load when Beavyr starts."),
+                                                Err(err) => {
+                                                    message = err;
+                                                }
+                                            }
+                                        }
+                                        settings.scheme_message = Some(message);
+                                    }
+                                    Err(err) => settings.scheme_message = Some(err),
+                                }
+                            }
+
+                            // Deleting matters because the names are typed: a
+                            // mistyped scheme would otherwise sit in the list for
+                            // good.
+                            let exists = crate::custom_schemes::list_saved().contains(&name);
+                            if ui
+                                .add_enabled(exists, egui::Button::new("Delete"))
+                                .on_disabled_hover_text("No saved scheme by that name.")
+                                .clicked_once()
+                            {
+                                settings.scheme_message = match crate::custom_schemes::delete(&name)
+                                {
+                                    Ok(()) => Some(format!("Deleted \u{201c}{name}\u{201d}.")),
+                                    Err(err) => Some(err),
+                                };
+                            }
+                        });
+                        if let Some(message) = &settings.scheme_message {
+                            ui.weak(message);
+                        }
+
+                        ui.collapsing("Per-element overrides (active in Custom)", |ui| {
+                            ui.spacing_mut().item_spacing = egui::vec2(6.0, 4.0);
+                            egui::ScrollArea::vertical()
+                                .max_height(240.0)
+                                .show(ui, |ui| {
+                                    let per_row =
+                                        ((ui.available_width() / 78.0) as usize).clamp(1, 6);
+                                    for chunk in ELEMENT_SYMBOLS.chunks(per_row) {
+                                        ui.horizontal_wrapped(|ui| {
+                                            for &sym in chunk {
+                                                if let Some(old) =
+                                                    settings.element_colors.get(sym).copied()
+                                                {
+                                                    let key = sym.to_string();
+                                                    let mut col = color_to_egui(old);
+                                                    ui.allocate_ui_with_layout(
+                                                        egui::vec2(70.0, 0.0),
+                                                        egui::Layout::left_to_right(
+                                                            egui::Align::Center,
+                                                        ),
+                                                        |ui| {
+                                                            ui.add_sized(
+                                                                [22.0, 0.0],
+                                                                egui::Label::new(sym),
+                                                            );
+                                                            if ui
+                                                                .color_edit_button_srgba(&mut col)
+                                                                .changed()
+                                                            {
+                                                                settings.element_colors.insert(
+                                                                    key.clone(),
+                                                                    egui_to_color(col),
+                                                                );
+                                                                settings.scheme =
+                                                                    ColorScheme::Custom;
+                                                                settings.materials_dirty = true;
+                                                            }
+                                                        },
+                                                    );
+                                                }
+                                            }
+                                        });
+                                    }
+                                });
+                        });
+
+                        ui.add_space(8.0);
+                        ui.separator();
+
+                        // Bond appearance
+                        ui.label("Bond appearance:");
+                        ui.horizontal_wrapped(|ui| {
+                            let sel = ui.visuals().selection.bg_fill;
+                            let dim = ui.visuals().widgets.inactive.bg_fill;
+
+                            let is_uniform =
+                                matches!(settings.bond_color_mode, BondColorMode::Uniform);
+                            let is_split =
+                                matches!(settings.bond_color_mode, BondColorMode::AtomSplit);
+
+                            if ui
+                                .add(egui::Button::new("Uniform bonds").fill(if is_uniform {
+                                    sel
+                                } else {
+                                    dim
+                                }))
+                                .clicked_once()
+                            {
+                                settings.bond_color_mode = BondColorMode::Uniform;
+                                settings.geometry_dirty = true;
+                            }
+
+                            if ui
+                                .add(egui::Button::new("Atom-split bonds").fill(if is_split {
+                                    sel
+                                } else {
+                                    dim
+                                }))
+                                .clicked_once()
+                            {
+                                settings.bond_color_mode = BondColorMode::AtomSplit;
+                                settings.geometry_dirty = true;
+                            }
+                        });
+
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label("Uniform bond color:");
+                            let mut bc = color_to_egui(settings.uniform_bond_color);
+                            if ui.color_edit_button_srgba(&mut bc).changed() {
+                                settings.uniform_bond_color = egui_to_color(bc);
+                                settings.materials_dirty = true;
+                            }
+                        });
+
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label("H-bond color:");
+                            let mut hc = color_to_egui(settings.hbond_color);
+                            if ui.color_edit_button_srgba(&mut hc).changed() {
+                                settings.hbond_color = egui_to_color(hc);
+                            }
+                        });
                     });
 
-                    ui.horizontal(|ui| {
-                        ui.label("H-bond color:");
-                        let mut hc = color_to_egui(settings.hbond_color);
-                        if ui.color_edit_button_srgba(&mut hc).changed() {
-                            settings.hbond_color = egui_to_color(hc);
+                    ui.add_space(8.0);
+
+                    crate::ui_style::collapsible_group(ui, "Atom and bond size", false, |ui| {
+                        // Sizes only re-point mesh handles; the cutoff sliders are the
+                        // only ones here that change connectivity.
+                        let mut mesh_changed = false;
+                        let mut bond_topology_changed = false;
+                        let mut hbond_topology_changed = false;
+
+                        mesh_changed |= ui
+                            .add(
+                                egui::Slider::new(&mut settings.atom_scale, 0.1..=3.0)
+                                    .text("Atom scale"),
+                            )
+                            .changed();
+                        mesh_changed |= ui
+                            .add(
+                                egui::Slider::new(&mut settings.atom_resolution, 0..=10)
+                                    .text("Atom resolution"),
+                            )
+                            .changed();
+
+                        ui.add_space(8.0);
+                        ui.separator();
+                        ui.add_space(8.0);
+
+                        mesh_changed |= ui
+                            .add(
+                                egui::Slider::new(&mut settings.bond_radius_pct, 0.05..=1.0)
+                                    .text("Bond radius (% of smaller atom)"),
+                            )
+                            .changed();
+
+                        bond_topology_changed |= ui
+                            .add(
+                                egui::Slider::new(&mut settings.bond_thresh_scale, 0.8..=3.0)
+                                    .text("Bond cutoff × covalent radii"),
+                            )
+                            .changed();
+
+                        ui.add_space(8.0);
+                        ui.separator();
+                        ui.add_space(8.0);
+
+                        hbond_topology_changed |= ui
+                            .add(
+                                egui::Slider::new(&mut settings.hbond_cutoff, 1.2..=5.0)
+                                    .text("Hydrogen bond cutoff in Å"),
+                            )
+                            .changed();
+
+                        // H-bond style
+                        ui.add(
+                            egui::Slider::new(&mut settings.hbond_thickness, 1.0..=80.0)
+                                .text("H-bond thickness"),
+                        );
+                        ui.add(
+                            egui::Slider::new(&mut settings.hbond_gap_scale, 0.2..=5.0)
+                                .text("H-bond dash gap scale"),
+                        );
+                        ui.add(
+                            egui::Slider::new(&mut settings.hbond_line_scale, 0.2..=5.0)
+                                .text("H-bond dash line scale"),
+                        );
+
+                        if bond_topology_changed {
+                            // `rebuild_if_dirty` recomputes connectivity itself; doing it
+                            // here as well meant two full bond passes in the same frame.
+                            settings.geometry_dirty = true;
+                            settings.bond_topology_dirty = true;
+                        } else if hbond_topology_changed {
+                            // H-bonds are drawn straight from `mol.hydrogen_bonds` as
+                            // gizmos, so no entity rebuild is needed — just the data.
+                            mol.recompute_bonds(settings.bond_thresh_scale, settings.hbond_cutoff);
+                        }
+                        if mesh_changed {
+                            settings.meshes_dirty = true;
                         }
                     });
-                });
 
-                ui.add_space(8.0);
+                    ui.add_space(8.0);
 
-                ui.collapsing("Lighting", |ui| {
-                    let mut changed = false;
+                    crate::ui_style::collapsible_group(ui, "Lighting", false, |ui| {
+                        let mut changed = false;
 
-                    // Ambient
-                    changed |= ui.checkbox(&mut settings.use_ambient, "Ambient (omnidirectional fill)").changed();
-                    ui.horizontal(|ui| {
-                        ui.label("Ambient color");
-                        let mut ac = color_to_egui(settings.ambient_color);
-                        if ui.color_edit_button_srgba(&mut ac).changed() {
-                            settings.ambient_color = egui_to_color(ac);
+                        // Ambient
+                        changed |= ui
+                            .checkbox(&mut settings.use_ambient, "Ambient (omnidirectional fill)")
+                            .changed();
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label("Ambient color");
+                            let mut ac = color_to_egui(settings.ambient_color);
+                            if ui.color_edit_button_srgba(&mut ac).changed() {
+                                settings.ambient_color = egui_to_color(ac);
+                                settings.lighting_dirty = true;
+                            }
+                        });
+                        changed |= ui
+                            .add(
+                                egui::Slider::new(&mut settings.ambient_brightness, 0.0..=3000.0)
+                                    .text("Ambient brightness"),
+                            )
+                            .changed();
+
+                        ui.separator();
+
+                        // Lighting rig
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label("Rig:");
+                            egui::ComboBox::from_id_salt("lighting_mode_combo")
+                                .selected_text(match settings.lighting_mode {
+                                    LightingMode::SinglePoint => "Single point",
+                                    LightingMode::ThreePoint => "Three-point",
+                                })
+                                .show_ui(ui, |ui| {
+                                    if ui
+                                        .selectable_label(
+                                            matches!(
+                                                settings.lighting_mode,
+                                                LightingMode::SinglePoint
+                                            ),
+                                            "Single point",
+                                        )
+                                        .clicked_once()
+                                    {
+                                        settings.lighting_mode = LightingMode::SinglePoint;
+                                        settings.lighting_dirty = true;
+                                    }
+                                    if ui
+                                        .selectable_label(
+                                            matches!(
+                                                settings.lighting_mode,
+                                                LightingMode::ThreePoint
+                                            ),
+                                            "Three-point",
+                                        )
+                                        .clicked_once()
+                                    {
+                                        settings.lighting_mode = LightingMode::ThreePoint;
+                                        settings.lighting_dirty = true;
+                                    }
+                                });
+                        });
+
+                        // Key
+                        changed |= ui
+                            .add(
+                                egui::Slider::new(
+                                    &mut settings.light_intensity,
+                                    50_000.0..=8_000_000.0,
+                                )
+                                .text("Key intensity"),
+                            )
+                            .changed();
+                        changed |= ui
+                            .add(
+                                egui::Slider::new(&mut settings.light_distance, 3.0..=40.0)
+                                    .text("Key distance"),
+                            )
+                            .changed();
+
+                        // Fill / Rim (only in three-point)
+                        if matches!(settings.lighting_mode, LightingMode::ThreePoint) {
+                            ui.separator();
+                            ui.label("Fill & Rim (three-point)");
+
+                            changed |= ui
+                                .add(
+                                    egui::Slider::new(
+                                        &mut settings.fill_intensity,
+                                        0.0..=10_000_000.0,
+                                    )
+                                    .text("Fill intensity"),
+                                )
+                                .changed();
+                            changed |= ui
+                                .add(
+                                    egui::Slider::new(&mut settings.fill_distance, 3.0..=50.0)
+                                        .text("Fill distance"),
+                                )
+                                .changed();
+
+                            changed |= ui
+                                .add(
+                                    egui::Slider::new(
+                                        &mut settings.rim_intensity,
+                                        0.0..=10_000_000.0,
+                                    )
+                                    .text("Rim intensity"),
+                                )
+                                .changed();
+                            changed |= ui
+                                .add(
+                                    egui::Slider::new(&mut settings.rim_distance, 3.0..=50.0)
+                                        .text("Rim distance"),
+                                )
+                                .changed();
+                        }
+
+                        if changed {
                             settings.lighting_dirty = true;
                         }
                     });
-                    changed |= ui
-                        .add(egui::Slider::new(&mut settings.ambient_brightness, 0.0..=3000.0).text("Ambient brightness"))
-                        .changed();
+                    crate::ui_style::collapsible_group(ui, "Element visibility", false, |ui| {
+                        refresh_element_filter_cache(&mut xyz_buf, &mol);
+                        let extras = &xyz_buf.element_filter_extras;
+                        if mol.atoms.is_empty() {
+                            ui.weak("No atoms loaded.");
+                            return;
+                        }
 
-                    ui.separator();
-
-                    // Lighting rig
-                    ui.horizontal(|ui| {
-                        ui.label("Rig:");
-                        egui::ComboBox::from_id_salt("lighting_mode_combo")
-                            .selected_text(match settings.lighting_mode {
-                                LightingMode::SinglePoint => "Single point",
-                                LightingMode::ThreePoint  => "Three-point",
-                            })
-                            .show_ui(ui, |ui| {
-                                if ui.selectable_label(matches!(settings.lighting_mode, LightingMode::SinglePoint), "Single point").clicked() {
-                                    settings.lighting_mode = LightingMode::SinglePoint;
-                                    settings.lighting_dirty = true;
+                        let mut changed = false;
+                        ui.horizontal_wrapped(|ui| {
+                            if ui.button("Show all").clicked_once() {
+                                for block in [
+                                    &ELEMENT_FILTER_S_BLOCK[..],
+                                    &ELEMENT_FILTER_D_BLOCK[..],
+                                    &ELEMENT_FILTER_P_BLOCK[..],
+                                    &ELEMENT_FILTER_F_BLOCK[..],
+                                ] {
+                                    for sym in block {
+                                        settings
+                                            .element_visibility
+                                            .insert((*sym).to_string(), true);
+                                    }
                                 }
-                                if ui.selectable_label(matches!(settings.lighting_mode, LightingMode::ThreePoint), "Three-point").clicked() {
-                                    settings.lighting_mode = LightingMode::ThreePoint;
-                                    settings.lighting_dirty = true;
+                                for sym in extras {
+                                    settings.element_visibility.insert(sym.clone(), true);
+                                }
+                                changed = true;
+                            }
+                            if ui.button("Hide all").clicked_once() {
+                                for block in [
+                                    &ELEMENT_FILTER_S_BLOCK[..],
+                                    &ELEMENT_FILTER_D_BLOCK[..],
+                                    &ELEMENT_FILTER_P_BLOCK[..],
+                                    &ELEMENT_FILTER_F_BLOCK[..],
+                                ] {
+                                    for sym in block {
+                                        settings
+                                            .element_visibility
+                                            .insert((*sym).to_string(), false);
+                                    }
+                                }
+                                for sym in extras {
+                                    settings.element_visibility.insert(sym.clone(), false);
+                                }
+                                changed = true;
+                            }
+                        });
+
+                        ui.add_space(4.0);
+                        ui.spacing_mut().item_spacing = egui::vec2(6.0, 4.0);
+                        egui::ScrollArea::vertical()
+                            .max_height(220.0)
+                            .show(ui, |ui| {
+                                let render_block =
+                                    |ui: &mut egui::Ui,
+                                     block: &[&str],
+                                     settings: &mut MolSettings,
+                                     changed: &mut bool| {
+                                        let cols = 4;
+                                        let rows = (block.len() + cols - 1) / cols;
+                                        for r in 0..rows {
+                                            ui.horizontal_wrapped(|ui| {
+                                                for c in 0..cols {
+                                                    let idx = r * cols + c;
+                                                    if let Some(sym) = block.get(idx) {
+                                                        let entry = settings
+                                                            .element_visibility
+                                                            .entry((*sym).to_string())
+                                                            .or_insert(true);
+                                                        if ui.checkbox(entry, *sym).changed() {
+                                                            *changed = true;
+                                                        }
+                                                    } else {
+                                                        ui.add_space(52.0);
+                                                    }
+                                                }
+                                            });
+                                        }
+                                    };
+
+                                ui.label("Hydrogen");
+                                let h_block = ["H"];
+                                render_block(ui, &h_block, &mut settings, &mut changed);
+                                ui.separator();
+                                ui.label("P-block");
+                                render_block(
+                                    ui,
+                                    &ELEMENT_FILTER_P_BLOCK,
+                                    &mut settings,
+                                    &mut changed,
+                                );
+                                ui.separator();
+                                ui.label("S-block");
+                                render_block(
+                                    ui,
+                                    &ELEMENT_FILTER_S_BLOCK,
+                                    &mut settings,
+                                    &mut changed,
+                                );
+                                ui.separator();
+                                ui.label("D-block");
+                                render_block(
+                                    ui,
+                                    &ELEMENT_FILTER_D_BLOCK,
+                                    &mut settings,
+                                    &mut changed,
+                                );
+                                ui.separator();
+                                ui.label("F-block");
+                                render_block(
+                                    ui,
+                                    &ELEMENT_FILTER_F_BLOCK,
+                                    &mut settings,
+                                    &mut changed,
+                                );
+
+                                if !extras.is_empty() {
+                                    ui.separator();
+                                    ui.label("Other");
+                                    let other: Vec<&str> =
+                                        extras.iter().map(|s| s.as_str()).collect();
+                                    render_block(ui, &other, &mut settings, &mut changed);
                                 }
                             });
+
+                        if changed {
+                            settings.geometry_dirty = true;
+                        }
                     });
 
-                    // Key
-                    changed |= ui
-                        .add(egui::Slider::new(&mut settings.light_intensity, 50_000.0..=8_000_000.0).text("Key intensity"))
-                        .changed();
-                    changed |= ui
-                        .add(egui::Slider::new(&mut settings.light_distance, 3.0..=40.0).text("Key distance"))
-                        .changed();
-
-                    // Fill / Rim (only in three-point)
-                    if matches!(settings.lighting_mode, LightingMode::ThreePoint) {
-                        ui.separator();
-                        ui.label("Fill & Rim (three-point)");
-
-                        changed |= ui
-                            .add(egui::Slider::new(&mut settings.fill_intensity, 0.0..=10_000_000.0).text("Fill intensity"))
-                            .changed();
-                        changed |= ui
-                            .add(egui::Slider::new(&mut settings.fill_distance, 3.0..=50.0).text("Fill distance"))
-                            .changed();
-
-                        changed |= ui
-                            .add(egui::Slider::new(&mut settings.rim_intensity, 0.0..=10_000_000.0).text("Rim intensity"))
-                            .changed();
-                        changed |= ui
-                            .add(egui::Slider::new(&mut settings.rim_distance, 3.0..=50.0).text("Rim distance"))
-                            .changed();
-                    }
-
-                    if changed { settings.lighting_dirty = true; }
-                });
-            });
+                    ui.add_space(8.0);
+                },
+            );
 
             // ===========================
             // 5) Export Image
@@ -1964,77 +1813,14 @@ pub fn ui_panel(
                 Tab::Export.default_size(),
                 "Export Image",
                 |ui| {
-                let warn_id = egui::Id::new("export_no_selection_warn");
-                let mut warn = ctx.data_mut(|d| d.get_persisted::<bool>(warn_id).unwrap_or(false));
-                if export_select_area.has_area {
-                    warn = false;
-                }
-
-                ui.horizontal(|ui| {
-                    ui.label("Format");
-                    egui::ComboBox::from_id_salt("export_format")
-                        .selected_text(match export_settings.format {
-                            ExportFormat::Png => "PNG",
-                            ExportFormat::Jpg => "JPG",
-                        })
-                        .show_ui(ui, |ui| {
-                            ui.selectable_value(&mut export_settings.format, ExportFormat::Png, "PNG");
-                            ui.selectable_value(&mut export_settings.format, ExportFormat::Jpg, "JPG");
-                        });
-                });
-                ui.horizontal(|ui| {
-                    ui.label("DPI");
-                    egui::ComboBox::from_id_salt("export_dpi")
-                        .selected_text(format!("{} DPI", export_settings.dpi))
-                        .show_ui(ui, |ui| {
-                            for dpi in [150_u32, 200, 300, 600, 1200] {
-                                ui.selectable_value(
-                                    &mut export_settings.dpi,
-                                    dpi,
-                                    format!("{dpi} DPI"),
-                                );
-                            }
-                        });
-                });
-                ui.horizontal(|ui| {
-                    ui.label("Canvas");
-                    ui.add(egui::DragValue::new(&mut export_settings.canvas_width).range(256..=8192));
-                    ui.label("x");
-                    ui.add(egui::DragValue::new(&mut export_settings.canvas_height).range(256..=8192));
-                });
-                ui.horizontal(|ui| {
-                    let label = if export_select_area.active {
-                        "Selecting..."
-                    } else {
-                        "Select Area"
-                    };
-                    if ui.add(egui::Button::new(label)).clicked() {
-                        warn = false;
-                        export_select_area.active = true;
-                        export_select_area.dragging = false;
-                        export_select_area.start = None;
-                        export_select_area.end = None;
-                        export_select_area.has_area = false;
-                    }
-                    if export_select_area.has_area && ui.button("Clear Area").clicked() {
-                        export_select_area.active = false;
-                        export_select_area.dragging = false;
-                        export_select_area.start = None;
-                        export_select_area.end = None;
-                        export_select_area.has_area = false;
-                    }
-                });
-                ui.horizontal(|ui| {
-                    let button_size = egui::vec2(120.0, 24.0);
-                    if ui
-                        .add_sized(button_size, egui::Button::new("Export Image"))
-                        .clicked()
-                    {
-                        if !export_select_area.has_area {
-                            warn = true;
-                            return;
-                        }
-                        let (Ok((_cam, proj, cam_xform)), Ok(win)) = (q_cam.single(), windows.single()) else {
+                    if crate::export_image::ui::panel(
+                        ui,
+                        &mut export_settings,
+                        &mut export_select_area,
+                    ) {
+                        let (Ok((_cam, proj, cam_xform)), Ok(win)) =
+                            (q_cam.single(), windows.single())
+                        else {
                             return;
                         };
                         let ok = crate::export_image::start_export_capture(
@@ -2055,16 +1841,8 @@ pub fn ui_panel(
                             export_select_area.has_area = false;
                         }
                     }
-                });
-                if warn {
-                    ui.add_space(4.0);
-                    ui.colored_label(
-                        egui::Color32::from_rgb(220, 80, 80),
-                        "Select an area before exporting.",
-                    );
-                }
-                ctx.data_mut(|d| d.insert_persisted(warn_id, warn));
-            });
+                },
+            );
         };
 
         if windowed {
@@ -2152,7 +1930,7 @@ pub fn ui_panel(
                                 .on_hover_text(
                                     "Quantum chemistry — run any job on this structure",
                                 )
-                                .clicked()
+                                .clicked_once()
                             {
                                 qc_panel.open = !qc_panel.open;
                             }
@@ -2165,7 +1943,7 @@ pub fn ui_panel(
                             if ui
                                 .add(button)
                                 .on_hover_text("Molecule editor / Z-matrix")
-                                .clicked()
+                                .clicked_once()
                             {
                                 ui_layout.builder_open = !ui_layout.builder_open;
                             }
@@ -2223,6 +2001,11 @@ pub fn ui_panel(
         ) {
             window_rects.push(rect);
         }
+    }
+    if let Some(rect) = crate::qchem_panel::ui::input_editor_window(
+        ctx, &mut qc_panel, &mut qc_task, &xtb_panel_state, &mol,
+    ) {
+        window_rects.push(rect);
     }
     crate::qchem_panel::ui::result_windows(ctx, &mut xtb_panel_state, &xtb_task);
     if qc_panel.summary_open {
@@ -2467,28 +2250,6 @@ fn egui_to_color(c: egui::Color32) -> Color {
         c.b() as f32 / 255.0,
         c.a() as f32 / 255.0,
     )
-}
-
-/// One row of the floating orientation menu: a button that expands into `body` when clicked,
-/// collapsing any other row that was open. `body` draws the choices (planes or axes) and is
-/// responsible for acting on whichever one is clicked; this only handles which row is showing.
-fn menu_row(
-    ui: &mut egui::Ui,
-    label: &str,
-    item: crate::orientation::MenuItem,
-    expanded: &mut Option<crate::orientation::MenuItem>,
-    body: impl FnOnce(&mut egui::Ui),
-) {
-    let showing = *expanded == Some(item);
-    if ui.selectable_label(showing, label).clicked() {
-        *expanded = if showing { None } else { Some(item) };
-    }
-    if showing {
-        ui.horizontal(|ui| {
-            ui.add_space(12.0);
-            body(ui);
-        });
-    }
 }
 
 /// The Molecule Editor window.
