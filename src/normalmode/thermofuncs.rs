@@ -52,6 +52,7 @@ const GRIMME_BAV_SI: f64 = 1.0e-44;
 const GRIMME_ALPHA: f64 = 4.0;
 
 #[derive(Debug, Clone)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct ThermoResults {
     pub pfelec: f64,
     pub pftrans: f64,

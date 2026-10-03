@@ -289,6 +289,7 @@ pub fn poll_spectrum_run(
             // transitions rather than the ground state. So there is nothing to
             // load after one, and whatever the Surface tool already holds is
             // left alone.
+            state.orbital_link = Default::default();
             if let Some(text) = &output.molden {
                 match crate::orbitals::molden::parse_molden(text) {
                     Ok(data) => {
@@ -303,6 +304,7 @@ pub fn poll_spectrum_run(
                             Some(format!("From this {} run", output.result.method)),
                             Some(text.clone()),
                         );
+                        state.orbital_link.bind(&orbitals);
                     }
                     Err(err) => {
                         // The spectrum is still perfectly good, so this is a

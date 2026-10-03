@@ -136,6 +136,7 @@ pub fn parse_g98_geometry(text: &str) -> Result<(Vec<String>, Vec<f64>), String>
 
 /// One line of xTB's `$vibrational spectrum` block.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct VibSpectrumLine {
     pub mode: usize,
     pub wavenumber_cm1: f64,

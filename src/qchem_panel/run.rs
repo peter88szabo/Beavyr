@@ -1652,6 +1652,7 @@ pub fn poll_qc_run(
             // The orbitals, into the Surface tool. Asking for them is almost
             // always so they can be looked at, so they are loaded rather than
             // merely offered to save.
+            let mut loaded_matching_orbitals = false;
             if let Some(path) = &output.molden_path {
                 match fs::read_to_string(path) {
                     Ok(text) => match crate::orbitals::molden::parse_molden(&text) {
@@ -1667,6 +1668,7 @@ pub fn poll_qc_run(
                                 Some(format!("From this {} run", output.program.label())),
                                 Some(text),
                             );
+                            loaded_matching_orbitals = true;
                             layout.open[crate::ui_layout::Tab::Surface.index()] = true;
                         }
                         Err(err) => {
@@ -1695,6 +1697,8 @@ pub fn poll_qc_run(
                     Ok(result) => {
                         uvvis.expanded_root = None;
                         uvvis.load_error = None;
+                        uvvis.orbital_link = Default::default();
+                        if loaded_matching_orbitals { uvvis.orbital_link.bind(&orbitals); }
                         uvvis.result = Some(result);
                         layout.open[crate::ui_layout::Tab::UvVis.index()] = true;
                     }

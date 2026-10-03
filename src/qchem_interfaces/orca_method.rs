@@ -176,6 +176,7 @@ pub const DEFAULT_FUNCTIONAL: &str = "B3LYP";
 /// seconds of starting, which is cheap to discover, and the free-text keyword
 /// line is there for anything else.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub enum Dispersion {
     #[default]
     None,

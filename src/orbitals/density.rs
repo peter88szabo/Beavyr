@@ -27,6 +27,7 @@ const VALUE_FLOOR: f64 = 1.0e-8;
 
 /// Which scalar field to build.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub enum Quantity {
     /// A single molecular orbital, psi_i.
     #[default]

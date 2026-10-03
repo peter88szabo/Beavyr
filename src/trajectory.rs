@@ -19,6 +19,7 @@ pub struct TrajFullAtom;
 pub struct TrajFullBond;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub enum PlaybackMode {
     Loop,
     Once,
@@ -26,12 +27,14 @@ pub enum PlaybackMode {
 }
 
 #[derive(Clone)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct TrajectoryFrame {
     pub atoms: Vec<String>,
     pub pos: Vec<Vec3>,
 }
 
 #[derive(Resource, Clone)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct TrajectoryState {
     pub frames: Vec<TrajectoryFrame>,
     pub current_frame: usize,

@@ -94,10 +94,9 @@ pub(crate) fn load_molden_from_path(
                 settings.representation = RepresentationMode::SticksRounded;
                 settings.geometry_dirty = true;
                 let name = path.file_name().map(|n| n.to_string_lossy().into_owned());
-                // A file the user opened needs no provenance line: its name is
-                // the provenance, and the file is already on disk so there is
-                // nothing to save.
-                state.adopt(data, name, None, None);
+                // Keep the original text for portable projects and Save As.
+                // The filename already supplies provenance in the panel.
+                state.adopt(data, name, None, Some(text));
                 true
             }
             Err(error) => {
@@ -229,6 +228,7 @@ fn panel_body(
                 {
                     state.spin = spin;
                     state.selected = data.homo_index(spin);
+                    state.browser.reveal = true;
                 }
             }
         }
@@ -395,6 +395,8 @@ fn panel_body(
             ui.spacing_mut().item_spacing.y = 2.0;
             ui.spacing_mut().button_padding.y = 2.0;
             ui.spacing_mut().interact_size.y = 24.0;
+            let visible = super::browser::controls(ui, state, orbitals);
+            let keyboard_id = super::browser::keyboard_id(ui);
             // A single header carries the column meanings so the rows themselves need
             // no repeated labels.  Header and rows share one format spec, so they
             // cannot drift out of alignment.
@@ -409,14 +411,29 @@ fn panel_body(
             } else {
                 360.0
             };
-            egui::ScrollArea::vertical()
+            let mut scroll = egui::ScrollArea::vertical()
                 .id_salt("surface_orbitals")
                 .max_height(list_height)
-                .auto_shrink([false; 2])
+                .auto_shrink([false; 2]);
+            if state.browser.reveal {
+                if let Some(row) = state
+                    .selected
+                    .and_then(|index| visible.iter().position(|&i| i == index))
+                {
+                    scroll = scroll.vertical_scroll_offset(
+                        (row as f32 * (row_height + ui.spacing().item_spacing.y)
+                            - list_height * 0.5)
+                            .max(0.0),
+                    );
+                }
+                state.browser.reveal = false;
+            }
+            scroll
                 // Virtualised: 546 orbitals must not cost 546 laid-out widgets a frame.
-                .show_rows(ui, row_height, orbitals.len(), |ui, range| {
+                .show_rows(ui, row_height, visible.len(), |ui, range| {
                     ui.style_mut().override_text_style = Some(egui::TextStyle::Monospace);
-                    for index in range {
+                    for row in range {
+                        let index = visible[row];
                         let orbital = &orbitals[index];
                         let marker = match homo {
                             Some(h) if index == h => "  HOMO",
@@ -436,6 +453,8 @@ fn panel_body(
                             .clicked_once()
                         {
                             state.selected = Some(index);
+                            state.browser.jump = (index + 1).to_string();
+                            ui.memory_mut(|memory| memory.request_focus(keyboard_id));
                         }
                     }
                 });

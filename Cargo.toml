@@ -12,14 +12,18 @@ dev = ["bevy/dynamic_linking"]
 
 [dependencies]
 # Keep Bevy's rendering/UI defaults, but omit its audio feature and ALSA dependency.
-bevy = { version = "0.19.1", default-features = false, features = ["2d", "3d", "ui", "jpeg"] }
+bevy = { version = "0.19.1", default-features = false, features = ["2d", "3d", "ui", "jpeg", "serialize"] }
 bevy_egui = "0.42.0"
+# Portable projects and reusable fragments; egui persistence keeps window layouts.
+egui = { version = "0.36.1", features = ["persistence"] }
+serde = { version = "1.0", features = ["derive"] }
+ron = "0.12.2"
 rfd = "0.17"
 
 # Imported frequency-analysis code from the Behemoth project uses these two.
 # Both are pure Rust: `ndarray-linalg` (which would need a system BLAS) is
 # deliberately NOT used -- see docs/superpowers/specs/2026-09-04-frequency-analysis-design.md
-ndarray = "0.15"
+ndarray = { version = "0.15", features = ["serde"] }
 anyhow = "1.0"
 
 # Our own code stays cheap to rebuild, but Bevy/wgpu/glam must be optimised or

@@ -45,6 +45,8 @@ const REACTION_PATH_GRADIENT_FLOOR: f64 = 1.0e-4;
 
 /// The finished analysis: everything the panel needs to list modes, animate
 /// one, and show thermochemistry/spectrum windows.
+#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Clone)]
 pub struct FrequencyResult {
     pub atoms: Vec<String>,
     /// Equilibrium geometry in the frame the Hessian was actually computed
@@ -96,6 +98,7 @@ pub struct FrequencyResult {
 }
 
 #[derive(Clone)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub(crate) struct RawFrequencyOutput {
     atoms: Vec<String>,
     coords_bohr: Vec<f64>,
@@ -136,6 +139,94 @@ pub struct XtbFrequencyTask {
     /// on screen. A loaded Hessian usually arrives with nothing displayed, and
     /// its modes are meaningless without the structure they belong to.
     pub pending_geometry: Option<(Vec<String>, Vec<Vec3>)>,
+}
+
+/// Portable analysis data, excluding subprocesses and pending UI actions.
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+pub(crate) struct FrequencyArchive {
+    result: Option<FrequencyResult>,
+    raw: Option<HessianSource>,
+    multiplicity: i32,
+}
+
+impl XtbFrequencyTask {
+    pub(crate) fn archive(&self) -> FrequencyArchive {
+        FrequencyArchive {
+            result: self.result.clone(),
+            raw: self.last_raw.clone(),
+            multiplicity: self.last_multiplicity,
+        }
+    }
+
+    pub(crate) fn restore_archive(&mut self, archive: FrequencyArchive) {
+        self.result = archive.result;
+        self.last_raw = archive.raw;
+        self.last_multiplicity = archive.multiplicity;
+        self.pending_geometry = None;
+        self.last_message = None;
+        self.last_is_error = false;
+    }
+}
+
+impl FrequencyArchive {
+    pub(crate) fn validate(&self) -> Result<(), String> {
+        let geometry = |atoms: &[String], xyz: &[f64]| {
+            !atoms.is_empty() && xyz.len() == atoms.len() * 3 && xyz.iter().all(|x| x.is_finite())
+        };
+        if let Some(raw) = &self.raw {
+            let valid = match raw {
+                HessianSource::Computed(r) => {
+                    let n = r.atoms.len() * 3;
+                    geometry(&r.atoms, &r.coords_bohr)
+                        && r.hessian.dim() == (n, n)
+                        && r.hessian.iter().all(|x| x.is_finite())
+                        && r.gradient_bohr
+                            .as_ref()
+                            .is_none_or(|g| g.len() == n && g.iter().all(|x| x.is_finite()))
+                        && r.masses_amu.as_ref().is_none_or(|m| {
+                            m.len() == r.atoms.len() && m.iter().all(|x| x.is_finite() && *x > 0.0)
+                        })
+                        && r.ir_intensities_km_mol
+                            .as_ref()
+                            .is_none_or(|v| v.len() == n)
+                }
+                HessianSource::Imported(r) => {
+                    geometry(&r.atoms, &r.coords_bohr)
+                        && r.modes.dim() == (r.atoms.len() * 3, r.frequencies_cm1.len())
+                        && r.ir_intensities_km_mol.len() == r.frequencies_cm1.len()
+                        && r.modes
+                            .iter()
+                            .chain(&r.frequencies_cm1)
+                            .all(|x| x.is_finite())
+                }
+            };
+            if !valid {
+                return Err("Invalid saved Hessian or imported modes".into());
+            }
+        }
+        if let Some(r) = &self.result {
+            let n = r.frequencies_cm1.len();
+            if r.atoms.is_empty()
+                || r.atoms.len() != r.coords_angstrom.len()
+                || r.coords_angstrom.iter().any(|p| !p.is_finite())
+                || r.modes.nrows() != r.atoms.len() * 3
+                || r.modes.ncols() != n
+                || r.ir_intensities_km_mol.len() != n
+                || r.frequencies_cm1
+                    .iter()
+                    .chain(r.modes.iter())
+                    .any(|x| !x.is_finite())
+                || r.negative_indices
+                    .iter()
+                    .chain(&r.zero_indices)
+                    .chain(&r.positive_indices)
+                    .any(|i| *i >= n)
+            {
+                return Err("Invalid saved frequency analysis".into());
+            }
+        }
+        Ok(())
+    }
 }
 
 impl FrequencyResult {
@@ -894,6 +985,7 @@ fn analyze(
 ///
 /// The modes are taken as printed; only the thermochemistry is computed here.
 #[derive(Clone)]
+#[derive(serde::Serialize, serde::Deserialize)]
 struct ImportedModes {
     atoms: Vec<String>,
     coords_bohr: Vec<f64>,
@@ -911,6 +1003,7 @@ struct ImportedModes {
 
 /// Either a Hessian we can analyse ourselves, or a finished set of modes.
 #[derive(Clone)]
+#[derive(serde::Serialize, serde::Deserialize)]
 enum HessianSource {
     /// A force-constant matrix: we project it and diagonalise it.
     Computed(Box<RawFrequencyOutput>),
@@ -1313,6 +1406,8 @@ pub fn poll_xtb_frequencies(
 }
 
 #[derive(Resource)]
+#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Clone)]
 pub struct XtbFreqPanelState {
     /// Which external program computes the Hessian. Kept separate from the
     /// optimizer's choice: running a Hessian in a different program than the

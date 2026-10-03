@@ -171,6 +171,7 @@ pub fn ui_panel(
             ResMut<crate::structure_history::StructureHistory>,
             ResMut<crate::qchem_panel::QcPanelState>,
             ResMut<crate::qchem_panel::run::QcRunTask>,
+            ResMut<crate::project::ProjectState>,
         ),
     ),
 ) {
@@ -193,8 +194,9 @@ pub fn ui_panel(
         mut uvvis_task,
         startup_report,
         mut conformer_run,
-        (mut ts_generation, mut structure_history, mut qc_panel, mut qc_task),
+        (mut ts_generation, mut structure_history, mut qc_panel, mut qc_task, mut project),
     ) = builder_resources;
+    crate::project::restore_ui(ctx, &mut project);
     if !*style_initialized {
         ctx.style_mut_of(ctx.theme(), |style| {
             style.text_styles = [
@@ -402,6 +404,7 @@ pub fn ui_panel(
                         let sel = ui.visuals().selection.bg_fill;
                         let dim = ui.visuals().widgets.inactive.bg_fill;
 
+                        crate::project::menu(ui, &mut project);
                         if ui.add(crate::ui_style::primary("Open XYZ…")).clicked_once() {
                             let dlg = crate::recent_dir::open().add_filter("XYZ", &["xyz"]);
                             if let Some(path) = crate::recent_dir::pick_file(dlg) {
@@ -749,9 +752,25 @@ pub fn ui_panel(
                         &mol,
                         &behemoth_path,
                         traj.playing,
+                        &mut orbital_state,
                     );
                 },
             );
+            if let Some(path) = uvvis_state.orbital_link.pending_molden.take() {
+                let previous = structure_history.before(&mol, &traj);
+                if crate::orbitals::ui::load_molden_from_path(&path, &mut orbital_state, &mut mol, &mut settings, &mut ev_changed) {
+                    traj.clear_for_structure();
+                    structure_history.replaced(previous, &mol, &traj, "Imported spectrum orbitals");
+                    xtb_freq_panel_state.selected_mode = None;
+                    uvvis_state.orbital_link.bind(&orbital_state);
+                    uvvis_state.load_error = None;
+                } else {
+                    uvvis_state.load_error = orbital_state.warning.clone();
+                }
+            }
+            if std::mem::take(&mut uvvis_state.orbital_link.reveal) {
+                open[Tab::Surface.index()] = true;
+            }
             // ===========================
             // 1d) Trajectory
             // ===========================

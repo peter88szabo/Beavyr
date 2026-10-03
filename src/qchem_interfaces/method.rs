@@ -36,6 +36,7 @@ pub const TASI_ELEMENTS: [&str; 7] = ["C", "Cl", "F", "H", "N", "O", "S"];
 /// is not shipped with the build in use. Adding it back is one variant here
 /// and one line in `ALL`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub enum XtbMethod {
     Gfn1,
     Gfn2,
@@ -68,6 +69,7 @@ impl Default for XtbMethod {
 /// `rks` and `uks` is not the user's to make: `--method rks` on an open shell
 /// is refused outright. The multiplicity decides, in `behemoth_method_flag`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub enum BehemothMethod {
     Tasi,
     Gfn1Xtb,
@@ -134,6 +136,7 @@ impl Default for BehemothMethod {
 /// From `behemoth --list disp`. Tkatchenko-Scheffler is listed there as "not
 /// available yet" and so is not offered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub enum Dispersion {
     None,
     D3Bj,
@@ -197,6 +200,7 @@ impl Default for Dispersion {
 
 /// How the Coulomb and exchange integrals are handled.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub enum TwoElectron {
     Exact,
     Rijk,
@@ -439,6 +443,7 @@ pub fn basis_label(cli: &str) -> &str {
 /// optimization is a legitimate thing to want, and is the same reasoning by
 /// which each panel already keeps its own program selection.
 #[derive(Debug, Clone, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct MethodConfig {
     pub xtb: XtbMethod,
     pub behemoth: BehemothMethod,

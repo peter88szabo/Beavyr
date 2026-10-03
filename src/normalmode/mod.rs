@@ -58,6 +58,7 @@ pub struct NormalModeResult {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub enum EckartMode {
     Off,
     VibRot,

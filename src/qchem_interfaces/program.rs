@@ -27,6 +27,7 @@
 
 /// An external program Beavyr can run a calculation with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub enum QcProgram {
     /// Grimme's xTB, driven through its own command line.
     Xtb,

@@ -8,6 +8,8 @@ use crate::scene::MainCamera;
 
 /// Orbit camera with correct screen-space panning (eye translates with target).
 #[derive(Resource)]
+#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Clone)]
 pub struct OrbitCamera {
     pub radius: f32,
     /// Free orbit orientation. Quaternions avoid Euler-angle limits and allow

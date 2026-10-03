@@ -27,6 +27,7 @@ pub struct MolecularOrbital {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub enum Spin {
     Alpha,
     Beta,

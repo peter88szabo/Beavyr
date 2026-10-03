@@ -274,6 +274,7 @@ pub fn uvvis_panel(
     mol: &Molecule,
     behemoth_path: &str,
     animating: bool,
+    orbitals: &mut crate::orbitals::OrbitalState,
 ) {
     ui.scope(|ui| {
         crate::ui_style::modern(ui);
@@ -282,7 +283,7 @@ pub fn uvvis_panel(
             "Explore electronic excitations",
             "Load TD-DFT output or calculate an absorption spectrum.",
         );
-        panel_body(ui, state, task, mol, behemoth_path, animating);
+        panel_body(ui, state, task, mol, behemoth_path, animating, orbitals);
     });
 }
 
@@ -293,6 +294,7 @@ fn panel_body(
     mol: &Molecule,
     behemoth_path: &str,
     animating: bool,
+    orbitals: &mut crate::orbitals::OrbitalState,
 ) {
     crate::ui_style::group(ui, "Spectrum data", |ui| {
         ui.horizontal_wrapped(|ui| {
@@ -304,6 +306,7 @@ fn panel_body(
             }
             if state.result.is_some() && ui.button("Clear").clicked_once() {
                 state.result = None;
+                state.orbital_link = Default::default();
                 state.load_error = None;
                 state.expanded_root = None;
                 state.spectrum_window_open = false;
@@ -333,6 +336,7 @@ fn panel_body(
         result,
         expanded_root,
         spectrum_window_open,
+        orbital_link,
         ..
     } = &mut *state;
     let Some(result) = result.as_ref() else {
@@ -388,7 +392,8 @@ fn panel_body(
     ui.add_space(6.0);
     ui.label(egui::RichText::new("Click a root to see the orbital excitations behind it.").weak());
     ui.add_space(2.0);
-    state_table(ui, result, expanded_root);
+    orbital_link.controls(ui, orbitals);
+    state_table(ui, result, expanded_root, orbital_link, orbitals);
 
     // The spectrum lives in its own window, opened from this panel -- the
     // same arrangement the IR spectrum uses.
@@ -415,6 +420,7 @@ pub(crate) fn load_tddft_from_path(path: &std::path::Path, state: &mut UvVisStat
     match std::fs::read_to_string(path) {
         Ok(text) => match super::detect_and_parse(&text, path) {
             Ok(result) => {
+                state.orbital_link = Default::default();
                 state.result = Some(result);
                 state.load_error = None;
                 state.expanded_root = None;
@@ -442,7 +448,13 @@ pub(crate) fn load_tddft_from_path(path: &std::path::Path, state: &mut UvVisStat
 ///
 /// `<S²>` and `Mult` appear only for an unrestricted reference -- an empty
 /// column for a closed-shell run is just noise.
-fn state_table(ui: &mut egui::Ui, result: &TddftResult, expanded: &mut Option<usize>) {
+fn state_table(
+    ui: &mut egui::Ui,
+    result: &TddftResult,
+    expanded: &mut Option<usize>,
+    link: &mut super::orbital_link::OrbitalLink,
+    orbitals: &mut crate::orbitals::OrbitalState,
+) {
     let show_spin = result.unrestricted;
     egui::ScrollArea::both()
         .auto_shrink([false, false])
@@ -457,7 +469,7 @@ fn state_table(ui: &mut egui::Ui, result: &TddftResult, expanded: &mut Option<us
             );
             ui.separator();
             for st in &result.states {
-                state_row(ui, st, show_spin, expanded);
+                state_row(ui, st, show_spin, expanded, result, link, orbitals);
             }
         });
 }
@@ -496,7 +508,15 @@ fn state_row_text(st: &ExcitedState, show_spin: bool, is_open: bool) -> String {
     text
 }
 
-fn state_row(ui: &mut egui::Ui, st: &ExcitedState, show_spin: bool, expanded: &mut Option<usize>) {
+fn state_row(
+    ui: &mut egui::Ui,
+    st: &ExcitedState,
+    show_spin: bool,
+    expanded: &mut Option<usize>,
+    result: &TddftResult,
+    link: &mut super::orbital_link::OrbitalLink,
+    orbitals: &mut crate::orbitals::OrbitalState,
+) {
     let is_open = *expanded == Some(st.root);
     let row = ui.add(
         egui::Button::new(egui::RichText::new(state_row_text(st, show_spin, is_open)).monospace())
@@ -546,24 +566,15 @@ fn state_row(ui: &mut egui::Ui, st: &ExcitedState, show_spin: bool, expanded: &m
     // HOMO/LUMO-relative name and a bracketed character -- the name goes in a
     // tooltip, so the extra information is kept without the column layout
     // differing between programs.
-    for (line, excitation) in excitation_lines(st)
-        .into_iter()
-        .zip(st.excitations_by_weight())
-    {
-        let label = ui.add(
-            egui::Label::new(egui::RichText::new(line).monospace())
-                .wrap_mode(egui::TextWrapMode::Extend),
-        );
-        let described = excitation.described();
-        if described != excitation.label() {
-            label.on_hover_text(described);
-        }
+    for excitation in st.excitations_by_weight() {
+        link.contribution(ui, result, excitation, orbitals);
     }
 }
 
 /// One line per contribution: the orbital pair and its percentage, nothing
 /// else, indented to sit under the root it belongs to. Padded to a common
 /// width so the arrows and the percentages each form a column.
+#[cfg(test)]
 fn excitation_lines(st: &ExcitedState) -> Vec<String> {
     let ranked = st.excitations_by_weight();
     let widest = ranked.iter().map(|e| e.label().len()).max().unwrap_or(0);

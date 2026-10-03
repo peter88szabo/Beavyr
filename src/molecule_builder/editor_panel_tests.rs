@@ -135,6 +135,35 @@ fn label_rect(output: &egui::FullOutput, label: &str) -> Option<egui::Rect> {
 }
 
 #[test]
+fn named_custom_fragment_button_reuses_placement_and_undo() {
+    let mut fixture = EditorFixture::new("1\ncarbon\nC 0 0 0\n");
+    let source = Molecule::from_xyz("2\nhydroxyl\nO 0 0 0\nH 0.96 0 0\n");
+    let fragment = crate::molecule_builder::custom_fragments::Fragment::from_selection(
+        "My hydroxyl",
+        &source,
+        &[0, 1],
+        0,
+    )
+    .unwrap();
+    fixture.zmat.custom_fragments.entries.clear();
+    fixture.zmat.custom_fragments.entries.push(fragment);
+    set_selected_atom(&mut fixture.zmat, &fixture.mol.atoms, Some(0));
+    fixture.click("My fragments");
+    fixture.click("My hydroxyl");
+    fixture.click("Add to C1");
+    assert_eq!(fixture.mol.atoms, ["C", "O", "H"]);
+    assert_eq!(
+        fixture.zmat.placed_editor.moving.as_deref(),
+        Some(&[1, 2][..])
+    );
+    assert!((fixture.mol.pos[1].distance(fixture.mol.pos[2]) - 0.96).abs() < 1e-5);
+    fixture.act(Action::Undo).unwrap();
+    assert_eq!(fixture.mol.atoms, ["C"]);
+    fixture.act(Action::Redo).unwrap();
+    assert_eq!(fixture.mol.atoms, ["C", "O", "H"]);
+}
+
+#[test]
 fn clicking_fragment_then_add_targets_the_existing_fragment_editor() {
     let mut fixture = EditorFixture::new("1\ncarbon\nC 0 0 0\n");
     set_selected_atom(&mut fixture.zmat, &fixture.mol.atoms, Some(0));

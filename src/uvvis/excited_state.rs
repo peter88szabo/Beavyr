@@ -34,6 +34,7 @@ use crate::qchem_interfaces::method::{
 /// parameterisation and an active-space energy window in place of a root
 /// count, so it needs its own controls rather than being bent into these.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub enum ExcitedStateMethod {
     /// Grimme's original sTDA-xTB, `--method xtb --stda`. Needs an external
     /// `xtb4stda` binary to generate its orbitals.
@@ -167,6 +168,7 @@ pub const CANONICAL_MOLDEN_FILE: &str = "canonicalMO.molden";
 /// Everything the excited-state calculation needs beyond the reference's own
 /// level of theory.
 #[derive(Debug, Clone, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct ExcitedStateConfig {
     pub method: ExcitedStateMethod,
     /// `--stddft-roots`. Behemoth's default is 5.

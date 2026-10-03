@@ -23,6 +23,8 @@ use crate::qchem_interfaces::program::QcProgram;
 
 /// Everything the panel remembers between frames.
 #[derive(Resource)]
+#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Clone)]
 pub struct QcPanelState {
     pub open: bool,
     pub program: QcProgram,

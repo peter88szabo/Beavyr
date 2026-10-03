@@ -16,6 +16,8 @@ struct PanelState {
     close_requested: bool,
     search: String,
     all_fragments: bool,
+    my_fragments: bool,
+    save_fragment: super::super::custom_fragments::SaveForm,
     status: String,
 }
 
@@ -28,6 +30,12 @@ fn panel_state(ctx: &egui::Context) -> PanelState {
 
 fn store_panel_state(ctx: &egui::Context, state: PanelState) {
     ctx.data_mut(|data| data.insert_temp(egui::Id::new("molecular_editor_layout"), state));
+}
+
+pub(crate) fn restore_editor_docking(ctx: &egui::Context, docked: bool) {
+    let mut state = panel_state(ctx);
+    state.docked = docked;
+    store_panel_state(ctx, state);
 }
 
 pub(crate) fn editor_docked(ctx: &egui::Context) -> bool {
@@ -173,7 +181,34 @@ pub(super) fn contents(
                     ui.label("Pause trajectory playback to edit this structure.");
                 }
                 ui.add_enabled_ui(available && !zmat.add_atom_active, |ui| {
-                    palette(ui, &mut panel, zmat);
+                    ui.horizontal_wrapped(|ui| {
+                        ui.selectable_value(&mut panel.my_fragments, false, "Built-in");
+                        ui.selectable_value(&mut panel.my_fragments, true, "My fragments");
+                    });
+                    if panel.my_fragments {
+                        ui.add(
+                            egui::TextEdit::singleline(&mut panel.search)
+                                .hint_text("Search my fragments")
+                                .desired_width(f32::INFINITY),
+                        );
+                        let moving = zmat
+                            .placed_editor
+                            .moving
+                            .as_deref()
+                            .or(editor.moving.as_deref());
+                        super::super::custom_fragments::show(
+                            ui,
+                            &mut zmat.custom_fragments,
+                            &mut panel.save_fragment,
+                            &mut zmat.frag_name,
+                            mol,
+                            zmat.selected_index,
+                            moving,
+                            &panel.search,
+                        );
+                    } else {
+                        palette(ui, &mut panel, zmat);
+                    }
                     placement_controls(ui, zmat, mol, &mut action);
                 });
                 reference_controls(ui, zmat, editor, mol, available, &mut action);
@@ -450,7 +485,6 @@ fn fragment_matches(name: &str, query: &str) -> bool {
 }
 
 fn palette(ui: &mut egui::Ui, panel: &mut PanelState, zmat: &mut ZMatrixBuilderState) {
-    ui.strong("Insert an atom or fragment");
     ui.horizontal_wrapped(|ui| {
         for symbol in COMMON_ATOMS {
             if ui
@@ -554,7 +588,7 @@ fn placement_controls(
                 });
         });
         let selection = zmat.selected_index.filter(|&i| i < mol.atoms.len());
-        let chosen = find_fragment(&zmat.frag_name).is_some();
+        let chosen = find_selected_fragment(zmat).is_some();
         let primary = if mol.atoms.is_empty() {
             format!("Place {}", zmat.frag_name)
         } else if let Some(i) = selection {
@@ -835,7 +869,7 @@ fn perform_mutation(
                 return Err("Select an atom to attach to.".into());
             }
             let fragment =
-                find_fragment(&zmat.frag_name).ok_or("Choose an atom or fragment first.")?;
+                find_selected_fragment(zmat).ok_or("Choose an atom or fragment first.")?;
             zmat.zmat.clear();
             add_fragment_to_zmat(
                 &mut zmat.zmat,

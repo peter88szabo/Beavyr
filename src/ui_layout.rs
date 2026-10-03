@@ -142,6 +142,8 @@ impl Tab {
 }
 
 #[derive(Resource)]
+#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Clone)]
 pub struct UiLayout {
     /// `false` presents the general tools in a side panel.
     pub windowed: bool,

@@ -14,6 +14,7 @@ use types::TddftResult;
 pub mod behemoth;
 pub mod excited_state;
 pub mod orca;
+pub mod orbital_link;
 pub mod psi4;
 pub mod pyscf;
 pub mod run;
@@ -62,6 +63,7 @@ pub fn detect_and_parse(
 
 /// Which axis the absorption spectrum is drawn against.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub enum SpectrumUnit {
     Nanometres,
     ElectronVolts,
@@ -128,7 +130,11 @@ impl SpectrumUnit {
 
 /// Everything the UV-Vis tool remembers between frames.
 #[derive(Resource)]
+#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Clone)]
 pub struct UvVisState {
+    #[serde(skip)]
+    pub orbital_link: orbital_link::OrbitalLink,
     /// The parsed file, once one has been loaded.
     pub result: Option<TddftResult>,
     /// Why the last load attempt failed, shown until the next one succeeds.
@@ -156,6 +162,7 @@ pub struct UvVisState {
 impl Default for UvVisState {
     fn default() -> Self {
         Self {
+            orbital_link: Default::default(),
             result: None,
             load_error: None,
             expanded_root: None,

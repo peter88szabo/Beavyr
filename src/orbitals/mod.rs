@@ -8,6 +8,7 @@
 //! isovalue slider only re-runs the mesher.
 
 pub mod basis;
+pub mod browser;
 pub mod cart2sph;
 pub mod density;
 pub mod evaluate;
@@ -40,7 +41,7 @@ const MAX_GRID_POINTS: usize = 2_000_000;
 /// Higher setting means finer sampling and a smoother surface, at a cost that
 /// grows with the cube of the refinement.  Index 0 is unused so the slider can
 /// read 1..=6 like the atom-resolution controls.
-const RESOLUTION_SPACING: [f32; 8] = [0.0, 0.40, 0.30, 0.25, 0.20, 0.15, 0.12, 0.09];
+const RESOLUTION_SPACING: [f32; 9] = [0.0, 0.40, 0.30, 0.25, 0.20, 0.15, 0.12, 0.09, 0.07];
 
 /// Lowest and highest selectable surface resolution.
 pub const MIN_RESOLUTION: u32 = 1;
@@ -79,6 +80,7 @@ struct SampleOutput {
 
 /// How the isosurface is drawn.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub enum SurfaceStyle {
     /// Shaded triangles.
     #[default]
@@ -113,8 +115,8 @@ pub struct OrbitalState {
     /// opened: the method line of the excited-state run that produced it.
     /// `None` for a loaded file, whose name is shown instead.
     pub provenance: Option<String>,
-    /// The Molden text behind a computed set, kept so it can be saved. A run's
-    /// scratch directory is discarded, so this is the only copy.
+    /// Original Molden text for both imported and computed orbitals. Projects
+    /// embed it so a moved source file or removed run directory is harmless.
     pub molden_text: Option<String>,
 
     /// Which scalar field the panel is showing.
@@ -122,6 +124,7 @@ pub struct OrbitalState {
     pub spin: Spin,
     /// Orbital chosen in the UI, as an index into the current spin set.
     pub selected: Option<usize>,
+    pub browser: browser::Browser,
     /// AO-basis density matrices, built on first use and then reused.
     density: Option<Arc<DensityMatrices>>,
 
@@ -162,6 +165,7 @@ impl Default for OrbitalState {
             quantity: Quantity::Orbital,
             spin: Spin::Alpha,
             selected: None,
+            browser: browser::Browser::default(),
             density: None,
             isovalue: Quantity::Orbital.default_isovalue(),
             resolution: DEFAULT_RESOLUTION,
@@ -246,6 +250,10 @@ impl OrbitalState {
     ) {
         let spin = Spin::Alpha;
         self.selected = data.homo_index(spin);
+        self.browser = browser::Browser {
+            reveal: true,
+            ..Default::default()
+        };
         self.spin = spin;
         self.quantity = Quantity::Orbital;
         self.isovalue = Quantity::Orbital.default_isovalue();
@@ -270,6 +278,7 @@ impl OrbitalState {
         self.provenance = None;
         self.molden_text = None;
         self.selected = None;
+        self.browser = browser::Browser::default();
         self.density = None;
         self.field = None;
         self.field_key = None;

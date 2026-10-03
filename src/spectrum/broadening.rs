@@ -8,6 +8,7 @@
 /// How a stick spectrum is turned into a continuous curve -- or not, in the
 /// `Sticks` case.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub enum BroadeningKind {
     Gaussian,
     Lorentzian,

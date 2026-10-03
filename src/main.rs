@@ -22,6 +22,7 @@ mod numerics;
 mod optimizer;
 mod orbitals;
 mod picking;
+mod project;
 mod qchem_interfaces;
 mod qchem_panel;
 mod recent_dir;
@@ -178,6 +179,8 @@ fn main() {
         .init_resource::<uvvis::UvVisState>()
         .init_resource::<uvvis::run::SpectrumTask>()
         .init_resource::<ui_layout::UiLayout>()
+        .init_resource::<project::ProjectState>()
+        .add_systems(Update, project::process.before(UpdateSet::Core))
         // scene
         // Files named on the command line load before the camera is centred,
         // so the view frames what was loaded rather than an empty scene.

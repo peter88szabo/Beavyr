@@ -10,7 +10,7 @@ use std::path::PathBuf;
 
 #[path = "input_editor.rs"]
 mod input_editor;
-pub(crate) use input_editor::show as input_editor_window;
+pub(crate) use input_editor::{show as input_editor_window, project_input_state, restore_project_input_state};
 
 const ACCENT: egui::Color32 = egui::Color32::from_rgb(104, 174, 255);
 const WARNING: egui::Color32 = egui::Color32::from_rgb(230, 170, 90);
@@ -56,6 +56,17 @@ fn store(ctx: &egui::Context, state: Presentation) {
 
 pub(super) fn is_modern(ctx: &egui::Context) -> bool {
     presentation(ctx).modern
+}
+
+pub(crate) fn project_presentation(ctx: &egui::Context) -> (bool, bool) {
+    let state = presentation(ctx);
+    (state.modern, state.docked)
+}
+
+pub(crate) fn restore_project_presentation(ctx: &egui::Context, value: (bool, bool)) {
+    let mut state = presentation(ctx);
+    state.modern = value.0; state.docked = value.1;
+    store(ctx, state);
 }
 
 pub(crate) fn is_docked(ctx: &egui::Context) -> bool {

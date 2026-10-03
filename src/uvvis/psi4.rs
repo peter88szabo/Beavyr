@@ -31,7 +31,7 @@
 
 use std::path::{Path, PathBuf};
 
-use super::types::{ExcitedState, Excitation, Spin, TddftResult, HARTREE_TO_EV};
+use super::types::{Excitation, ExcitedState, Spin, TddftResult, HARTREE_TO_EV};
 
 /// Reciprocal centimetres per electronvolt.
 const EV_TO_CM1: f64 = 8065.543_937_0;
@@ -81,6 +81,14 @@ pub fn parse_psi4_tddft(text: &str, source: &Path) -> Result<TddftResult, String
                     if line.starts_with(STATE_PREFIX) {
                         break;
                     }
+                    if line == "Alpha orbitals:"
+                        || line == "Beta orbitals:"
+                        || line.starts_with("Sums of squares:")
+                        || line.contains("<-")
+                    {
+                        index += 1;
+                        continue;
+                    }
                     match parse_excitation_line(line) {
                         Some(excitation) => {
                             state.excitations.push(excitation);
@@ -121,7 +129,9 @@ pub fn parse_psi4_tddft(text: &str, source: &Path) -> Result<TddftResult, String
         method: method.to_string(),
         // Psi4's excited-state print does not state the reference's spin, and
         // guessing it from the roots would be a guess.
-        unrestricted: text.contains("UKS") || text.contains("UHF"),
+        unrestricted: text.contains("UKS")
+            || text.contains("UHF")
+            || text.contains("Beta orbitals:"),
         ground_state_s2: None,
         states,
         notes,
@@ -194,7 +204,11 @@ fn multiplicity_from(rest: &str) -> Option<u32> {
     if close <= open {
         return None;
     }
-    rest[open + 1..close].split_whitespace().next()?.parse().ok()
+    rest[open + 1..close]
+        .split_whitespace()
+        .next()?
+        .parse()
+        .ok()
 }
 
 /// The number immediately before `unit` on this line.
@@ -215,11 +229,29 @@ fn number_before(text: &str, unit: &str) -> Option<f64> {
 /// `12 -> 13   0.68901`.
 fn parse_excitation_line(line: &str) -> Option<Excitation> {
     let (left, right) = line.split_once("->")?;
-    let from_orbital: u32 = left.split_whitespace().next()?.parse().ok()?;
-
-    let mut right_tokens = right.split_whitespace();
-    let to_orbital: u32 = right_tokens.next()?.parse().ok()?;
-    // The coefficient is the last number on the line.
+    let endpoint = |text: &str| -> Option<(u32, Spin, Option<String>)> {
+        let token = text.split_whitespace().next()?;
+        let digits = token.bytes().take_while(u8::is_ascii_digit).count();
+        let number = token[..digits].parse().ok()?;
+        let bracket = text
+            .split_once('(')
+            .and_then(|(_, s)| s.split_once(')'))
+            .map(|(s, _)| s.trim());
+        let spin = match bracket {
+            Some("a") => Spin::Alpha,
+            Some("b") => Spin::Beta,
+            _ => Spin::Unspecified,
+        };
+        let irrep = if digits < token.len() {
+            Some(&token[digits..])
+        } else {
+            bracket.filter(|s| *s != "a" && *s != "b")
+        };
+        Some((number, spin, irrep.map(|s| format!("irrep {s}"))))
+    };
+    let (from_orbital, from_spin, from_label) = endpoint(left)?;
+    let (to_orbital, to_spin, to_label) = endpoint(right)?;
+    // Ignore the optional trailing percentage printed by recent Psi4 versions.
     let coefficient: f64 = right
         .split_whitespace()
         .filter_map(|token| token.parse::<f64>().ok())
@@ -230,19 +262,38 @@ fn parse_excitation_line(line: &str) -> Option<Excitation> {
     // same way whichever program produced them.
     Some(Excitation {
         from_orbital,
-        from_spin: Spin::Unspecified,
+        from_spin,
         to_orbital,
-        to_spin: Spin::Unspecified,
+        to_spin,
         weight: coefficient * coefficient,
         coefficient: Some(coefficient),
-        from_label: None,
-        to_label: None,
+        from_label,
+        to_label,
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn modern_psi4_contributions_keep_irrep_and_spin_for_orbital_linking() {
+        let e = parse_excitation_line("   4b2 (b) -> 5a1 (b) 0.689010 (47.473%)").unwrap();
+        assert_eq!((e.from_orbital, e.to_orbital), (4, 5));
+        assert_eq!(e.from_spin, Spin::Beta);
+        assert_eq!(e.from_label.as_deref(), Some("irrep b2"));
+        assert_eq!(e.to_label.as_deref(), Some("irrep a1"));
+        assert!((e.coefficient.unwrap() - 0.689010).abs() < 1e-9);
+        let restricted = parse_excitation_line(" 4b2 -> 5a1 0.689010 (47.473%)").unwrap();
+        assert_eq!(restricted.from_spin, Spin::Unspecified);
+        assert_eq!(restricted.from_label.as_deref(), Some("irrep b2"));
+        let result = parse_psi4_tddft(
+            "Psi4 1.11\nExcited State 1 (1 B2): 0.27971 au 162.97 nm f = 0.0123\nAlpha orbitals:\n Sums of squares: Xssq = 1.0\n 4b2 (a) -> 5a1 (a) 0.689010 (47.473%)\nBeta orbitals:\n Sums of squares: Xssq = 1.0\n 4b2 (b) -> 5a1 (b) 0.5 (25.0%)\n",
+            Path::new("test.out"),
+        ).unwrap();
+        assert_eq!(result.states[0].excitations.len(), 2);
+        assert!(result.unrestricted);
+    }
 
     /// Text laid out exactly as Psi4's own print statement produces it.
     const OUTPUT: &str = concat!(
@@ -263,8 +314,7 @@ mod tests {
 
     #[test]
     fn the_roots_are_read_with_their_energies_and_strengths() {
-        let result =
-            parse_psi4_tddft(OUTPUT, Path::new("water.out")).expect("two roots are here");
+        let result = parse_psi4_tddft(OUTPUT, Path::new("water.out")).expect("two roots are here");
         assert_eq!(result.states.len(), 2);
 
         let first = &result.states[0];
@@ -355,7 +405,9 @@ mod tests {
     /// without a spectrum is still known to be Psi4.
     #[test]
     fn a_psi4_file_is_recognised_even_without_a_spectrum() {
-        assert!(is_psi4_output("  Psi4 started on host\n  Total Energy = -76.0\n"));
+        assert!(is_psi4_output(
+            "  Psi4 started on host\n  Total Energy = -76.0\n"
+        ));
         assert!(!is_psi4_output("ORCA TERMINATED NORMALLY\n"));
     }
 }

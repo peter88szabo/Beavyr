@@ -26,6 +26,26 @@ fn store_state(ctx: &egui::Context, state: EditorState) {
     ctx.data_mut(|data| data.insert_temp(egui::Id::new(STATE_ID), state));
 }
 
+pub(crate) fn project_input_state(ctx: &egui::Context) -> (bool, Option<QcProgram>, String) {
+    let state = state(ctx);
+    (state.open, state.program, state.file_name)
+}
+
+pub(crate) fn restore_project_input_state(
+    ctx: &egui::Context,
+    saved: (bool, Option<QcProgram>, String),
+) {
+    store_state(
+        ctx,
+        EditorState {
+            open: saved.0,
+            program: saved.1,
+            file_name: saved.2,
+            ..Default::default()
+        },
+    );
+}
+
 fn sync(state: &mut EditorState, panel: &mut QcPanelState, mol: &Molecule) {
     let positions: Vec<_> = mol
         .pos

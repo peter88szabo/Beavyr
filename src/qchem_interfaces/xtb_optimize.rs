@@ -33,6 +33,7 @@ use super::valence::validate_electronic_state;
 /// nothing that belongs to the optimization run itself (that lives in
 /// `XtbOptimizationTask`).
 #[derive(Resource)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct XtbPanelState {
     pub charge: i32,
     pub multiplicity: i32,

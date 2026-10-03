@@ -15,6 +15,7 @@ pub const HARTREE_TO_EV: f64 = 27.211_386_245_988;
 /// Which spin manifold an orbital belongs to. Restricted references print no
 /// spin label at all, which is `Unspecified` rather than a guess at alpha.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub enum Spin {
     Alpha,
     Beta,
@@ -42,6 +43,7 @@ impl Spin {
 
 /// One orbital-to-orbital contribution to an excited state.
 #[derive(Debug, Clone, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct Excitation {
     pub from_orbital: u32,
     pub from_spin: Spin,
@@ -99,6 +101,7 @@ impl Excitation {
 
 /// One root of the TD-DFT problem.
 #[derive(Debug, Clone, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct ExcitedState {
     /// The root number as the program labels it, counting from 1.
     pub root: usize,
@@ -143,6 +146,7 @@ impl ExcitedState {
 
 /// Everything one TD-DFT output file had to say.
 #[derive(Debug, Clone, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct TddftResult {
     pub source: PathBuf,
     /// e.g. `ORCA 6.1.0`.

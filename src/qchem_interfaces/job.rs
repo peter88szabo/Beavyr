@@ -42,6 +42,7 @@ pub enum ResultTarget {
 
 /// The kind of calculation to run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub enum JobType {
     /// One energy at the structure as it stands.
     SinglePoint,
@@ -191,6 +192,7 @@ impl JobType {
 /// One enum rather than one per program, with a per-program list, so the panel
 /// can be written once. A program simply does not list what it cannot do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub enum QcMethod {
     // Semi-empirical and parametrised.
     Gfn1,
@@ -392,6 +394,7 @@ pub fn supports(program: QcProgram, job: JobType) -> bool {
 
 /// Excited-state settings, shown only for a TD-DFT job.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct ExcitedStateOptions {
     /// How many roots to solve for.
     pub states: u32,

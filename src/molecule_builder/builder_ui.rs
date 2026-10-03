@@ -3,7 +3,7 @@ use bevy_egui::egui;
 
 #[path = "editor_panel.rs"]
 mod editor_panel;
-pub(crate) use editor_panel::{editor_docked, take_close_request};
+pub(crate) use editor_panel::{editor_docked, restore_editor_docking, take_close_request};
 
 use super::attach;
 use super::fragments;
@@ -516,6 +516,7 @@ impl BuilderChange {
 
 #[derive(Resource, Clone)]
 pub struct ZMatrixBuilderState {
+    pub custom_fragments: super::custom_fragments::Library,
     pub zmat: Vec<ZAtom>,
     /// The editor under the insert buttons, set up for the fragment placed
     /// last: the new bond is its axis and the fragment's own atoms are what
@@ -646,6 +647,7 @@ impl ZAtomEditRow {
 impl Default for ZMatrixBuilderState {
     fn default() -> Self {
         Self {
+            custom_fragments: Default::default(),
             zmat: Vec::new(),
             placed_editor: EditorRotateState::default(),
             placed_atom_count: 0,
@@ -1259,6 +1261,14 @@ pub fn tile_fragments() -> Vec<&'static fragments::FragmentDef> {
 ///
 /// `Atom: X` builds a one-atom fragment at the origin; that atom is its own
 /// connector, which is what the attachment code expects of the first atom.
+fn find_selected_fragment(state: &ZMatrixBuilderState) -> Option<ChosenFragment> {
+    state
+        .custom_fragments
+        .find(&state.frag_name)
+        .map(|f| ChosenFragment { xyz: f.xyz.clone() })
+        .or_else(|| find_fragment(&state.frag_name))
+}
+
 fn find_fragment(name: &str) -> Option<ChosenFragment> {
     if let Some(symbol) = name.strip_prefix("Atom: ") {
         let symbol = symbol.trim();
@@ -1963,7 +1973,7 @@ pub(crate) fn commit_fragment_connect(
     if !zmat_matches_molecule(zmat_state, mol) {
         return;
     }
-    let Some(frag) = find_fragment(&zmat_state.frag_name) else {
+    let Some(frag) = find_selected_fragment(zmat_state) else {
         zmat_state.last_error = Some("Fragment not found.".to_string());
         return;
     };
@@ -2070,7 +2080,7 @@ fn commit_fragment_replace(
     if !zmat_matches_molecule(zmat_state, mol) {
         return;
     }
-    if find_fragment(&zmat_state.frag_name).is_none() {
+    if find_selected_fragment(zmat_state).is_none() {
         zmat_state.last_error = Some("Fragment not found.".to_string());
         return;
     }

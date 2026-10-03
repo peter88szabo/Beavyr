@@ -106,6 +106,36 @@ choose **Representation**, toggle hydrogen bonds, or open **Orientation** for
 **Orient to plane**, **Mirror across plane**, and **Flip around axis**. Orient
 and Flip keep a chiral molecule as it was; Mirror gives you its enantiomer.
 
+### Projects and custom fragments
+
+Use **Structure (XYZ) → Project → Save project…** to write a `.beavyr` file.
+It embeds the structure, trajectory, calculation settings and manual input,
+Molden orbitals, frequency results and their Hessian or imported modes, UV–Vis
+results, spectrum settings, camera, appearance and window layout. Original data
+files are not needed to reopen it. **Open project…** validates the saved data
+before replacing the session; **Restore previous session** reverses that open.
+Calculations must be stopped before opening, and restored playback starts paused.
+Executable paths stay local to the installation. Calculation log files, scratch
+artifacts, conformer search results and measurement annotations are not part of
+this project format; save those separately using their tools.
+
+In Molecular Editor, open **My fragments → Save molecule as fragment…**.
+A **name is required**: it becomes the button used to select the fragment later.
+Choose **Whole molecule** or **Selected atoms**, then the **Attachment atom**.
+Atom selections accept ranges such as `1-6, 9`; **Add picked atom** uses the
+viewport selection, and **Use edited fragment** uses the current Fragment
+Editor selection. Select a saved button, then **Place**, **Add** or **Replace**
+through the existing placement controls. Attached fragments use the existing
+Fragment Editor, including translation, rotation and dihedral adjustment, and
+placement supports Undo/Redo. Right-click a saved button to remove it; **Undo
+removal** restores the most recently removed entry.
+
+The library is saved per user under `~/.config/beavyr/fragments` on Linux
+(`$XDG_CONFIG_HOME/beavyr/fragments` when set), `%APPDATA%/Beavyr/fragments` on
+Windows, or `~/Library/Application Support/Beavyr/fragments` on macOS. Names
+must be unique within the library. Projects and fragments use versioned RON
+serialization through `serde`/`ron`; egui persistence stores the window layout.
+
 ### Quantum Chemistry
 
 Open the atom-shaped launcher beside the Molecule Editor launcher. The modern
@@ -235,6 +265,11 @@ re-evaluating the basis from scratch.
 Open **Surface Tools**, click **Load Molden…**, and choose **Orbitals**,
 **Electron density**, or **Spin density**. For an orbital, select a row in the
 list and, for an open-shell calculation, choose **Alpha** or **Beta** spin.
+Type an orbital number in **#** and press **Enter** to reveal it. Use **↑/↓**
+(or the previous/next buttons) to move through the visible list; **Page Up/Down**
+moves ten entries. **Filter** offers occupied/virtual orbitals and an inclusive
+energy range in Hartree. Filtering preserves the original orbital numbers;
+a direct index jump clears filters so the requested orbital is visible.
 Adjust **Isovalue** and **Surface resolution**, then choose **Solid** or **Mesh**.
 The orbital list fills the remaining window height, with **HOMO** and **LUMO**
 marked on their rows. The default orbital isovalue is **0.07**; isovalue,
@@ -260,7 +295,14 @@ The wavelength plot starts with a **5.0 nm** width. Export the curve for a figur
 
 Click **Load output…** to load excited states, expand a state to inspect
 its orbital contributions, or click **Show Absorption Spectrum** to plot them.
-Load the corresponding Molden file in **Surface Tools** to inspect the orbitals.
+Use **Matching Molden…** to pair the spectrum with its orbital file, or
+**Link current orbitals** when Surface Tools already holds that calculation's
+orbitals. Click either orbital number in an expanded contribution to open it
+in Surface Tools. The display retains the output's numbering and maps it to
+the appropriate file index, spin and (for Psi4) symmetry. Loading another
+wavefunction invalidates the link. Runs that supply both a spectrum and
+Molden orbitals link them automatically. Use the original canonical orbitals
+from the same calculation.
 **Calculate spectrum** opens the calculation controls; it stays open during a
 run so the cancellation control remains available.
 

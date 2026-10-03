@@ -5,6 +5,7 @@ use crate::color_schemes::color_scheme_map;
 
 /// Color schemes exactly as in the single-file version
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub enum ColorScheme {
     Custom,
     CPK,
@@ -16,6 +17,7 @@ pub enum ColorScheme {
 
 #[allow(dead_code)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub enum ShadingPreset {
     MoldenClassic,
     NeutralPbr,
@@ -25,6 +27,7 @@ pub enum ShadingPreset {
 
 /// Lighting modes (old single-point or a classic three-point rig)
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub enum LightingMode {
     SinglePoint,
     ThreePoint,
@@ -32,6 +35,7 @@ pub enum LightingMode {
 
 /// Atom/bond rendering styles for performance vs fidelity.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub enum RepresentationMode {
     BallAndStick,
     SticksRounded,
@@ -43,12 +47,14 @@ pub enum RepresentationMode {
 
 /// Bond color modes: a single uniform color or split by the colors of the two atoms.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub enum BondColorMode {
     Uniform,
     AtomSplit,
 }
 
 #[derive(Resource, Clone)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct MolSettings {
     // geometry
     pub atom_scale: f32,        // multiplier on covalent radius for spheres
