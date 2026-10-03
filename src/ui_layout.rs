@@ -1,23 +1,23 @@
 //! Layout mode for the control panels.
 //!
-//! Two layouts coexist and are switchable at runtime, so the newer tabbed
-//! drawer can be abandoned instantly without a rebuild if it turns out to be
-//! worse in practice:
+//! General tools can use either layout at runtime:
 //!
 //! * `Classic` -- the original always-visible right panel with every section
-//!   stacked as collapsing headers, plus the molecule editor as a permanent
-//!   left panel.
+//!   stacked as collapsing headers.
 //! * `Windowed` -- a permanent, narrow icon rail down the left edge, where
 //!   each icon toggles that tool's own floating window. Several tools can be
 //!   open and arranged at once, the viewport keeps both edges except for the
-//!   rail itself, and the molecule editor is reached from a small round
-//!   button on the right.
+//!   rail itself.
+//!
+//! The molecule editor and Quantum Chemistry calculator have their own
+//! launchers on the right, float by default, and offer explicit docking.
 //!
 //! Nothing here draws chemistry -- it only decides *where* the existing
 //! panels go, so both layouts call exactly the same section bodies.
 
 use bevy::prelude::*;
 use bevy_egui::egui;
+use crate::ui_icons::{Icon, IconButton};
 
 /// Which section the drawer is showing. One tool per tab -- grouping
 /// several tools behind one icon just recreates the scrolling accordion the
@@ -63,26 +63,24 @@ impl Tab {
         Tab::Export,
     ];
 
-    /// A single glyph for the rail. These come from the emoji set egui
-    /// bundles by default (the same family its own demo app uses), so they
-    /// render without shipping an extra icon font.
-    pub fn icon(self) -> &'static str {
+    /// A vector icon for the rail, independent of the installed fonts.
+    pub fn icon(self) -> Icon {
         match self {
-            Tab::Structure => "🖹",
-            Tab::RecentStructures => "↶",
-            Tab::Representation => "⬢",
-            Tab::Optimize => "🔧",
-            Tab::TsGeneration => "⇌",
-            Tab::Conformers => "🌿",
-            Tab::Vibrations => "📈",
-            Tab::UvVis => "🌈",
-            Tab::Trajectory => "▶",
-            Tab::Compare => "⚖",
-            Tab::Measure => "📏",
-            Tab::Surface => "◉",
-            Tab::Diagnostics => "⚠",
-            Tab::Appearance => "🎨",
-            Tab::Export => "💾",
+            Tab::Structure => Icon::Structure,
+            Tab::RecentStructures => Icon::History,
+            Tab::Representation => Icon::Representation,
+            Tab::Optimize => Icon::Optimize,
+            Tab::TsGeneration => Icon::TransitionState,
+            Tab::Conformers => Icon::Conformers,
+            Tab::Vibrations => Icon::Vibrations,
+            Tab::UvVis => Icon::Spectrum,
+            Tab::Trajectory => Icon::Trajectory,
+            Tab::Compare => Icon::Compare,
+            Tab::Measure => Icon::Measure,
+            Tab::Surface => Icon::Surface,
+            Tab::Diagnostics => Icon::Diagnostics,
+            Tab::Appearance => Icon::Appearance,
+            Tab::Export => Icon::Export,
         }
     }
 
@@ -144,12 +142,12 @@ impl Tab {
 
 #[derive(Resource)]
 pub struct UiLayout {
-    /// `false` restores the original layout exactly.
+    /// `false` presents the general tools in a side panel.
     pub windowed: bool,
     /// One flag per entry of `Tab::ALL`, in the same order.
     pub open: [bool; Tab::COUNT],
-    /// Whether the molecule editor's floating window is open (windowed
-    /// layout only; the classic layout keeps it as a docked left panel).
+    /// Whether the molecule editor is open. It floats by default in either
+    /// layout, and the user can dock it from its header.
     pub builder_open: bool,
 }
 
@@ -224,8 +222,8 @@ pub fn icon_rail(ui: &mut egui::Ui, open: &mut [bool; Tab::COUNT]) {
                 continue;
             }
             let is_open = open[index];
-            let button = egui::Button::new(egui::RichText::new(tab.icon()).size(19.0))
-                .min_size(egui::vec2(34.0, 34.0))
+            let button = IconButton::new(tab.icon())
+                .label(tab.title())
                 .selected(is_open);
             if ui.add(button).on_hover_text(tab.title()).clicked() {
                 open[index] = !is_open;
@@ -242,7 +240,7 @@ mod tests {
     #[test]
     fn every_tab_has_an_icon_and_a_title() {
         for tab in Tab::ALL {
-            assert!(!tab.icon().is_empty());
+            assert!(!tab.icon().label().is_empty());
             assert!(!tab.title().is_empty());
         }
     }

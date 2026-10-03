@@ -437,7 +437,7 @@ pub fn poll_xtb_optimization(
 
 /// Draws the geometry-optimization section: charge/multiplicity, the xTB
 /// path, validation feedback, and the Optimize/Cancel controls. Called from
-/// `ui.rs`, matching how `molecule_builder::builder_ui_panel` is a free
+/// `ui.rs`, matching how `molecule_builder::builder_ui_contents` is a free
 /// function the main panel invokes rather than a system of its own.
 pub fn xtb_optimization_panel(
     ui: &mut egui::Ui,

@@ -240,7 +240,7 @@ impl HydrogenState {
         }
     }
 
-    fn add(&mut self, mol: &mut Molecule, settings: &mut MolSettings) -> bool {
+    pub(super) fn add(&mut self, mol: &mut Molecule, settings: &mut MolSettings) -> bool {
         self.invalidate_if_changed(mol);
         let before = mol.clone();
         match complete(mol) {
@@ -287,35 +287,6 @@ fn refresh(mol: &mut Molecule, settings: &mut MolSettings) {
     mol.recompute_bonds(settings.bond_thresh_scale, settings.hbond_cutoff);
     settings.geometry_dirty = true;
     settings.bond_topology_dirty = true;
-}
-
-/// Just the two buttons, with no row of their own, so the caller can put them
-/// beside other buttons that belong on the same line.
-pub(super) fn buttons(
-    ui: &mut egui::Ui,
-    state: &mut HydrogenState,
-    mol: &mut Molecule,
-    settings: &mut MolSettings,
-) -> bool {
-    let mut changed = false;
-    if ui
-        .add_enabled(!mol.atoms.is_empty(), egui::Button::new("Add missing H"))
-        .on_hover_text(
-            "Fills saturated sp3 carbon to four bonds and oxygen to two, with the same \
-             chemically aware placement as Add Atom (auto). Existing atoms stay fixed. \
-             Other elements, and detected multiple or partial bonds, are left alone.",
-        )
-        .clicked()
-    {
-        changed = state.add(mol, settings);
-    }
-    if ui
-        .add_enabled(state.undo.is_some(), egui::Button::new("Undo H addition"))
-        .clicked()
-    {
-        changed |= state.undo(mol, settings);
-    }
-    changed
 }
 
 /// Whatever the last addition had to say, if anything.

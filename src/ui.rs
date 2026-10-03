@@ -18,7 +18,7 @@ use crate::export_image::{ExportCounter, ExportFormat, ExportSelectArea, ExportS
 // Measurements UI + resource
 use crate::measurements::Measurements;
 use crate::molecule_builder::builder_ui::{
-    builder_ui_contents, builder_ui_panel, EditorRotateState, ZMatrixBuilderState,
+    builder_ui_contents, EditorRotateState, ZMatrixBuilderState,
 };
 use crate::qchem_interfaces::xtb_freq::xtb_frequency_panel;
 use crate::rmsd::ui::rmsd_panel;
@@ -2111,12 +2111,27 @@ pub fn ui_panel(
 
     ui_layout.open = open_windows;
 
-    // A small rounded floating button opens the molecule editor as a window
-    // in the tabbed layout, instead of it permanently occupying the left
-    // edge the way the classic layout docks it.
-    if windowed {
+    // The editor opens floating in either application layout. Docking is an
+    // explicit choice in the editor, independent of the other tool windows.
+    {
+        let mut editor_launcher_offset = if ui_layout.builder_open
+            && crate::molecule_builder::builder_ui::editor_docked(&ctx)
+        {
+            ctx.data_mut(|data| {
+                data.get_temp::<f32>(egui::Id::new("modern_editor_docked_width"))
+                    .unwrap_or(420.0)
+            })
+        } else {
+            0.0
+        };
+        if qc_panel.open && crate::qchem_panel::ui::is_docked(&ctx) {
+            editor_launcher_offset += crate::qchem_panel::ui::docked_width(&ctx);
+        }
         egui::Area::new(egui::Id::new("builder_launcher"))
-            .anchor(egui::Align2::RIGHT_TOP, egui::vec2(-12.0, 12.0))
+            .anchor(
+                egui::Align2::RIGHT_TOP,
+                egui::vec2(-12.0 - editor_launcher_offset, 12.0),
+            )
             .show(&ctx, |ui| {
                 egui::Frame::popup(ui.style())
                     .corner_radius(egui::CornerRadius::same(18))
@@ -2127,10 +2142,11 @@ pub fn ui_panel(
                         // something *to* the structure, rather than tools for
                         // looking at one, which is what the left rail is.
                         ui.horizontal(|ui| {
-                            let label = egui::RichText::new("⚛").size(18.0);
-                            let button = egui::Button::new(label)
-                                .min_size(egui::vec2(30.0, 30.0))
-                                .selected(qc_panel.open);
+                            let button = crate::ui_icons::IconButton::new(
+                                crate::ui_icons::Icon::QuantumChemistry,
+                            )
+                            .size(30.0)
+                            .selected(qc_panel.open);
                             if ui
                                 .add(button)
                                 .on_hover_text(
@@ -2141,10 +2157,11 @@ pub fn ui_panel(
                                 qc_panel.open = !qc_panel.open;
                             }
 
-                            let label = egui::RichText::new("✏").size(18.0);
-                            let button = egui::Button::new(label)
-                                .min_size(egui::vec2(30.0, 30.0))
-                                .selected(ui_layout.builder_open);
+                            let button = crate::ui_icons::IconButton::new(
+                                crate::ui_icons::Icon::MoleculeEditor,
+                            )
+                            .size(30.0)
+                            .selected(ui_layout.builder_open);
                             if ui
                                 .add(button)
                                 .on_hover_text("Molecule editor / Z-matrix")
@@ -2157,8 +2174,7 @@ pub fn ui_panel(
             });
 
         let mut builder_open = ui_layout.builder_open;
-        let placed_shown = zmat_state.placed_editor.moving.is_some();
-        let builder_window = molecule_editor_window(&ctx, &mut builder_open, placed_shown, |ui| {
+        let mut draw_editor = |ui: &mut egui::Ui| {
             let change = builder_ui_contents(
                 ui, &mut editor_rotate_state, &mut zmat_state, &mut mol,
                 &mut settings, &mut structure_history, &mut traj,
@@ -2170,36 +2186,43 @@ pub fn ui_panel(
                 // An edit in place leaves the view alone.
                 ev_changed.write(MoleculeChanged::parse_xyz(change.recenter()));
             }
-        });
-        if let Some(window) = &builder_window {
-            window_rects.push(window.response.rect);
+        };
+        if builder_open && crate::molecule_builder::builder_ui::editor_docked(&ctx) {
+            let panel = egui::Panel::right("modern_molecular_editor")
+                .default_size(420.0)
+                .min_size(380.0)
+                .max_size(620.0)
+                .resizable(true)
+                .show(&mut viewport_ui, &mut draw_editor);
+            ctx.data_mut(|data| {
+                data.insert_temp(egui::Id::new("modern_editor_docked_width"), panel.response.rect.width());
+            });
+            window_rects.push(panel.response.rect);
+        } else {
+            let builder_window = molecule_editor_window(&ctx, &mut builder_open, draw_editor);
+            if let Some(window) = &builder_window {
+                window_rects.push(window.response.rect);
+            }
+        }
+        if crate::molecule_builder::builder_ui::take_close_request(&ctx) {
+            builder_open = false;
         }
         ui_layout.builder_open = builder_open;
     }
 
-    if !windowed {
-        let change = builder_ui_panel(
-            &mut viewport_ui, &mut editor_rotate_state, &mut zmat_state,
-            &mut mol, &mut settings, &mut structure_history, &mut traj,
-        );
-        if change.happened() {
-            xtb_freq_panel_state.selected_mode = None;
-            xyz_buf.current_file = None;
-            ev_changed.write(MoleculeChanged::parse_xyz(change.recenter()));
-        }
-    }
-
-    // The general quantum-chemistry panel, and the summary a finished run
-    // leaves behind. Both are windows rather than rail tabs because the panel
-    // is opened from the round launcher beside the editor.
+    // The calculator opens from the launcher beside the editor. Its modern
+    // form can float or dock; finished results use their own summary window.
     if qc_panel.open {
-        crate::qchem_panel::ui::qc_panel(
+        if let Some(rect) = crate::qchem_panel::ui::qc_panel(
             ctx,
+            &mut viewport_ui,
             &mut qc_panel,
             &mut qc_task,
             &mut xtb_panel_state,
             &mol,
-        );
+        ) {
+            window_rects.push(rect);
+        }
     }
     crate::qchem_panel::ui::result_windows(ctx, &mut xtb_panel_state, &xtb_task);
     if qc_panel.summary_open {
@@ -2244,7 +2267,9 @@ pub fn ui_panel(
     // molecule has been rotated, which is only readable if the arrows are
     // named.
     if let (Ok((_cam_comp, _proj, cam_xform)), Ok(window)) = (q_cam.single(), windows.single()) {
-        let physical = UVec2::new(window.physical_width(), window.physical_height());
+        let physical = crate::scene::axis_gizmo_canvas_size(
+            window, panel_regions.free_viewport, &panel_regions.windows,
+        );
         if physical.x > 0 && physical.y > 0 {
             let painter = ctx.layer_painter(egui::LayerId::new(
                 egui::Order::Foreground,
@@ -2468,35 +2493,29 @@ fn menu_row(
 
 /// The Molecule Editor window.
 ///
-/// Opens on the right, where its button is, at a fixed starting height tall
-/// enough for everything in the panel, the Newly Placed Fragment section
-/// included. Only the starting size: the window stays freely resizable.
+/// The editor owns its scrolling so its header, selection and footer stay visible.
 pub(crate) fn molecule_editor_window(
     ctx: &egui::Context,
     open: &mut bool,
-    _placed_shown: bool,
     add_contents: impl FnOnce(&mut egui::Ui),
 ) -> Option<egui::InnerResponse<Option<()>>> {
-    const EDITOR_WIDTH: f32 = 360.0;
-    const EDITOR_HEIGHT: f32 = 950.0;
+    const EDITOR_WIDTH: f32 = 420.0;
+    const EDITOR_HEIGHT: f32 = 760.0;
     const EDITOR_MARGIN: f32 = 16.0;
     let viewport = ctx.viewport_rect();
     let height = EDITOR_HEIGHT.min(viewport.height() - 2.0 * EDITOR_MARGIN);
     egui::Window::new("Molecule Editor")
-        // New id so this starting size replaces any size remembered before.
-        .id(egui::Id::new("molecule_editor_window_v9"))
+        .id(egui::Id::new("molecule_editor_modern_v1"))
         .open(open)
         .resizable(true)
         .default_size([EDITOR_WIDTH, height])
+        .min_width(380.0)
+        .min_height(440.0)
         .default_pos([
             (viewport.right() - EDITOR_WIDTH - EDITOR_MARGIN).max(viewport.left()),
             viewport.top() + EDITOR_MARGIN,
         ])
-        .show(ctx, |ui| {
-            egui::ScrollArea::vertical()
-                .auto_shrink([false, false])
-                .show(ui, add_contents);
-        })
+        .show(ctx, add_contents)
 }
 
 pub(crate) fn apply_xyz_text(

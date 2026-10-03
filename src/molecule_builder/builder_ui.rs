@@ -1,6 +1,10 @@
 use bevy::prelude::*;
 use bevy_egui::egui;
 
+#[path = "editor_panel.rs"]
+mod editor_panel;
+pub(crate) use editor_panel::{editor_docked, take_close_request};
+
 use super::attach;
 use super::fragments;
 use super::rotator::{
@@ -522,10 +526,6 @@ pub struct ZMatrixBuilderState {
     /// an undo, a deletion, a reload -- and it is put away rather than left
     /// to move the wrong atoms.
     pub placed_atom_count: usize,
-    /// Whether the fragments are shown as a grid of tiles rather than a
-    /// dropdown. A dropdown hides twenty names behind one; tiles show them
-    /// at the cost of height, so which is better is the user's call.
-    pub fragment_tiles: bool,
     /// Whether the "really clear the display?" question is on screen.
     pub confirm_clear: bool,
     /// Set when the builder made the change itself, so the structure-load
@@ -649,7 +649,6 @@ impl Default for ZMatrixBuilderState {
             zmat: Vec::new(),
             placed_editor: EditorRotateState::default(),
             placed_atom_count: 0,
-            fragment_tiles: true,
             confirm_clear: false,
             skip_next_sync: false,
             history: super::history::BuilderHistory::default(),
@@ -1124,40 +1123,11 @@ fn place_and_derive_fragment(
     clearance
 }
 
-/// The label of the entry that inserts one atom rather than a group.
-///
-/// It sits at the top of the same list as the built-in fragments, because a
-/// single atom *is* a fragment of one atom: `-Cl`, `-Br` and `-I` in that list
-/// are already exactly that, and they go in through the same code. Keeping
-/// atoms and groups apart bought two panels doing one job.
-pub const SINGLE_ATOM_ENTRY: &str = "Single atom\u{2026}";
-
 /// Said when a button that acts on the selection is pressed with nothing
 /// selected. The buttons stay enabled and say this, because a press that
 /// cannot register looks exactly like one that did nothing.
 const NOTHING_SELECTED: &str = "No atom selected. Left-click an atom in the 3D view, or a \
      row index in the Z-matrix, then press this again.";
-
-/// Offered in the single-atom form. Typing is always allowed, so this is a
-/// shortcut for the elements a structure is usually built from, not a limit.
-const COMMON_ELEMENTS: &[&str] = &[
-    // X first: a dummy is not an element, but it is what you reach for when
-    // placing something, and hunting for it at the end of a list of real
-    // elements would be the wrong shape.
-    crate::molecule::DUMMY_SYMBOL,
-    "H",
-    "B",
-    "C",
-    "N",
-    "O",
-    "F",
-    "Si",
-    "P",
-    "S",
-    "Cl",
-    "Br",
-    "I",
-];
 
 /// A fragment the panel can insert: one of the built-in list, or a single atom
 /// built on the spot from an element symbol.
@@ -2467,95 +2437,6 @@ pub fn draw_builder_highlights(
     }
 }
 
-/// Left-side, resizable panel with collapsible “Molecule Builder” and
-/// “Fragment Editor” sections.
-/// NOTE: We now do a clean jump: no immediate atom transform sync; instead we
-/// update `mol.pos` + `mol.bonds` and flag geometry/topology dirty so the scene
-/// rebuilds atoms & bonds together next frame (no mismatched frame).
-/// The molecule editor's contents, independent of the container it is drawn
-/// in: the classic layout docks this in a permanent left panel, while the
-/// tabbed layout puts it in a floating window opened from a small round
-/// button, so it no longer occupies a whole screen edge.
-/// "Clean up geometry": relaxes the structure with the built-in DREIDING force field.
-///
-/// This is what the force field was added for. Building a molecule by hand -- attaching fragments,
-/// setting a bond length, rotating a dihedral -- leaves bond lengths and angles that are roughly
-/// right and locally strained, and the fix wants to be immediate. DREIDING runs in this process,
-/// so a molecule of the size anyone assembles by hand relaxes in milliseconds and the button can
-/// simply do its work before the frame ends, with no task to poll and no spinner to watch.
-///
-/// It is a cleanup, not an optimisation. The result is a sensible starting structure to hand to
-/// xTB or Behemoth, and the panel says so rather than letting it be mistaken for a converged
-/// geometry.
-fn cleanup_row(
-    ui: &mut egui::Ui,
-    zmat_state: &mut ZMatrixBuilderState,
-    mol: &mut Molecule,
-    settings: &mut MolSettings,
-) {
-    ui.horizontal(|ui| {
-        let enabled = !mol.atoms.is_empty();
-        if ui
-            .add_enabled(
-                enabled,
-                // Neon green text on the ordinary button background. A filled
-                // button drew far more attention than a convenience deserves.
-                egui::Button::new(
-                    egui::RichText::new("Clean up geometry")
-                        .color(egui::Color32::from_rgb(57, 255, 20))
-                        .strong(),
-                ),
-            )
-            .on_hover_text(
-                "Relaxes the structure with the built-in DREIDING force field. Fixes the strained \
-                 bond lengths and angles that hand-building leaves behind, in milliseconds. A \
-                 starting structure for a real optimiser, not a substitute for one.",
-            )
-            .clicked()
-        {
-            let before = current_step(zmat_state, mol);
-            let report = run_cleanup(mol, settings);
-            if report.is_ok() {
-                zmat_state.history.record(
-                    "cleaned up the geometry",
-                    &before.atoms,
-                    &before.pos,
-                    &before.zmat,
-                );
-                // Every coordinate moved and dummies may have gone, so the
-                // Z-matrix built from the old structure no longer describes
-                // this one.
-                zmat_state.zmat = zmat2xyz::xyz_to_zmat(&mol.atoms, &mol.pos);
-                zmat_state.edit_refresh = true;
-                set_selected_atom(zmat_state, &mol.atoms, None);
-            }
-            zmat_state.cleanup_report = Some(report);
-        }
-        if ui
-            .add_enabled(
-                zmat_state.cleanup_report.is_some(),
-                egui::Button::new("Dismiss"),
-            )
-            .clicked()
-        {
-            zmat_state.cleanup_report = None;
-        }
-    });
-
-    match &zmat_state.cleanup_report {
-        Some(Ok(message)) => {
-            ui.label(egui::RichText::new(message).small());
-        }
-        Some(Err(message)) => {
-            ui.colored_label(
-                egui::Color32::from_rgb(220, 120, 90),
-                egui::RichText::new(message).small(),
-            );
-        }
-        None => {}
-    }
-}
-
 /// Relaxes `mol` in place, returning a one-line report or the reason it could not.
 fn run_cleanup(mol: &mut Molecule, settings: &mut MolSettings) -> Result<String, String> {
     use crate::forcefield::dreiding::objective::{cleanup_options, relax_angstrom};
@@ -2674,27 +2555,17 @@ fn clear_display(
 pub fn builder_ui_contents(
     ui: &mut egui::Ui,
     state: &mut EditorRotateState,
-    mut zmat_state: &mut ZMatrixBuilderState,
-    mut mol: &mut Molecule,
-    mut settings: &mut MolSettings,
+    zmat_state: &mut ZMatrixBuilderState,
+    mol: &mut Molecule,
+    settings: &mut MolSettings,
     history: &mut crate::structure_history::StructureHistory,
     traj: &mut crate::trajectory::TrajectoryState,
 ) -> BuilderChange {
-    let mut change = BuilderChange::None;
-    let mut clear_pressed = false;
-    crate::structure_history::editor_controls(ui, history, mol, traj, |ui| {
-        // Yellow, and beside Save to history rather than among the buttons
-        // that edit the structure in place: it acts on the whole structure,
-        // like saving it does.
-        let clear = egui::Button::new(
-            egui::RichText::new("Clear Display").color(egui::Color32::BLACK),
-        )
-        .fill(egui::Color32::from_rgb(230, 195, 70));
-        clear_pressed = ui.add(clear).clicked();
-    });
-    if clear_pressed && !mol.atoms.is_empty() {
-        zmat_state.confirm_clear = true;
+    if zmat_state.original_atoms.is_none() && !mol.atoms.is_empty() {
+        zmat_state.original_atoms = Some(mol.atoms.clone());
+        zmat_state.original_pos = Some(mol.pos.clone());
     }
+    let mut change = editor_panel::contents(ui, state, zmat_state, mol, settings, history, traj);
     let ctx = ui.ctx().clone();
 
     // Asked before, not explained after. Undo does bring the structure back,
@@ -2729,485 +2600,17 @@ pub fn builder_ui_contents(
             change = clear_display(zmat_state, state, mol, settings, history, traj);
         }
     }
-            if zmat_state.original_atoms.is_none() && !mol.atoms.is_empty() {
-                zmat_state.original_atoms = Some(mol.atoms.clone());
-                zmat_state.original_pos = Some(mol.pos.clone());
-            }
-            ui.add_space(8.0);
-            {
-                let previous_atom_count = mol.atoms.len();
-                let mut hydrogens_changed = false;
-                ui.horizontal_wrapped(|ui| {
-                    hydrogens_changed = super::hydrogens::buttons(
-                        ui,
-                        &mut zmat_state.hydrogen_state,
-                        mol,
-                        settings,
-                    );
-                });
-                super::hydrogens::report(ui, &zmat_state.hydrogen_state);
+    builder_auxiliary_windows(&ctx, state, zmat_state, mol, settings);
+    change
+}
 
-                if hydrogens_changed {
-                    zmat_state.zmat = super::hydrogens::builder_zmat(mol, previous_atom_count);
-                    zmat_state.edit_refresh = true;
-                    zmat_state.last_frag_snapshot = None;
-                    zmat_state.frag_undo_visible = false;
-                    zmat_state.last_remove_snapshot = None;
-                    zmat_state.redo_remove_visible = false;
-                    zmat_state.add_atom_active = false;
-                    zmat_state.add_atom_auto = false;
-                    zmat_state.add_atom_picks.clear();
-                    zmat_state.add_atom_status = None;
-                    zmat_state.last_error = None;
-                    zmat_state.cleanup_report = None;
-                    set_selected_atom(zmat_state, &mol.atoms, None);
-                    *state = EditorRotateState::default();
-                    traj.clear_for_structure();
-                    // Notify dependent panels and stop frequency animation.
-                    // This edit is saved to history only on explicit request
-                    // or when leaving the structure, like other builder edits.
-                    // Same molecule with its hydrogens filled in: the
-                    // camera must not move, and the history must survive.
-                    change = BuilderChange::Edited;
-                    zmat_state.skip_next_sync = true;
-                }
-                ui.add_space(6.0);
-                cleanup_row(ui, &mut zmat_state, &mut mol, &mut settings);
-
-                ui.add_space(6.0);
-                // What the next click will do, always. Three things want the
-                // same click and nothing used to say which was listening.
-                if let Some(line) = next_click_meaning(zmat_state, state) {
-                    ui.label(egui::RichText::new(line).strong());
-                }
-                ui.add_space(6.0);
-                ui.separator();
-                ui.add_space(6.0);
-
-                // The Z-matrix table lives in its own window now. It is by
-                // far the tallest thing the builder draws, and most editing
-                // sessions never open it, so it does not belong in the panel.
-                // It is the same table, with the same editing, moved.
-                ui.horizontal_wrapped(|ui| {
-                    if ui
-                        .button("Open Z-matrix")
-                        .on_hover_text("Edit the internal coordinates in a separate window.")
-                        .clicked()
-                    {
-                        zmat_state.zmat_window_open = !zmat_state.zmat_window_open;
-                    }
-                    // Blue text, the same treatment as Clean up geometry:
-                    // a coloured label on the ordinary button background,
-                    // light enough to read against a dark panel.
-                    if ui
-                        .add(egui::Button::new(
-                            egui::RichText::new("Fragment editor")
-                                .color(egui::Color32::from_rgb(105, 175, 255))
-                                .strong(),
-                        ))
-                        .on_hover_text("Rotate, stretch or bend part of the structure about a bond.")
-                        .clicked()
-                    {
-                        state.window_open = !state.window_open;
-                    }
-                });
-
-                ui.add_space(6.0);
-                ui.separator();
-                ui.add_space(6.0);
-
-                // ONE insert section, for atoms and groups alike.
-                //
-                // These were two panels doing the same job: choose a thing,
-                // say how it attaches, press a button. A single atom is a
-                // fragment of one atom -- -Cl, -Br and -I in the list already
-                // are exactly that -- so they are one code path now, and
-                // "Single atom..." is simply the first entry in the list.
-                ui.label(egui::RichText::new("Add / Replace Fragment").heading().strong());
-
-                // Read again after the chooser below, never reused from
-                // here: the dropdown and the tiles both change what is being
-                // inserted, and acting on the value from the top of the frame
-                // is what made choosing a group after an atom impossible --
-                // the element row would still run and overwrite it.
-                let inserting_atom = zmat_state.frag_name.starts_with("Atom: ");
-
-                ui.horizontal_wrapped(|ui| {
-                    ui.label("What");
-                    if zmat_state.fragment_tiles {
-                        // The tiles below are the chooser; this only reports
-                        // what they chose, so the row still reads as a
-                        // setting rather than going blank.
-                        ui.label(egui::RichText::new(zmat_state.frag_name.clone()).strong());
-                    } else {
-                    egui::ComboBox::from_id_salt("frag_combo")
-                        .width(128.0)
-                        .selected_text(zmat_state.frag_name.clone())
-                        .show_ui(ui, |ui| {
-                            // Choosing this opens the element form. The name
-                            // becomes "Atom: X" only once an element is
-                            // actually set, so a half-made choice cannot be
-                            // inserted.
-                            if ui
-                                .selectable_label(inserting_atom, SINGLE_ATOM_ENTRY)
-                                .clicked()
-                            {
-                                // Straight into the list. The element is set
-                                // on the row below, in the panel, because a
-                                // window to choose one letter is a window too
-                                // many.
-                                if zmat_state.new_symbol.trim().is_empty() {
-                                    zmat_state.new_symbol = "C".to_string();
-                                }
-                                zmat_state.frag_name =
-                                    format!("Atom: {}", zmat_state.new_symbol.trim());
-                                zmat_state.last_error = None;
-                            }
-                            ui.separator();
-                            for frag in fragments::FRAGMENTS {
-                                ui.selectable_value(
-                                    &mut zmat_state.frag_name,
-                                    frag.name.to_string(),
-                                    frag.name,
-                                );
-                            }
-                        });
-                    }
-                    ui.add_space(10.0);
-                    ui.label("Bond");
-                    egui::ComboBox::from_id_salt("frag_bond_order")
-                        .width(84.0)
-                        .selected_text(zmat_state.frag_bond_order.label())
-                        .show_ui(ui, |ui| {
-                            for &bo in &[BondOrder::Single, BondOrder::Double, BondOrder::Triple] {
-                                if ui
-                                    .selectable_value(
-                                        &mut zmat_state.frag_bond_order,
-                                        bo,
-                                        bo.label(),
-                                    )
-                                    .clicked()
-                                {
-                                    zmat_state.frag_angle_deg = bo.default_angle();
-                                    zmat_state.frag_dihedral_deg = bo.default_dihedral();
-                                }
-                            }
-                        });
-                    ui.add_space(10.0);
-                    if ui
-                        .selectable_label(zmat_state.fragment_tiles, "tiles")
-                        .on_hover_text("Show the fragments as a grid instead of a dropdown.")
-                        .clicked()
-                    {
-                        zmat_state.fragment_tiles = !zmat_state.fragment_tiles;
-                    }
-                });
-
-                if zmat_state.fragment_tiles {
-                    ui.add_space(2.0);
-                    ui.horizontal_wrapped(|ui| {
-                        // First, and keeping its name: it is how every element
-                        // that has no tile of its own gets inserted.
-                        if ui
-                            .add_sized(
-                                [78.0, 24.0],
-                                egui::Button::new(SINGLE_ATOM_ENTRY).selected(inserting_atom),
-                            )
-                            .clicked()
-                        {
-                            if zmat_state.new_symbol.trim().is_empty() {
-                                zmat_state.new_symbol = "C".to_string();
-                            }
-                            zmat_state.frag_name =
-                                format!("Atom: {}", zmat_state.new_symbol.trim());
-                            zmat_state.last_error = None;
-                        }
-                        for frag in tile_fragments() {
-                            let selected = zmat_state.frag_name == frag.name;
-                            if ui
-                                .add_sized(
-                                    [78.0, 24.0],
-                                    egui::Button::new(frag.name).selected(selected),
-                                )
-                                .clicked()
-                            {
-                                zmat_state.frag_name = frag.name.to_string();
-                                zmat_state.last_error = None;
-                            }
-                        }
-                    });
-                    ui.add_space(2.0);
-                }
-
-                // The element, on the next row rather than behind a button.
-                // Only when an atom is what is being inserted -- a group
-                // carries its own atoms.
-                //
-                // Recomputed, because the dropdown or a tile above may have
-                // just changed the answer.
-                if zmat_state.frag_name.starts_with("Atom: ") {
-                    ui.horizontal_wrapped(|ui| {
-                        ui.label("Element");
-                        egui::ComboBox::from_id_salt("atom_element")
-                            .width(56.0)
-                            .selected_text(zmat_state.new_symbol.clone())
-                            .show_ui(ui, |ui| {
-                                for sym in COMMON_ELEMENTS {
-                                    ui.selectable_value(
-                                        &mut zmat_state.new_symbol,
-                                        sym.to_string(),
-                                        *sym,
-                                    );
-                                }
-                            });
-                        ui.label("or type");
-                        ui.add(
-                            egui::TextEdit::singleline(&mut zmat_state.new_symbol)
-                                .desired_width(48.0),
-                        );
-                    });
-                    // What is inserted follows the symbol with no separate
-                    // confirming step. An empty box leaves the name "Atom: ",
-                    // which resolves to nothing, so the buttons refuse it and
-                    // say why -- and this row stays on screen while it is
-                    // being typed into.
-                    zmat_state.frag_name =
-                        format!("Atom: {}", zmat_state.new_symbol.trim());
-                }
-
-                ui.horizontal_wrapped(|ui| {
-                    ui.label("Angle (deg)");
-                    ui.add(egui::DragValue::new(&mut zmat_state.frag_angle_deg).speed(0.1));
-                    ui.add_space(12.0);
-                    ui.label("Dihedral (deg)");
-                    ui.add(egui::DragValue::new(&mut zmat_state.frag_dihedral_deg).speed(0.1));
-                });
-
-                ui.add_space(4.0);
-                ui.horizontal_wrapped(|ui| {
-                    if zmat_state.zmat.is_empty() {
-                        // Nothing exists to attach to, so there is no selection
-                        // to make: the first thing is dropped in where it
-                        // stands. One atom or twelve, the same path.
-                        if ui.button("Place").clicked() {
-                            if let Some(frag) = find_fragment(&zmat_state.frag_name) {
-                                let name = format!("placed {}", zmat_state.frag_name);
-                                record_step(zmat_state, mol, name);
-                                zmat_state.last_frag_snapshot = Some(zmat_state.zmat.clone());
-                                zmat_state.frag_undo_visible = true;
-                                let frag_angle_deg = zmat_state.frag_angle_deg;
-                                let frag_dihedral_deg = zmat_state.frag_dihedral_deg;
-                                add_fragment_to_zmat(
-                                    &mut zmat_state.zmat,
-                                    &frag.xyz,
-                                    None,
-                                    0.0,
-                                    frag_angle_deg,
-                                    frag_dihedral_deg,
-                                );
-                                let coords = zmat2xyz::zmat_to_xyz(&zmat_state.zmat);
-                                mol.atoms = zmat_state
-                                    .zmat
-                                    .iter()
-                                    .map(|atom| atom.symbol.clone())
-                                    .collect();
-                                mol.pos = coords;
-                                mol.recompute_bonds(2.0, 3.0);
-                                settings.geometry_dirty = true;
-                                settings.bond_topology_dirty = true;
-                                zmat_state.edit_refresh = true;
-                                zmat_state.last_error = None;
-                            } else {
-                                zmat_state.last_error =
-                                    Some("Choose what to insert first.".to_string());
-                            }
-                        }
-                    } else {
-                        // Two buttons, not a mode dropdown. Which one you press
-                        // is the whole decision, and it is visible in the press
-                        // rather than remembered from a setting made earlier.
-                        //
-                        // Both stay enabled with nothing selected and say so
-                        // when pressed: a press that cannot register looks
-                        // exactly like one that did nothing.
-                        if ui
-                            .button("Add to selection")
-                            .on_hover_text("Attaches it to the selected atom.")
-                            .clicked()
-                        {
-                            if zmat_state.selected_index.is_none() {
-                                zmat_state.last_error = Some(NOTHING_SELECTED.to_string());
-                            } else {
-                                let name = format!("added {}", zmat_state.frag_name);
-                                record_step(zmat_state, mol, name);
-                                zmat_state.frag_mode = FragmentInsertMode::Connect;
-                                commit_fragment_connect(zmat_state, mol, settings);
-                            }
-                        }
-                        if ui
-                            .button("Replace selection")
-                            .on_hover_text("Replaces the selected atom with it.")
-                            .clicked()
-                        {
-                            if zmat_state.selected_index.is_none() {
-                                zmat_state.last_error = Some(NOTHING_SELECTED.to_string());
-                            } else {
-                                let name = format!("replaced with {}", zmat_state.frag_name);
-                                record_step(zmat_state, mol, name);
-                                zmat_state.frag_mode = FragmentInsertMode::Replace;
-                                commit_fragment_replace(zmat_state, mol, settings, state);
-                            }
-                        }
-                    }
-
-                    if ui.button("Remove Last").clicked() && !zmat_state.zmat.is_empty() {
-                        record_step(zmat_state, mol, "removed the last atom");
-                        if zmat_state.zmat.pop().is_some() {
-                            let coords = zmat2xyz::zmat_to_xyz(&zmat_state.zmat);
-                            mol.atoms = zmat_state
-                                .zmat
-                                .iter()
-                                .map(|atom| atom.symbol.clone())
-                                .collect();
-                            mol.pos = coords;
-                            mol.recompute_bonds(2.0, 3.0);
-                            settings.geometry_dirty = true;
-                            settings.bond_topology_dirty = true;
-                            zmat_state.edit_refresh = true;
-                        }
-                    }
-                });
-
-                // Placing one atom against reference atoms you pick yourself.
-                // "Add to selection" works the placement out; this is for when
-                // the bond, angle and dihedral partners have to be stated
-                // exactly. Only for a single atom: a group's own geometry
-                // already fixes everything but where it joins.
-                if inserting_atom && !zmat_state.zmat.is_empty() {
-                    ui.horizontal(|ui| {
-                        let armed = zmat_state.add_atom_active && !zmat_state.add_atom_auto;
-                        if ui
-                            .button(if armed { "Cancel" } else { "Pick references\u{2026}" })
-                            .on_hover_text(
-                                "Pick the bond, angle and dihedral reference atoms yourself; \
-                                 the values set above are used exactly as given.",
-                            )
-                            .clicked()
-                        {
-                            zmat_state.add_atom_active = !armed;
-                            zmat_state.add_atom_auto = false;
-                            zmat_state.add_atom_picks.clear();
-                            zmat_state.add_atom_status = None;
-                            // The explicit path reads its own copies of these.
-                            // They are one set of numbers on screen, so they
-                            // must be one set of numbers underneath.
-                            zmat_state.new_angle_deg = zmat_state.frag_angle_deg;
-                            zmat_state.new_dihedral_deg = zmat_state.frag_dihedral_deg;
-                            zmat_state.new_bond_order = zmat_state.frag_bond_order;
-                        }
-                    });
-                }
-
-                if zmat_state.add_atom_active {
-                    // The automatic mode needs one reference only; that is the
-                    // whole difference between the two buttons.
-                    let needed = if zmat_state.add_atom_auto {
-                        1
-                    } else {
-                        add_atom_picks_required(zmat_state.zmat.len())
-                    };
-                    let picked = zmat_state.add_atom_picks.len();
-                    if zmat_state.add_atom_auto {
-                        ui.weak("Pick the atom to bond to \u{2014} the rest is worked out.");
-                    } else {
-                        ui.weak(add_atom_prompt(picked, needed));
-                    }
-                    let roles = ["bond", "angle", "dihedral"];
-                    ui.monospace(
-                        zmat_state
-                            .add_atom_picks
-                            .iter()
-                            .enumerate()
-                            .map(|(k, &idx)| {
-                                let name = match mol.atoms.get(idx) {
-                                    Some(sym) => format!("{sym}{}", idx + 1),
-                                    None => format!("{}", idx + 1),
-                                };
-                                format!("{}: {name}", roles[k.min(2)])
-                            })
-                            .collect::<Vec<_>>()
-                            .join("   "),
-                    );
-                    if let Some(status) = &zmat_state.add_atom_status {
-                        ui.colored_label(egui::Color32::from_rgb(210, 160, 40), status);
-                    }
-                    // The last pick is the last thing the user has to do: the
-                    // atom appears as soon as its placement is fully stated.
-                    if picked >= needed && needed > 0 {
-                        let name = format!("added {}", zmat_state.new_symbol.trim());
-                        record_step(zmat_state, mol, name);
-                        if zmat_state.add_atom_auto {
-                            commit_add_atom_auto(&mut zmat_state, &mut mol, &mut settings);
-                        } else {
-                            commit_add_atom_with_refs(&mut zmat_state, &mut mol, &mut settings);
-                        }
-                    }
-                }
-
-                // The fragment just placed, ready to be turned, slid or tilted
-                // about the bond it was placed on.
-                placed_fragment_editor(ui, zmat_state, mol, settings);
-
-                // One Undo and one Redo, over every action the builder takes.
-                // The line beside them says what Undo will take back, so it
-                // can be read before it is pressed rather than discovered
-                // after -- which is what made six separate Undos untrustworthy.
-                ui.add_space(6.0);
-                ui.separator();
-                ui.horizontal_wrapped(|ui| {
-                    let undo_name = zmat_state.history.next_undo().map(str::to_string);
-                    let redo_name = zmat_state.history.next_redo().map(str::to_string);
-                    if ui
-                        .add_enabled(undo_name.is_some(), egui::Button::new("Undo"))
-                        .on_hover_text(format!("{} steps can be undone.", zmat_state.history.depth()))
-                        .on_disabled_hover_text("Nothing to undo yet.")
-                        .clicked()
-                    {
-                        let now = current_step(zmat_state, mol);
-                        if let Some(step) = zmat_state.history.undo(now) {
-                            restore_step(step, zmat_state, mol, settings);
-                        }
-                    }
-                    if ui
-                        .add_enabled(redo_name.is_some(), egui::Button::new("Redo"))
-                        .on_disabled_hover_text("Nothing to redo.")
-                        .clicked()
-                    {
-                        let now = current_step(zmat_state, mol);
-                        if let Some(step) = zmat_state.history.redo(now) {
-                            restore_step(step, zmat_state, mol, settings);
-                        }
-                    }
-                    match (&undo_name, &redo_name) {
-                        (Some(name), _) => ui.weak(format!("last: {name}")),
-                        (None, Some(name)) => ui.weak(format!("redo: {name}")),
-                        (None, None) => ui.weak("nothing done yet"),
-                    };
-                });
-                ui.add_space(6.0);
-
-                // Why a press did nothing, said where the press happened. The
-                // panel's other error line sits above the Z-matrix table,
-                // which in a scrolling window is off-screen by the time these
-                // controls are in view -- so a failure looked like silence.
-                if let Some(err) = &zmat_state.last_error {
-                    ui.colored_label(egui::Color32::LIGHT_RED, err);
-                }
-                if let Some(score) = zmat_state.frag_scan_score {
-                    ui.weak(format!("Fragment scan min distance: {:.3} Å", score));
-                }
-            }
-
+fn builder_auxiliary_windows(
+    ctx: &egui::Context,
+    state: &mut EditorRotateState,
+    mut zmat_state: &mut ZMatrixBuilderState,
+    mut mol: &mut Molecule,
+    mut settings: &mut MolSettings,
+) {
             // The Z-matrix, in its own window. Drawn after the panel body so
             // the panel's borrows of zmat_state have ended; `open` needs a
             // separate bool for the same reason, since the closure below
@@ -3663,7 +3066,6 @@ pub fn builder_ui_contents(
 
 
             fragment_editor_window(&ctx, state, zmat_state, mol, settings);
-    change
 }
 
 
@@ -4133,25 +3535,6 @@ fn placed_fragment_editor(
 
     zmat_state.placed_editor = editor;
 }
-
-/// The classic docked-left-panel presentation of the molecule editor.
-pub fn builder_ui_panel(
-    ui: &mut egui::Ui,
-    state: &mut EditorRotateState,
-    zmat_state: &mut ZMatrixBuilderState,
-    mol: &mut Molecule,
-    settings: &mut MolSettings,
-    history: &mut crate::structure_history::StructureHistory,
-    traj: &mut crate::trajectory::TrajectoryState,
-) -> BuilderChange {
-    egui::Panel::left("molecule_editor_panel")
-        .resizable(true)
-        .show(ui, |ui| {
-            builder_ui_contents(ui, state, zmat_state, mol, settings, history, traj)
-        })
-        .inner
-}
-
 
 #[cfg(test)]
 mod fragment_placement_tests {

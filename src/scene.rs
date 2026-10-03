@@ -1347,8 +1347,49 @@ pub fn update_light_positions(
 
 // ---------------------- Axis viewport & sync ----------------------
 
+/// Keep the orientation gizmo clear of docked panels and floating tool windows.
+pub(crate) fn axis_gizmo_canvas_size(
+    window: &Window,
+    free_viewport: Option<Rect>,
+    floating_windows: &[Rect],
+) -> UVec2 {
+    let physical = UVec2::new(window.physical_width(), window.physical_height());
+    let scale = window.scale_factor() as f32;
+    let viewport = free_viewport.unwrap_or_else(|| {
+        Rect::from_corners(Vec2::ZERO, physical.as_vec2() / scale)
+    });
+    let mut canvas = UVec2::new(
+        ((viewport.max.x * scale).round().max(0.0) as u32).min(physical.x),
+        ((viewport.max.y * scale).round().max(0.0) as u32).min(physical.y),
+    );
+    let span = (AXIS_VP_SIZE + AXIS_VP_MARGIN) as f32 / scale;
+    // A move can uncover another window; repeat until the corner is clear.
+    // Each move strictly reduces one bound, and there are finitely many windows.
+    for _ in 0..=floating_windows.len() {
+        let corner = canvas.as_vec2() / scale;
+        let min = corner - Vec2::splat(span);
+        let Some(obstacle) = floating_windows.iter().find(|rect| {
+            rect.min.x < corner.x
+                && rect.max.x > min.x
+                && rect.min.y < corner.y
+                && rect.max.y > min.y
+        }) else {
+            break;
+        };
+        if obstacle.min.x >= viewport.min.x + span {
+            canvas.x = (obstacle.min.x * scale).floor() as u32;
+        } else if obstacle.min.y >= viewport.min.y + span {
+            canvas.y = (obstacle.min.y * scale).floor() as u32;
+        } else {
+            break;
+        }
+    }
+    canvas
+}
+
 pub fn update_axis_viewport_on_resize(
     windows: Query<&Window>,
+    panels: Res<crate::ui::UiPanelRegions>,
     mut q_axis_cam: Query<&mut Camera, With<AxisCamera>>,
 ) {
     let Ok(window) = windows.single() else {
@@ -1358,8 +1399,9 @@ pub fn update_axis_viewport_on_resize(
         return;
     };
 
-    let w = window.physical_width();
-    let h = window.physical_height();
+    let canvas = axis_gizmo_canvas_size(window, panels.free_viewport, &panels.windows);
+    let w = canvas.x;
+    let h = canvas.y;
 
     if w == 0 || h == 0 {
         cam.viewport = None;
@@ -1516,6 +1558,49 @@ mod bond_span_tests {
 #[cfg(test)]
 mod axis_gizmo_tests {
     use super::*;
+
+    #[test]
+    fn docked_editor_keeps_axes_and_labels_inside_the_canvas_at_high_dpi() {
+        let mut window = Window::default();
+        window.resolution.set_scale_factor_override(Some(2.0));
+        window.resolution.set_physical_resolution(2560, 1440);
+        let canvas = axis_gizmo_canvas_size(&window, Some(Rect::new(50.0, 0.0, 860.0, 720.0)), &[]);
+        assert_eq!(canvas, UVec2::new(1720, 1440));
+        for (_, position, _) in axis_gizmo_label_positions(canvas, 2.0, &front_view()) {
+            assert!(position.x < 860.0, "an axis label overlaps the editor: {position:?}");
+            assert!(position.y < 720.0);
+        }
+        assert_eq!(axis_gizmo_canvas_size(&window, None, &[]), UVec2::new(2560, 1440));
+    }
+
+    #[test]
+    fn floating_editor_keeps_axes_clear_and_releases_the_corner_when_moved() {
+        for scale in [1.0, 2.0] {
+            let mut window = Window::default();
+            window.resolution.set_scale_factor_override(Some(scale));
+            window.resolution.set_physical_resolution(
+                (1280.0 * scale) as u32,
+                (720.0 * scale) as u32,
+            );
+            let editor = Rect::new(844.0, 16.0, 1264.0, 704.0);
+            let canvas = axis_gizmo_canvas_size(&window, None, &[editor]);
+            assert_eq!(
+                canvas,
+                UVec2::new((844.0 * scale) as u32, (720.0 * scale) as u32),
+            );
+            for (_, position, _) in axis_gizmo_label_positions(canvas, scale, &front_view()) {
+                assert!(
+                    !editor.contains(position),
+                    "axis label overlaps floating editor: {position:?}",
+                );
+            }
+            let moved = Rect::new(50.0, 16.0, 470.0, 704.0);
+            assert_eq!(
+                axis_gizmo_canvas_size(&window, None, &[moved]),
+                UVec2::new((1280.0 * scale) as u32, (720.0 * scale) as u32),
+            );
+        }
+    }
 
     /// A camera looking down -Z with +Y up: the classic front view, where X
     /// runs right, Y runs up the screen, and Z points at the viewer.

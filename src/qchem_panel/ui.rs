@@ -20,25 +20,37 @@ use crate::qchem_interfaces::xtb_optimize::{
     python_environment_row, resolve_program_executable, XtbPanelState,
 };
 
+#[path = "modern_ui.rs"]
+mod modern_ui;
+pub(crate) use modern_ui::{docked_width, is_docked};
+
 /// Draws the panel and starts a run when the button is pressed.
 #[allow(clippy::too_many_arguments)]
 pub fn qc_panel(
     ctx: &egui::Context,
+    host_ui: &mut egui::Ui,
     panel: &mut QcPanelState,
     task: &mut QcRunTask,
     opt_panel: &mut XtbPanelState,
     mol: &Molecule,
-) {
+) -> Option<egui::Rect> {
+    if !task.is_running() {
+        panel.config.nproc = panel.config.nproc.clamp(1, 4);
+    }
+    if modern_ui::is_modern(ctx) {
+        return modern_ui::show(ctx, host_ui, panel, task, opt_panel, mol);
+    }
     let mut open = panel.open;
-    egui::Window::new("Quantum Chemistry")
+    let window = egui::Window::new("Quantum Chemistry")
         .open(&mut open)
         .default_size([460.0, 640.0])
         .vscroll(true)
         .show(ctx, |ui| {
+            modern_ui::layout_switch(ui);
             body(ui, panel, task, opt_panel, mol);
         });
     panel.open = open;
-
+    window.map(|window| window.response.rect)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -258,6 +270,15 @@ fn program_row(
         panel.set_program(chosen);
     });
 
+    program_path_row(ui, panel, opt_panel, running);
+}
+
+fn program_path_row(
+    ui: &mut egui::Ui,
+    panel: &QcPanelState,
+    opt_panel: &mut XtbPanelState,
+    running: bool,
+) {
     // The path, shared with the optimizer panel so a program pointed at once is
     // pointed at everywhere.
     if panel.program.needs_binary_path() {
@@ -584,7 +605,7 @@ fn resources_row(ui: &mut egui::Ui, panel: &mut QcPanelState, running: bool) {
         ui.label("nproc");
         ui.add_enabled(
             !running,
-            egui::DragValue::new(&mut panel.config.nproc).speed(1.0).range(1..=1024),
+            egui::DragValue::new(&mut panel.config.nproc).speed(1.0).range(1..=4),
         );
     });
     if panel.program == QcProgram::Orca && panel.config.nproc > 1 {
@@ -630,42 +651,7 @@ fn run_row(
         };
 
         if button.clicked() {
-            panel.show_warnings = true;
-            let program = panel.program;
-            // The path the optimizer panel remembers for this program.
-            let entered = opt_panel
-                .paths
-                .iter()
-                .find(|(p, _)| *p == program)
-                .map(|(_, path)| path.clone())
-                .unwrap_or_default();
-            match resolve_program_executable(program, &entered) {
-                Ok(binary) => {
-                    let positions: Vec<f64> = mol
-                        .pos
-                        .iter()
-                        .flat_map(|p| [p.x as f64, p.y as f64, p.z as f64])
-                        .collect();
-                    task.start(
-                        program,
-                        panel.method,
-                        panel.job,
-                        binary,
-                        mol.atoms.clone(),
-                        positions,
-                        panel.charge,
-                        panel.multiplicity,
-                        panel.config.clone(),
-                        panel.excited,
-                        panel.wavefunction,
-                        panel.advanced.then(|| panel.advanced_text.clone()),
-                    );
-                }
-                Err(err) => {
-                    task.last_message = Some(err);
-                    task.last_is_error = true;
-                }
-            }
+            start_run(panel, task, opt_panel, mol);
         }
 
         if running {
@@ -685,6 +671,52 @@ fn run_row(
             ui.colored_label(egui::Color32::from_rgb(230, 120, 90), message);
         } else {
             ui.label(egui::RichText::new(message).weak());
+        }
+    }
+}
+
+/// Both presentations launch through the same calculation path.
+fn start_run(
+    panel: &mut QcPanelState,
+    task: &mut QcRunTask,
+    opt_panel: &XtbPanelState,
+    mol: &Molecule,
+) {
+    panel.config.nproc = panel.config.nproc.clamp(1, 4);
+    panel.show_warnings = true;
+    let program = panel.program;
+    // The path the optimizer panel remembers for this program.
+    let entered = opt_panel
+        .paths
+        .iter()
+        .find(|(p, _)| *p == program)
+        .map(|(_, path)| path.clone())
+        .unwrap_or_default();
+    match resolve_program_executable(program, &entered) {
+        Ok(binary) => {
+            let positions: Vec<f64> = mol
+                .pos
+                .iter()
+                .flat_map(|p| [p.x as f64, p.y as f64, p.z as f64])
+                .collect();
+            task.start(
+                program,
+                panel.method,
+                panel.job,
+                binary,
+                mol.atoms.clone(),
+                positions,
+                panel.charge,
+                panel.multiplicity,
+                panel.config.clone(),
+                panel.excited,
+                panel.wavefunction,
+                panel.advanced.then(|| panel.advanced_text.clone()),
+            );
+        }
+        Err(err) => {
+            task.last_message = Some(err);
+            task.last_is_error = true;
         }
     }
 }

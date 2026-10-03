@@ -317,33 +317,6 @@ fn status(ui: &mut egui::Ui, history: &StructureHistory) {
         }
     }
 }
-/// The save-to-history row. `trailing` draws anything the caller wants on the
-/// same line -- the molecule editor puts Clear Display there, where it sits
-/// with the other whole-structure actions instead of among the buttons that
-/// edit the structure in place.
-pub fn editor_controls(
-    ui: &mut egui::Ui,
-    history: &mut StructureHistory,
-    mol: &Molecule,
-    traj: &TrajectoryState,
-    trailing: impl FnOnce(&mut egui::Ui),
-) {
-    ui.horizontal_wrapped(|ui| {
-        ui.add(egui::TextEdit::singleline(&mut history.save_name).desired_width(180.0).hint_text("History name (optional)"));
-        if ui.add_enabled(!mol.atoms.is_empty() && !traj.playing, egui::Button::new("Save to history"))
-            .on_hover_text("Save this version across sessions. Pause playback first to explicitly save a trajectory frame.").clicked() {
-            history.save_current(mol);
-        }
-        trailing(ui);
-    });
-    // Failures only. A confirmation line under a button that says "Save to
-    // history" repeats what the button already said, and it sat there for the
-    // rest of the session; a save that failed silently would be a real loss.
-    if history.is_error {
-        status(ui, history);
-    }
-    ui.separator();
-}
 pub fn panel(
     ui: &mut egui::Ui,
     history: &mut StructureHistory,

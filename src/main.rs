@@ -33,6 +33,7 @@ mod trajectory;
 mod structure_history;
 mod ts_generation;
 mod ui;
+mod ui_icons;
 mod ui_layout;
 mod ui_measurements;
 mod uvvis;
@@ -78,6 +79,13 @@ fn main() {
         .add_plugins(
             DefaultPlugins
                 .set(ImagePlugin::default_nearest())
+                .set(bevy::window::WindowPlugin {
+                    primary_window: Some(Window {
+                        title: format!("Beavyr {}", env!("CARGO_PKG_VERSION")),
+                        ..default()
+                    }),
+                    ..default()
+                })
                 .set(bevy::log::LogPlugin {
                     // Bevy's own defaults, plus one addition.
                     //

@@ -40,17 +40,30 @@ number can be open at once, and each keeps its own state.
 
 ### Molecule Editor
 
-Open **Molecule Editor** to load or paste XYZ coordinates, or build a molecule
-by adding atoms and fragments. Select an atom in the viewer to work on it;
-the Z-matrix table lets you edit bond lengths, angles and dihedrals.
+Load or paste XYZ coordinates through **Structure (XYZ)**, then open
+**Molecule Editor** to edit the structure or build one by adding atoms and
+fragments. Select an atom in the viewer to work on it; the Z-matrix table lets
+you edit bond lengths, angles and dihedrals.
 
-![Molecule Editor with a selected atom, Z-matrix coordinates, and atom and fragment controls](Images/Editor.png)
+The editor opens as a floating, resizable window. Common elements
+and fragments are one click away; search the fragment library by name or formula.
+The selection card identifies the atom that **Add** or **Replace** will act on,
+and Undo/Redo and the geometry tools stay visible while the library scrolls.
+Drag it wherever you prefer, or choose **Dock** to attach it to the right edge.
+Use **Float** to detach it again.
 
-The atom count, molecular formula in Hill notation (`C12 : H24 : O2`) and
-molecular weight sit at the top of the panel — the cheapest way to notice that
-a structure is one hydrogen short before doing anything else with it. An
-unknown element symbol suppresses the weight and is named, rather than
-quietly producing a weight that is too small.
+After attaching or replacing a fragment, the existing **Newly Placed Fragment**
+controls are ready to rotate, stretch and bend it. **Fragment Editor ↗** opens
+the existing tool with that fragment's atoms and attachment axis already set.
+Its controls and Apply/Cancel behavior are unchanged.
+
+![Modern Molecular Editor with a selected atom, fragment palette, Add and Replace actions, and fixed geometry tools](Images/EditorModern.png)
+
+The atom count and molecular formula in Hill notation (`C12H24O2`) sit at the
+top of the modern panel; hover the formula for the molecular weight. This is
+the cheapest way to notice that a structure is one hydrogen short before doing
+anything else with it. An unknown element symbol suppresses the weight and is
+named, rather than quietly producing a weight that is too small.
 
 Load or paste XYZ. Edit the coordinates as text and re-apply, or edit the
 molecule directly in 3D. The builder adds and removes atoms, attaches
@@ -85,17 +98,44 @@ toggle hydrogen bonds, and **Orient / Mirror / Flip** the structure into a
 chosen coordinate plane or about a chosen axis. Orient and Flip keep a chiral
 molecule as it was; Mirror deliberately gives you its enantiomer.
 
+### Quantum Chemistry
+
+Open the atom-shaped launcher beside the Molecule Editor launcher. The modern
+calculator opens floating; **Dock** attaches it to the right edge and **Float**
+detaches it again. The **Quantum chemistry code** selector stays at the top,
+with all eight existing backends and **Configure…** beside it. Its status tells
+you whether the executable or Python environment is available.
+
+Choose **Energy**, **Optimize**, **Frequencies**, or **Optimize + frequencies**;
+**More…** offers the other supported calculations. Search the program's method,
+functional and basis lists by name or keyword. Resources, additional options,
+and direct input editing expand when needed. The action and status stay at the
+bottom while the settings scroll, and resources are limited to four cores.
+
+The **Classic** option restores the previous calculator form. Both layouts use
+the same code selection, settings, custom input and running calculation. For
+Classic from startup, launch with `BEAVYR_CLASSIC_QC=1`.
+
+![Modern Quantum Chemistry calculator with a prominent code selector and fixed calculation action](Images/QuantumChemistryModern.png)
+
+The main application title includes the version declared in `Cargo.toml`,
+for example **Beavyr 0.2.1**.
+
+The toolbars use consistent vector icons with hover labels and blue highlights
+for open tools. They stay sharp at different display scales and do not depend
+on emoji fonts.
+
 ### Geometry Optimization
 
 Relax the displayed structure with xTB or the built-in DREIDING
 force field. Optimization runs in the background so the viewer stays responsive.
 
-1. Load or draw a molecule, then open **Geometry Optimization** using the wrench
-   icon on the left.
-2. Choose the **Program** and method. For an external program, use **Browse…**
-   to select its executable. Check the structure's **Charge** and **Multiplicity**
-   before starting, and set **nproc** to the number of cores you want to use.
-3. Click **Optimize**. After completion, open **Trajectory** to inspect the
+1. Load or draw a molecule, open **Quantum Chemistry** from the atom-shaped
+   launcher, and choose **Optimize**.
+2. Choose the code and method. For an external program, use **Configure…** and
+   **Browse…** to select its executable. Check the structure's **Charge** and
+   **Multiplicity** before starting, and expand **Resources** to set the cores.
+3. Click **Start optimization**. After completion, open **Trajectory** to inspect the
    optimization steps, or **Show Energy Plot** to see the energy history when
    available. Use **Save to history** in Molecule Editor to retain the result.
 
@@ -103,7 +143,7 @@ force field. Optimization runs in the background so the viewer stays responsive.
 
 ### Recent Structures
 
-The **↶ Recent Structures** icon keeps the last 20 distinct structures, newest
+The **Recent Structures** icon keeps the last 20 distinct structures, newest
 first. Loading another structure or pressing **Clear Display** preserves the
 structure you are leaving, including unsaved drawings and edits. The newly
 loaded standalone structure is saved too. Click **Load** beside an entry to
