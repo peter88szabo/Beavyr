@@ -35,6 +35,7 @@ fn portable_project_restores_embedded_data_settings_and_camera() {
         pos: data.positions.clone(),
         bonds: vec![],
         hydrogen_bonds: vec![],
+        topology: None,
     });
     let mut orbitals = OrbitalState::default();
     orbitals.adopt(
@@ -221,4 +222,16 @@ fn workspace_round_trip_preserves_window_position_and_docking() {
         ui.text_edit_singleline(&mut text).request_focus();
     });
     output.textures_delta.clear();
+}
+
+#[test]
+fn peptide_project_preserves_residue_ids_charge_and_connectivity() {
+    use crate::molecule_builder::peptide::{self,Recipe};
+    let mut world=world();
+    let original=peptide::build(&Recipe{residues:peptide::parse_sequence("AKD").unwrap(),..Default::default()},None).unwrap().molecule;
+    world.insert_resource(original.clone());
+    let saved=Snapshot::capture(&world,Workspace::capture(&egui::Context::default())).unwrap();
+    let text=ron::ser::to_string(&saved).unwrap();let loaded:Snapshot=ron::from_str(&text).unwrap();
+    let orbitals=loaded.validate().unwrap();loaded.apply(&mut world,orbitals);
+    let restored=world.resource::<Molecule>();assert_eq!(restored.topology,original.topology);assert_eq!(restored.bonds,original.bonds);assert_eq!(restored.pos,original.pos);
 }

@@ -27,6 +27,7 @@ pub const MAX_STEPS: usize = 200;
 #[derive(Clone, Debug)]
 pub struct BuilderStep {
     /// What the action was called, in the words the button used.
+    pub topology: Option<super::topology::Topology>,
     pub name: String,
     pub atoms: Vec<String>,
     pub pos: Vec<Vec3>,
@@ -51,6 +52,7 @@ impl BuilderHistory {
     pub fn record(&mut self, name: impl Into<String>, atoms: &[String], pos: &[Vec3], zmat: &[ZAtom]) {
         self.future.clear();
         self.past.push(BuilderStep {
+            topology: None,
             name: name.into(),
             atoms: atoms.to_vec(),
             pos: pos.to_vec(),
@@ -59,6 +61,10 @@ impl BuilderHistory {
         if self.past.len() > MAX_STEPS {
             self.past.remove(0);
         }
+    }
+
+    pub fn set_last_topology(&mut self, topology: Option<super::topology::Topology>) {
+        if let Some(step) = self.past.last_mut() { step.topology = topology; }
     }
 
     /// What Undo will take back, named, so it can be read before it is pressed.
@@ -124,6 +130,7 @@ mod tests {
 
     fn state(n: usize) -> BuilderStep {
         BuilderStep {
+            topology: None,
             name: format!("step {n}"),
             atoms: vec!["C".to_string(); n],
             pos: vec![Vec3::splat(n as f32); n],

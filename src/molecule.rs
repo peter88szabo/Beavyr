@@ -11,6 +11,7 @@ pub type MolSnapshot = Vec<Vec3>;
 /// Positions are stored in Å (Angstrom). All parsing is Å.
 #[derive(Resource, Clone)]
 pub struct Molecule {
+    pub topology: Option<crate::molecule_builder::topology::Topology>,
     pub atoms: Vec<String>,
     pub pos: Vec<Vec3>,                           // positions in Å
     pub bonds: Vec<(usize, usize, f32)>,          // (i, j, distance in Å)
@@ -26,6 +27,7 @@ impl Molecule {
             pos: Vec::new(),
             bonds: Vec::new(),
             hydrogen_bonds: Vec::new(),
+            topology: None,
         }
     }
 
@@ -47,6 +49,7 @@ impl Molecule {
             pos,
             bonds: vec![],
             hydrogen_bonds: vec![],
+            topology: None,
         };
         mol.recompute_bonds(2.0, 3.0);
         mol
@@ -88,7 +91,14 @@ impl Molecule {
             return;
         }
 
-        self.recompute_covalent_bonds(thresh_scale);
+        if self.topology.as_ref().is_some_and(|t| !t.valid_for(&self.atoms)) {
+            self.topology = None;
+        }
+        if let Some(topology) = &self.topology {
+            self.bonds = topology.bonds.iter().map(|&(a,b,_)| (a,b,self.pos[a].distance(self.pos[b]))).collect();
+        } else {
+            self.recompute_covalent_bonds(thresh_scale);
+        }
 
         // Build adjacency from covalent bonds
         let mut bonded_to: Vec<Vec<usize>> = vec![Vec::new(); n];
@@ -898,6 +908,7 @@ mod tests {
             pos,
             bonds: vec![],
             hydrogen_bonds: vec![],
+            topology: None,
         }
     }
 

@@ -230,6 +230,8 @@ impl Orbitals {
 
 #[derive(Clone, Serialize, Deserialize)]
 struct Snapshot {
+    #[serde(default)]
+    topology: Option<crate::molecule_builder::topology::Topology>,
     version: u32,
     application: String,
     atoms: Vec<String>,
@@ -257,6 +259,7 @@ impl Snapshot {
         Ok(Self {
             version: VERSION,
             application: env!("CARGO_PKG_VERSION").into(),
+            topology: mol.topology.clone(),
             atoms: mol.atoms.clone(),
             positions: mol.pos.clone(),
             xyz_draft: world.resource::<XyzBuffer>().text.clone(),
@@ -286,6 +289,7 @@ impl Snapshot {
             );
         }
         validate_geometry(&self.atoms, &self.positions)?;
+        if self.topology.as_ref().is_some_and(|t| !t.valid_for(&self.atoms)) { bail!("Invalid saved residue topology"); }
         for frame in &self.trajectory.frames {
             validate_geometry(&frame.atoms, &frame.pos)?;
         }
@@ -361,6 +365,7 @@ impl Snapshot {
             pos: self.positions,
             bonds: vec![],
             hydrogen_bonds: vec![],
+            topology: self.topology,
         };
         mol.recompute_bonds(self.settings.bond_thresh_scale, self.settings.hbond_cutoff);
         world.insert_resource(mol);

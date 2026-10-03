@@ -394,6 +394,7 @@ fn panel_body(
 
 /// A Bevy system that paints distance labels near the measured lines in a 2D egui overlay.
 pub fn distance_labels_overlay(
+    builder: Res<crate::molecule_builder::builder_ui::ZMatrixBuilderState>,
     mut contexts: bevy_egui::EguiContexts,
     q_cam: Query<(&Camera, &GlobalTransform), (With<Camera3d>, With<crate::scene::MainCamera>)>,
     windows: Query<&Window>,
@@ -428,7 +429,11 @@ pub fn distance_labels_overlay(
 
             for pair in measurements.pairs.iter().filter(|p| p.visible) {
                 let n = mol.pos.len();
-                if pair.a >= n || pair.b >= n {
+                if pair.a >= n
+                    || pair.b >= n
+                    || builder.selection.hidden.contains(&pair.a)
+                    || builder.selection.hidden.contains(&pair.b)
+                {
                     continue;
                 }
 

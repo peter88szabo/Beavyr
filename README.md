@@ -57,6 +57,17 @@ controls are ready to rotate, stretch and bend it. **Fragment Editor ↗** opens
 the existing tool with that fragment's atoms and attachment axis already set.
 Its controls and Apply/Cancel behavior are unchanged.
 
+**Peptide Builder…** opens a separate floating window with 22 amino-acid tiles,
+sequence input, N- or C-terminal growth, protonation choices and a rotatable
+preview. Build a separate peptide or extend a selected free amino/carboxyl group.
+Insertion is undoable and prepares the existing Fragment Editor for the new
+atoms. Its **Edit residues** tab adds previewed residue replacement, side-chain
+fitting, ACE/NME caps, positioned disulfide links and PDB export. Residue chemistry
+survives project save/load and Undo/Redo; **Add missing H** restores named peptide
+hydrogens and now supports neutral amine/amide nitrogen in ordinary structures.
+Peptides hide hydrogen bonds, and chains longer than 20 residues default to a
+backbone trace. See the [Peptide Builder guide](data/amino_acids/PEPTIDE_BUILDER.md).
+
 ![Modern Molecular Editor with a selected atom, fragment palette, Add and Replace actions, and fixed geometry tools](Images/EditorModern.png)
 
 The atom count and molecular formula in Hill notation (`C12H24O2`) sit at the
@@ -82,10 +93,31 @@ It keeps existing coordinates fixed and skips centres with detected multiple
 or partial bonds. **Undo H addition** restores the structure before the addition;
 use **Save to history** to keep an edited version between sessions.
 
-**Clean up geometry** relaxes bond lengths and angles a fragment left
-strained, using a force field built into Beavyr — no external program, no
-waiting. It is a starting structure for a real optimisation, not a substitute
-for one, and it says so.
+The Molecular Editor's **Select** menu selects by element, connected fragment,
+bonded neighbours, or the last placed fragment. Click replaces the selection;
+**Shift-click** toggles atoms. The menu also offers **All visible**, **Invert**,
+and **Clear selection**. The original dashed magenta rings show selected atoms. The active atom remains
+the attachment target for the existing placement controls.
+
+**Freeze** fixes selected atoms for quick cleanup; amber boxes mark them.
+The **Frozen** menu unfreezes selected atoms or all atoms. **Isolate** hides
+unselected atoms, bonds and labels; **Show all** restores them. Isolation affects
+the view and picking only: calculations still use the complete molecule.
+Selection, isolation and freezing are session tools and are reset when a new
+structure is loaded. Appending fragments preserves freezes on existing atoms.
+These tools do not change the Fragment Editor's ordered picks or transformations.
+
+**Clean up geometry** opens a floating DREIDING cleanup window. Choose **Whole
+structure** or **Selected atoms**, then **Preview cleanup**. Frozen atoms always
+stay fixed; in selected mode all unselected atoms stay fixed too. The built-in
+force field runs in the background and can be cancelled. Cyan outlines show the
+proposed geometry and displacement without changing the current coordinates.
+**Accept cleanup** records one Undo/Redo step; **Discard** or closing the window
+leaves the molecule unchanged. Changes to the source geometry or movable atoms
+invalidate the preview. Dummy atoms are retained, fixed, outside the force field.
+Cleanup reports energy change and convergence, and rejects unsupported atom
+types. It prepares a starting structure for optimisation; metal coordination,
+unusual bonding and electronic states require a suitable quantum method.
 
 The atom context menu also offers **Delete atom** beside **Use as rotation
 center**. Deletion keeps the remaining Cartesian coordinates fixed and recreates

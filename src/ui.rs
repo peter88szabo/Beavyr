@@ -34,7 +34,6 @@ use crate::uvvis::{ui::uvvis_panel, UvVisState};
 const AXIS_LABEL_FONT_SIZE: f32 = 19.0;
 
 // NEW: shared picking helper (egui-friendly shim)
-use crate::picking::screen::find_nearest_atom_screen_space_egui;
 
 const ELEMENT_FILTER_S_BLOCK: [&str; 14] = [
     "H", "He", "Li", "Be", "Na", "Mg", "K", "Ca", "Rb", "Sr", "Cs", "Ba", "Fr", "Ra",
@@ -233,8 +232,12 @@ pub fn ui_panel(
                 let mouse_px = egui::pos2(pos_points.x * scale, pos_points.y * scale);
 
                 let (picked_idx, popup_pos) = if let Some((hit_idx, hit_px_pos)) =
-                    find_nearest_atom_screen_space_egui(
-                        cam_comp, cam_xform, &mol.pos, mouse_px, 18.0,
+                    crate::picking::screen::find_nearest_visible_atom(
+                        cam_comp, cam_xform, &mol.pos, Vec2::new(mouse_px.x, mouse_px.y), 18.0,
+                        |i| {
+                            !zmat_state.selection.hidden.contains(&i)
+                                && crate::scene::element_visible(&mol.atoms[i], &settings)
+                        },
                     ) {
                     (
                         hit_idx as i32,
@@ -712,6 +715,7 @@ pub fn ui_panel(
                     if let Some((atoms, pos)) = xtb_freq_task.pending_geometry.take() {
                         let previous = structure_history.before(&mol, &traj);
                         traj.clear_for_structure();
+                        mol.topology = None;
                         mol.atoms = atoms;
                         mol.pos = pos;
                         structure_history.replaced(
@@ -2007,6 +2011,18 @@ pub fn ui_panel(
         ui_layout.builder_open = builder_open;
     }
 
+    let (peptide_rect, peptide_change) = crate::molecule_builder::peptide_builder::window(
+        ctx, &mut zmat_state, &mut editor_rotate_state, &mut mol,
+        &mut settings, &mut traj,
+    );
+    if let Some(rect) = peptide_rect { window_rects.push(rect); }
+    if peptide_change.happened() {
+        ui_layout.builder_open = true;
+        xtb_freq_panel_state.selected_mode = None;
+        xyz_buf.current_file = None;
+        ev_changed.write(MoleculeChanged::parse_xyz(peptide_change.recenter()));
+    }
+
     // The calculator opens from the launcher beside the editor. Its modern
     // form can float or dock; finished results use their own summary window.
     if qc_panel.open {
@@ -2051,6 +2067,16 @@ pub fn ui_panel(
     }
     if let Some(rect) = crate::ts_generation::plot::window(ctx, &mut ts_generation) {
         window_rects.push(rect);
+    }
+
+    if ui_layout.builder_open {
+        if let Some(rect) = zmat_state.cleanup.rect {
+            window_rects.push(rect);
+        }
+    } else {
+        zmat_state.cleanup.cancel();
+        zmat_state.cleanup.open = false;
+        zmat_state.cleanup.rect = None;
     }
 
     // Record what the panels ended up covering, now that they have all been
@@ -2133,6 +2159,9 @@ pub fn ui_panel(
                     };
 
                     for (i, &p_world) in mol.pos.iter().enumerate() {
+                        if zmat_state.selection.hidden.contains(&i) {
+                            continue;
+                        }
                         let Some(galley) = galleys.get(i) else {
                             continue;
                         };
@@ -2305,6 +2334,7 @@ pub(crate) fn apply_xyz_text(
     ev_changed: &mut MessageWriter<MoleculeChanged>,
 ) -> Option<String> {
     let (atoms, qxyz, extra_frames) = parse_xyz_first_frame_angstrom(text);
+    mol.topology = None;
     mol.atoms = atoms;
     mol.set_pos(
         qxyz.into_iter()

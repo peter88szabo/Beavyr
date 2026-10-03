@@ -608,8 +608,15 @@ impl DreidingTopology {
         for &(i, j, distance) in &mol.bonds {
             let order = estimate_bond_order(&mol.atoms[i], &mol.atoms[j], distance);
             let in_ring = bond_is_in_ring(&geometry_adjacency, i, j);
+            let explicit = mol.topology.as_ref().filter(|t| t.valid_for(&mol.atoms))
+                .and_then(|t| t.bonds.iter().find(|&&(a,b,_)| (a==i && b==j)||(a==j && b==i))).map(|b|b.2);
+            let bond_order = match explicit {
+                Some(1) => GraphBondOrder::Single, Some(2) => GraphBondOrder::Double,
+                Some(3) => GraphBondOrder::Triple, Some(4) => GraphBondOrder::Aromatic,
+                _ => discrete_order(order,in_ring),
+            };
             graph
-                .add_bond(i, j, discrete_order(order, in_ring))
+                .add_bond(i, j, bond_order)
                 .map_err(|e| BuildError::Typing(e.to_string()))?;
         }
 
@@ -880,7 +887,7 @@ fn detect_open_shell(mol: &Molecule) -> OpenShell {
         .sum();
     OpenShell {
         short_valence,
-        odd_electron_count: electrons % 2 == 1,
+        odd_electron_count: (i64::from(electrons) - i64::from(mol.topology.as_ref().and_then(|t| t.charge()).unwrap_or(0))) % 2 != 0,
     }
 }
 

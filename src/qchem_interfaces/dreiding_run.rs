@@ -13,14 +13,10 @@
 use std::fs;
 use std::path::Path;
 
-use crate::forcefield::dreiding::objective::{
-    relax_angstrom, Relaxation, HARTREE_TO_KCAL,
-};
+use crate::forcefield::dreiding::objective::{relax_angstrom, Relaxation, HARTREE_TO_KCAL};
 use crate::forcefield::dreiding::DreidingTopology;
 use crate::molecule::Molecule;
-use crate::optimizer::minimum_cartesian::{
-    CartesianMinimumMethod, CartesianMinimumOptions,
-};
+use crate::optimizer::minimum_cartesian::{CartesianMinimumMethod, CartesianMinimumOptions};
 
 use super::behemoth::{OPTIMIZED_GEOMETRY_FILE, TRAJECTORY_FILE};
 use super::xtb_optimize::{EnergyHistoryPoint, XtbOptimizationOutput};
@@ -57,6 +53,21 @@ pub(crate) fn molecule_for_force_field(input_xyz: &str) -> Molecule {
 /// Optimises a geometry with DREIDING, writing its output where the panels expect to find it.
 pub fn optimize(workdir: &Path, input_xyz: &str) -> Result<XtbOptimizationOutput, String> {
     let mol = molecule_for_force_field(input_xyz);
+    optimize_molecule(workdir, &mol)
+}
+
+/// Keep the builder's explicit connectivity and bond orders for annotated structures.
+pub fn optimize_molecule(workdir: &Path, mol: &Molecule) -> Result<XtbOptimizationOutput, String> {
+    optimize_with_options(workdir, mol, optimization_options())
+}
+
+fn optimize_with_options(
+    workdir: &Path,
+    mol: &Molecule,
+    options: CartesianMinimumOptions,
+) -> Result<XtbOptimizationOutput, String> {
+    let mut mol = mol.clone();
+    mol.recompute_bonds(1.2, 2.5);
     let topology = DreidingTopology::build(&mol).map_err(|e| e.to_string())?;
     let atoms = &mol.atoms;
 
@@ -65,8 +76,25 @@ pub fn optimize(workdir: &Path, input_xyz: &str) -> Result<XtbOptimizationOutput
         .iter()
         .flat_map(|p| [p.x as f64, p.y as f64, p.z as f64])
         .collect();
-    let (_relaxed, relaxation) = relax_angstrom(&topology, &start, optimization_options())
+    let (relaxed, mut relaxation) = relax_angstrom(&topology, &start, options.clone())
         .map_err(|e| format!("DREIDING optimisation failed: {e}"))?;
+
+    // A fresh inverse Hessian can recover from a stale BFGS approximation on
+    // a flexible peptide. Bound the recovery to one additional 1000-step pass.
+    if !relaxation.converged {
+        let (_, mut continuation) = relax_angstrom(&topology, &relaxed, options)
+            .map_err(|e| format!("DREIDING restart failed: {e}"))?;
+        continuation.initial_energy = relaxation.initial_energy;
+        continuation.cycles += relaxation.cycles;
+        relaxation.trajectory.append(&mut continuation.trajectory);
+        relaxation
+            .trajectory_energies
+            .append(&mut continuation.trajectory_energies);
+        continuation.trajectory = relaxation.trajectory;
+        continuation.trajectory_energies = relaxation.trajectory_energies;
+        continuation.message = format!("One BFGS restart; {}", continuation.message);
+        relaxation = continuation;
+    }
 
     let trajectory_text = trajectory_xyz(atoms, &relaxation);
     let energy_history = relaxation
@@ -86,7 +114,15 @@ pub fn optimize(workdir: &Path, input_xyz: &str) -> Result<XtbOptimizationOutput
     if let Some(last) = relaxation.trajectory.last() {
         let _ = fs::write(
             workdir.join(OPTIMIZED_GEOMETRY_FILE),
-            frame_xyz(atoms, last, "optimised with DREIDING"),
+            frame_xyz(
+                atoms,
+                last,
+                if relaxation.converged {
+                    "optimized with DREIDING"
+                } else {
+                    "DREIDING final geometry; not converged"
+                },
+            ),
         );
     }
 
@@ -208,15 +244,31 @@ mod tests {
     const WATER: &str = "3\n\nO 0.000 0.000 0.000\nH 0.980 0.000 0.000\nH -0.245 0.949 0.000\n";
 
     #[test]
+    fn dreiding_restart_is_bounded_and_does_not_claim_false_convergence() {
+        let dir =
+            std::env::temp_dir().join(format!("beavyr_dreiding_restart_{}", std::process::id()));
+        let mol = molecule_for_force_field("3\n\nO 0 0 0\nH 1.3 0 0\nH 0 1.3 0\n");
+        let mut options = optimization_options();
+        options.max_cycles = 1;
+        let result = optimize_with_options(&dir, &mol, options).unwrap();
+        assert!(result.log.contains("One BFGS restart"));
+        assert!(result.log.contains("cycles                2"));
+        assert!(result.log.contains("converged             no"));
+        let xyz = std::fs::read_to_string(dir.join(OPTIMIZED_GEOMETRY_FILE)).unwrap();
+        assert!(xyz.lines().nth(1).unwrap().contains("not converged"));
+        assert!(!result.energy_history.is_empty());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn optimising_water_writes_a_readable_trajectory() {
         let dir = std::env::temp_dir().join(format!("beavyr_dreiding_test_{}", std::process::id()));
         let output = optimize(&dir, WATER).expect("water is optimisable");
 
         // The energies must be recoverable by the same parser Behemoth's output uses, or the
         // energy plot silently shows nothing.
-        let energies = crate::qchem_interfaces::behemoth::parse_trajectory_energies(
-            &output.trajectory_text,
-        );
+        let energies =
+            crate::qchem_interfaces::behemoth::parse_trajectory_energies(&output.trajectory_text);
         assert!(!energies.is_empty(), "no cycle lines were written");
         assert_eq!(energies.len(), output.energy_history.len());
 
@@ -234,8 +286,8 @@ mod tests {
     /// reported as final -- otherwise the plot and the summary disagree.
     #[test]
     fn the_energy_falls_and_the_plot_agrees_with_the_summary() {
-        let dir = std::env::temp_dir()
-            .join(format!("beavyr_dreiding_test_e_{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("beavyr_dreiding_test_e_{}", std::process::id()));
         let output = optimize(&dir, WATER).unwrap();
 
         let history = &output.energy_history;
@@ -251,8 +303,8 @@ mod tests {
 
     #[test]
     fn the_summary_reports_the_energy_breakdown_and_the_atom_types() {
-        let dir = std::env::temp_dir()
-            .join(format!("beavyr_dreiding_test_s_{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("beavyr_dreiding_test_s_{}", std::process::id()));
         let output = optimize(&dir, WATER).unwrap();
 
         for expected in [
@@ -271,13 +323,16 @@ mod tests {
     /// atom, rather than a generic optimiser error.
     #[test]
     fn an_unparameterised_molecule_is_refused_by_name() {
-        let dir = std::env::temp_dir()
-            .join(format!("beavyr_dreiding_test_r_{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("beavyr_dreiding_test_r_{}", std::process::id()));
         let error = match optimize(&dir, "2\n\nLi 0.0 0.0 0.0\nF 0.0 0.0 1.564\n") {
             Err(message) => message,
             Ok(_) => panic!("lithium has no DREIDING parameters"),
         };
-        assert!(error.contains("Li") || error.contains("DREIDING"), "{error}");
+        assert!(
+            error.contains("Li") || error.contains("DREIDING"),
+            "{error}"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

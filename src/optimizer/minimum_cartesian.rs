@@ -4,7 +4,7 @@
 //! optimizers can be compared side by side.
 
 use anyhow::{bail, Result};
-use ndarray::{Array1, Array2};
+use ndarray::Array2;
 
 use super::traits::Objective;
 
@@ -260,20 +260,18 @@ fn bfgs_inverse_update(h_inv: &mut Array2<f64>, step: &[f64], y: &[f64]) {
     }
     let n = step.len();
     let rho = 1.0 / ys;
-    let old = h_inv.clone();
-    let mut left = Array2::<f64>::eye(n);
-    let mut right = Array2::<f64>::eye(n);
+    // Expand (I-rho*s*yᵀ) H (I-rho*y*sᵀ) + rho*s*sᵀ.
+    // H is symmetric. One matrix-vector product and a rank-two update cost
+    // O(n²), instead of the two O(n³) matrix products previously used here.
+    let hy = mat_vec(h_inv, y);
+    let factor = rho * (1.0 + rho * dot(y, &hy));
+    let mut updated = h_inv.clone();
     for i in 0..n {
         for j in 0..n {
-            left[(i, j)] -= rho * step[i] * y[j];
-            right[(i, j)] -= rho * y[i] * step[j];
+            updated[(i, j)] +=
+                factor * step[i] * step[j] - rho * (step[i] * hy[j] + hy[i] * step[j]);
         }
     }
-    let updated = left.dot(&old).dot(&right)
-        + rho
-            * Array1::from(step.to_vec())
-                .insert_axis(ndarray::Axis(1))
-                .dot(&Array1::from(step.to_vec()).insert_axis(ndarray::Axis(0)));
     if updated.iter().all(|v| v.is_finite()) {
         *h_inv = updated;
     }
@@ -464,6 +462,38 @@ pub fn minimize_cartesian<O: Objective>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rank_two_bfgs_matches_dense_formula_and_secant_condition() {
+        for n in [2, 7, 25] {
+            let mut h = Array2::from_shape_fn((n, n), |(i, j)| {
+                if i == j {
+                    2.0 + i as f64 * 0.1
+                } else {
+                    0.01 * (i + j) as f64
+                }
+            });
+            let s: Vec<_> = (0..n).map(|i| 0.1 + i as f64 * 0.03).collect();
+            let y: Vec<_> = (0..n).map(|i| 0.2 + i as f64 * 0.01).collect();
+            let rho = 1.0 / dot(&s, &y);
+            let left =
+                Array2::from_shape_fn((n, n), |(i, j)| f64::from(i == j) - rho * s[i] * y[j]);
+            let right =
+                Array2::from_shape_fn((n, n), |(i, j)| f64::from(i == j) - rho * y[i] * s[j]);
+            let expected = left.dot(&h).dot(&right)
+                + Array2::from_shape_fn((n, n), |(i, j)| rho * s[i] * s[j]);
+            bfgs_inverse_update(&mut h, &s, &y);
+            for (actual, expected) in h.iter().zip(expected.iter()) {
+                assert!((actual - expected).abs() < 1e-12);
+            }
+            for (actual, expected) in mat_vec(&h, &y).iter().zip(&s) {
+                assert!((actual - expected).abs() < 1e-12);
+            }
+            let before = h.clone();
+            bfgs_inverse_update(&mut h, &s, &y.iter().map(|v| -v).collect::<Vec<_>>());
+            assert_eq!(h, before);
+        }
+    }
 
     struct HarmonicCartesian {
         target: Vec<f64>,

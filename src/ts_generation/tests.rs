@@ -576,6 +576,7 @@ fn captured_endpoints_stay_independent_while_the_viewer_is_edited() {
         pos: first.positions.clone(),
         bonds: vec![],
         hydrogen_bonds: vec![],
+        topology: None,
     };
     let a = Endpoint::capture(&mol, "A").unwrap();
     // Drawing or a completed geometry optimization replaces the displayed coordinates.

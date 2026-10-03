@@ -1,0 +1,5 @@
+# Generation/audit only; not required by the Beavyr application.
+gemmi==0.7.5
+rdkit==2025.9.6
+numpy==2.5.3
+Pillow==12.3.0

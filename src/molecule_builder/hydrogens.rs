@@ -1,4 +1,4 @@
-//! Hydrogen completion shared by the one-atom smart tool and the bulk C/O tool.
+//! Hydrogen completion shared by the one-atom smart tool and the bulk hydrogen-completion tool.
 //! Work in the displayed Cartesian coordinates: existing atoms never move.
 
 use bevy::prelude::Vec3;
@@ -22,11 +22,52 @@ pub(super) fn append_smart_hydrogen(mol: &mut Molecule, host: usize) -> Result<(
         return Err("That atom no longer exists.".into());
     };
     let symbols: Vec<&str> = mol.atoms.iter().map(String::as_str).collect();
-    let neighbors = attach::bonded_indices(&symbols, &mol.pos, host, &[]);
+    let neighbors = if let Some(t) = mol.topology.as_ref().filter(|t| t.valid_for(&mol.atoms)) {
+        t.bonds
+            .iter()
+            .filter_map(|&(a, b, _)| {
+                if a == host {
+                    Some(b)
+                } else if b == host {
+                    Some(a)
+                } else {
+                    None
+                }
+            })
+            .collect()
+    } else {
+        attach::bonded_indices(&symbols, &mol.pos, host, &[])
+    };
     let center = mol.pos[host];
+    let amide = symbol == "N"
+        && neighbors.iter().any(|&c| {
+            symbols[c] == "C"
+                && attach::bonded_indices(&symbols, &mol.pos, c, &[])
+                    .iter()
+                    .any(|&o| {
+                        symbols[o] == "O"
+                            && estimate_bond_order("C", "O", mol.pos[c].distance(mol.pos[o])) >= 1.5
+                    })
+        });
     let orders: Vec<f64> = neighbors
         .iter()
-        .map(|&i| estimate_bond_order(symbol, symbols[i], center.distance(mol.pos[i])))
+        .map(|&i| {
+            if amide && symbols[i] == "C" {
+                return 1.0;
+            }
+            if let Some(t) = &mol.topology {
+                if let Some(&(_, _, o)) = t
+                    .bonds
+                    .iter()
+                    .find(|&&(a, b, _)| (a == host && b == i) || (b == host && a == i))
+                {
+                    if o > 0 {
+                        return if o == 4 { 1.5 } else { o as f64 };
+                    }
+                }
+            }
+            estimate_bond_order(symbol, symbols[i], center.distance(mol.pos[i]))
+        })
         .collect();
     let total: f64 = orders.iter().sum();
     if let Some(valences) = common_valences(symbol) {
@@ -54,7 +95,9 @@ pub(super) fn append_smart_hydrogen(mol: &mut Molecule, host: usize) -> Result<(
         .map(|&i| (mol.pos[i] - center).normalize())
         .collect();
     let max_order = orders.iter().copied().fold(1.0_f64, f64::max);
-    let angle = if max_order >= 2.5 {
+    let angle = if amide {
+        120.0
+    } else if max_order >= 2.5 {
         180.0
     } else if max_order >= 1.25 {
         120.0
@@ -63,6 +106,20 @@ pub(super) fn append_smart_hydrogen(mol: &mut Molecule, host: usize) -> Result<(
     };
     let candidates = match dirs.as_slice() {
         [] => vec![Vec3::X, Vec3::Y, Vec3::Z, -Vec3::X, -Vec3::Y, -Vec3::Z],
+        [axis] if amide => {
+            let carbon = neighbors[0];
+            let reference = attach::bonded_indices(&symbols, &mol.pos, carbon, &[])
+                .into_iter()
+                .find(|&i| symbols[i] == "O")
+                .map(|i| mol.pos[i] - mol.pos[carbon])
+                .unwrap_or(Vec3::Y);
+            let tangent = (reference - reference.dot(*axis) * *axis).normalize_or_zero();
+            let theta = 120.0_f32.to_radians();
+            vec![
+                *axis * theta.cos() + tangent * theta.sin(),
+                *axis * theta.cos() - tangent * theta.sin(),
+            ]
+        }
         [axis] => attach::cone_directions(*axis, angle, 24),
         [a, b] => {
             let mut candidates = Vec::new();
@@ -118,6 +175,17 @@ pub(super) fn append_smart_hydrogen(mol: &mut Molecule, host: usize) -> Result<(
             host + 1
         ));
     };
+    if let Some(t) = mol.topology.as_mut() {
+        let id = t.atoms.iter().map(|a| a.id).max().unwrap_or(0) + 1;
+        t.atoms.push(super::topology::AtomInfo {
+            id,
+            residue: t.atoms[host].residue,
+            name: format!("H{id}"),
+            charge: Some(0),
+        });
+        t.elements.push("H".into());
+        t.bonds.push((host, mol.atoms.len(), 1));
+    }
     mol.atoms.push("H".into());
     mol.pos.push(position);
     Ok(())
@@ -170,21 +238,61 @@ pub(super) fn builder_zmat(mol: &Molecule, first_added: usize) -> Vec<ZAtom> {
 }
 
 #[derive(Default, Debug)]
-struct Completion {
-    added: usize,
-    skipped: usize,
+pub(super) struct Completion {
+    pub added: usize,
+    pub skipped: usize,
 }
 
-fn complete(mol: &mut Molecule) -> Result<Completion, String> {
+pub(super) fn complete(mol: &mut Molecule) -> Result<Completion, String> {
     if mol.atoms.len() != mol.pos.len() || mol.pos.iter().any(|p| !p.is_finite()) {
         return Err("The structure contains missing or non-finite coordinates.".into());
     }
     let original_count = mol.atoms.len();
     let mut result = Completion::default();
+    if mol
+        .topology
+        .as_ref()
+        .is_some_and(|t| t.valid_for(&mol.atoms))
+    {
+        result.added += super::peptide_edit::restore_hydrogens(mol)?;
+    }
     for host in 0..original_count {
+        if let Some(t) = mol.topology.as_ref() {
+            if let Some(id) = t.atoms[host].residue {
+                let cap = t
+                    .residues
+                    .iter()
+                    .any(|r| r.id == id && matches!(r.template.as_str(), "ACE" | "NME"));
+                if cap {
+                    let target = match mol.atoms[host].as_str() {
+                        "C" => 4,
+                        "N" => 3,
+                        "O" => 2,
+                        _ => 0,
+                    };
+                    let occupied: usize = t
+                        .bonds
+                        .iter()
+                        .filter(|&&(a, b, _)| a == host || b == host)
+                        .map(|b| b.2 as usize)
+                        .sum();
+                    for _ in occupied..target {
+                        match append_smart_hydrogen(mol, host) {
+                            Ok(()) => result.added += 1,
+                            Err(_) => {
+                                result.skipped += 1;
+                                break;
+                            }
+                        }
+                    }
+                }
+                continue;
+            }
+        }
         let target = match mol.atoms[host].as_str() {
             "C" => 4,
             "O" => 2,
+            "N" => 3,
             _ => continue,
         };
         let symbols: Vec<&str> = mol.atoms.iter().map(String::as_str).collect();
@@ -195,13 +303,26 @@ fn complete(mol: &mut Molecule) -> Result<Completion, String> {
         // This action assumes saturated C and neutral divalent O. A shorter
         // or stretched bond is evidence against that assumption, not another
         // missing H. In particular leave carbonyl and aromatic centres alone.
-        if neighbors.iter().any(|&i| {
-            estimate_bond_order(
-                symbols[host],
-                symbols[i],
-                mol.pos[host].distance(mol.pos[i]),
-            ) != 1.0
-        }) {
+        let amide = mol.atoms[host] == "N"
+            && neighbors.iter().any(|&c| {
+                symbols[c] == "C"
+                    && attach::bonded_indices(&symbols, &mol.pos, c, &[])
+                        .iter()
+                        .any(|&o| {
+                            symbols[o] == "O"
+                                && estimate_bond_order("C", "O", mol.pos[c].distance(mol.pos[o]))
+                                    >= 1.5
+                        })
+            });
+        if !amide
+            && neighbors.iter().any(|&i| {
+                estimate_bond_order(
+                    symbols[host],
+                    symbols[i],
+                    mol.pos[host].distance(mol.pos[i]),
+                ) != 1.0
+            })
+        {
             result.skipped += 1;
             continue;
         }
@@ -251,7 +372,10 @@ impl HydrogenState {
                     if result.skipped == 0 {
                         String::new()
                     } else {
-                        format!(" Skipped {} C/O centre(s) with multiple/partial bonds or unsuitable geometry.", result.skipped)
+                        format!(
+                            " Skipped {} centre(s) with ambiguous valence or unsuitable geometry.",
+                            result.skipped
+                        )
                     }
                 )));
                 if result.added == 0 {

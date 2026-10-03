@@ -104,6 +104,7 @@ fn read_entry(path: PathBuf) -> Result<Entry> {
         pos: frame.pos,
         bonds: vec![],
         hydrogen_bonds: vec![],
+        topology: None,
     })
     .context("Invalid structure coordinates")?;
     Ok(Entry {
@@ -302,6 +303,7 @@ impl StructureHistory {
     }
     pub fn restore(&mut self, entry: Entry, mol: &mut Molecule, traj: &mut TrajectoryState) {
         let previous = self.before(mol, traj);
+        mol.topology = None;
         mol.atoms = entry.snapshot.atoms;
         mol.pos = entry.snapshot.positions;
         mol.bonds.clear();

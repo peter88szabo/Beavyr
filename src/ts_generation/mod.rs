@@ -232,6 +232,7 @@ impl TsGeneration {
             pos: reactant.positions.clone(),
             bonds: vec![],
             hydrogen_bonds: vec![],
+            topology: None,
         };
         valence::validate_electronic_state(&mol, self.charge, self.multiplicity)
             .map_err(|error| anyhow::anyhow!("{error}"))?;

@@ -212,8 +212,7 @@ impl XtbOptimizationTask {
         &mut self,
         program: QcProgram,
         binary: &Path,
-        atoms: &[String],
-        pos: &[Vec3],
+        mol: &Molecule,
         charge: i32,
         uhf: i32,
         multiplicity: i32,
@@ -222,7 +221,8 @@ impl XtbOptimizationTask {
         if self.is_running() {
             return;
         }
-        let input_xyz = write_xyz_string(atoms, pos);
+        let input_xyz = write_xyz_string(&mol.atoms, &mol.pos);
+        let explicit_molecule = (program == QcProgram::Dreiding).then(|| mol.clone());
         // Owned, because the task outlives the caller's borrow.
         let method = method.clone();
         // A new run invalidates the previous one's summary; leaving it would
@@ -246,7 +246,9 @@ impl XtbOptimizationTask {
         let task_child = child_slot.clone();
         let task_dir = run_dir.clone();
         let task = AsyncComputeTaskPool::get().spawn(async move {
-            run_optimize_cancellable(
+            let result = if let Some(mol) = explicit_molecule {
+                super::dreiding_run::optimize_molecule(&task_dir, &mol)
+            } else { run_optimize_cancellable(
                 program,
                 &binary,
                 &task_dir,
@@ -257,8 +259,8 @@ impl XtbOptimizationTask {
                 &method,
                 &task_cancel,
                 &task_child,
-            )
-            .map_err(|message| XtbOptimizationFailure {
+            ) };
+            result.map_err(|message| XtbOptimizationFailure {
                 energy_history: energy_history_for(program, &task_dir),
                 message,
             })
@@ -647,8 +649,7 @@ fn optimization_panel_body(
                     task.start(
                         program,
                         &binary,
-                        &mol.atoms,
-                        &mol.pos,
+                        mol,
                         panel_state.charge,
                         uhf,
                         panel_state.multiplicity,

@@ -338,6 +338,7 @@ pub fn load_command_line_files(
                     // here as well as there because the camera is centred at
                     // startup, before any panel has drawn.
                     if let Some((atoms, pos)) = freq_task.pending_geometry.take() {
+                        mol.topology = None;
                         mol.atoms = atoms;
                         mol.pos = pos;
                         mol.recompute_bonds(settings.bond_thresh_scale, settings.hbond_cutoff);

@@ -20,11 +20,12 @@ pub fn configure_hbond_gizmos(mut cfg_store: ResMut<GizmoConfigStore>, settings:
 
 /// Draw dashed hydrogen bonds as gizmo lines
 pub fn draw_hydrogen_bonds_dashed(
+    builder: Res<crate::molecule_builder::builder_ui::ZMatrixBuilderState>,
     mut gizmos: Gizmos<HbondGizmos>,
     mol: Res<Molecule>,
     settings: Res<MolSettings>,
 ) {
-    if !settings.show_hbonds {
+    if !settings.show_hbonds || mol.topology.as_ref().is_some_and(|t| t.peptide_residue_count() > 0) {
         return;
     }
 
@@ -34,6 +35,9 @@ pub fn draw_hydrogen_bonds_dashed(
     let n_atoms = mol.atoms.len();
 
     for &(i, j, hdist) in &mol.hydrogen_bonds {
+        if builder.selection.hidden.contains(&i) || builder.selection.hidden.contains(&j) {
+            continue;
+        }
         // Skip degenerate / “off” hbonds
         if hdist <= 0.0001 {
             continue;

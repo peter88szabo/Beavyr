@@ -4,6 +4,7 @@ use bevy_egui::egui;
 #[path = "editor_panel.rs"]
 mod editor_panel;
 pub(crate) use editor_panel::{editor_docked, restore_editor_docking, take_close_request};
+pub(crate) use editor_panel::insert_peptide;
 
 use super::attach;
 use super::fragments;
@@ -516,6 +517,9 @@ impl BuilderChange {
 
 #[derive(Resource, Clone)]
 pub struct ZMatrixBuilderState {
+    pub peptide: super::peptide_builder::State,
+    pub selection: super::selection::Selection,
+    pub cleanup: super::cleanup::Cleanup,
     pub custom_fragments: super::custom_fragments::Library,
     pub zmat: Vec<ZAtom>,
     /// The editor under the insert buttons, set up for the fragment placed
@@ -647,6 +651,9 @@ impl ZAtomEditRow {
 impl Default for ZMatrixBuilderState {
     fn default() -> Self {
         Self {
+            peptide: Default::default(),
+            selection: Default::default(),
+            cleanup: Default::default(),
             custom_fragments: Default::default(),
             zmat: Vec::new(),
             placed_editor: EditorRotateState::default(),
@@ -1206,12 +1213,14 @@ fn record_step(
 ) {
     let zmat = zmat_state.zmat.clone();
     zmat_state.history.record(name, &mol.atoms, &mol.pos, &zmat);
+    zmat_state.history.set_last_topology(mol.topology.clone());
 }
 
 /// The structure as it stands, for the redo stack to return to.
 fn current_step(zmat_state: &ZMatrixBuilderState, mol: &Molecule) -> super::history::BuilderStep {
     super::history::BuilderStep {
         name: String::new(),
+        topology: mol.topology.clone(),
         atoms: mol.atoms.clone(),
         pos: mol.pos.clone(),
         zmat: zmat_state.zmat.clone(),
@@ -1229,6 +1238,7 @@ fn restore_step(
     mol: &mut Molecule,
     settings: &mut MolSettings,
 ) {
+    mol.topology = step.topology;
     mol.atoms = step.atoms;
     mol.pos = step.pos;
     zmat_state.zmat = step.zmat;
@@ -2152,6 +2162,7 @@ fn commit_fragment_replace(
 /// did not turn into a camera orbit, so rotating the view leaves the selection
 /// alone.
 pub fn handle_viewport_click(
+    keys: Res<ButtonInput<KeyCode>>,
     mut ev: MessageReader<ViewportClicked>,
     mol: Option<Res<Molecule>>,
     mut zmat_state: ResMut<ZMatrixBuilderState>,
@@ -2165,7 +2176,13 @@ pub fn handle_viewport_click(
             collect_add_atom_pick(&mut zmat_state, &mol.atoms, hit);
             continue;
         }
-        set_selected_atom(&mut zmat_state, &mol.atoms, hit);
+        zmat_state.selection.sync(&mol);
+        zmat_state.selection.click(
+            hit,
+            keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight),
+        );
+        let active = zmat_state.selection.active_atom(hit, zmat_state.selected_index);
+        set_selected_atom(&mut zmat_state, &mol.atoms, active);
     }
 }
 
@@ -2195,6 +2212,8 @@ pub fn sync_builder_on_structure_load(
         zmat_state.skip_next_sync = false;
         return;
     }
+    zmat_state.selection = Default::default();
+    zmat_state.cleanup.cancel();
     let atoms: &[String] = match &mol {
         Some(mol) => {
             zmat_state.zmat = zmat2xyz::xyz_to_zmat(&mol.atoms, &mol.pos);
@@ -2234,8 +2253,7 @@ pub fn delete_atom_cartesian(
         zmat_state.original_atoms = Some(mol.atoms.clone());
         zmat_state.original_pos = Some(mol.pos.clone());
     }
-    mol.atoms.remove(index);
-    mol.pos.remove(index);
+    super::peptide_edit::remove_atoms(mol, &std::collections::HashSet::from([index]));
     mol.recompute_bonds(settings.bond_thresh_scale, settings.hbond_cutoff);
     zmat_state.zmat = zmat2xyz::xyz_to_zmat(&mol.atoms, &mol.pos);
     zmat_state.edit_refresh = true;
@@ -2380,7 +2398,7 @@ pub fn draw_builder_highlights(
     let green = Color::srgba(0.2, 1.0, 0.2, 1.0);
 
     let draw_hl = |gizmos: &mut Gizmos<BuilderHighlightGizmos>, idx: usize, color: Color| {
-        if idx < mol.pos.len() {
+        if idx < mol.pos.len() && !zmat_state.selection.hidden.contains(&idx) {
             let base_r = covalent_radius_angstrom(&mol.atoms[idx]) * settings.atom_scale;
             let r = (base_r * 1.25).max(0.15);
             gizmos.sphere(mol.pos[idx], r, color);
@@ -2435,6 +2453,12 @@ pub fn draw_builder_highlights(
     // so the highlight follows either.
     if let Some(selected) = zmat_state.selected_index.filter(|&i| i < mol.pos.len()) {
         draw_hl(&mut highlights, selected, magenta);
+    }
+    // Multiple selection uses the same original dashed highlight and colour.
+    for &selected in &zmat_state.selection.atoms {
+        if Some(selected) != zmat_state.selected_index {
+            draw_hl(&mut highlights, selected, magenta);
+        }
     }
 
     if !zmat_state.edit_preview.is_empty() {
@@ -2542,6 +2566,7 @@ fn clear_display(
     zmat_state.confirm_clear = false;
     record_step(zmat_state, mol, "cleared the display");
     let previous = history.before(mol, traj);
+    mol.topology = None;
     mol.atoms.clear();
     mol.pos.clear();
     mol.bonds.clear();
@@ -3422,6 +3447,7 @@ fn fragment_editor_finish(
             zmat_state
                 .history
                 .record("moved a fragment", &mol.atoms, &base, &zmat);
+            zmat_state.history.set_last_topology(mol.topology.clone());
         }
         state.base_ref = None;
         state.preview_values = None;
@@ -3689,6 +3715,7 @@ C   2.050   1.450   0.000
             pos: vec![Vec3::ZERO],
             bonds: vec![],
             hydrogen_bonds: vec![],
+            topology: None,
         };
         let mut state = ZMatrixBuilderState::default();
         state.zmat = xyz_to_zmat(&mol.atoms, &mol.pos);
@@ -3753,6 +3780,7 @@ C   2.050   1.450   0.000
             pos: vec![Vec3::ZERO],
             bonds: vec![],
             hydrogen_bonds: vec![],
+            topology: None,
         };
         let mut state = ZMatrixBuilderState::default();
         state.zmat = xyz_to_zmat(&mol.atoms, &mol.pos);
@@ -3799,6 +3827,7 @@ C   2.050   1.450   0.000
             pos: vec![Vec3::ZERO],
             bonds: vec![],
             hydrogen_bonds: vec![],
+            topology: None,
         };
         let mut state = ZMatrixBuilderState::default();
         state.zmat = xyz_to_zmat(&mol.atoms, &mol.pos);
@@ -4345,6 +4374,7 @@ C   0.700  -1.212   0.000
             pos: zmat2xyz::zmat_to_xyz(&zmat_state.zmat),
             bonds: vec![],
             hydrogen_bonds: vec![],
+            topology: None,
         };
         mol.recompute_bonds(1.2, 2.5);
         let mut settings = MolSettings::default();
@@ -4426,6 +4456,7 @@ mod conjugation_tests {
             pos: zmat2xyz::zmat_to_xyz(&zmat_state.zmat),
             bonds: vec![],
             hydrogen_bonds: vec![],
+            topology: None,
         };
         mol.recompute_bonds(1.2, 2.5);
         let mut settings = MolSettings::default();
@@ -4547,6 +4578,7 @@ C   1.540   0.000   0.000
             pos: zmat2xyz::zmat_to_xyz(&zmat),
             bonds: vec![],
             hydrogen_bonds: vec![],
+            topology: None,
         };
         let mut state = ZMatrixBuilderState::default();
         state.zmat = zmat;
@@ -4670,6 +4702,7 @@ H   1.090   0.000   0.000
             pos: zmat2xyz::zmat_to_xyz(&zmat),
             bonds: vec![],
             hydrogen_bonds: vec![],
+            topology: None,
         };
         mol.recompute_bonds(2.0, 3.0);
         let mut state = ZMatrixBuilderState::default();
@@ -4844,6 +4877,7 @@ mod real_file_replace_tests {
             pos: rebuilt.clone(),
             bonds: vec![],
             hydrogen_bonds: vec![],
+            topology: None,
         };
         mol.recompute_bonds(2.0, 3.0);
 
@@ -4905,6 +4939,7 @@ mod real_file_replace_tests {
             pos: zmat2xyz::zmat_to_xyz(&zmat),
             bonds: vec![],
             hydrogen_bonds: vec![],
+            topology: None,
         };
         mol.recompute_bonds(2.0, 3.0);
         let before = mol.pos.clone();
@@ -5003,6 +5038,7 @@ mod real_file_replace_tests {
             pos: positions.clone(),
             bonds: vec![],
             hydrogen_bonds: vec![],
+            topology: None,
         };
         mol.recompute_bonds(2.0, 3.0);
 
@@ -5035,6 +5071,7 @@ mod real_file_replace_tests {
             pos: positions.clone(),
             bonds: vec![],
             hydrogen_bonds: vec![],
+            topology: None,
         };
         mol.recompute_bonds(2.0, 3.0);
 
@@ -5846,6 +5883,7 @@ mod zmat_edit_tests {
                 pos: pos.clone(),
                 bonds: vec![],
                 hydrogen_bonds: vec![],
+                topology: None,
             };
             mol.recompute_bonds(1.2, 2.5);
             let mut adj = vec![Vec::new(); symbols.len()];
@@ -5907,6 +5945,7 @@ mod zmat_edit_tests {
             pos: positions,
             bonds: vec![],
             hydrogen_bonds: vec![],
+            topology: None,
         };
         mol.recompute_bonds(1.2, 2.5);
         let mut zmat_state = ZMatrixBuilderState::default();

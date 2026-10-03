@@ -73,8 +73,9 @@ fn card(ui: &egui::Ui) -> egui::Frame {
         .inner_margin(10)
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 enum Action {
+    Peptide(Box<super::super::peptide::Build>),
     Place,
     Add,
     Replace,
@@ -136,6 +137,9 @@ pub(super) fn contents(
     traj: &mut TrajectoryState,
 ) -> BuilderChange {
     let mut panel = panel_state(ui.ctx());
+    if zmat.selection.sync(mol) {
+        settings.geometry_dirty = true;
+    }
     let original_style = ui.style().clone();
     let pending = pending_fragment_edit(editor, zmat, mol);
     let available = !pending && !traj.playing && !zmat.confirm_clear;
@@ -148,7 +152,7 @@ pub(super) fn contents(
     ui.scope(|ui| {
         style_panel(ui);
         header(ui, &mut panel, zmat, mol, history, available, &mut action);
-        selection(ui, zmat, mol, available, &mut action);
+        selection(ui, zmat, mol, settings, available, &mut action);
 
         // Reserve the footer before laying out the scroll area: its controls
         // never disappear behind a long library or the placed-fragment form.
@@ -184,6 +188,9 @@ pub(super) fn contents(
                     ui.horizontal_wrapped(|ui| {
                         ui.selectable_value(&mut panel.my_fragments, false, "Built-in");
                         ui.selectable_value(&mut panel.my_fragments, true, "My fragments");
+                        if ui.button("Peptide Builder…").clicked() {
+                            zmat.peptide.open = true;
+                        }
                     });
                     if panel.my_fragments {
                         ui.add(
@@ -254,6 +261,9 @@ pub(super) fn contents(
         ui.allocate_rect(remaining, egui::Sense::hover());
     });
 
+    if zmat.cleanup.show(ui.ctx(), mol, &zmat.selection, available) {
+        action = Some(Action::Cleanup);
+    }
     let mut change = BuilderChange::None;
     if let Some(action) = action {
         match perform(action, editor, zmat, mol, settings, traj) {
@@ -378,6 +388,7 @@ fn selection(
     ui: &mut egui::Ui,
     zmat: &mut ZMatrixBuilderState,
     mol: &Molecule,
+    settings: &mut MolSettings,
     available: bool,
     action: &mut Option<Action>,
 ) {
@@ -385,30 +396,38 @@ fn selection(
         ui.set_min_width((ui.available_width() - 1.0).max(0.0));
         if let Some(index) = zmat.selected_index.filter(|&i| i < mol.atoms.len()) {
             ui.horizontal(|ui| {
-                ui.strong(format!("Selected  {}{}", mol.atoms[index], index + 1));
-                if ui.small_button("Deselect").clicked() {
-                    set_selected_atom(zmat, &mol.atoms, None);
-                }
-            });
-            ui.add_enabled_ui(available, |ui| {
-                ui.horizontal(|ui| {
-                    ui.menu_button("Change element…", |ui| {
-                        if let Some(symbol) = element_picker(ui, "change_selected_element") {
-                            *action = Some(Action::ChangeElement(index, symbol));
+                ui.strong(format!("Active atom  {}{}", mol.atoms[index], index + 1));
+                ui.menu_button("Atom…", |ui| {
+                    if ui.button("Deselect").clicked() {
+                        set_selected_atom(zmat, &mol.atoms, None);
+                        zmat.selection.atoms.clear();
+                        ui.close();
+                    }
+                    ui.add_enabled_ui(available, |ui| {
+                        ui.menu_button("Change element…", |ui| {
+                            if let Some(symbol) = element_picker(ui, "change_selected_element") {
+                                *action = Some(Action::ChangeElement(index, symbol));
+                                ui.close();
+                            }
+                        });
+                        if ui.button("Delete atom").clicked() {
+                            *action = Some(Action::Delete(index));
                             ui.close();
                         }
                     });
-                    if ui.button("Delete atom").clicked() {
-                        *action = Some(Action::Delete(index));
-                    }
                 });
             });
         } else if mol.atoms.is_empty() {
             ui.strong("Build a molecule or cluster");
             ui.small("Choose below, then Place to start.");
         } else {
-            ui.strong("Select an atom in the 3D view");
-            ui.small("Attach a fragment, replace an atom, or change its element.");
+            ui.strong("Select atoms in the 3D view").on_hover_text(
+                "Click an atom to attach a fragment. Shift-click toggles multiple selection.",
+            );
+        }
+        if !mol.atoms.is_empty() {
+            zmat.selection
+                .controls(ui, mol, settings, zmat.placed_editor.moving.as_deref());
         }
     });
 }
@@ -701,7 +720,7 @@ fn footer(
                 egui::Button::new("Add missing H"),
             )
             .on_hover_text(
-                "Fill supported saturated carbon and oxygen sites. Existing atoms stay fixed.",
+                "Restore peptide H atoms and fill supported carbon, nitrogen and oxygen sites. Existing atoms stay fixed.",
             )
             .clicked()
         {
@@ -717,7 +736,7 @@ fn footer(
             )
             .clicked()
         {
-            *action = Some(Action::Cleanup);
+            zmat.cleanup.open = true;
         }
     });
     ui.horizontal(|ui| {
@@ -781,6 +800,9 @@ fn perform(
         };
         if let Some(step) = step {
             restore_step(step, zmat, mol, settings);
+            zmat.selection = Default::default();
+            zmat.selection.sync(mol);
+            zmat.cleanup.cancel();
             reset_fragment_targets(editor, zmat);
             zmat.hydrogen_state = Default::default();
             zmat.cleanup_report = None;
@@ -804,23 +826,29 @@ fn perform(
         Err(error) => {
             // Some older operations reconstruct before reporting an error.
             // Preserve the exact displayed Cartesian snapshot in that case.
-            if mol.atoms != before.atoms || mol.pos != before.pos {
+            if mol.atoms != before.atoms || mol.pos != before.pos || mol.topology != before.topology {
                 restore_step(before, zmat, mol, settings);
                 reset_fragment_targets(editor, zmat);
             }
             return Err(error);
         }
     };
-    if before.atoms == mol.atoms && before.pos == mol.pos {
+    if before.atoms == mol.atoms && before.pos == mol.pos && before.topology == mol.topology {
         return Ok(None);
     }
     zmat.history
         .record(&message, &before.atoms, &before.pos, &before.zmat);
+    zmat.history.set_last_topology(before.topology.clone());
     if !matches!(action, Action::Cleanup) {
         zmat.cleanup_report = None;
     }
-    if !matches!(action, Action::Add | Action::Replace) {
+    if !matches!(action, Action::Add | Action::Replace | Action::Peptide(_)) {
         reset_fragment_targets(editor, zmat);
+    }
+    if !matches!(action, Action::Peptide(_))
+        && (!mol.atoms.starts_with(&before.atoms) || matches!(action, Action::Replace)) {
+        zmat.selection = Default::default();
+        zmat.selection.sync(mol);
     }
     settings.geometry_dirty = true;
     settings.bond_topology_dirty = true;
@@ -864,6 +892,34 @@ fn perform_mutation(
     settings: &mut MolSettings,
 ) -> Result<String, String> {
     match action {
+        Action::Peptide(build) => {
+            *mol = build.molecule.clone();
+            if let Some(t) = &mol.topology { t.display_defaults(settings); }
+            mol.recompute_bonds(settings.bond_thresh_scale, settings.hbond_cutoff);
+            zmat.zmat = zmat2xyz::xyz_to_zmat(&mol.atoms, &mol.pos);
+            let frozen = zmat.selection.frozen.iter().filter_map(|&i|
+                build.host_mapping.get(i).copied().flatten()).collect();
+            let hidden = zmat.selection.hidden.iter().filter_map(|&i|
+                build.host_mapping.get(i).copied().flatten()).collect();
+            zmat.selection = Default::default();
+            zmat.selection.sync(mol);
+            zmat.selection.frozen = frozen;
+            zmat.selection.hidden = hidden;
+            zmat.cleanup.cancel();
+            set_selected_atom(zmat, &mol.atoms, None);
+            let open = editor.window_open;
+            *editor = EditorRotateState::default();
+            editor.window_open = open;
+            zmat.placed_editor = EditorRotateState {
+                picks: build.picks.to_vec(),
+                chosen_side: Some(RotateSide::B),
+                moving: Some(build.moving.clone()),
+                session_origin: Some(mol.pos.clone()),
+                ..Default::default()
+            };
+            zmat.placed_atom_count = mol.atoms.len();
+            Ok(format!("Peptide: {}", build.sequence))
+        }
         Action::Place => {
             if !mol.atoms.is_empty() {
                 return Err("Select an atom to attach to.".into());
@@ -950,7 +1006,10 @@ fn perform_mutation(
             ))
         }
         Action::Cleanup => {
-            let report = run_cleanup(mol, settings)?;
+            let preview = zmat.cleanup.accepted(mol, &zmat.selection)?;
+            mol.set_pos(preview.positions);
+            mol.recompute_bonds(settings.bond_thresh_scale, settings.hbond_cutoff);
+            let report = preview.report;
             zmat.zmat = zmat2xyz::xyz_to_zmat(&mol.atoms, &mol.pos);
             zmat.cleanup_report = Some(Ok(report));
             set_selected_atom(zmat, &mol.atoms, None);
@@ -969,6 +1028,21 @@ fn perform_mutation(
         }
         Action::Undo | Action::Redo => unreachable!("handled before mutation"),
     }
+}
+
+pub(crate) fn insert_peptide(
+    build: super::super::peptide::Build,
+    editor: &mut EditorRotateState,
+    zmat: &mut ZMatrixBuilderState,
+    mol: &mut Molecule,
+    settings: &mut MolSettings,
+    traj: &mut TrajectoryState,
+) -> Result<BuilderChange, String> {
+    if zmat.confirm_clear || zmat.add_atom_active || editor.active {
+        return Err("Finish atom picking or the pending clear action first.".into());
+    }
+    perform(Action::Peptide(Box::new(build)), editor, zmat, mol, settings, traj)
+        .map(|result| result.map_or(BuilderChange::None, |(change, _)| change))
 }
 
 #[cfg(test)]

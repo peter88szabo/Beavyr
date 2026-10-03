@@ -205,6 +205,7 @@ mod tests {
             pos: vec![Default::default(); atoms.len()],
             bonds: dated_bonds,
             hydrogen_bonds: vec![],
+            topology: None,
         }
     }
 
@@ -224,6 +225,7 @@ mod tests {
             pos: vec![Default::default(); atoms.len()],
             bonds: dated_bonds,
             hydrogen_bonds: vec![],
+            topology: None,
         }
     }
 
@@ -253,6 +255,7 @@ mod tests {
                 (5, 6, 0.97),
             ],
             hydrogen_bonds: vec![],
+            topology: None,
         };
         let (uhf, warnings) = validate_electronic_state(&m, 0, 1).unwrap();
         assert_eq!(uhf, 0);
@@ -421,6 +424,7 @@ mod tests {
             pos,
             bonds: vec![],
             hydrogen_bonds: vec![],
+            topology: None,
         };
         m.recompute_bonds(2.0, 3.0);
 
@@ -474,6 +478,7 @@ mod tests {
             pos,
             bonds: vec![],
             hydrogen_bonds: vec![],
+            topology: None,
         };
         m.recompute_bonds(2.0, 3.0);
 

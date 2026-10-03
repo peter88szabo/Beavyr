@@ -167,7 +167,7 @@ pub fn axis_gizmo_label_positions(
 }
 const LARGE_MOLECULE_ATOM_THRESHOLD: usize = 1000;
 
-fn element_visible(sym: &str, settings: &MolSettings) -> bool {
+pub(crate) fn element_visible(sym: &str, settings: &MolSettings) -> bool {
     settings
         .element_visibility
         .get(sym)
@@ -197,7 +197,7 @@ fn representation_atom_scale(settings: &MolSettings) -> f32 {
 }
 
 /// Radius of the drawn sphere for an atom.
-fn atom_display_radius(sym: &str, settings: &MolSettings) -> f32 {
+pub(crate) fn atom_display_radius(sym: &str, settings: &MolSettings) -> f32 {
     covalent_radius_angstrom(sym) * settings.atom_scale * representation_atom_scale(settings)
 }
 
@@ -253,6 +253,10 @@ fn split_span(len: f32, start_inset: f32, end_inset: f32) -> (f32, f32) {
 }
 
 fn apply_large_molecule_representation(mol: &Molecule, settings: &mut MolSettings) {
+    if let Some(t) = &mol.topology {
+        t.display_defaults(settings);
+        if t.longest_chain() > 20 { return; }
+    }
     if mol.atoms.len() <= LARGE_MOLECULE_ATOM_THRESHOLD {
         return;
     }
@@ -913,6 +917,7 @@ pub fn update_meshes_if_dirty(
 }
 
 pub fn rebuild_if_dirty(
+    builder: Res<crate::molecule_builder::builder_ui::ZMatrixBuilderState>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -962,8 +967,11 @@ pub fn rebuild_if_dirty(
         let atom_resolution = atom_display_resolution(&settings);
 
         for i in 0..mol.atoms.len() {
+            if builder.selection.hidden.contains(&i) {
+                continue;
+            }
             let sym = &mol.atoms[i];
-            if matches!(settings.representation, RepresentationMode::BackboneTrace) && sym == "H" {
+            if matches!(settings.representation, RepresentationMode::BackboneTrace) && (sym == "H" || mol.topology.as_ref().is_some_and(|t| !t.backbone_atom(i))) {
                 continue;
             }
             if !element_visible(sym, &settings) {
@@ -1015,6 +1023,9 @@ pub fn rebuild_if_dirty(
     if matches!(settings.representation, RepresentationMode::SticksRounded) {
         degree = vec![0; mol.atoms.len()];
         for &(i, j, _d) in &bonds {
+            if builder.selection.hidden.contains(&i) || builder.selection.hidden.contains(&j) {
+                continue;
+            }
             if bond_touches_dummy(&mol, i, j) {
                 continue;
             }
@@ -1028,6 +1039,9 @@ pub fn rebuild_if_dirty(
     }
     for (i, j, len_cc) in bonds {
         if i >= mol.atoms.len() || j >= mol.atoms.len() {
+            continue;
+        }
+        if builder.selection.hidden.contains(&i) || builder.selection.hidden.contains(&j) {
             continue;
         }
         if bond_touches_dummy(&mol, i, j) {
@@ -1228,6 +1242,7 @@ pub fn rebuild_if_dirty(
 
 /// Draw bonds as simple line segments (used in line-based representations).
 pub fn draw_bond_lines(
+    builder: Res<crate::molecule_builder::builder_ui::ZMatrixBuilderState>,
     mut gizmos: Gizmos<BondLineGizmos>,
     mol: Res<Molecule>,
     settings: Res<MolSettings>,
@@ -1251,6 +1266,9 @@ pub fn draw_bond_lines(
         if i >= n_pos || j >= n_pos || i >= n_atoms || j >= n_atoms {
             continue;
         }
+        if builder.selection.hidden.contains(&i) || builder.selection.hidden.contains(&j) {
+            continue;
+        }
         if bond_touches_dummy(&mol, i, j) {
             continue;
         }
@@ -1259,7 +1277,7 @@ pub fn draw_bond_lines(
             continue;
         }
         if matches!(settings.representation, RepresentationMode::BackboneTrace) {
-            if mol.atoms[i] == "H" || mol.atoms[j] == "H" {
+            if mol.atoms[i] == "H" || mol.atoms[j] == "H" || mol.topology.as_ref().is_some_and(|t| !t.backbone_atom(i) || !t.backbone_atom(j)) {
                 continue;
             }
         }

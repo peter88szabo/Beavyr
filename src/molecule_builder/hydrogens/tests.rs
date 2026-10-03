@@ -6,6 +6,7 @@ fn molecule(atoms: &[&str], pos: &[Vec3]) -> Molecule {
         pos: pos.to_vec(),
         bonds: vec![],
         hydrogen_bonds: vec![],
+        topology: None,
     }
 }
 
@@ -94,7 +95,7 @@ fn ethane_has_no_extra_cross_bonds_even_with_an_inflated_display_threshold() {
 #[test]
 fn existing_hydrogens_and_non_target_elements_are_preserved() {
     let mut mol = molecule(
-        &["N", "C", "H"],
+        &["Ne", "C", "H"],
         &[Vec3::new(20.0, 0.0, 0.0), Vec3::ZERO, Vec3::X * 1.07],
     );
     let before = mol.clone();
@@ -244,4 +245,15 @@ fn new_hydrogen_editor_rows_reference_their_hosts_and_preserve_geometry() {
             }
         }
     }
+}
+
+#[test]
+fn nitrogen_completion_adds_ammonia_and_planar_amide_hydrogens() {
+    let mut ammonia=molecule(&["N"],&[Vec3::ZERO]);assert_eq!(complete(&mut ammonia).unwrap().added,3);assert_eq!(complete(&mut ammonia).unwrap().added,0);
+    // Formamide heavy atoms. The short amide C-N must not be treated as a double bond.
+    let mut amide=molecule(&["C","O","N"],&[Vec3::ZERO,Vec3::X*1.23,Vec3::new(-0.67,1.16,0.0)]);
+    complete(&mut amide).unwrap();amide.recompute_bonds(1.2,2.5);
+    let hs:Vec<_>=amide.bonds.iter().filter_map(|&(a,b,_)| if a==2 && amide.atoms[b]=="H" {Some(b)} else if b==2 && amide.atoms[a]=="H" {Some(a)} else {None}).collect();
+    assert_eq!(hs.len(),2);for h in hs {assert!(amide.pos[h].z.abs()<1e-4,"amide H must be planar");}
+    assert_eq!(complete(&mut amide).unwrap().added,0);
 }

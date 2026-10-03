@@ -1,5 +1,52 @@
 use super::*;
 
+#[test]
+fn peptide_insertion_is_one_undo_step_and_uses_the_unmodified_fragment_editor() {
+    use crate::molecule_builder::peptide::{self, End, Recipe};
+    let recipe = |s: &str| Recipe { residues: peptide::parse_sequence(s).unwrap(), ..Default::default() };
+    let mut fixture = EditorFixture::new("0\n\n");
+    let monomer = peptide::build(&recipe("A"), None).unwrap();
+    fixture.act(Action::Peptide(Box::new(monomer))).unwrap();
+    fixture.zmat.placed_editor = Default::default();
+    let before = fixture.mol.clone();
+    let anchor = peptide::attachment(&fixture.mol, 2, End::C).unwrap();
+    let draft = peptide::build(&recipe("PG"), Some((&fixture.mol, &anchor))).unwrap();
+    let map = draft.host_mapping.clone();
+    let moving = draft.moving.clone();
+    fixture.zmat.selection.frozen.insert(0);
+    fixture.act(Action::Peptide(Box::new(draft))).unwrap();
+    assert_eq!(fixture.zmat.history.depth(), 2);
+    assert_eq!(fixture.zmat.selection.frozen, [map[0].unwrap()].into());
+    assert_eq!(fixture.zmat.placed_editor.moving.as_ref(), Some(&moving));
+    let after = fixture.mol.clone();
+    let mut editor = fixture.zmat.placed_editor.clone();
+    assert!(fragment_editor_prepare(&mut editor, &mut fixture.mol, &mut fixture.settings));
+    editor.axis_len_target += 0.4;
+    editor.angle_deg = 20.0;
+    recompute_preview(&mut editor, &mut fixture.mol, &mut fixture.settings);
+    for j in map.iter().flatten() { assert_eq!(fixture.mol.pos[*j], after.pos[*j]); }
+    assert!(moving.iter().any(|&i| fixture.mol.pos[i] != after.pos[i]));
+    revert_preview(&mut editor, &mut fixture.mol, &mut fixture.settings);
+    assert_eq!(fixture.mol.pos, after.pos);
+    fixture.act(Action::Undo).unwrap();
+    assert_eq!(fixture.mol.atoms, before.atoms);
+    assert_eq!(fixture.mol.pos, before.pos);
+    assert_eq!(fixture.mol.topology, before.topology);
+    fixture.act(Action::Redo).unwrap();
+    assert_eq!(fixture.mol.atoms, after.atoms);
+    assert_eq!(fixture.mol.pos, after.pos);
+    assert_eq!(fixture.mol.topology, after.topology);
+}
+
+#[test]
+fn peptide_button_only_opens_its_window_and_does_not_edit_the_structure() {
+    let mut fixture = EditorFixture::new("1\n\nC 0 0 0\n");
+    fixture.click("Peptide Builder…");
+    assert!(fixture.zmat.peptide.open);
+    assert_eq!(fixture.mol.atoms, ["C"]);
+    assert_eq!(fixture.zmat.history.depth(), 0);
+}
+
 struct EditorFixture {
     ctx: egui::Context,
     editor: EditorRotateState,
@@ -161,6 +208,79 @@ fn named_custom_fragment_button_reuses_placement_and_undo() {
     assert_eq!(fixture.mol.atoms, ["C"]);
     fixture.act(Action::Redo).unwrap();
     assert_eq!(fixture.mol.atoms, ["C", "O", "H"]);
+}
+
+#[test]
+fn cleanup_preview_accepts_as_one_undoable_edit_and_redoes_exactly() {
+    use crate::molecule_builder::cleanup::{relax, Scope};
+    let mut fixture = EditorFixture::new("3\n\nO 0 0 0\nH 1.1 0 0\nH -0.2 1.05 0\n");
+    let original = fixture.mol.pos.clone();
+    fixture.zmat.selection.sync(&fixture.mol);
+    fixture.zmat.selection.atoms.insert(1);
+    fixture.zmat.selection.frozen.insert(0);
+    let preview = relax(
+        &fixture.mol,
+        &fixture.zmat.selection,
+        Scope::Selected,
+        &std::sync::atomic::AtomicBool::new(false),
+    )
+    .unwrap();
+    let expected = preview.positions.clone();
+    fixture.click("Clean up geometry");
+    assert!(fixture.zmat.cleanup.open);
+    fixture.zmat.cleanup.scope = Scope::Selected;
+    fixture.zmat.cleanup.preview = Some(preview);
+    assert_eq!(
+        fixture.mol.pos, original,
+        "preview must not change calculation input"
+    );
+    fixture.click("Accept cleanup");
+    assert_eq!(fixture.mol.pos, expected);
+    assert_eq!(fixture.mol.pos[0], original[0]);
+    assert_eq!(fixture.mol.pos[2], original[2]);
+    assert_eq!(fixture.zmat.history.depth(), 1);
+    fixture.act(Action::Undo).unwrap();
+    assert_eq!(fixture.mol.pos, original);
+    fixture.act(Action::Redo).unwrap();
+    assert_eq!(fixture.mol.pos, expected);
+}
+
+#[test]
+fn discarding_cleanup_leaves_coordinates_and_history_untouched() {
+    use crate::molecule_builder::cleanup::{relax, Scope};
+    let mut fixture = EditorFixture::new("3\n\nO 0 0 0\nH 1.1 0 0\nH -0.2 1.05 0\n");
+    let original = fixture.mol.pos.clone();
+    fixture.zmat.cleanup.preview = Some(
+        relax(
+            &fixture.mol,
+            &fixture.zmat.selection,
+            Scope::Whole,
+            &std::sync::atomic::AtomicBool::new(false),
+        )
+        .unwrap(),
+    );
+    fixture.zmat.cleanup.open = true;
+    fixture.click("Discard");
+    assert!(!fixture.zmat.cleanup.open);
+    assert!(fixture.zmat.cleanup.preview.is_none());
+    assert_eq!(fixture.mol.pos, original);
+    assert_eq!(fixture.zmat.history.depth(), 0);
+}
+
+#[test]
+fn selection_toolbar_isolates_freezes_and_restores_without_editing_atoms() {
+    let mut fixture = EditorFixture::new("3\n\nO 0 0 0\nH 1.1 0 0\nH -0.2 1.05 0\n");
+    fixture.zmat.selection.sync(&fixture.mol);
+    fixture.zmat.selection.atoms = [1, 2].into();
+    let original = fixture.mol.pos.clone();
+    fixture.click("Freeze");
+    assert_eq!(fixture.zmat.selection.frozen, [1, 2].into());
+    fixture.click("Isolate");
+    assert_eq!(fixture.zmat.selection.hidden, [0].into());
+    fixture.click("Show all");
+    assert!(fixture.zmat.selection.hidden.is_empty());
+    assert_eq!(fixture.mol.pos, original);
+    assert_eq!(fixture.zmat.history.depth(), 0);
 }
 
 #[test]

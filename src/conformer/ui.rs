@@ -1018,6 +1018,7 @@ fn load_as_trajectory(
     traj.fixed_bonds = true;
 
     if let Some(first) = traj.frames.first() {
+        mol.topology = None;
         mol.atoms = first.atoms.clone();
         mol.pos = first.pos.clone();
         mol.recompute_bonds(settings.bond_thresh_scale, settings.hbond_cutoff);

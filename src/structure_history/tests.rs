@@ -26,6 +26,7 @@ fn molecule(distance: f32) -> Molecule {
         pos: vec![Vec3::ZERO, Vec3::new(distance, 1.2345678, -0.000000123)],
         bonds: vec![],
         hydrogen_bonds: vec![],
+        topology: None,
     }
 }
 fn remember(history: &mut StructureHistory, distance: f32, name: &str) {

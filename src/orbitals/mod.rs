@@ -577,6 +577,7 @@ mod adopt_tests {
             pos: data.positions.clone(),
             bonds: vec![],
             hydrogen_bonds: vec![],
+            topology: None,
         }
     }
 
@@ -1086,6 +1087,7 @@ mod surface_cleanup_tests {
             pos: data.positions.clone(),
             bonds: vec![],
             hydrogen_bonds: vec![],
+            topology: None,
         }
     }
 

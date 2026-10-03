@@ -163,6 +163,7 @@ fn main() {
         .init_resource::<EditorRotateState>()
         .init_resource::<ZMatrixBuilderState>()
         .init_gizmo_group::<BuilderGizmos>()
+        .init_gizmo_group::<molecule_builder::cleanup::CleanupGizmos>()
         .init_gizmo_group::<BuilderHighlightGizmos>()
         // trajectory
         .init_resource::<TrajectoryState>()
@@ -209,6 +210,8 @@ fn main() {
                 update_lighting_if_dirty,
                 update_materials_if_dirty,
                 update_meshes_if_dirty,
+                molecule_builder::builder_ui::sync_builder_on_structure_load,
+                molecule_builder::selection::sync,
                 rebuild_if_dirty,
                 update_light_positions,
                 update_axis_viewport_on_resize,
@@ -234,7 +237,6 @@ fn main() {
                 configure_builder_gizmos,
                 molecule_builder::builder_ui::handle_builder_atom_picked,
                 molecule_builder::builder_ui::handle_viewport_click,
-                molecule_builder::builder_ui::sync_builder_on_structure_load,
                 draw_builder_highlights,
                 // trajectory
                 trajectory::advance_trajectory,
@@ -246,6 +248,9 @@ fn main() {
                 // limit for a system set; nesting costs nothing and keeps
                 // the ordering.
                 (
+                    molecule_builder::cleanup::configure,
+                    molecule_builder::cleanup::poll,
+                    molecule_builder::cleanup::draw,
                     qchem_panel::run::poll_qc_run,
                     uvvis::run::poll_spectrum_run,
                     conformer::poll_conformer_search,

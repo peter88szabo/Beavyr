@@ -128,6 +128,8 @@ fn pick_and_emit_atom(
     mol: Option<Res<Molecule>>,
     measurements: Option<Res<Measurements>>,
     builder: Option<Res<EditorRotateState>>,
+    zmat: Res<crate::molecule_builder::builder_ui::ZMatrixBuilderState>,
+    settings: Res<crate::settings::MolSettings>,
     panel_regions: Res<crate::ui::UiPanelRegions>,
     mut mouse_motion: MessageReader<MouseMotion>,
     mut tracker: ResMut<ClickTracker>,
@@ -155,6 +157,8 @@ fn pick_and_emit_atom(
             &q_cam,
             &mol,
             &panel_regions,
+            &zmat.selection.hidden,
+            &settings,
         ) {
             tracker.press(hit);
         }
@@ -178,8 +182,8 @@ fn pick_and_emit_atom(
     let Some(hit_idx) = hit else {
         return;
     };
-    let want_measure = measurements
-        .is_some_and(|m| m.is_active || m.angle_active || m.dihedral_active);
+    let want_measure =
+        measurements.is_some_and(|m| m.is_active || m.angle_active || m.dihedral_active);
     let want_builder = builder.is_some_and(|b| b.active);
     if want_measure {
         ev_pick.write(AtomPicked {
@@ -205,6 +209,8 @@ fn press_target(
     q_cam: &Query<(&Camera, &GlobalTransform), (With<Camera3d>, With<crate::scene::MainCamera>)>,
     mol: &Molecule,
     panel_regions: &crate::ui::UiPanelRegions,
+    hidden: &std::collections::BTreeSet<usize>,
+    settings: &crate::settings::MolSettings,
 ) -> Option<Option<usize>> {
     // Skip while egui has captured the pointer or a popup is open.
     if egui_wants_input.is_using_pointer() || egui_wants_input.is_popup_open() {
@@ -227,8 +233,10 @@ fn press_target(
     let mouse_px = mouse_logical * window.scale_factor() as f32;
 
     Some(
-        screen::find_nearest_atom_screen_space(cam, cam_xf, &mol.pos, mouse_px, 18.0)
-            .map(|(hit_idx, _)| hit_idx),
+        screen::find_nearest_visible_atom(cam, cam_xf, &mol.pos, mouse_px, 18.0, |i| {
+            !hidden.contains(&i) && crate::scene::element_visible(&mol.atoms[i], settings)
+        })
+        .map(|(hit_idx, _)| hit_idx),
     )
 }
 

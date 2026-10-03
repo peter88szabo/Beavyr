@@ -358,6 +358,7 @@ pub fn update_measurement_distances(
 
 /// Draw gizmos (distance lines + pending highlights + preview highlights)
 pub fn draw_measurement_lines(
+    builder: Res<crate::molecule_builder::builder_ui::ZMatrixBuilderState>,
     mut gizmos: Gizmos<MeasurementGizmos>,
     mut highlights: Gizmos<MeasurementHighlightGizmos>,
     measurements: Res<Measurements>,
@@ -374,7 +375,7 @@ pub fn draw_measurement_lines(
 
     // ---------- Pending highlights ----------
     let mut draw_highlight = |idx: usize, color: Color| {
-        if idx < n {
+        if idx < n && !builder.selection.hidden.contains(&idx) {
             let center = mol.pos[idx];
             let base_r = covalent_radius_angstrom(&mol.atoms[idx]) * settings.atom_scale;
             let r = (base_r * 1.25).max(0.15);
@@ -431,7 +432,11 @@ pub fn draw_measurement_lines(
 
     // ---------- Distance lines ----------
     for pair in measurements.pairs.iter().filter(|p| p.visible) {
-        if pair.a >= n || pair.b >= n {
+        if pair.a >= n
+            || pair.b >= n
+            || builder.selection.hidden.contains(&pair.a)
+            || builder.selection.hidden.contains(&pair.b)
+        {
             continue;
         }
 

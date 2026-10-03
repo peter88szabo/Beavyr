@@ -389,6 +389,7 @@ mod tests {
             ],
             bonds: vec![],
             hydrogen_bonds: vec![],
+            topology: None,
         }
     }
     #[test]
@@ -436,6 +437,7 @@ mod tests {
             pos: vec![Vec3::ZERO],
             bonds: vec![],
             hydrogen_bonds: vec![],
+            topology: None,
         };
         let mut builder = ZMatrixBuilderState::default();
         builder.custom_fragments = Library::at(None);
