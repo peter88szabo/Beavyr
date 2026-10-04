@@ -88,8 +88,8 @@ sequence before building. Cross-linked side chains cannot be replaced or fitted.
 bond in two local passes and selects lower steric-overlap scores. Backbone atoms,
 ring bonds and cross-links remain fixed. This is deterministic torsion sampling,
 not a Dunbrack probability model, a global packing search or a force-field
-minimization. Original xTB ring geometries remain intact; no new runtime library
-or Python dependency is required.
+minimization. Original xTB ring geometries remain intact. This older local fitting action is
+retained alongside the new library-based rotamer controls.
 
 Disulfides require two free cysteine sulfurs already 1.8–2.3 Å apart and acceptable
 C–S–S angles. Linking removes thiol H atoms and neutralizes sulfur charges. It
@@ -153,3 +153,86 @@ It reports convergence and energy, validates retained bond lengths and writes
 `/tmp/beavyr-peptide-20-dreiding.xyz`. It is not an insulin fold or a folding test.
 
 See the [recorded 20-residue validation and optimized XYZ](../peptide_validation/VALIDATION.md).
+
+
+## Open an experimental protein
+
+Use **Structure → Open structure…** for `.pdb`, `.ent`, `.cif` or `.mmcif`, or pass
+the filename to Beavyr. Import uses [pdbtbx](https://docs.rs/pdbtbx/0.12.0/pdbtbx/)
+for coordinates. The first model is loaded. For alternate locations, one complete
+residue alternate is selected by mean occupancy (alphabetical tie-break), sharing
+blank-alternate atoms. The selected alternate, source chain, residue number,
+insertion code and source residue name survive project saves and Undo/Redo.
+
+Standard residues receive named template connectivity and bond orders. Peptide
+bonds require adjacent residue identifiers, the same uninterrupted chain and a
+plausible C–N distance. PDB `TER` and missing residue numbers prevent implicit
+joining. PDB `SSBOND`, `LINK`, covalent `CONECT` and mmCIF covalent/disulfide
+`struct_conn` records preserve explicit cross-links. Symmetry-related links to
+unloaded atoms are reported and skipped. No biological assembly or crystal
+symmetry expansion is performed.
+
+Unknown ligands and waters remain in the molecule. Their internal bonds may be
+distance-inferred; they are not given invented amino-acid identities. Missing
+heavy atoms are reported, not reconstructed. Imported histidine/state aliases
+are recognized, but coordinates alone do not determine protonation: unlabelled
+residue states use neutral defaults, and unspecified formal charges remain
+unknown. Review residue states before **Add missing H** and set the calculation's
+charge explicitly as needed. This importer is not a pH/protonation predictor.
+
+PDB export retains source residue numbers and insertion codes. Single-character
+chain IDs are retained where unique; other chain IDs receive unique PDB letters.
+Beavyr projects preserve the original mmCIF identifiers without PDB's limits.
+
+## Backbone conformation
+
+In **Edit residues**, choose a residue, then use **Backbone · φ / ψ / ω**:
+
+- Set φ, ψ and incoming ω, then **Preview backbone**. Undefined terminal angles
+  are disabled. The Ramachandran plot shows measured φ/ψ values for the structure;
+  clicking sets this residue's proposed φ/ψ. α/β labels are reference positions,
+  not residue-specific allowed-region contours or an outlier assessment.
+- Choose **α-helix**, **β-strand** or **Type-I turn**, select the last residue with
+  **through**, then **Preview range preset**. A type-I turn sets its two central
+  residues. Presets change φ/ψ and preserve ω; they do not fold a protein.
+- Inspect the detached preview and close contacts, then **Apply preview**.
+  Molecular Editor **Undo/Redo** restores the complete edit in one step.
+
+Rotations operate on the covalently connected side of each bond. Bond lengths
+and local stereochemistry are preserved, but downstream residues outside a
+selected range can move as a rigid continuation. Proline φ, ring closure and
+cross-links that prevent an independent rotation are refused. Frozen atoms are
+checked both when previewing and applying. The Fragment Editor is unchanged.
+
+## Side-chain rotamers
+
+**Find rotamers** queries the embedded Dunbrack 2010 library through the
+[`dunbrack` Rust crate](https://docs.rs/dunbrack/0.1.0/dunbrack/) using the measured
+backbone angles. Undefined terminal dimensions are averaged over the periodic
+10° grid. The current conformation and up to twelve candidates are shown;
+arrows cycle their previews. Each candidate rotates the existing side chain,
+preserving its bond lengths, ring geometry and backbone coordinates.
+
+Candidates are ranked by squared nonbonded overlap, then library probability.
+The overlap score includes internal side-chain clashes and contacts with the
+rest of the structure, excluding bonded and angle-connected pairs. It is a
+geometric score, not a force-field energy or a hydrogen-bond score. The shown
+prior is a library probability, not a predicted binding probability.
+
+After applying a mutation, **Preview nearby repack** searches neighbors within
+2–12 Å of the selected residue. It keeps that residue and all backbones fixed,
+accepting only lower-overlap side chains in one sequential pass. It is a local
+repair tool, not exhaustive global packing. Unsupported or locked neighbors are
+skipped and counted in the preview message.
+
+Gly/Ala have no independent side-chain χ; proline ring fitting and Sec/Pyl library
+rotamers are not implemented. Disulfide-linked side chains cannot be rotated
+independently. The existing template builder and fitting tools remain available.
+All rotamer tables are compiled in; no runtime network or Python is required.
+
+Protein regression fixtures include RCSB 1CRN (PDB and mmCIF) and 1UBQ. Run the
+import/conformation regressions with:
+
+```sh
+taskset -c 0-3 cargo test -j 4 protein_ -- --test-threads=4
+```

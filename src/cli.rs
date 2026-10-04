@@ -37,6 +37,7 @@ const MAX_SNIFF_BYTES: u64 = 64 * 1024 * 1024;
 pub enum FileKind {
     /// XYZ coordinates, one frame or many.
     Xyz,
+    Protein,
     /// An ORCA `.hess`, or a Gaussian log with frequencies in it.
     Hessian,
     /// Orbitals and a basis set.
@@ -57,7 +58,7 @@ impl FileKind {
     /// The window to open once a file of this kind has loaded, if any.
     pub fn window(self) -> Option<Tab> {
         match self {
-            FileKind::Xyz => Some(Tab::Structure),
+            FileKind::Xyz | FileKind::Protein => Some(Tab::Structure),
             FileKind::Hessian | FileKind::Engrad => Some(Tab::Vibrations),
             FileKind::Molden => Some(Tab::Surface),
             FileKind::TdDft => Some(Tab::UvVis),
@@ -93,6 +94,7 @@ pub fn classify(path: &Path, head: &str) -> FileKind {
 
     match ext.as_str() {
         "xyz" => FileKind::Xyz,
+        "pdb" | "ent" | "cif" | "mmcif" => FileKind::Protein,
         "hess" => FileKind::Hessian,
         "molden" => FileKind::Molden,
         "engrad" => FileKind::Engrad,
@@ -199,6 +201,7 @@ Beavyr -- molecular viewer and quantum-chemistry front-end
 Files are recognised by their extension:
 
     .xyz            a structure; several frames become a trajectory
+    .pdb/.cif       protein coordinates and residue annotations (also .mmcif/.ent)
     .hess           an ORCA Hessian -- frequencies are analysed on opening
     .molden         orbitals and basis set
     .engrad         an ORCA gradient, for the reaction-path projection
@@ -292,7 +295,7 @@ pub fn load_command_line_files(
 
         let previous = history.before(&mol, traj);
         let loaded = match kind {
-            FileKind::Xyz => match crate::ui::load_xyz_from_path(
+            FileKind::Xyz | FileKind::Protein => match crate::ui::load_xyz_from_path(
                 path,
                 xyz_buf,
                 traj,
@@ -401,8 +404,8 @@ pub fn load_command_line_files(
         };
 
         if loaded {
-            if matches!(kind, FileKind::Xyz | FileKind::Molden | FileKind::Hessian) {
-                if !matches!(kind, FileKind::Xyz) {
+            if matches!(kind, FileKind::Xyz | FileKind::Protein | FileKind::Molden | FileKind::Hessian) {
+                if !matches!(kind, FileKind::Xyz | FileKind::Protein) {
                     traj.clear_for_structure();
                 }
                 history.replaced(previous, &mol, traj, &name);
@@ -444,6 +447,7 @@ mod tests {
     #[test]
     fn each_plain_extension_maps_to_its_tool() {
         assert_eq!(kind_of("ZZAllyl.xyz", ""), FileKind::Xyz);
+        for name in ["protein.pdb", "protein.PDB", "protein.ent", "protein.cif", "protein.mmCIF"] {assert_eq!(kind_of(name,""),FileKind::Protein);}
         assert_eq!(kind_of("water.hess", ""), FileKind::Hessian);
         assert_eq!(kind_of("mo.molden", ""), FileKind::Molden);
         assert_eq!(kind_of("job.engrad", ""), FileKind::Engrad);

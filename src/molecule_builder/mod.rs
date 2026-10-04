@@ -15,3 +15,10 @@ pub mod peptide;
 pub mod topology;
 pub mod peptide_edit;
 pub mod peptide_builder;
+
+pub mod protein_import;
+pub mod peptide_conformation;
+pub mod peptide_rotamers;
+
+#[cfg(test)]
+mod protein_workflow_tests;

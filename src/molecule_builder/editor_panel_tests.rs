@@ -464,3 +464,21 @@ fn main_tools_stay_visible_at_laptop_height_with_all_fragments_and_placed_editor
         }
     }
 }
+
+#[test]
+fn protein_backbone_preview_apply_undo_and_freeze_after_preview() {
+    use crate::molecule_builder::{peptide::{self, Recipe},peptide_conformation as conf};
+    let mut fixture=EditorFixture::new("0\n\n");
+    let original=peptide::build(&Recipe{residues:peptide::parse_sequence("AKLA").unwrap(),..Default::default()},None).unwrap();
+    fixture.act(Action::Peptide(Box::new(original))).unwrap();
+    let before=fixture.mol.clone();
+    let preview=conf::edit(&fixture.mol,2,Some(-60.0),Some(-40.0),None).unwrap();
+    let moved=preview.moving[0];fixture.zmat.selection.frozen.insert(moved);
+    assert!(fixture.act(Action::Peptide(Box::new(preview.clone()))).is_err());
+    assert_eq!(fixture.mol.pos,before.pos);
+    fixture.zmat.selection.frozen.clear();
+    fixture.act(Action::Peptide(Box::new(preview))).unwrap();
+    let after=fixture.mol.clone();assert_ne!(after.pos,before.pos);
+    fixture.act(Action::Undo).unwrap();assert_eq!(fixture.mol.pos,before.pos);assert_eq!(fixture.mol.topology,before.topology);
+    fixture.act(Action::Redo).unwrap();assert_eq!(fixture.mol.pos,after.pos);assert_eq!(fixture.mol.topology,after.topology);
+}

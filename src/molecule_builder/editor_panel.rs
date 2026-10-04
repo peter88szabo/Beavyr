@@ -893,6 +893,12 @@ fn perform_mutation(
 ) -> Result<String, String> {
     match action {
         Action::Peptide(build) => {
+            if zmat.selection.frozen.iter().any(|&i| {
+                build.host_mapping.get(i).copied().flatten()
+                    .is_none_or(|j| build.molecule.pos.get(j) != mol.pos.get(i))
+            }) {
+                return Err("This edit would move or remove frozen atoms. Unfreeze them first.".into());
+            }
             *mol = build.molecule.clone();
             if let Some(t) = &mol.topology { t.display_defaults(settings); }
             mol.recompute_bonds(settings.bond_thresh_scale, settings.hbond_cutoff);

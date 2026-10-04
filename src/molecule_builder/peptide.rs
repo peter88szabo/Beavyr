@@ -588,6 +588,7 @@ pub fn build(recipe: &Recipe, host: Option<(&Molecule, &Attachment)>) -> Result<
         let residue_id = next_residue;
         next_residue += 1;
         topology.residues.push(ResidueInfo {
+            origin: None,
             id: residue_id,
             chain,
             template: part.template.id.into(),

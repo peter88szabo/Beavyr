@@ -42,6 +42,9 @@ pub struct State {
     link_residue: Option<u64>,
     replacement: Residue,
     fit: bool,
+    backbone: BackboneControls,
+    rotamers: Option<RotamerCache>,
+    neighbor_radius: f32,
     recipe: Recipe,
     mode: Mode,
     end: End,
@@ -66,6 +69,9 @@ impl Default for State {
             link_residue: None,
             replacement: Residue::new(AminoAcid::Alanine),
             fit: true,
+            backbone: BackboneControls::default(),
+            rotamers: None,
+            neighbor_radius: 6.0,
             recipe: Recipe::default(),
             mode: Mode::New,
             end: End::C,
@@ -253,11 +259,12 @@ pub fn window(
                 ui.selectable_value(&mut state.mode, Mode::Extend, "Extend selected terminus");
                 ui.selectable_value(&mut state.mode, Mode::Edit, "Edit residues");
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.weak(format!("{} residues", state.recipe.residues.len()));
+                    let count=if state.mode==Mode::Edit {mol.topology.as_ref().map(|t|t.peptide_residue_count()).unwrap_or(0)} else {state.recipe.residues.len()};
+                    ui.weak(format!("{count} residues"));
                 });
             });
             if state.mode == Mode::Edit {
-                edit_controls(ui, &mut state, mol, zmat.selected_index, ready);
+                edit_controls(ui, &mut state, mol, zmat.selected_index, &zmat.selection.frozen, ready);
                 let current = state.preview_current(mol);
                 insert = ui.add_enabled(ready && current, egui::Button::new("Apply preview")).clicked();
                 if let Some(error) = &state.error { ui.colored_label(egui::Color32::LIGHT_RED,error); }
@@ -617,52 +624,474 @@ mod tests {
     }
 }
 
-fn edit_controls(ui:&mut egui::Ui,state:&mut State,mol:&Molecule,selected:Option<usize>,ready:bool) {
+fn edit_controls(
+    ui: &mut egui::Ui,
+    state: &mut State,
+    mol: &Molecule,
+    selected: Option<usize>,
+    frozen: &std::collections::BTreeSet<usize>,
+    ready: bool,
+) {
     use super::peptide_edit as edit;
-    let Ok(t)=edit::metadata(mol) else {ui.weak("Build a peptide or open its Beavyr project to edit residues.");return;};
-    let residues:Vec<_>=t.residues.iter().filter(|r|edit::template(&r.template).is_some()).collect();
-    if !residues.iter().any(|r|Some(r.id)==state.edit_residue) {state.edit_residue=residues.first().map(|r|r.id);}
-    let label=|id:Option<u64>| residues.iter().find(|r|Some(r.id)==id).map(|r|format!("{} · {}",r.id,edit::template(&r.template).unwrap().amino_acid.three_letter())).unwrap_or_else(||"Select residue".into());
+    let before = (
+        state.edit_residue,
+        state.link_residue,
+        state.replacement.clone(),
+        state.fit,
+    );
+    let Ok(t) = edit::metadata(mol) else {
+        ui.weak("Build a peptide or open a PDB, mmCIF or Beavyr project to edit residues.");
+        return;
+    };
+    let residues: Vec<_> = t
+        .residues
+        .iter()
+        .filter(|r| edit::template(&r.template).is_some())
+        .collect();
+    if !residues.iter().any(|r| Some(r.id) == state.edit_residue) {
+        state.edit_residue = residues.first().map(|r| r.id);
+    }
+    let label = |id: Option<u64>| {
+        residues
+            .iter()
+            .find(|r| Some(r.id) == id)
+            .map(|r| residue_label(r))
+            .unwrap_or_else(|| "Select residue".into())
+    };
     ui.horizontal(|ui| {
-        egui::ComboBox::from_id_salt("edit_residue").selected_text(label(state.edit_residue)).show_ui(ui,|ui| {for r in &residues {ui.selectable_value(&mut state.edit_residue,Some(r.id),label(Some(r.id)));}});
-        if ui.add_enabled(selected.is_some(),egui::Button::new("From selected atom")).clicked() {state.edit_residue=selected.and_then(|i|t.atoms.get(i)).and_then(|a|a.residue);}
-        if let Some(q)=t.charge() {ui.small(format!("Charge {q:+}"));}
+        egui::ComboBox::from_id_salt("edit_residue")
+            .selected_text(label(state.edit_residue))
+            .show_ui(ui, |ui| {
+                for r in &residues {
+                    ui.selectable_value(&mut state.edit_residue, Some(r.id), label(Some(r.id)));
+                }
+            });
+        if ui
+            .add_enabled(selected.is_some(), egui::Button::new("From selected atom"))
+            .clicked()
+        {
+            state.edit_residue = selected
+                .and_then(|i| t.atoms.get(i))
+                .and_then(|a| a.residue);
+        }
+        if let Some(q) = t.charge() {
+            ui.small(format!("Charge {q:+}"));
+        }
         if ui.button("Export PDB…").clicked() {
             match edit::pdb(mol) {
-                Ok(text)=>if let Some(path)=rfd::FileDialog::new().add_filter("PDB",&["pdb"]).set_file_name("peptide.pdb").save_file() {
-                    match std::fs::write(path,text) {Ok(())=>state.message="Exported residue names and connectivity.".into(),Err(e)=>state.error=Some(e.to_string())}
-                },Err(e)=>state.error=Some(e),
+                Ok(text) => {
+                    if let Some(path) = rfd::FileDialog::new()
+                        .add_filter("PDB", &["pdb"])
+                        .set_file_name("peptide.pdb")
+                        .save_file()
+                    {
+                        match std::fs::write(path, text) {
+                            Ok(()) => {
+                                state.message = "Exported residue names and connectivity.".into()
+                            }
+                            Err(e) => state.error = Some(e.to_string()),
+                        }
+                    }
+                }
+                Err(e) => state.error = Some(e),
             }
         }
     });
-    let before = (state.edit_residue,state.link_residue,state.replacement.clone(),state.fit);
-    let mut result=None;
-    ui.add_enabled_ui(ready,|ui| {
+
+    let mut result = None;
+    ui.add_enabled_ui(ready, |ui| {
         ui.horizontal_wrapped(|ui| {
             ui.label("Replace with");
-            let before=state.replacement.amino;
-            egui::ComboBox::from_id_salt("replacement_acid").selected_text(before.three_letter()).show_ui(ui,|ui| {for a in AminoAcid::ALL {ui.selectable_value(&mut state.replacement.amino,a,a.three_letter());}});
-            if before!=state.replacement.amino {state.replacement=Residue::new(state.replacement.amino);}
-            egui::ComboBox::from_id_salt("replacement_state").selected_text(state_name(state.replacement.side_chain)).show_ui(ui,|ui| {for t in state.replacement.amino.templates().iter().filter(|t|t.termini==TerminalState::Neutral) {ui.selectable_value(&mut state.replacement.side_chain,t.side_chain,state_name(t.side_chain));}});
-            if ui.button("Preview replacement").clicked() {result=state.edit_residue.map(|r|edit::replace(mol,r,&state.replacement,state.fit));}
+            let before = state.replacement.amino;
+            egui::ComboBox::from_id_salt("replacement_acid")
+                .selected_text(before.three_letter())
+                .show_ui(ui, |ui| {
+                    for a in AminoAcid::ALL {
+                        ui.selectable_value(&mut state.replacement.amino, a, a.three_letter());
+                    }
+                });
+            if before != state.replacement.amino {
+                state.replacement = Residue::new(state.replacement.amino);
+            }
+            egui::ComboBox::from_id_salt("replacement_state")
+                .selected_text(state_name(state.replacement.side_chain))
+                .show_ui(ui, |ui| {
+                    for t in state
+                        .replacement
+                        .amino
+                        .templates()
+                        .iter()
+                        .filter(|t| t.termini == TerminalState::Neutral)
+                    {
+                        ui.selectable_value(
+                            &mut state.replacement.side_chain,
+                            t.side_chain,
+                            state_name(t.side_chain),
+                        );
+                    }
+                });
+            if ui.button("Preview replacement").clicked() {
+                result = state
+                    .edit_residue
+                    .map(|r| edit::replace(mol, r, &state.replacement, state.fit));
+            }
         });
         ui.horizontal_wrapped(|ui| {
-            ui.checkbox(&mut state.fit,"Fit side chains");
-            if ui.button("Preview side-chain fit").clicked() {result=Some(edit::pack(mol,state.edit_residue));}
-            if ui.button("Preview ACE cap (N)").clicked() {result=state.edit_residue.map(|r|edit::cap(mol,r,End::N));}
-            if ui.button("Preview NME cap (C)").clicked() {result=state.edit_residue.map(|r|edit::cap(mol,r,End::C));}
+            ui.checkbox(&mut state.fit, "Fit side chains");
+            if ui.button("Preview side-chain fit").clicked() {
+                result = Some(edit::pack(mol, state.edit_residue));
+            }
+            if ui.button("Preview ACE cap (N)").clicked() {
+                result = state.edit_residue.map(|r| edit::cap(mol, r, End::N));
+            }
+            if ui.button("Preview NME cap (C)").clicked() {
+                result = state.edit_residue.map(|r| edit::cap(mol, r, End::C));
+            }
         });
         ui.horizontal_wrapped(|ui| {
             ui.label("Disulfide partner");
-            egui::ComboBox::from_id_salt("disulfide_partner").selected_text(label(state.link_residue)).show_ui(ui,|ui| {for r in &residues {if edit::template(&r.template).unwrap().amino_acid==AminoAcid::Cysteine {ui.selectable_value(&mut state.link_residue,Some(r.id),label(Some(r.id)));}}});
-            if ui.button("Preview S–S link").on_hover_text("Requires two positioned cysteine sulfurs; checks distance and bond angles.").clicked() {
-                result=Some(match (state.edit_residue,state.link_residue) {(Some(a),Some(b))=>edit::disulfide(mol,a,b),_=>Err("Select two cysteine residues.".into())});
+            egui::ComboBox::from_id_salt("disulfide_partner")
+                .selected_text(label(state.link_residue))
+                .show_ui(ui, |ui| {
+                    for r in &residues {
+                        if edit::template(&r.template).unwrap().amino_acid == AminoAcid::Cysteine {
+                            ui.selectable_value(
+                                &mut state.link_residue,
+                                Some(r.id),
+                                label(Some(r.id)),
+                            );
+                        }
+                    }
+                });
+            if ui
+                .button("Preview S–S link")
+                .on_hover_text(
+                    "Requires two positioned cysteine sulfurs; checks distance and bond angles.",
+                )
+                .clicked()
+            {
+                result = Some(match (state.edit_residue, state.link_residue) {
+                    (Some(a), Some(b)) => edit::disulfide(mol, a, b),
+                    _ => Err("Select two cysteine residues.".into()),
+                });
             }
         });
     });
-    if before != (state.edit_residue,state.link_residue,state.replacement.clone(),state.fit) { state.preview=None; }
-    if let Some(result)=result {match result {
-        Ok(build)=>{state.error=None;state.message.clear();state.preview=Some(Preview{build,recipe:state.recipe.clone(),mode:state.mode,target:state.target_key(),atoms:mol.atoms.clone(),positions:mol.pos.clone(),topology:mol.topology.clone(),fit:state.fit});},
-        Err(e)=>{state.preview=None;state.error=Some(e);}
-    }}
+    if let Some(operation) = conformation_controls(ui, state, mol, ready) {
+        result = Some(operation);
+    }
+    if before
+        != (
+            state.edit_residue,
+            state.link_residue,
+            state.replacement.clone(),
+            state.fit,
+        )
+    {
+        state.preview = None;
+    }
+    if let Some(result) = result {
+        let result = result.and_then(|build| {
+            if frozen.iter().any(|&i| {
+                build
+                    .host_mapping
+                    .get(i)
+                    .copied()
+                    .flatten()
+                    .is_none_or(|j| build.molecule.pos[j] != mol.pos[i])
+            }) {
+                Err("This edit would move or remove frozen atoms. Unfreeze them first.".into())
+            } else {
+                Ok(build)
+            }
+        });
+        match result {
+            Ok(build) => {
+                state.error = None;
+                state.message.clear();
+                state.preview = Some(Preview {
+                    build,
+                    recipe: state.recipe.clone(),
+                    mode: state.mode,
+                    target: state.target_key(),
+                    atoms: mol.atoms.clone(),
+                    positions: mol.pos.clone(),
+                    topology: mol.topology.clone(),
+                    fit: state.fit,
+                });
+            }
+            Err(e) => {
+                state.preview = None;
+                state.error = Some(e);
+            }
+        }
+    }
+}
+
+#[derive(Clone)]
+struct BackboneControls {
+    loaded: Option<u64>,
+    positions: Vec<Vec3>,
+    topology: Option<super::topology::Topology>,
+    angles: [f32; 3],
+    available: [bool; 3],
+    end: Option<u64>,
+    preset: super::peptide_conformation::Preset,
+    points: Vec<(u64, f32, f32)>,
+}
+impl Default for BackboneControls {
+    fn default() -> Self {
+        Self {
+            loaded: None,
+            positions: vec![],
+            topology: None,
+            angles: [0.0, 0.0, 180.0],
+            available: [false; 3],
+            end: None,
+            preset: super::peptide_conformation::Preset::Helix,
+            points: vec![],
+        }
+    }
+}
+#[derive(Clone)]
+struct RotamerCache {
+    choices: super::peptide_rotamers::Choices,
+    source: Vec<Vec3>,
+    topology: Option<super::topology::Topology>,
+    index: usize,
+}
+fn residue_label(r: &super::topology::ResidueInfo) -> String {
+    let name = super::peptide_edit::template(&r.template)
+        .map(|t| t.amino_acid.three_letter())
+        .unwrap_or(&r.template);
+    if let Some(o) = &r.origin {
+        format!("{} · {}{} · {name}", o.chain, o.number, o.insertion)
+    } else {
+        format!("Chain {} · {} · {name}", r.chain, r.id)
+    }
+}
+fn conformation_controls(
+    ui: &mut egui::Ui,
+    state: &mut State,
+    mol: &Molecule,
+    ready: bool,
+) -> Option<Result<Build, String>> {
+    use super::peptide_conformation::{self as conf, Kind, Preset};
+    use super::peptide_rotamers as rot;
+    let id = state.edit_residue?;
+    let t = super::peptide_edit::metadata(mol).ok()?;
+    if state.backbone.loaded != Some(id)
+        || state.backbone.positions != mol.pos
+        || state.backbone.topology != mol.topology
+    {
+        state.preview = None;
+        state.rotamers = None;
+        let mut controls = BackboneControls::default();
+        controls.loaded = Some(id);
+        controls.end = Some(id);
+        controls.positions = mol.pos.clone();
+        controls.topology = mol.topology.clone();
+        for (i, k) in [Kind::Phi, Kind::Psi, Kind::Omega].into_iter().enumerate() {
+            if let Some(v) = conf::measured(mol, id, k) {
+                controls.angles[i] = v;
+                controls.available[i] = true;
+            }
+        }
+        for r in &t.residues {
+            if let (Some(phi), Some(psi)) = (
+                conf::measured(mol, r.id, Kind::Phi),
+                conf::measured(mol, r.id, Kind::Psi),
+            ) {
+                controls.points.push((r.id, phi, psi));
+            }
+        }
+        state.backbone = controls;
+    }
+    let mut result = None;
+    egui::CollapsingHeader::new("Backbone · φ / ψ / ω").default_open(true).show(ui,|ui| {
+        let controls=&mut state.backbone;let before=(controls.angles,controls.end,controls.preset);
+        let mut preview=false;let mut preset=false;
+        ui.add_enabled_ui(ready,|ui| {
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| {
+                    for (i,label) in ["φ","ψ","ω (incoming)"].into_iter().enumerate() {
+                        ui.horizontal(|ui| {ui.label(label);if controls.available[i] {ui.add(egui::DragValue::new(&mut controls.angles[i]).range(-180.0..=180.0).suffix("°").speed(0.5));}else{ui.weak("Undefined at this end/break");}});
+                    }
+                    preview=ui.button("Preview backbone").clicked();
+                    ui.horizontal(|ui| {
+                        egui::ComboBox::from_id_salt("backbone_preset").selected_text(match controls.preset{Preset::Helix=>"α-helix",Preset::Strand=>"β-strand",Preset::TurnI=>"Type-I turn"}).show_ui(ui,|ui|{for(p,label)in[(Preset::Helix,"α-helix"),(Preset::Strand,"β-strand"),(Preset::TurnI,"Type-I turn")]{ui.selectable_value(&mut controls.preset,p,label);}});
+                        ui.label("through");
+                        let chain=t.residues.iter().find(|r|r.id==id).map(|r|r.chain);
+                        let label=t.residues.iter().find(|r|Some(r.id)==controls.end).map(residue_label).unwrap_or_default();
+                        egui::ComboBox::from_id_salt("backbone_range_end").selected_text(label).show_ui(ui,|ui|{for r in t.residues.iter().filter(|r|Some(r.chain)==chain && super::peptide_edit::template(&r.template).is_some()){ui.selectable_value(&mut controls.end,Some(r.id),residue_label(r));}});
+                    });
+                    preset=ui.button("Preview range preset").on_hover_text("A type-I turn sets the two central residues. Rings and cross-links are protected.").clicked();
+                });
+                ramachandran(ui,controls,id);
+            });
+        });
+        if before!=(controls.angles,controls.end,controls.preset){state.preview=None;}
+        if preview {let values:Vec<_>=controls.angles.iter().zip(controls.available).map(|(&v,ok)|ok.then_some(v)).collect();result=Some(conf::edit(mol,id,values[0],values[1],values[2]));}
+        if preset {result=Some(conf::preset(mol,id,controls.end.unwrap_or(id),controls.preset));}
+    });
+    egui::CollapsingHeader::new("Side-chain rotamers").default_open(true).show(ui,|ui| {
+        ui.add_enabled_ui(ready,|ui| {
+            ui.horizontal_wrapped(|ui| {
+                if ui.button("Find rotamers").clicked(){match rot::choices(mol,id){Ok(choices)=>{state.rotamers=Some(RotamerCache{choices,source:mol.pos.clone(),topology:mol.topology.clone(),index:0});state.error=None;},Err(e)=>{state.rotamers=None;result=Some(Err(e));}}}
+                if ui.add(egui::DragValue::new(&mut state.neighbor_radius).range(2.0..=12.0).suffix(" Å").prefix("Nearby ")).changed() {state.preview=None;}
+                if ui.button("Preview nearby repack").on_hover_text("Keep this residue and all backbones fixed; choose lower-clash rotamers for nearby side chains.").clicked(){result=Some(rot::repack_neighbors(mol,id,state.neighbor_radius));}
+            });
+            if state.rotamers.as_ref().is_some_and(|c|c.source!=mol.pos||c.topology!=mol.topology||c.choices.residue!=id){state.rotamers=None;}
+            if let Some(cache)=&mut state.rotamers {
+                if cache.choices.marginal {ui.small("Terminal rotamers: averaged over undefined backbone angles.");}
+                ui.horizontal_wrapped(|ui|{
+                    let mut selected=cache.index;
+                    if ui.add_enabled(selected>0,egui::Button::new("←")).on_hover_text("Previous rotamer").clicked(){selected-=1;}
+                    egui::ComboBox::from_id_salt("rotamer_choice").selected_text(if selected==0{"Current".into()}else{format!("Rotamer {selected}")}).show_ui(ui,|ui| {
+                        for(i,c)in cache.choices.candidates.iter().enumerate(){let label=if c.current {format!("Current · overlap {:.3}",c.score)}else{format!("{i} · overlap {:.3} · prior {:.1}%",c.score,c.probability.unwrap_or(0.0)*100.0)};ui.selectable_value(&mut selected,i,label);}
+                    });
+                    if ui.add_enabled(selected+1<cache.choices.candidates.len(),egui::Button::new("→")).on_hover_text("Next rotamer").clicked(){selected+=1;}
+                    if selected!=cache.index {cache.index=selected;result=Some(rot::preview(mol,&cache.choices,selected));}
+                    if ui.button("Preview rotamer").clicked(){result=Some(rot::preview(mol,&cache.choices,cache.index));}
+                    let c=&cache.choices.candidates[cache.index];ui.small(c.chi.iter().enumerate().map(|(i,v)|format!("χ{} {v:.0}°",i+1)).collect::<Vec<_>>().join(" · "));
+                });
+                ui.small("Ranked by local overlap, then library probability. Overlap is a steric score, not energy.");
+            }
+        });
+    });
+    result
+}
+fn ramachandran(ui: &mut egui::Ui, controls: &mut BackboneControls, id: u64) {
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(156.0, 156.0), egui::Sense::click_and_drag());
+    let area = rect.shrink(13.0);
+    let p = ui.painter();
+    p.rect_filled(rect, 6, ui.visuals().extreme_bg_color);
+    let project = |phi: f32, psi: f32| {
+        egui::pos2(
+            area.left() + (phi + 180.0) / 360.0 * area.width(),
+            area.bottom() - (psi + 180.0) / 360.0 * area.height(),
+        )
+    };
+    p.line_segment(
+        [project(0.0, -180.0), project(0.0, 180.0)],
+        egui::Stroke::new(1.0, ui.visuals().weak_text_color()),
+    );
+    p.line_segment(
+        [project(-180.0, 0.0), project(180.0, 0.0)],
+        egui::Stroke::new(1.0, ui.visuals().weak_text_color()),
+    );
+    for &(r, phi, psi) in &controls.points {
+        p.circle_filled(
+            project(phi, psi),
+            if r == id { 3.5 } else { 2.0 },
+            if r == id {
+                ACCENT
+            } else {
+                ui.visuals().weak_text_color()
+            },
+        );
+    }
+    if controls.available[0] && controls.available[1] {
+        let at = project(controls.angles[0], controls.angles[1]);
+        p.circle_stroke(at, 5.0, egui::Stroke::new(1.5, egui::Color32::YELLOW));
+    }
+    p.text(
+        egui::pos2(rect.right() - 5.0, area.center().y),
+        egui::Align2::RIGHT_BOTTOM,
+        "φ",
+        egui::FontId::proportional(11.0),
+        ui.visuals().text_color(),
+    );
+    p.text(
+        egui::pos2(area.center().x, rect.top() + 2.0),
+        egui::Align2::LEFT_TOP,
+        "ψ",
+        egui::FontId::proportional(11.0),
+        ui.visuals().text_color(),
+    );
+    for (phi, psi, label) in [(-57.0, -47.0, "α"), (-135.0, 135.0, "β")] {
+        p.text(
+            project(phi, psi),
+            egui::Align2::LEFT_BOTTOM,
+            label,
+            egui::FontId::proportional(11.0),
+            ui.visuals().weak_text_color(),
+        );
+    }
+    if controls.available[0] && controls.available[1] && (response.clicked() || response.dragged())
+    {
+        if let Some(at) = response.interact_pointer_pos() {
+            controls.angles[0] =
+                ((at.x - area.left()) / area.width() * 360.0 - 180.0).clamp(-180.0, 180.0);
+            controls.angles[1] =
+                ((area.bottom() - at.y) / area.height() * 360.0 - 180.0).clamp(-180.0, 180.0);
+        }
+    }
+    response.on_hover_text("Ramachandran plot: φ and ψ from −180° to +180°. Click to set the preview target. α/β are reference positions, not probability contours or a validation map.");
+}
+
+#[cfg(test)]
+mod protein_panel_tests {
+    use super::*;
+    #[test]
+    fn protein_edit_panel_renders_backbone_and_rotamers_without_changing_structure() {
+        let ctx = egui::Context::default();
+        let mut mol = peptide::build(
+            &Recipe {
+                residues: peptide::parse_sequence("AKLA").unwrap(),
+                ..Default::default()
+            },
+            None,
+        )
+        .unwrap()
+        .molecule;
+        let original = mol.clone();
+        let mut zmat = ZMatrixBuilderState::default();
+        zmat.peptide.open = true;
+        zmat.peptide.mode = Mode::Edit;
+        zmat.peptide.edit_residue = Some(2);
+        let mut editor = EditorRotateState::default();
+        let mut settings = MolSettings::default();
+        let mut traj = TrajectoryState::default();
+        let mut rect = None;
+        for frame in 0..4 {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1280.0, 720.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| {
+                    let (r, change) = window(
+                        ui.ctx(),
+                        &mut zmat,
+                        &mut editor,
+                        &mut mol,
+                        &mut settings,
+                        &mut traj,
+                    );
+                    rect = r;
+                    assert!(!change.happened());
+                },
+            );
+            output.textures_delta.clear();
+            if frame == 1 {
+                zmat.peptide.rotamers = Some(RotamerCache {
+                    choices: super::super::peptide_rotamers::choices(&mol, 2).unwrap(),
+                    source: mol.pos.clone(),
+                    topology: mol.topology.clone(),
+                    index: 1,
+                });
+            }
+        }
+        assert_eq!(zmat.peptide.backbone.available, [true; 3]);
+        assert!(zmat.peptide.rotamers.is_some());
+        assert_eq!(mol.pos, original.pos);
+        assert_eq!(mol.topology, original.topology);
+        assert!(rect.unwrap().bottom() <= 720.0);
+        assert!(rect.unwrap().right() <= 1280.0);
+    }
 }

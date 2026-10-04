@@ -11,10 +11,21 @@ pub struct AtomInfo {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ResidueOrigin {
+    pub chain: String,
+    pub number: isize,
+    pub insertion: String,
+    pub name: String,
+    pub alternate: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ResidueInfo {
     pub id: u64,
     pub chain: u64,
     pub template: String,
+    #[serde(default)]
+    pub origin: Option<ResidueOrigin>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]

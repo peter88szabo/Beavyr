@@ -25,6 +25,8 @@ rfd = "0.17"
 # deliberately NOT used -- see docs/superpowers/specs/2026-09-04-frequency-analysis-design.md
 ndarray = { version = "0.15", features = ["serde"] }
 anyhow = "1.0"
+pdbtbx = { version = "0.12.0", default-features = false, features = ["compression"] }
+dunbrack = "0.1.0"
 
 # Our own code stays cheap to rebuild, but Bevy/wgpu/glam must be optimised or
 # the viewer is unusably slow in a dev build.

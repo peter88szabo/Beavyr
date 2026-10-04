@@ -408,8 +408,8 @@ pub fn ui_panel(
                         let dim = ui.visuals().widgets.inactive.bg_fill;
 
                         crate::project::menu(ui, &mut project);
-                        if ui.add(crate::ui_style::primary("Open XYZ…")).clicked_once() {
-                            let dlg = crate::recent_dir::open().add_filter("XYZ", &["xyz"]);
+                        if ui.add(crate::ui_style::primary("Open structure…")).clicked_once() {
+                            let dlg = crate::recent_dir::open().add_filter("Structures", &["xyz", "pdb", "ent", "cif", "mmcif"]);
                             if let Some(path) = crate::recent_dir::pick_file(dlg) {
                                 let previous = structure_history.before(&mol, &traj);
                                 match load_xyz_from_path(
@@ -478,8 +478,8 @@ pub fn ui_panel(
                             let suggested = xyz_buf
                                 .current_file
                                 .as_ref()
-                                .and_then(|path| path.file_name())
-                                .map(|name| name.to_string_lossy().to_string())
+                                .map(|path| path.with_extension("xyz"))
+                                .and_then(|path| path.file_name().map(|name|name.to_string_lossy().into_owned()))
                                 .unwrap_or_else(|| "structure.xyz".to_string());
                             let dlg =
                                 crate::recent_dir::save(&suggested).add_filter("XYZ", &["xyz"]);
@@ -2377,6 +2377,25 @@ pub(crate) fn load_xyz_from_path(
     let text = fs::read_to_string(path)
         .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
 
+    if crate::molecule_builder::protein_import::is_protein_path(path) {
+        let cif = path.extension().and_then(|e| e.to_str()).is_some_and(|e| {
+            e.eq_ignore_ascii_case("cif") || e.eq_ignore_ascii_case("mmcif")
+        });
+        let imported = crate::molecule_builder::protein_import::parse(&text, cif)?;
+        *mol = imported.molecule;
+        if let Some(t) = &mol.topology {
+            t.display_defaults(settings);
+        }
+        traj.clear_for_structure();
+        xyz_buf.last_dir = path.parent().map(|p| p.to_path_buf());
+        xyz_buf.current_file = Some(path.to_path_buf());
+        xyz_buf.text = format!("{}\nImported protein\n{}", mol.atoms.len(), format_xyz_from_molecule(mol));
+        xyz_buf.warning = (!imported.warnings.is_empty()).then(|| imported.warnings.join("\n"));
+        settings.geometry_dirty = true;
+        settings.bond_topology_dirty = true;
+        ev_changed.write(MoleculeChanged::parse_xyz(true));
+        return Ok(1);
+    }
     let frames = trajectory::parse_multi_xyz(&text)
         .map_err(|e| format!("{}: {e}", path.display()))?;
     if frames.is_empty() {
@@ -2389,6 +2408,7 @@ pub(crate) fn load_xyz_from_path(
     xyz_buf.warning = None;
 
     if frames.len() > 1 {
+        mol.topology = None;
         traj.last_dir = path.parent().map(|p| p.to_path_buf());
         traj.current_file = Some(path.to_path_buf());
         traj.frames = frames;
@@ -2465,5 +2485,64 @@ mod panel_region_tests {
         let mut r = regions();
         r.windows.clear();
         assert!(!r.covers(Vec2::new(500.0, 400.0)));
+    }
+}
+
+#[cfg(test)]
+mod protein_open_tests {
+    use super::*;
+    use bevy::ecs::system::SystemState;
+    #[test]
+    fn protein_open_retains_topology_display_defaults_and_invalid_load_is_atomic() {
+        let mut world = World::new();
+        world.init_resource::<Messages<MoleculeChanged>>();
+        let mut state = SystemState::<MessageWriter<MoleculeChanged>>::new(&mut world);
+        let mut writer = state.get_mut(&mut world).unwrap();
+        let mut xyz = XyzBuffer::default();
+        let mut traj = trajectory::TrajectoryState::default();
+        let mut mol = Molecule::empty();
+        let mut settings = MolSettings::default();
+        let mut cam = crate::camera::OrbitCamera::default();
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/proteins/1CRN.cif");
+        assert_eq!(
+            load_xyz_from_path(
+                &path,
+                &mut xyz,
+                &mut traj,
+                &mut mol,
+                &mut settings,
+                &mut cam,
+                &mut writer
+            )
+            .unwrap(),
+            1
+        );
+        assert_eq!(mol.topology.as_ref().unwrap().peptide_residue_count(), 46);
+        assert!(!settings.show_hbonds);
+        assert_eq!(
+            settings.representation,
+            crate::settings::RepresentationMode::BackboneTrace
+        );
+        assert!(mol.hydrogen_bonds.is_empty());
+        let before = mol.clone();
+        let text_before = xyz.text.clone();
+        let bad =
+            std::env::temp_dir().join(format!("beavyr-invalid-protein-{}.cif", std::process::id()));
+        std::fs::write(&bad, "data_bad\nloop_\n_atom_site.id\n'broken").unwrap();
+        let result = load_xyz_from_path(
+            &bad,
+            &mut xyz,
+            &mut traj,
+            &mut mol,
+            &mut settings,
+            &mut cam,
+            &mut writer,
+        );
+        std::fs::remove_file(&bad).unwrap();
+        assert!(result.is_err());
+        assert_eq!(mol.pos, before.pos);
+        assert_eq!(mol.topology, before.topology);
+        assert_eq!(xyz.text, text_before);
     }
 }

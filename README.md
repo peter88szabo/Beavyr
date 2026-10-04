@@ -66,7 +66,18 @@ fitting, ACE/NME caps, positioned disulfide links and PDB export. Residue chemis
 survives project save/load and Undo/Redo; **Add missing H** restores named peptide
 hydrogens and now supports neutral amine/amide nitrogen in ordinary structures.
 Peptides hide hydrogen bonds, and chains longer than 20 residues default to a
-backbone trace. See the [Peptide Builder guide](data/amino_acids/PEPTIDE_BUILDER.md).
+backbone trace. **Structure → Open structure…** and command-line file opening
+accept PDB/mmCIF proteins, retaining residue identifiers and recorded covalent
+links. The Peptide Builder's **Edit residues** tab also offers φ/ψ/ω edits,
+range presets, a clickable Ramachandran plot, and clash-ranked Dunbrack rotamers
+with nearby side-chain repacking. Every conformational edit previews before an
+undoable Apply. See the [Peptide Builder guide](data/amino_acids/PEPTIDE_BUILDER.md).
+
+Protein import uses `pdbtbx` 0.12; rotamers use `dunbrack` 0.1 and its embedded
+2010 tables. Both are Rust dependencies; there is no Python, runtime download or
+new runtime configuration. The tables increase the binary's data footprint and
+make the first compilation slower. Parser parallelism is disabled; builds and
+tests remain limited to four cores.
 
 ![Modern Molecular Editor with a selected atom, fragment palette, Add and Replace actions, and fixed geometry tools](Images/EditorModern.png)
 
