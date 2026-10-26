@@ -96,27 +96,28 @@ impl Tab {
 
     /// A sensible opening size per tool -- the wide, table-heavy ones need
     /// more room than the short control lists.
+    /// Widths are 80% of the original layout's, which left the panels too wide.
     pub fn default_size(self) -> [f32; 2] {
         match self {
-            Tab::Structure => [500.0, 620.0],
-            Tab::RecentStructures => [460.0, 620.0],
-            Tab::Representation => [460.0, 520.0],
-            Tab::Optimize => [430.0, 420.0],
-            Tab::TsGeneration => [580.0, 720.0],
+            Tab::Structure => [400.0, 620.0],
+            Tab::RecentStructures => [370.0, 620.0],
+            Tab::Representation => [370.0, 520.0],
+            Tab::Optimize => [345.0, 420.0],
+            Tab::TsGeneration => [465.0, 720.0],
             // Wide and tall: the conformer table earns the room, one row per
             // conformer with energies and populations alongside.
-            Tab::Conformers => [520.0, 620.0],
+            Tab::Conformers => [415.0, 620.0],
             // Tall: two run blocks, the settings above them and a mode list
             // that is worth seeing more than a handful of rows of.
-            Tab::Vibrations => [540.0, 660.0],
-            Tab::UvVis => [560.0, 560.0],
-            Tab::Trajectory => [500.0, 620.0],
-            Tab::Compare => [480.0, 540.0],
-            Tab::Measure => [500.0, 640.0],
-            Tab::Surface => [520.0, 660.0],
-            Tab::Diagnostics => [500.0, 520.0],
-            Tab::Appearance => [520.0, 640.0],
-            Tab::Export => [460.0, 520.0],
+            Tab::Vibrations => [430.0, 660.0],
+            Tab::UvVis => [450.0, 560.0],
+            Tab::Trajectory => [400.0, 620.0],
+            Tab::Compare => [385.0, 540.0],
+            Tab::Measure => [400.0, 640.0],
+            Tab::Surface => [415.0, 660.0],
+            Tab::Diagnostics => [400.0, 520.0],
+            Tab::Appearance => [415.0, 640.0],
+            Tab::Export => [370.0, 520.0],
         }
     }
 
@@ -173,6 +174,9 @@ impl Default for UiLayout {
 ///
 /// Returns whether the body was actually shown, which a couple of callers
 /// need in order to skip expensive work while their section is hidden.
+/// Width of the always-visible tool rail on the left.
+pub const TOOL_RAIL_WIDTH: f32 = 50.0;
+
 pub fn section<R>(
     ui: &mut egui::Ui,
     windowed: bool,
@@ -233,7 +237,18 @@ fn section_impl<R>(
         }
         let ctx = ui.ctx().clone();
         let mut still_open = *open;
+        // First opened just right of the tool rail, never over it; windows
+        // already open this frame push it down and right a little.
+        let cascade = 24.0 * rects.len() as f32;
+        let viewport = ctx.viewport_rect();
+        let default_pos = egui::pos2(
+            viewport.left() + TOOL_RAIL_WIDTH + 12.0 + cascade,
+            viewport.top() + 12.0 + cascade,
+        );
+        // A new id, so sizes remembered from the wider layout do not come back.
         let response = egui::Window::new(title)
+            .id(egui::Id::new((title, "narrow_v2")))
+            .default_pos(default_pos)
             .frame(crate::ui_style::window_frame(&ctx))
             .open(&mut still_open)
             .resizable(true)

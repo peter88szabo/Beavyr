@@ -1889,7 +1889,7 @@ pub fn ui_panel(
             // own floating window that the rail toggles, so any number can be
             // open at once and dragged where the user wants them.
             let rail = egui::Panel::left("tool_rail")
-                .exact_size(50.0)
+                .exact_size(crate::ui_layout::TOOL_RAIL_WIDTH)
                 .resizable(false)
                 .show(&mut viewport_ui, |ui| {
                     icon_rail(ui, &mut open_windows);
