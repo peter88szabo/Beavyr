@@ -1,0 +1,56 @@
+Building Beavyr from source on Ubuntu
+=====================================
+
+This covers building Beavyr yourself (cargo run, ./reinstall.sh,
+packaging/build-deb.sh). To only USE Beavyr, install the .deb instead;
+it needs none of this.
+
+
+1. Rust (latest stable, through rustup)
+---------------------------------------
+
+Beavyr uses Bevy 0.19, which needs rustc 1.95 or newer. Ubuntu's own
+"rustc" apt package is older, so install Rust through rustup:
+
+    sudo snap install rustup --classic
+    rustup default stable
+
+Remove Ubuntu's apt Rust if it is installed. /usr/bin comes before
+/snap/bin in PATH, so the old compiler would be picked up instead of
+rustup's:
+
+    sudo apt remove rustc cargo
+
+Check that the right compiler is active (both should show the same,
+recent version):
+
+    rustc --version
+    cargo --version
+
+Keep Rust up to date with:
+
+    rustup update
+
+
+2. System packages
+------------------
+
+    sudo apt install build-essential pkg-config libudev-dev \
+                     libx11-dev libxkbcommon-dev libwayland-dev
+
+  build-essential   C compiler, linker and strip
+  pkg-config        lets crates find the system libraries below
+  libudev-dev       input-device (gamepad) support in Bevy
+  libx11-dev        X11 windowing
+  libxkbcommon-dev  keyboard handling under X11 and Wayland
+  libwayland-dev    Wayland windowing
+
+Audio is disabled in Cargo.toml, so ALSA (libasound2-dev) is NOT needed.
+
+
+3. Build
+--------
+
+    cargo run                                     # dev build
+    cargo build --release --no-default-features   # standalone binary
+    ./reinstall.sh                                # build the .deb and install it

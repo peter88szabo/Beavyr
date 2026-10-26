@@ -20,6 +20,12 @@ OUT="$ROOT/target/deb/${PKG}_${VERSION}_${ARCH}.deb"
 
 if [[ "${1:-}" != "--no-build" ]]; then
   echo "==> building release binary (this takes a few minutes)"
+  # Ubuntu's apt `rustc` (/usr/bin) sits ahead of rustup's in PATH and is too
+  # old for Bevy, so when rustup is around, build with its rustc explicitly.
+  if [[ -z "${RUSTC:-}" ]] && command -v rustup >/dev/null; then
+    RUSTC="$(rustup which rustc)"
+    export RUSTC
+  fi
   ( cd "$ROOT" && cargo build --release --no-default-features )
 fi
 

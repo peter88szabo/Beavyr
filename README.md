@@ -531,6 +531,30 @@ GPL-3.0. See `LICENSE`.
 
 ## Building from source
 
+### Ubuntu dependencies
+
+Bevy 0.19 needs rustc 1.95 or newer, which is newer than Ubuntu's own `rustc`
+package. Install Rust through rustup and remove the apt version, which would
+otherwise sit ahead of rustup's in `PATH`:
+
+```sh
+sudo snap install rustup --classic
+rustup default stable
+sudo apt remove rustc cargo        # only if installed
+```
+
+Then install the system libraries Bevy builds against:
+
+```sh
+sudo apt install build-essential pkg-config libudev-dev \
+                 libx11-dev libxkbcommon-dev libwayland-dev
+```
+
+`UBUNTU_BUILD_DEPENDENCIES.txt` explains what each package is for. Only
+building from source needs these packages; the `.deb` does not.
+
+### Building
+
 ```sh
 cargo run                                       # dev build, dynamic linking, fast rebuilds
 cargo build --release --no-default-features     # standalone binary, no dynamic linking
