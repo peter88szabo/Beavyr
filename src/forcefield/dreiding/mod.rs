@@ -340,7 +340,8 @@ impl DreidingTopology {
         let mut message = String::new();
         if self.open_shell.odd_electron_count {
             message.push_str(
-                "This molecule has an odd number of electrons, so it is a radical. ",
+                "Counted as neutral, this molecule has an odd number of electrons, so it is \
+                 either a radical or an ion. ",
             );
         } else if !self.open_shell.short_valence.is_empty() {
             message.push_str(
@@ -368,8 +369,9 @@ impl DreidingTopology {
         message.push_str(
             "DREIDING has no radical parameters, so such a centre is given the closed-shell type \
              for its number of bonds and the bond lengths around it are approximate -- a peroxy \
-             O-O comes out about 0.1 Å short. Use this to clean up or to rank shapes, and let a \
-             quantum-chemical method with the right spin multiplicity settle the geometry.",
+             O-O comes out about 0.1 Å short. The force field ignores charge and spin, so check \
+             both: use this to clean up or to rank shapes, and let a quantum-chemical method \
+             with the right charge and spin multiplicity settle the geometry.",
         );
         Some(message)
     }

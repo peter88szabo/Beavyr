@@ -400,4 +400,16 @@ mod tests {
         assert!(!state.ready(&changed));
         assert!(state.preview.is_none());
     }
+
+    #[test]
+    fn a_radical_warning_asks_to_check_charge_and_spin() {
+        // Methyl radical: odd electron count when neutral.
+        let methyl = Molecule::from_xyz(
+            "4\n\nC 0 0 0\nH 1.08 0 0\nH -0.54 0.935 0\nH -0.54 -0.935 0\n",
+        );
+        let p = relax(&methyl, &Selection::default(), Scope::Whole, &AtomicBool::new(false))
+            .unwrap();
+        assert!(p.report.contains("charge and spin multiplicity"), "{}", p.report);
+        assert!(p.report.contains("radical or an ion"), "{}", p.report);
+    }
 }
