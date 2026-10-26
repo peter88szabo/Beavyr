@@ -105,8 +105,14 @@ fn main() {
                     // not recognise. There is nothing to fix on our side and
                     // nothing a user can do about it, so it is silenced rather
                     // than left to scroll past on every launch. Its errors
-                    // still show, in case a decoration ever genuinely fails.
-                    filter: format!("{}sctk_adwaita=error", bevy::log::DEFAULT_FILTER),
+                    // still show, in case a decoration ever genuinely fails --
+                    // except the theme lookup in `config`: when the desktop's
+                    // settings portal answers slowly it logs an ERROR and just
+                    // keeps the default title-bar colours.
+                    filter: format!(
+                        "{}sctk_adwaita=error,sctk_adwaita::config=off",
+                        bevy::log::DEFAULT_FILTER
+                    ),
                     ..default()
                 }),
         )
