@@ -2,7 +2,6 @@
 use std::collections::BTreeSet;
 
 use bevy::prelude::*;
-use bevy_egui::egui;
 
 use super::builder_ui::ZMatrixBuilderState;
 use crate::{molecule::Molecule, settings::MolSettings};
@@ -49,147 +48,6 @@ impl Selection {
             .or_else(|| previous.filter(|i| self.atoms.contains(i)))
             .or_else(|| self.atoms.first().copied())
     }
-
-    pub fn expand(&mut self, mol: &Molecule, connected: bool) {
-        let mut adjacency = vec![Vec::new(); mol.atoms.len()];
-        for &(a, b, _) in &mol.bonds {
-            if a < adjacency.len() && b < adjacency.len() {
-                adjacency[a].push(b);
-                adjacency[b].push(a);
-            }
-        }
-        let mut queue: Vec<_> = self.atoms.iter().copied().collect();
-        let initial = queue.len();
-        let mut cursor = 0;
-        while cursor < queue.len() && (connected || cursor < initial) {
-            let i = queue[cursor];
-            cursor += 1;
-            if let Some(neighbours) = adjacency.get(i) {
-                for &j in neighbours {
-                    if !self.hidden.contains(&j) && self.atoms.insert(j) {
-                        queue.push(j);
-                    }
-                }
-            }
-        }
-    }
-
-    pub fn invert(&mut self, count: usize) {
-        self.atoms = (0..count)
-            .filter(|i| !self.hidden.contains(i) && !self.atoms.contains(i))
-            .collect();
-    }
-
-    /// Compact contextual tools. Nothing here changes coordinates or atom indices.
-    pub fn controls(
-        &mut self,
-        ui: &mut egui::Ui,
-        mol: &Molecule,
-        settings: &mut MolSettings,
-        placed: Option<&[usize]>,
-    ) {
-        let visible: BTreeSet<_> = (0..mol.atoms.len())
-            .filter(|i| {
-                !self.hidden.contains(i) && crate::scene::element_visible(&mol.atoms[*i], settings)
-            })
-            .collect();
-        self.atoms.retain(|i| visible.contains(i));
-        ui.horizontal_wrapped(|ui| {
-            ui.menu_button(format!("Select · {}", self.atoms.len()), |ui| {
-                ui.weak("Click replaces · Shift-click toggles");
-                if let Some(placed) = placed {
-                    if ui.button("Last placed fragment").clicked() {
-                        self.atoms = placed
-                            .iter()
-                            .copied()
-                            .filter(|i| *i < mol.atoms.len() && !self.hidden.contains(i))
-                            .collect();
-                        ui.close();
-                    }
-                }
-                ui.menu_button("By element", |ui| {
-                    for symbol in mol.atoms.iter().collect::<BTreeSet<_>>() {
-                        if ui.button(symbol).clicked() {
-                            self.atoms = mol
-                                .atoms
-                                .iter()
-                                .enumerate()
-                                .filter(|(i, s)| *s == symbol && !self.hidden.contains(i))
-                                .map(|(i, _)| i)
-                                .collect();
-                            ui.close();
-                        }
-                    }
-                });
-                ui.add_enabled_ui(!self.atoms.is_empty(), |ui| {
-                    if ui.button("Connected fragment").clicked() {
-                        self.expand(mol, true);
-                        ui.close();
-                    }
-                    if ui.button("Bonded neighbours").clicked() {
-                        self.expand(mol, false);
-                        ui.close();
-                    }
-                });
-                if ui.button("All visible").clicked() {
-                    self.atoms = (0..mol.atoms.len())
-                        .filter(|i| !self.hidden.contains(i))
-                        .collect();
-                    ui.close();
-                }
-                if ui.button("Invert").clicked() {
-                    self.invert(mol.atoms.len());
-                    ui.close();
-                }
-                if ui.button("Clear selection").clicked() {
-                    self.atoms.clear();
-                    ui.close();
-                }
-            })
-            .response
-            .on_hover_text(
-                "Select atoms for cleanup or freezing; Fragment Editor picks remain independent.",
-            );
-            self.atoms.retain(|i| visible.contains(i));
-            if !self.atoms.is_empty() {
-                if ui
-                    .small_button("Freeze")
-                    .on_hover_text("Keep selected atoms fixed during quick cleanup")
-                    .clicked()
-                {
-                    self.frozen.extend(&self.atoms);
-                }
-                if ui
-                    .small_button("Isolate")
-                    .on_hover_text(
-                        "Hide unselected atoms; calculations still include the entire structure",
-                    )
-                    .clicked()
-                {
-                    self.hidden = (0..mol.atoms.len())
-                        .filter(|i| !self.atoms.contains(i))
-                        .collect();
-                    settings.geometry_dirty = true;
-                }
-            }
-            if !self.hidden.is_empty() && ui.small_button("Show all").clicked() {
-                self.hidden.clear();
-                settings.geometry_dirty = true;
-            }
-            if !self.frozen.is_empty() {
-                ui.menu_button(format!("Frozen · {}", self.frozen.len()), |ui| {
-                    if ui.button("Unfreeze selected").clicked() {
-                        self.frozen.retain(|i| !self.atoms.contains(i));
-                        ui.close();
-                    }
-                    if ui.button("Unfreeze all").clicked() {
-                        self.frozen.clear();
-                        ui.close();
-                    }
-                });
-            }
-        });
-    }
 }
 
 pub fn sync(
@@ -211,24 +69,13 @@ mod tests {
         mol
     }
     #[test]
-    fn neighbours_and_connected_components_are_distinct() {
-        let mut s = Selection::default();
-        s.click(Some(0), false);
-        s.expand(&molecule(), false);
-        assert_eq!(s.atoms, [0, 1].into());
-        s.expand(&molecule(), true);
-        assert_eq!(s.atoms, [0, 1, 2].into());
-    }
-    #[test]
-    fn toggle_invert_and_background_respect_visibility() {
+    fn toggle_and_background_clicks() {
         let mut s = Selection::default();
         s.click(Some(0), false);
         s.click(Some(1), true);
         s.click(Some(0), true);
         assert_eq!(s.atoms, [1].into());
-        s.hidden.insert(3);
-        s.invert(4);
-        assert_eq!(s.atoms, [0, 2].into());
+        s.click(Some(2), true);
         s.click(None, true);
         assert_eq!(s.atoms.len(), 2);
         s.click(None, false);

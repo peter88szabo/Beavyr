@@ -8,15 +8,26 @@ use crate::trajectory::TrajectoryState;
 
 const ACCENT: egui::Color32 = egui::Color32::from_rgb(104, 174, 255);
 const COMMON_ATOMS: &[&str] = &["H", "C", "N", "O", "S", "F", "Cl"];
-const COMMON_FRAGMENTS: &[&str] = &["-CH3", "-OH", "-NH2", "-Phenyl", "-OCH3", "-COOH"];
+const FRAGMENT_COLUMNS: usize = 4;
+// Library fragments left off the palette: -SH is -OH with O changed to S.
+const HIDDEN_FRAGMENTS: &[&str] = &["-SH"];
+const FRAGMENT_TILE_HEIGHT: f32 = 26.0;
+// One text size for the fragment tiles and the library row above them.
+const FRAGMENT_TILE_FONT: f32 = 13.5;
+// Add and Replace are both primary actions, told apart by colour.
+const ADD_FILL: egui::Color32 = egui::Color32::from_rgb(38, 96, 159);
+const REPLACE_FILL: egui::Color32 = egui::Color32::from_rgb(168, 98, 32);
+// Green, so the Peptide Builder stands out among the grey controls.
+const PEPTIDE_FILL: egui::Color32 = egui::Color32::from_rgb(46, 125, 70);
+const PEPTIDE_STROKE: egui::Color32 = egui::Color32::from_rgb(150, 220, 120);
 
 #[derive(Clone, Default)]
 struct PanelState {
     docked: bool,
     close_requested: bool,
     search: String,
-    all_fragments: bool,
     my_fragments: bool,
+    placement_open: bool,
     save_fragment: super::super::custom_fragments::SaveForm,
     status: String,
 }
@@ -186,9 +197,18 @@ pub(super) fn contents(
                 }
                 ui.add_enabled_ui(available && !zmat.add_atom_active, |ui| {
                     ui.horizontal_wrapped(|ui| {
-                        ui.selectable_value(&mut panel.my_fragments, false, "Built-in");
-                        ui.selectable_value(&mut panel.my_fragments, true, "My fragments");
-                        if ui.button("Peptide Builder…").clicked() {
+                        let text = |s: &str| egui::RichText::new(s).size(FRAGMENT_TILE_FONT);
+                        ui.selectable_value(&mut panel.my_fragments, false, text("Built-in"));
+                        ui.selectable_value(&mut panel.my_fragments, true, text("My fragments"));
+                        let peptide =
+                            egui::Button::new(text("Peptide Builder…").color(egui::Color32::WHITE))
+                                .fill(PEPTIDE_FILL)
+                                .stroke(egui::Stroke::new(1.0, PEPTIDE_STROKE));
+                        if ui
+                            .add(peptide)
+                            .on_hover_text("Build peptides and edit residues")
+                            .clicked()
+                        {
                             zmat.peptide.open = true;
                         }
                     });
@@ -214,11 +234,11 @@ pub(super) fn contents(
                             &panel.search,
                         );
                     } else {
-                        palette(ui, &mut panel, zmat);
+                        palette(ui, zmat);
                     }
-                    placement_controls(ui, zmat, mol, &mut action);
+                    placement_controls(ui, &mut panel, zmat, mol, &mut action);
                 });
-                reference_controls(ui, zmat, editor, mol, available, &mut action);
+                reference_controls(ui, &mut panel, zmat, editor, mol, available, &mut action);
 
                 if let Some(error) = &zmat.last_error {
                     ui.colored_label(egui::Color32::LIGHT_RED, error);
@@ -261,7 +281,11 @@ pub(super) fn contents(
         ui.allocate_rect(remaining, egui::Sense::hover());
     });
 
-    if zmat.cleanup.show(ui.ctx(), mol, &zmat.selection, available) {
+    // A finished cleanup is applied straight away, as one undoable step.
+    if let Some(error) = zmat.cleanup.take_error() {
+        zmat.cleanup_report = Some(Err(error));
+    }
+    if action.is_none() && available && zmat.cleanup.ready(mol) {
         action = Some(Action::Cleanup);
     }
     let mut change = BuilderChange::None;
@@ -288,8 +312,27 @@ fn header(
     available: bool,
     action: &mut Option<Action>,
 ) {
+    let comp = composition(&mol.atoms);
     ui.horizontal(|ui| {
-        ui.label(egui::RichText::new("Molecular Editor").size(21.0).strong());
+        // The floating window already shows the title in its title bar.
+        if panel.docked {
+            ui.label(egui::RichText::new("Molecular Editor").size(21.0).strong());
+        }
+        // Formula and atom count share the row with Dock and close; an empty
+        // structure has nothing to summarise.
+        if comp.natoms > 0 {
+            let summary = format!(
+                "{}  ·  {} atoms",
+                comp.formula.replace(" : ", ""),
+                comp.natoms
+            );
+            let response = ui.label(egui::RichText::new(summary).color(ACCENT));
+            if let Some(mass) = comp.mass_amu {
+                response.on_hover_text(format!("Molecular weight: {mass:.3} g/mol"));
+            } else if !comp.unknown.is_empty() {
+                response.on_hover_text(format!("Unknown elements: {}", comp.unknown.join(", ")));
+            }
+        }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if ui.small_button("×").on_hover_text("Close editor").clicked() {
                 panel.close_requested = true;
@@ -300,36 +343,8 @@ fn header(
             {
                 panel.docked = !panel.docked;
             }
-            ui.menu_button("•••", |ui| {
-                if ui
-                    .add_enabled(
-                        available && !mol.atoms.is_empty(),
-                        egui::Button::new("Clear Display…"),
-                    )
-                    .clicked()
-                {
-                    zmat.confirm_clear = true;
-                    ui.close();
-                }
-            });
         });
     });
-    let comp = composition(&mol.atoms);
-    let summary = if comp.natoms == 0 {
-        "Start with an atom or a fragment".to_owned()
-    } else {
-        format!(
-            "{}  ·  {} atoms",
-            comp.formula.replace(" : ", ""),
-            comp.natoms
-        )
-    };
-    let response = ui.label(egui::RichText::new(summary).color(ACCENT));
-    if let Some(mass) = comp.mass_amu {
-        response.on_hover_text(format!("Molecular weight: {mass:.3} g/mol"));
-    } else if !comp.unknown.is_empty() {
-        response.on_hover_text(format!("Unknown elements: {}", comp.unknown.join(", ")));
-    }
     ui.horizontal_wrapped(|ui| {
         if ui
             .add_enabled(
@@ -376,12 +391,24 @@ fn header(
                 }
             });
         });
+        if ui
+            .add_enabled(
+                available && !mol.atoms.is_empty(),
+                egui::Button::new("Clear Display…"),
+            )
+            .on_hover_text("Remove every atom on screen (asks first; Undo brings them back)")
+            .clicked()
+        {
+            zmat.confirm_clear = true;
+        }
     });
     if history.is_error {
         if let Some(message) = &history.message {
             ui.colored_label(egui::Color32::LIGHT_RED, message);
         }
     }
+    // Separates the structure-wide controls above from the builder below.
+    ui.separator();
 }
 
 fn selection(
@@ -392,9 +419,17 @@ fn selection(
     available: bool,
     action: &mut Option<Action>,
 ) {
+    // Shown only when there is something to act on: the active atom, or
+    // hidden/frozen atoms (which undo can bring back) that need a way out.
+    let selected = zmat.selected_index.filter(|&i| i < mol.atoms.len());
+    let hidden = !zmat.selection.hidden.is_empty();
+    let frozen = zmat.selection.frozen.len();
+    if selected.is_none() && !hidden && frozen == 0 {
+        return;
+    }
     card(ui).show(ui, |ui| {
         ui.set_min_width((ui.available_width() - 1.0).max(0.0));
-        if let Some(index) = zmat.selected_index.filter(|&i| i < mol.atoms.len()) {
+        if let Some(index) = selected {
             ui.horizontal(|ui| {
                 ui.strong(format!("Active atom  {}{}", mol.atoms[index], index + 1));
                 ui.menu_button("Atom…", |ui| {
@@ -417,17 +452,17 @@ fn selection(
                     });
                 });
             });
-        } else if mol.atoms.is_empty() {
-            ui.strong("Build a molecule or cluster");
-            ui.small("Choose below, then Place to start.");
-        } else {
-            ui.strong("Select atoms in the 3D view").on_hover_text(
-                "Click an atom to attach a fragment. Shift-click toggles multiple selection.",
-            );
         }
-        if !mol.atoms.is_empty() {
-            zmat.selection
-                .controls(ui, mol, settings, zmat.placed_editor.moving.as_deref());
+        if hidden || frozen > 0 {
+            ui.horizontal(|ui| {
+                if hidden && ui.small_button("Show all atoms").clicked() {
+                    zmat.selection.hidden.clear();
+                    settings.geometry_dirty = true;
+                }
+                if frozen > 0 && ui.small_button(format!("Unfreeze all · {frozen}")).clicked() {
+                    zmat.selection.frozen.clear();
+                }
+            });
         }
     });
 }
@@ -497,19 +532,13 @@ fn fragment_description(name: &str) -> &'static str {
     }
 }
 
-fn fragment_matches(name: &str, query: &str) -> bool {
-    let query = query.trim().to_lowercase();
-    name.to_lowercase().contains(&query)
-        || fragment_description(name).to_lowercase().contains(&query)
-}
-
-fn palette(ui: &mut egui::Ui, panel: &mut PanelState, zmat: &mut ZMatrixBuilderState) {
+fn palette(ui: &mut egui::Ui, zmat: &mut ZMatrixBuilderState) {
     ui.horizontal_wrapped(|ui| {
         for symbol in COMMON_ATOMS {
             if ui
                 .add_sized(
-                    [33.0, 32.0],
-                    egui::Button::new(*symbol)
+                    [28.0, 24.0],
+                    egui::Button::new(egui::RichText::new(*symbol).size(13.0))
                         .selected(zmat.frag_name == format!("Atom: {symbol}")),
                 )
                 .clicked()
@@ -524,109 +553,89 @@ fn palette(ui: &mut egui::Ui, panel: &mut PanelState, zmat: &mut ZMatrixBuilderS
             }
         });
     });
-    ui.add(
-        egui::TextEdit::singleline(&mut panel.search)
-            .hint_text("Search fragments — name or formula")
-            .desired_width(f32::INFINITY),
-    );
-
     let groups: Vec<_> = tile_fragments()
         .into_iter()
         .filter(|fragment| {
-            if !panel.search.trim().is_empty() {
-                fragment_matches(fragment.name, &panel.search)
-            } else {
-                panel.all_fragments || COMMON_FRAGMENTS.contains(&fragment.name)
-            }
+            !HIDDEN_FRAGMENTS.contains(&fragment.name)
         })
         .collect();
-    // Three equal columns stay legible at the panel's smallest supported width.
-    let tile_width = ((ui.available_width() - 16.0) / 3.0).max(70.0);
-    egui::Grid::new("modern_fragment_palette")
-        .spacing(egui::vec2(8.0, 6.0))
+    // Every built-in fragment, four compact tiles to a row.
+    let gap = 4.0;
+    let columns = FRAGMENT_COLUMNS;
+    let tile_width =
+        ((ui.available_width() - gap * (columns as f32 - 1.0)) / columns as f32).max(40.0);
+    // On a short panel the grid scrolls by itself, so Add stays in view.
+    let max_grid_height = (ui.clip_rect().height() * 0.4).max(3.0 * (FRAGMENT_TILE_HEIGHT + gap));
+    egui::ScrollArea::vertical()
+        .id_salt("modern_fragment_palette_scroll")
+        .max_height(max_grid_height)
+        .auto_shrink([false, true])
         .show(ui, |ui| {
-            for (index, fragment) in groups.iter().enumerate() {
-                let name = fragment.name.trim_start_matches('-');
-                let label = match name {
-                    "CycloPentane" => "5-ring",
-                    "CycloHexane" => "6-ring",
-                    "5-Ring centered" => "5-ring + centre",
-                    "6-Ring centered" => "6-ring + centre",
-                    _ => name,
-                };
-                if ui
-                    .add_sized(
-                        [tile_width, 36.0],
-                        egui::Button::new(label).selected(zmat.frag_name == fragment.name),
-                    )
-                    .on_hover_text(fragment_description(fragment.name))
-                    .clicked()
-                {
-                    zmat.frag_name = fragment.name.to_owned();
-                    zmat.last_error = None;
-                }
-                if index % 3 == 2 {
-                    ui.end_row();
-                }
-            }
+            egui::Grid::new("modern_fragment_palette")
+                .spacing(egui::vec2(gap, gap))
+                .show(ui, |ui| {
+                    for (index, fragment) in groups.iter().enumerate() {
+                        let name = fragment.name.trim_start_matches('-');
+                        let label = match name {
+                            "CycloPentane" => "5-ring",
+                            "CycloHexane" => "6-ring",
+                            "5-Ring centered" => "5-ring + centre",
+                            "6-Ring centered" => "6-ring + centre",
+                            _ => name,
+                        };
+                        if ui
+                            .add_sized(
+                                [tile_width, FRAGMENT_TILE_HEIGHT],
+                                egui::Button::new(
+                                    egui::RichText::new(label).size(FRAGMENT_TILE_FONT),
+                                )
+                                .truncate()
+                                .selected(zmat.frag_name == fragment.name),
+                            )
+                            .on_hover_text(fragment_description(fragment.name))
+                            .clicked()
+                        {
+                            zmat.frag_name = fragment.name.to_owned();
+                            zmat.last_error = None;
+                        }
+                        if index % columns == columns - 1 {
+                            ui.end_row();
+                        }
+                    }
+                });
         });
-    if groups.is_empty() {
-        ui.small("No matching fragments. Try a formula such as CH3 or a name such as methyl.");
-    }
-    if panel.search.is_empty() {
-        ui.checkbox(&mut panel.all_fragments, "Show all fragments");
-    } else if ui.small_button("Clear search").clicked() {
-        panel.search.clear();
-    }
 }
 
 fn placement_controls(
     ui: &mut egui::Ui,
+    panel: &mut PanelState,
     zmat: &mut ZMatrixBuilderState,
     mol: &Molecule,
     action: &mut Option<Action>,
 ) {
     card(ui).show(ui, |ui| {
         ui.set_min_width((ui.available_width() - 1.0).max(0.0));
-        ui.horizontal_wrapped(|ui| {
-            ui.strong(format!("Chosen: {}", zmat.frag_name));
-            ui.label("Bond");
-            egui::ComboBox::from_id_salt("modern_bond_order")
-                .width(75.0)
-                .selected_text(zmat.frag_bond_order.label())
-                .show_ui(ui, |ui| {
-                    for order in [BondOrder::Single, BondOrder::Double, BondOrder::Triple] {
-                        if ui
-                            .selectable_value(&mut zmat.frag_bond_order, order, order.label())
-                            .changed()
-                        {
-                            zmat.frag_angle_deg = order.default_angle();
-                            zmat.frag_dihedral_deg = order.default_dihedral();
-                        }
-                    }
-                });
-        });
+        // The highlighted tile already shows what is chosen.
         let selection = zmat.selected_index.filter(|&i| i < mol.atoms.len());
         let chosen = find_selected_fragment(zmat).is_some();
-        let primary = if mol.atoms.is_empty() {
-            format!("Place {}", zmat.frag_name)
-        } else if let Some(i) = selection {
-            format!("Add to {}{}", mol.atoms[i], i + 1)
-        } else {
-            "Add to selection".to_owned()
-        };
+        let primary = if mol.atoms.is_empty() { "Place" } else { "Add" };
+        let target = selection.map(|i| format!("{}{}", mol.atoms[i], i + 1));
         ui.horizontal_wrapped(|ui| {
             let button =
                 egui::Button::new(egui::RichText::new(primary).color(egui::Color32::WHITE))
-                    .fill(egui::Color32::from_rgb(38, 96, 159))
-                    .min_size(egui::vec2(150.0, 34.0));
-            if ui
+                    .fill(ADD_FILL)
+                    .min_size(egui::vec2(90.0, 30.0));
+            let add = ui
                 .add_enabled(
                     chosen && (mol.atoms.is_empty() || selection.is_some()),
                     button,
                 )
-                .on_disabled_hover_text("Select an atom in the 3D view first.")
-                .clicked()
+                .on_disabled_hover_text("Select an atom in the 3D view first.");
+            let add = match &target {
+                Some(t) if !mol.atoms.is_empty() => add.on_hover_text(format!("Add to {t}")),
+                _ => add,
+            };
+            if add.clicked()
             {
                 *action = Some(if mol.atoms.is_empty() {
                     Action::Place
@@ -635,16 +644,28 @@ fn placement_controls(
                 });
             }
             if !mol.atoms.is_empty() {
-                let label = selection
-                    .map(|i| format!("Replace {}{}", mol.atoms[i], i + 1))
-                    .unwrap_or_else(|| "Replace selection".into());
-                if ui
-                    .add_enabled(chosen && selection.is_some(), egui::Button::new(label))
-                    .on_disabled_hover_text("Select the atom you want to replace.")
-                    .clicked()
-                {
+                let button = egui::Button::new(
+                    egui::RichText::new("Replace").color(egui::Color32::WHITE),
+                )
+                .fill(REPLACE_FILL)
+                .min_size(egui::vec2(90.0, 30.0));
+                let replace = ui
+                    .add_enabled(chosen && selection.is_some(), button)
+                    .on_disabled_hover_text("Select the atom you want to replace.");
+                let replace = match &target {
+                    Some(t) => replace.on_hover_text(format!("Replace {t}")),
+                    None => replace,
+                };
+                if replace.clicked() {
                     *action = Some(Action::Replace);
                 }
+            }
+            if ui
+                .add(egui::Button::new("Placement…").selected(panel.placement_open))
+                .on_hover_text("Bond order, angle, dihedral and atom references")
+                .clicked()
+            {
+                panel.placement_open = !panel.placement_open;
             }
         });
     });
@@ -652,15 +673,39 @@ fn placement_controls(
 
 fn reference_controls(
     ui: &mut egui::Ui,
+    panel: &mut PanelState,
     zmat: &mut ZMatrixBuilderState,
     editor: &EditorRotateState,
     mol: &Molecule,
     available: bool,
     action: &mut Option<Action>,
 ) {
-    ui.add_enabled_ui(available, |ui| {
-        egui::CollapsingHeader::new("Placement settings").id_salt("modern_placement_settings").show(ui, |ui| {
+    let ctx = ui.ctx().clone();
+    egui::Window::new("Placement settings")
+        .id(egui::Id::new("modern_placement_settings_window"))
+        .open(&mut panel.placement_open)
+        .resizable(false)
+        .collapsible(false)
+        .show(&ctx, |ui| {
+        ui.add_enabled_ui(available, |ui| {
             ui.small("Attachment direction is chosen automatically. Set orientation or pick exact atom references here.");
+            ui.horizontal_wrapped(|ui| {
+                ui.label("Bond");
+                egui::ComboBox::from_id_salt("modern_bond_order")
+                    .width(75.0)
+                    .selected_text(zmat.frag_bond_order.label())
+                    .show_ui(ui, |ui| {
+                        for order in [BondOrder::Single, BondOrder::Double, BondOrder::Triple] {
+                            if ui
+                                .selectable_value(&mut zmat.frag_bond_order, order, order.label())
+                                .changed()
+                            {
+                                zmat.frag_angle_deg = order.default_angle();
+                                zmat.frag_dihedral_deg = order.default_dihedral();
+                            }
+                        }
+                    });
+            });
             ui.horizontal_wrapped(|ui| {
                 ui.label("Angle");
                 ui.add(egui::DragValue::new(&mut zmat.frag_angle_deg).speed(0.1).suffix("°"));
@@ -726,17 +771,26 @@ fn footer(
         {
             *action = Some(Action::Hydrogens);
         }
-        if ui
+        if zmat.cleanup.running() {
+            ui.spinner();
+            ui.label("Cleaning up…");
+            if ui.small_button("Cancel").clicked() {
+                zmat.cleanup.cancel();
+            }
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(50));
+        } else if ui
             .add_enabled(
                 available && !mol.atoms.is_empty(),
                 egui::Button::new("Clean up geometry"),
             )
             .on_hover_text(
-                "Built-in DREIDING cleanup. Produces a starting geometry for optimisation.",
+                "Optimise the whole structure with the DREIDING force field. One undoable step.",
             )
             .clicked()
         {
-            zmat.cleanup.open = true;
+            zmat.cleanup_report = None;
+            zmat.cleanup.start(mol);
         }
     });
     ui.horizontal(|ui| {
@@ -1012,7 +1066,7 @@ fn perform_mutation(
             ))
         }
         Action::Cleanup => {
-            let preview = zmat.cleanup.accepted(mol, &zmat.selection)?;
+            let preview = zmat.cleanup.accepted(mol)?;
             mol.set_pos(preview.positions);
             mol.recompute_bonds(settings.bond_thresh_scale, settings.hbond_cutoff);
             let report = preview.report;

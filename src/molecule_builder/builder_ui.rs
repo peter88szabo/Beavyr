@@ -2565,6 +2565,9 @@ fn clear_display(
 ) -> BuilderChange {
     zmat_state.confirm_clear = false;
     record_step(zmat_state, mol, "cleared the display");
+    // Keep the undo history: the load sync would otherwise clear it, and the
+    // confirmation promises that Undo brings the atoms back.
+    zmat_state.skip_next_sync = true;
     let previous = history.before(mol, traj);
     mol.topology = None;
     mol.atoms.clear();
@@ -3357,10 +3360,22 @@ fn fragment_editor_form(
         }
         AxisSource::JustPlaced => {
             if let (Some(a), Some(b)) = (state.picks.first(), state.picks.get(1)) {
-                ui.monospace(format!("Axis:   atom {} \u{2014} atom {} (the new bond)", a + 1, b + 1));
+                ui.label(
+                    egui::RichText::new(format!(
+                        "Axis:   atom {} \u{2014} atom {} (the new bond)",
+                        a + 1,
+                        b + 1
+                    ))
+                    .monospace()
+                    .small(),
+                );
             }
             let count = state.moving.as_ref().map_or(0, Vec::len);
-            ui.monospace(format!("Moving: the {count} atoms just placed"));
+            ui.label(
+                egui::RichText::new(format!("Moving: the {count} atoms just placed"))
+                    .monospace()
+                    .small(),
+            );
         }
     }
     if let Some(status) = &state.status {
@@ -3424,7 +3439,6 @@ fn fragment_editor_form(
             .on_disabled_hover_text("Nothing has been changed here yet.")
             .clicked();
     });
-    ui.weak("Nothing is written until Apply. Undo is in the builder panel.");
     actions
 }
 
@@ -3565,7 +3579,7 @@ fn placed_fragment_editor(
 
     ui.add_space(6.0);
     ui.separator();
-    ui.label(egui::RichText::new("Newly Placed Fragment").heading().strong());
+    ui.label(egui::RichText::new("Newly Placed Fragment").size(14.0).strong());
     let actions = fragment_editor_form(ui, &mut editor, ready, AxisSource::JustPlaced);
     fragment_editor_finish(actions, &mut editor, zmat_state, mol, settings, AxisSource::JustPlaced);
 

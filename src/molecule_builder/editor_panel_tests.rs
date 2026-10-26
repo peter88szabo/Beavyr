@@ -197,7 +197,7 @@ fn named_custom_fragment_button_reuses_placement_and_undo() {
     set_selected_atom(&mut fixture.zmat, &fixture.mol.atoms, Some(0));
     fixture.click("My fragments");
     fixture.click("My hydroxyl");
-    fixture.click("Add to C1");
+    fixture.click("Add");
     assert_eq!(fixture.mol.atoms, ["C", "O", "H"]);
     assert_eq!(
         fixture.zmat.placed_editor.moving.as_deref(),
@@ -211,33 +211,27 @@ fn named_custom_fragment_button_reuses_placement_and_undo() {
 }
 
 #[test]
-fn cleanup_preview_accepts_as_one_undoable_edit_and_redoes_exactly() {
-    use crate::molecule_builder::cleanup::{relax, Scope};
+fn a_finished_cleanup_is_applied_at_once_as_one_undoable_edit() {
+    use crate::molecule_builder::{
+        cleanup::{relax, Scope},
+        selection::Selection,
+    };
     let mut fixture = EditorFixture::new("3\n\nO 0 0 0\nH 1.1 0 0\nH -0.2 1.05 0\n");
     let original = fixture.mol.pos.clone();
-    fixture.zmat.selection.sync(&fixture.mol);
-    fixture.zmat.selection.atoms.insert(1);
-    fixture.zmat.selection.frozen.insert(0);
-    let preview = relax(
+    // Whole structure, nothing held fixed: what the button runs.
+    let result = relax(
         &fixture.mol,
-        &fixture.zmat.selection,
-        Scope::Selected,
+        &Selection::default(),
+        Scope::Whole,
         &std::sync::atomic::AtomicBool::new(false),
     )
     .unwrap();
-    let expected = preview.positions.clone();
-    fixture.click("Clean up geometry");
-    assert!(fixture.zmat.cleanup.open);
-    fixture.zmat.cleanup.scope = Scope::Selected;
-    fixture.zmat.cleanup.preview = Some(preview);
-    assert_eq!(
-        fixture.mol.pos, original,
-        "preview must not change calculation input"
-    );
-    fixture.click("Accept cleanup");
-    assert_eq!(fixture.mol.pos, expected);
-    assert_eq!(fixture.mol.pos[0], original[0]);
-    assert_eq!(fixture.mol.pos[2], original[2]);
+    let expected = result.positions.clone();
+    assert_ne!(expected, original);
+    fixture.zmat.cleanup.preview = Some(result);
+    fixture.frame(vec![], [1280.0, 720.0]);
+    assert_eq!(fixture.mol.pos, expected, "no Accept step");
+    assert!(fixture.zmat.cleanup.preview.is_none());
     assert_eq!(fixture.zmat.history.depth(), 1);
     fixture.act(Action::Undo).unwrap();
     assert_eq!(fixture.mol.pos, original);
@@ -246,41 +240,50 @@ fn cleanup_preview_accepts_as_one_undoable_edit_and_redoes_exactly() {
 }
 
 #[test]
-fn discarding_cleanup_leaves_coordinates_and_history_untouched() {
-    use crate::molecule_builder::cleanup::{relax, Scope};
+fn the_cleanup_button_relaxes_the_whole_structure_with_one_click() {
+    bevy::tasks::AsyncComputeTaskPool::get_or_init(bevy::tasks::TaskPool::default);
     let mut fixture = EditorFixture::new("3\n\nO 0 0 0\nH 1.1 0 0\nH -0.2 1.05 0\n");
+    // Frozen atoms are ignored: the whole structure is always cleaned up.
+    fixture.zmat.selection.sync(&fixture.mol);
+    fixture.zmat.selection.frozen.insert(0);
     let original = fixture.mol.pos.clone();
-    fixture.zmat.cleanup.preview = Some(
-        relax(
-            &fixture.mol,
-            &fixture.zmat.selection,
-            Scope::Whole,
-            &std::sync::atomic::AtomicBool::new(false),
-        )
-        .unwrap(),
-    );
-    fixture.zmat.cleanup.open = true;
-    fixture.click("Discard");
-    assert!(!fixture.zmat.cleanup.open);
-    assert!(fixture.zmat.cleanup.preview.is_none());
+    fixture.click("Clean up geometry");
+    let start = std::time::Instant::now();
+    while fixture.mol.pos == original && start.elapsed().as_secs() < 30 {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        fixture.frame(vec![], [1280.0, 720.0]);
+    }
+    assert_ne!(fixture.mol.pos, original, "{:?}", fixture.zmat.cleanup_report);
+    assert_ne!(fixture.mol.pos[0], original[0], "frozen atom must move too");
+    assert_eq!(fixture.zmat.history.depth(), 1);
+}
+
+#[test]
+fn hidden_and_frozen_atoms_can_be_restored_from_the_panel() {
+    let mut fixture = EditorFixture::new("3\n\nO 0 0 0\nH 1.1 0 0\nH -0.2 1.05 0\n");
+    fixture.zmat.selection.sync(&fixture.mol);
+    fixture.zmat.selection.hidden = [0].into();
+    fixture.zmat.selection.frozen = [1, 2].into();
+    let original = fixture.mol.pos.clone();
+    fixture.click("Show all atoms");
+    assert!(fixture.zmat.selection.hidden.is_empty());
+    fixture.click("Unfreeze all · 2");
+    assert!(fixture.zmat.selection.frozen.is_empty());
     assert_eq!(fixture.mol.pos, original);
     assert_eq!(fixture.zmat.history.depth(), 0);
 }
 
 #[test]
-fn selection_toolbar_isolates_freezes_and_restores_without_editing_atoms() {
+fn clear_display_is_a_visible_button_and_undo_brings_the_atoms_back() {
     let mut fixture = EditorFixture::new("3\n\nO 0 0 0\nH 1.1 0 0\nH -0.2 1.05 0\n");
-    fixture.zmat.selection.sync(&fixture.mol);
-    fixture.zmat.selection.atoms = [1, 2].into();
-    let original = fixture.mol.pos.clone();
-    fixture.click("Freeze");
-    assert_eq!(fixture.zmat.selection.frozen, [1, 2].into());
-    fixture.click("Isolate");
-    assert_eq!(fixture.zmat.selection.hidden, [0].into());
-    fixture.click("Show all");
-    assert!(fixture.zmat.selection.hidden.is_empty());
-    assert_eq!(fixture.mol.pos, original);
-    assert_eq!(fixture.zmat.history.depth(), 0);
+    fixture.click("Clear Display…");
+    assert!(fixture.zmat.confirm_clear);
+    fixture.click("Clear");
+    assert!(fixture.mol.atoms.is_empty());
+    // The load sync must not wipe the undo history for this edit.
+    assert!(fixture.zmat.skip_next_sync);
+    fixture.act(Action::Undo).unwrap();
+    assert_eq!(fixture.mol.atoms, ["O", "H", "H"]);
 }
 
 #[test]
@@ -288,7 +291,7 @@ fn clicking_fragment_then_add_targets_the_existing_fragment_editor() {
     let mut fixture = EditorFixture::new("1\ncarbon\nC 0 0 0\n");
     set_selected_atom(&mut fixture.zmat, &fixture.mol.atoms, Some(0));
     fixture.click("OH");
-    fixture.click("Add to C1");
+    fixture.click("Add");
     assert_eq!(fixture.mol.atoms, ["C", "O", "H"]);
     let moving = fixture
         .zmat
@@ -439,9 +442,6 @@ fn main_tools_stay_visible_at_laptop_height_with_all_fragments_and_placed_editor
     set_selected_atom(&mut fixture.zmat, &fixture.mol.atoms, Some(0));
     fixture.zmat.frag_name = "-Phenyl".into();
     fixture.act(Action::Add).unwrap();
-    let mut state = panel_state(&fixture.ctx);
-    state.all_fragments = true;
-    store_panel_state(&fixture.ctx, state);
     for height in [720.0, 600.0] {
         fixture.frame(vec![], [1280.0, height]);
         let output = fixture.frame(vec![], [1280.0, height]);

@@ -2069,14 +2069,8 @@ pub fn ui_panel(
         window_rects.push(rect);
     }
 
-    if ui_layout.builder_open {
-        if let Some(rect) = zmat_state.cleanup.rect {
-            window_rects.push(rect);
-        }
-    } else {
+    if !ui_layout.builder_open {
         zmat_state.cleanup.cancel();
-        zmat_state.cleanup.open = false;
-        zmat_state.cleanup.rect = None;
     }
 
     // Record what the panels ended up covering, now that they have all been

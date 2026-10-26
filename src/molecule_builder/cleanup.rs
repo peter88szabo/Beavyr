@@ -1,4 +1,4 @@
-//! Cancellable, constrained cleanup on a copy. Only Accept changes the molecule.
+//! One-click DREIDING cleanup, computed on a copy in the background.
 use std::collections::BTreeSet;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -7,7 +7,6 @@ use std::sync::{
 
 use anyhow::{bail, Result};
 use bevy::prelude::*;
-use bevy_egui::egui;
 
 use super::{builder_ui::ZMatrixBuilderState, selection::Selection};
 use crate::forcefield::dreiding::{
@@ -29,7 +28,6 @@ pub struct Preview {
     atoms: Vec<String>,
     original: Vec<Vec3>,
     pub positions: Vec<Vec3>,
-    pub mobile: BTreeSet<usize>,
     pub report: String,
 }
 
@@ -40,7 +38,6 @@ impl Preview {
 }
 
 struct Job {
-    mobile: BTreeSet<usize>,
     cancel: Arc<AtomicBool>,
     result: Arc<Mutex<Option<std::result::Result<Preview, String>>>>,
 }
@@ -50,11 +47,11 @@ impl Drop for Job {
     }
 }
 
+/// One-click DREIDING cleanup of the whole structure. It runs in the
+/// background so a large structure does not freeze the window, and the
+/// editor applies the result as one undoable step as soon as it is ready.
 #[derive(Clone, Default)]
 pub struct Cleanup {
-    pub open: bool,
-    pub rect: Option<egui::Rect>,
-    pub scope: Scope,
     pub preview: Option<Preview>,
     job: Option<Arc<Job>>,
     error: Option<String>,
@@ -68,22 +65,25 @@ impl Cleanup {
         self.preview = None;
     }
 
-    fn start(&mut self, mol: &Molecule, selection: &Selection) {
+    pub fn running(&self) -> bool {
+        self.job.is_some()
+    }
+
+    /// Relax every atom; nothing is held fixed.
+    pub fn start(&mut self, mol: &Molecule) {
         self.cancel();
         self.error = None;
         let mol = mol.clone();
-        let selection = selection.clone();
-        let scope = self.scope;
         let cancel = Arc::new(AtomicBool::new(false));
         let result = Arc::new(Mutex::new(None));
         self.job = Some(Arc::new(Job {
-            mobile: movable(&mol, &selection, scope),
             cancel: cancel.clone(),
             result: result.clone(),
         }));
         bevy::tasks::AsyncComputeTaskPool::get()
             .spawn(async move {
-                let output = relax(&mol, &selection, scope, &cancel).map_err(|e| e.to_string());
+                let output = relax(&mol, &Selection::default(), Scope::Whole, &cancel)
+                    .map_err(|e| e.to_string());
                 if let Ok(mut slot) = result.lock() {
                     *slot = Some(output);
                 }
@@ -91,18 +91,7 @@ impl Cleanup {
             .detach();
     }
 
-    pub fn poll(&mut self, mol: &Molecule, selection: &Selection) {
-        if self.job.is_some() || self.preview.is_some() {
-            let current = movable(mol, selection, self.scope);
-            if self.job.as_ref().is_some_and(|j| j.mobile != current)
-                || self.preview.as_ref().is_some_and(|p| p.mobile != current)
-            {
-                self.cancel();
-                self.error =
-                    Some("Selection or frozen atoms changed. Preview cleanup again.".into());
-                return;
-            }
-        }
+    pub fn poll(&mut self, mol: &Molecule) {
         let output = self
             .job
             .as_ref()
@@ -113,7 +102,7 @@ impl Cleanup {
                 Ok(preview) if preview.matches(mol) => self.preview = Some(preview),
                 Ok(_) => {
                     self.error = Some(
-                        "The structure changed. Run cleanup again on the current geometry.".into(),
+                        "The structure changed during cleanup; nothing was applied.".into(),
                     )
                 }
                 Err(error) => self.error = Some(error),
@@ -121,79 +110,25 @@ impl Cleanup {
         }
         if self.preview.as_ref().is_some_and(|p| !p.matches(mol)) {
             self.preview = None;
-            self.error = Some("The structure changed; the old preview was discarded.".into());
         }
     }
 
-    pub fn show(
-        &mut self,
-        ctx: &egui::Context,
-        mol: &Molecule,
-        selection: &Selection,
-        available: bool,
-    ) -> bool {
-        self.rect = None;
-        if !self.open {
-            return false;
-        }
-        self.poll(mol, selection);
-        let mut open = true;
-        let mut accept = false;
-        let mut discard = false;
-        let response = egui::Window::new("Quick geometry cleanup")
-            .id(egui::Id::new("quick_geometry_cleanup"))
-            .open(&mut open).default_width(370.0).resizable(true)
-            .show(ctx, |ui| {
-                ui.strong("DREIDING · built-in force field");
-                ui.small("For preparing a starting geometry. Metal coordination, unusual bonding and electronic states need a suitable quantum method.");
-                ui.separator();
-                ui.add_enabled_ui(self.job.is_none() && self.preview.is_none(), |ui| {
-                    ui.horizontal(|ui| {
-                        ui.selectable_value(&mut self.scope, Scope::Whole, "Whole structure");
-                        ui.selectable_value(&mut self.scope, Scope::Selected, "Selected atoms");
-                    });
-                });
-                let mobile = movable(mol, selection, self.scope);
-                if let Some(preview) = &self.preview {
-                    ui.label(format!("{} moving · {} fixed in this preview", preview.mobile.len(), mol.atoms.len() - preview.mobile.len()));
-                    ui.label(&preview.report);
-                    ui.small("Cyan: proposed geometry and movement. Current coordinates remain unchanged until Accept.");
-                    ui.horizontal(|ui| {
-                        accept = ui.add_enabled(available, egui::Button::new("Accept cleanup")).clicked();
-                        discard = ui.button("Discard").clicked();
-                    });
-                } else if self.job.is_some() {
-                    ui.horizontal(|ui| { ui.spinner(); ui.label("Relaxing geometry…"); });
-                    if ui.button("Cancel cleanup").clicked() { self.cancel(); }
-                    ctx.request_repaint_after(std::time::Duration::from_millis(50));
-                } else {
-                    ui.label(format!("{} to move · {} fixed", mobile.len(), mol.atoms.len() - mobile.len()));
-                    if self.scope == Scope::Selected { ui.small("Unselected atoms stay fixed. Frozen atoms always stay fixed."); }
-                    if ui.add_enabled(available && !mobile.is_empty(), egui::Button::new("Preview cleanup")).clicked() { self.start(mol, selection); }
-                    if mobile.is_empty() { ui.weak("Select movable atoms or unfreeze them to continue."); }
-                }
-                if !available { ui.weak("Pause playback and apply or cancel fragment adjustments first."); }
-                if let Some(error) = &self.error { ui.colored_label(egui::Color32::LIGHT_RED, error); }
-            });
-        self.rect = response.map(|r| r.response.rect);
-        if !open || discard {
-            self.cancel();
-            self.open = false;
-        }
-        accept
+    /// Whether a finished result for the current structure is waiting.
+    pub fn ready(&mut self, mol: &Molecule) -> bool {
+        self.poll(mol);
+        self.preview.is_some()
     }
 
-    pub fn accepted(
-        &mut self,
-        mol: &Molecule,
-        selection: &Selection,
-    ) -> std::result::Result<Preview, String> {
-        let preview = self.preview.as_ref().ok_or("Preview cleanup first.")?;
-        if !preview.matches(mol) || preview.mobile != movable(mol, selection, self.scope) {
-            return Err("The structure or selection changed. Preview cleanup again.".into());
+    pub fn take_error(&mut self) -> Option<String> {
+        self.error.take()
+    }
+
+    pub fn accepted(&mut self, mol: &Molecule) -> std::result::Result<Preview, String> {
+        match self.preview.take() {
+            Some(preview) if preview.matches(mol) => Ok(preview),
+            Some(_) => Err("The structure changed during cleanup; nothing was applied.".into()),
+            None => Err("Cleanup has not finished.".into()),
         }
-        self.open = false;
-        Ok(self.preview.take().unwrap())
     }
 }
 
@@ -339,14 +274,12 @@ pub fn relax(
         atoms: mol.atoms.clone(),
         original: mol.pos.clone(),
         positions,
-        mobile,
         report,
     })
 }
 
 pub fn poll(mut builder: ResMut<ZMatrixBuilderState>, mol: Res<Molecule>) {
-    let builder = &mut *builder;
-    builder.cleanup.poll(&mol, &builder.selection);
+    builder.cleanup.poll(&mol);
 }
 
 #[derive(Default, Reflect, GizmoConfigGroup)]
@@ -360,7 +293,7 @@ pub fn configure(mut store: ResMut<GizmoConfigStore>) {
     cfg.depth_bias = -1.0;
 }
 
-/// Ghost geometry never modifies coordinates, picking, or calculation input.
+/// Marks frozen atoms; never modifies coordinates, picking, or calculation input.
 pub fn draw(
     settings: Res<crate::settings::MolSettings>,
     mut gizmos: Gizmos<CleanupGizmos>,
@@ -379,33 +312,6 @@ pub fn draw(
                     )),
                     frozen,
                 );
-            }
-        }
-    }
-    if let Some(preview) = builder
-        .cleanup
-        .preview
-        .as_ref()
-        .filter(|p| builder.cleanup.open && p.matches(&mol))
-    {
-        let color = Color::srgb(0.15, 0.95, 0.85);
-        for &(a, b, _) in &mol.bonds {
-            if a < preview.positions.len()
-                && b < preview.positions.len()
-                && !builder.selection.hidden.contains(&a)
-                && !builder.selection.hidden.contains(&b)
-                && crate::scene::element_visible(&mol.atoms[a], &settings)
-                && crate::scene::element_visible(&mol.atoms[b], &settings)
-            {
-                gizmos.line(preview.positions[a], preview.positions[b], color);
-            }
-        }
-        for &i in &preview.mobile {
-            if !builder.selection.hidden.contains(&i)
-                && crate::scene::element_visible(&mol.atoms[i], &settings)
-            {
-                gizmos.sphere(preview.positions[i], 0.18, color);
-                gizmos.line(mol.pos[i], preview.positions[i], color);
             }
         }
     }
@@ -477,22 +383,21 @@ mod tests {
         );
         let mut changed = mol.clone();
         changed.pos[0].x += 0.01;
-        assert!(state.accepted(&changed, &Selection::default()).is_err());
+        assert!(state.accepted(&changed).is_err());
         state.cancel();
-        assert!(state.accepted(&mol, &Selection::default()).is_err());
+        assert!(state.accepted(&mol).is_err());
     }
 
     #[test]
-    fn freezing_an_atom_after_preview_invalidates_that_preview() {
+    fn a_result_for_an_edited_structure_is_dropped() {
         let mol = water();
-        let mut selection = Selection::default();
         let mut state = Cleanup::default();
-        state.preview =
-            Some(relax(&mol, &selection, Scope::Whole, &AtomicBool::new(false)).unwrap());
-        selection.frozen.insert(1);
-        assert!(state.accepted(&mol, &selection).is_err());
-        state.poll(&mol, &selection);
+        state.preview = Some(
+            relax(&mol, &Selection::default(), Scope::Whole, &AtomicBool::new(false)).unwrap(),
+        );
+        let mut changed = mol.clone();
+        changed.pos[1].x += 0.2;
+        assert!(!state.ready(&changed));
         assert!(state.preview.is_none());
-        assert!(state.error.as_deref().unwrap().contains("frozen"));
     }
 }
