@@ -55,10 +55,6 @@ pub struct State {
     preview: Option<Preview>,
     message: String,
     error: Option<String>,
-    yaw: f32,
-    pitch: f32,
-    zoom: f32,
-    show_h: bool,
 }
 
 impl Default for State {
@@ -82,10 +78,6 @@ impl Default for State {
             preview: None,
             message: String::new(),
             error: None,
-            yaw: 0.3,
-            pitch: -0.3,
-            zoom: 1.0,
-            show_h: false,
         }
     }
 }
@@ -97,6 +89,17 @@ fn state_name(state: SideChainState) -> &'static str {
         SideChainState::Deprotonated => "−1 · deprotonated",
         SideChainState::HistidineDelta => "His δ · ND1-H",
         SideChainState::HistidineEpsilon => "His ε · NE2-H",
+    }
+}
+
+/// A short form of `state_name` for the narrow sequence list.
+fn state_tag(state: SideChainState) -> &'static str {
+    match state {
+        SideChainState::Neutral => "",
+        SideChainState::Protonated => "+1",
+        SideChainState::Deprotonated => "−1",
+        SideChainState::HistidineDelta => "δ",
+        SideChainState::HistidineEpsilon => "ε",
     }
 }
 
@@ -241,13 +244,26 @@ pub fn window(
         state.target = None;
     }
     let response = egui::Window::new("Peptide Builder")
-        .id(egui::Id::new("peptide_builder_window"))
-        .open(&mut open).default_size([800.0, 650.0]).min_width(640.0)
+        .id(egui::Id::new("peptide_builder_window_v3"))
+        .open(&mut open).default_size([470.0, 650.0]).min_width(420.0)
          .resizable(true).collapsible(false)
         .max_height((ctx.content_rect().height() - 24.0).max(300.0)).vscroll(true)
         .show(ctx, |ui| {
-            ui.spacing_mut().item_spacing = egui::vec2(8.0, 7.0);
-            ui.spacing_mut().button_padding = egui::vec2(10.0, 6.0);
+            // Compact: smaller text and buttons than the app default, so every
+            // control fits in the window. 13.5 matches the editor's fragment tiles.
+            ui.spacing_mut().item_spacing = egui::vec2(6.0, 5.0);
+            ui.spacing_mut().button_padding = egui::vec2(6.0, 3.0);
+            ui.spacing_mut().interact_size.y = 22.0;
+            for (style, size) in [
+                (egui::TextStyle::Body, 13.5),
+                (egui::TextStyle::Button, 13.5),
+                (egui::TextStyle::Monospace, 13.0),
+                (egui::TextStyle::Small, 11.5),
+            ] {
+                if let Some(font) = ui.style_mut().text_styles.get_mut(&style) {
+                    font.size = size;
+                }
+            }
             let visuals = &mut ui.style_mut().visuals;
             visuals.selection.bg_fill = egui::Color32::from_rgb(35, 75, 117);
             visuals.selection.stroke = egui::Stroke::new(1.0, ACCENT);
@@ -274,7 +290,6 @@ pub fn window(
                     ui.label(&preview.build.sequence);
                     if let Some(q) = preview.build.charge { ui.small(format!("Formal charge {q:+}")); }
                     if preview.build.clashes > 0 { ui.colored_label(egui::Color32::YELLOW,format!("{} close contacts",preview.build.clashes)); }
-                    draw_preview(ui,&preview.build.molecule,&preview.build.moving,&mut state.yaw,&mut state.pitch,&mut state.zoom,state.show_h);
                 }
                 return;
             }
@@ -313,8 +328,12 @@ pub fn window(
             }
             ui.separator();
             let body_height = (ui.available_height() - 415.0).max(165.0);
-            ui.columns(2, |columns| {
-                let ui = &mut columns[0];
+            // A narrow fixed-width sequence list; the tiles take the rest.
+            let sequence_width = 190.0;
+            let palette_width = (ui.available_width() - sequence_width - 8.0).max(210.0);
+            ui.horizontal_top(|ui| {
+                ui.vertical(|ui| {
+                ui.set_width(palette_width);
                 ui.add(egui::TextEdit::singleline(&mut state.search).hint_text("Find amino acid").desired_width(f32::INFINITY));
                 egui::ScrollArea::vertical().id_salt("peptide_palette").max_height(body_height).auto_shrink([false, false]).show(ui, |ui| {
                     let query = state.search.trim().to_ascii_lowercase();
@@ -322,18 +341,20 @@ pub fn window(
                         query.is_empty() || a.name().to_ascii_lowercase().contains(&query)
                             || a.three_letter().to_ascii_lowercase().contains(&query)
                             || a.one_letter().to_ascii_lowercase().to_string() == query).collect();
-                    let tile_width = ((ui.available_width() - 18.0) / 4.0).floor();
-                    egui::Grid::new("peptide_tiles").spacing([6.0, 6.0]).show(ui, |ui| {
+                    let tile_width = ((ui.available_width() - 8.0) / 3.0).floor();
+                    egui::Grid::new("peptide_tiles").spacing([4.0, 4.0]).show(ui, |ui| {
                         for (i, acid) in amino.iter().enumerate() {
                             let title = format!("{}  {}", acid.three_letter(), acid.one_letter());
                             if ui.add_enabled(state.recipe.residues.len() < peptide::MAX_RESIDUES,
-                                egui::Button::new(egui::RichText::new(title).strong()).min_size(egui::vec2(tile_width, 28.0)))
+                                egui::Button::new(title).min_size(egui::vec2(tile_width, 24.0)))
                                 .on_hover_text(acid.name()).clicked() { state.add(*acid); }
-                            if i % 4 == 3 { ui.end_row(); }
+                            if i % 3 == 2 { ui.end_row(); }
                         }
                     });
                 });
-                let ui = &mut columns[1];
+                });
+                ui.vertical(|ui| {
+                ui.set_width(sequence_width);
                 ui.horizontal(|ui| {
                     ui.strong("N to C sequence");
                     if ui.small_button("Clear").clicked() {
@@ -354,7 +375,7 @@ pub fn window(
                             if ui.selectable_label(state.selected_row == Some(i), format!("{:>2}  {}", i + 1, residue.amino.three_letter())).clicked() {
                                 state.selected_row = Some(i);
                             }
-                            ui.small(state_name(residue.side_chain));
+                            ui.small(state_tag(residue.side_chain)).on_hover_text(state_name(residue.side_chain));
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 if ui.small_button("×").on_hover_text("Remove residue").clicked() { remove = Some(i); }
                                 if move_button(ui, i + 1 < state.recipe.residues.len(), false) { movement = Some((i, i + 1)); }
@@ -369,6 +390,7 @@ pub fn window(
                         state.recipe.residues.swap(a, b);
                         state.selected_row = Some(b);
                     }
+                });
                 });
             });
             if let Some(residue) = state.selected_row.and_then(|i| state.recipe.residues.get_mut(i))
@@ -415,42 +437,23 @@ pub fn window(
             if state.recipe.residues.iter().any(|r| r.amino == AminoAcid::Proline) {
                 ui.small("Proline keeps its ring geometry; its φ is constrained. Its free amine is NH / NH₂+.");
             }
-            let current = state.preview_current(mol);
-            ui.horizontal(|ui| {
-                if ui.add_enabled(ready && !state.recipe.residues.is_empty(), egui::Button::new("Preview peptide")).clicked() {
-                    if let Err(error) = state.make_preview(mol) { state.error = Some(error); }
-                }
-                insert = ui.add_enabled(ready && current, egui::Button::new(egui::RichText::new("Insert peptide").strong()).fill(egui::Color32::from_rgb(35, 75, 117)))
-                    .on_hover_text("One undoable edit; the new atoms are ready for the existing Fragment Editor.").clicked();
-                ui.checkbox(&mut state.show_h, "Show H");
-            });
+            // Insert builds the current sequence and places it directly.
+            insert = ui.add_enabled(ready && !state.recipe.residues.is_empty(), egui::Button::new(egui::RichText::new("Insert peptide").strong()).fill(egui::Color32::from_rgb(35, 75, 117)))
+                .on_hover_text("One undoable edit; the new atoms are ready for the existing Fragment Editor.").clicked();
             if !ready { ui.weak("Pause playback and finish any active fragment adjustment or atom picking first."); }
             if let Some(error) = &state.error { ui.colored_label(egui::Color32::LIGHT_RED, error); }
             if !state.message.is_empty() { ui.colored_label(ACCENT, &state.message); }
-            let is_current = state.preview_current(mol);
-            if let Some(preview) = &state.preview {
-                if !is_current { ui.colored_label(egui::Color32::YELLOW, "Preview is out of date — preview again before inserting."); }
-                let build = &preview.build;
-                ui.horizontal_wrapped(|ui| {
-                    ui.small(format!("{} new atoms", build.moving.len()));
-                    if let Some(charge) = build.charge { ui.small(format!("Charge {charge:+}")); }
-                    if build.removed_host_atoms > 0 { ui.small(format!("{} leaving atoms removed from host", build.removed_host_atoms)); }
-                    if build.clashes > 0 {
-                        ui.colored_label(egui::Color32::YELLOW, format!("{} close contacts — adjust or relax after insertion", build.clashes));
-                    }
-                });
-                draw_preview(ui, &build.molecule, &build.moving, &mut state.yaw, &mut state.pitch, &mut state.zoom, state.show_h);
-            } else {
-                let height = (ui.available_height() - 30.0).clamp(80.0, 140.0);
-                let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), height), egui::Sense::hover());
-                ui.painter().rect_filled(rect, 8, ui.visuals().extreme_bg_color);
-                ui.painter().text(rect.center(), egui::Align2::CENTER_CENTER, "Build a sequence, then preview it here", egui::FontId::proportional(14.0), ui.visuals().weak_text_color());
-            }
             ui.small("Starting geometry from optimized monomers. The assembled chain still needs relaxation.");
         });
     let mut change = BuilderChange::None;
+    if insert && !state.preview_current(mol) {
+        if let Err(error) = state.make_preview(mol) {
+            state.error = Some(error);
+        }
+    }
     if insert && state.preview_current(mol) {
         let build = state.preview.as_ref().unwrap().build.clone();
+        let clashes = build.clashes;
         match builder_ui::insert_peptide(build, editor, zmat, mol, settings, trajectory) {
             Ok(result) => {
                 // A separate new chain may lie outside the old camera frame.
@@ -467,6 +470,9 @@ pub fn window(
                 } else {
                     "Inserted. Undo is available in Molecular Editor; Fragment Editor controls the new atoms."
                 }.into();
+                if clashes > 0 {
+                    state.message += &format!(" {clashes} close contacts — adjust or relax the new chain.");
+                }
                 state.error = None;
             }
             Err(error) => state.error = Some(error),
@@ -477,92 +483,81 @@ pub fn window(
     (response.map(|r| r.response.rect), change)
 }
 
-fn draw_preview(
-    ui: &mut egui::Ui,
-    mol: &Molecule,
-    moving: &[usize],
-    yaw: &mut f32,
-    pitch: &mut f32,
-    zoom: &mut f32,
-    show_h: bool,
-) {
-    let (rect, response) = ui.allocate_exact_size(
-        egui::vec2(
-            ui.available_width(),
-            (ui.available_height() - 30.0).clamp(80.0, 155.0),
-        ),
-        egui::Sense::drag(),
-    );
-    let painter = ui.painter_at(rect);
-    painter.rect_filled(rect, 8, ui.visuals().extreme_bg_color);
-    if response.dragged() {
-        let delta = ui.input(|i| i.pointer.delta());
-        *yaw += delta.x * 0.01;
-        *pitch += delta.y * 0.01;
-    }
-    if response.hovered() {
-        *zoom = (*zoom * ui.input(|i| (i.smooth_scroll_delta.y * 0.003).exp())).clamp(0.2, 8.0);
-    }
-    let visible: Vec<_> = (0..mol.atoms.len())
-        .filter(|&i| show_h || mol.atoms[i] != "H")
-        .collect();
-    if visible.is_empty() {
-        return;
-    }
-    let center = visible.iter().map(|&i| mol.pos[i]).sum::<Vec3>() / visible.len() as f32;
-    let rotation = Quat::from_rotation_x(*pitch) * Quat::from_rotation_y(*yaw);
-    let positions: Vec<_> = mol.pos.iter().map(|p| rotation * (*p - center)).collect();
-    let mut span = Vec2::splat(0.1);
-    for &i in &visible {
-        span = span.max(positions[i].truncate().abs());
-    }
-    let scale = ((rect.width() - 28.0) / (2.0 * span.x))
-        .min((rect.height() - 28.0) / (2.0 * span.y))
-        * *zoom;
-    let project = |i: usize| rect.center() + egui::vec2(positions[i].x, -positions[i].y) * scale;
-    for &(a, b, _) in &mol.bonds {
-        if !show_h && (mol.atoms[a] == "H" || mol.atoms[b] == "H") {
-            continue;
-        }
-        painter.line_segment(
-            [project(a), project(b)],
-            egui::Stroke::new(1.5, egui::Color32::from_gray(120)),
-        );
-    }
-    let mut order = visible;
-    order.sort_by(|&a, &b| positions[a].z.total_cmp(&positions[b].z));
-    for i in order {
-        let color = match mol.atoms[i].as_str() {
-            "N" => egui::Color32::from_rgb(95, 155, 255),
-            "O" => egui::Color32::from_rgb(245, 102, 113),
-            "S" | "Se" => egui::Color32::from_rgb(239, 200, 80),
-            "H" => egui::Color32::from_gray(225),
-            _ => egui::Color32::from_rgb(151, 176, 185),
-        };
-        // Build::moving is sorted; keep redraw work linearithmic for long chains.
-        let color = if moving.binary_search(&i).is_ok() {
-            color
-        } else {
-            color.gamma_multiply(0.4)
-        };
-        painter.circle_filled(
-            project(i),
-            if mol.atoms[i] == "H" { 2.0 } else { 3.8 },
-            color,
-        );
-    }
-    painter.text(
-        rect.left_bottom() + egui::vec2(8.0, -6.0),
-        egui::Align2::LEFT_BOTTOM,
-        "Drag to rotate · scroll to zoom",
-        egui::FontId::proportional(11.0),
-        ui.visuals().weak_text_color(),
-    );
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn insert_builds_the_peptide_without_a_preview_first() {
+        fn find(shape: &egui::Shape, label: &str) -> Option<egui::Pos2> {
+            match shape {
+                egui::Shape::Text(t) if t.galley.text() == label => {
+                    Some(egui::Rect::from_min_size(t.pos, t.galley.size()).center())
+                }
+                egui::Shape::Vec(v) => v.iter().find_map(|s| find(s, label)),
+                _ => None,
+            }
+        }
+        let ctx = egui::Context::default();
+        let mut zmat = ZMatrixBuilderState::default();
+        zmat.peptide.open = true;
+        zmat.peptide.recipe.residues = peptide::parse_sequence("AG").unwrap();
+        let mut mol = Molecule::empty();
+        let mut editor = EditorRotateState::default();
+        let mut settings = MolSettings::default();
+        let mut trajectory = TrajectoryState::default();
+        let mut changes = vec![];
+        let mut frame = |events: Vec<egui::Event>| {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1280.0, 900.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    let (_, change) = window(
+                        ui.ctx(),
+                        &mut zmat,
+                        &mut editor,
+                        &mut mol,
+                        &mut settings,
+                        &mut trajectory,
+                    );
+                    changes.push(change);
+                },
+            );
+            output.textures_delta.clear();
+            output
+        };
+        frame(vec![]);
+        let output = frame(vec![]);
+        let pos = output
+            .shapes
+            .iter()
+            .find_map(|s| find(&s.shape, "Insert peptide"))
+            .expect("Insert peptide button");
+        frame(vec![
+            egui::Event::PointerMoved(pos),
+            egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: Default::default(),
+            },
+        ]);
+        frame(vec![egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: Default::default(),
+        }]);
+        drop(frame);
+        assert!(!mol.atoms.is_empty(), "Insert must place the peptide: {:?}", zmat.peptide.error);
+        assert!(changes.iter().any(|c| c.happened()));
+    }
     #[test]
     fn floating_window_renders_and_previews_without_the_molecular_editor() {
         let ctx = egui::Context::default();
