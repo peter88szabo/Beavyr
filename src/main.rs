@@ -85,9 +85,15 @@ fn main() {
             DefaultPlugins
                 .set(ImagePlugin::default_nearest())
                 .set(bevy::window::WindowPlugin {
-                    primary_window: Some(Window {
-                        title: format!("Beavyr {}", env!("CARGO_PKG_VERSION")),
-                        ..default()
+                    primary_window: Some({
+                        let mut window = Window {
+                            title: format!("Beavyr {}", env!("CARGO_PKG_VERSION")),
+                            ..default()
+                        };
+                        // Open maximized; the window manager still lets the
+                        // user restore it to a smaller size.
+                        window.set_maximized(true);
+                        window
                     }),
                     ..default()
                 })

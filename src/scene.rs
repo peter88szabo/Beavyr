@@ -1489,6 +1489,9 @@ fn compute_centroid(points: &[Vec3]) -> Option<Vec3> {
     Some(acc / (points.len() as f32))
 }
 
+/// Closest distance (Å) the camera frames a structure from.
+const MIN_FIT_RADIUS: f32 = 20.0;
+
 fn auto_fit_camera(points: &[Vec3], cam: &mut OrbitCamera) {
     let Some(c) = compute_centroid(points) else {
         return;
@@ -1503,9 +1506,39 @@ fn auto_fit_camera(points: &[Vec3], cam: &mut OrbitCamera) {
         }
     }
 
-    // Keep a comfortable framing margin and clamp to usable bounds.
-    let desired = (max_r * 3.0).max(2.0);
+    // Keep a comfortable framing margin and clamp to usable bounds. Small
+    // structures (a first fragment, a single atom) are viewed from at least
+    // MIN_FIT_RADIUS, so they sit small in the middle of the view with room
+    // to build around them instead of filling the screen.
+    let desired = (max_r * 3.0).max(MIN_FIT_RADIUS);
     cam.radius = desired.clamp(2.0, 200.0);
+}
+
+#[cfg(test)]
+mod auto_fit_tests {
+    use super::*;
+
+    #[test]
+    fn a_first_small_fragment_is_framed_from_a_distance() {
+        // A methyl group: about 1 Å from its centre to the farthest atom.
+        let methyl = [
+            Vec3::ZERO,
+            Vec3::new(1.09, 0.0, 0.0),
+            Vec3::new(-0.36, 1.03, 0.0),
+            Vec3::new(-0.36, -0.51, 0.89),
+        ];
+        let mut cam = OrbitCamera::default();
+        auto_fit_camera(&methyl, &mut cam);
+        assert_eq!(cam.radius, MIN_FIT_RADIUS);
+    }
+
+    #[test]
+    fn a_large_structure_is_still_framed_by_its_size() {
+        let chain: Vec<Vec3> = (0..40).map(|i| Vec3::X * i as f32 * 1.5).collect();
+        let mut cam = OrbitCamera::default();
+        auto_fit_camera(&chain, &mut cam);
+        assert!(cam.radius > MIN_FIT_RADIUS);
+    }
 }
 
 #[cfg(test)]
