@@ -333,7 +333,6 @@ pub fn panel(
     let mut selected = None;
     ui.scope(|ui| {
         crate::ui_style::modern(ui);
-        crate::ui_style::heading(ui, "Your saved structures", "Newest first · shared across windows and sessions");
         ui.horizontal(|ui| {
             ui.small(format!("{} of 20 saved", history.entries.len()));
             ui.menu_button("How history works", |ui| {
@@ -342,29 +341,21 @@ pub fn panel(
                 ui.label("Use Save in Molecule Editor to keep an edited version. Edits and trajectory playback do not add entries automatically.");
             });
         });
-        let filter_id = egui::Id::new("recent_structures_search_v1");
-        let mut filter = ui.ctx().data_mut(|data| data.get_temp::<String>(filter_id).unwrap_or_default());
-        ui.add(egui::TextEdit::singleline(&mut filter)
-            .desired_width(f32::INFINITY).hint_text("Search by name or formula"));
-        ui.ctx().data_mut(|data| data.insert_temp(filter_id, filter.clone()));
         status(ui, history);
-        let query = filter.trim().to_lowercase();
-        let mut matches = 0;
         for (index, entry) in history.entries.iter().enumerate() {
             let comp = composition(&entry.snapshot.atoms);
-            if !entry.name.to_lowercase().contains(&query) && !comp.formula.to_lowercase().contains(&query) {
-                continue;
-            }
-            matches += 1;
             ui.push_id(&entry.path, |ui| {
                 crate::ui_style::group(ui, "", |ui| {
                     ui.horizontal(|ui| {
                         ui.label(egui::RichText::new(format!("{:02}", index + 1)).small().color(crate::ui_style::ACCENT));
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui.add(crate::ui_style::primary("Load")).clicked_once() {
+                            if ui
+                                .add(crate::ui_style::primary(egui::RichText::new("Load").small()))
+                                .clicked_once()
+                            {
                                 selected = Some(entry.clone());
                             }
-                            ui.add(egui::Label::new(egui::RichText::new(&entry.name).strong()).truncate())
+                            ui.add(egui::Label::new(egui::RichText::new(&entry.name).small().strong()).truncate())
                                 .on_hover_text(&entry.name);
                         });
                     });
@@ -386,8 +377,6 @@ pub fn panel(
             crate::ui_style::group(ui, "No saved structures yet", |ui| {
                 ui.small("Save a version from Molecule Editor to keep it here.");
             });
-        } else if matches == 0 {
-            ui.weak("No structures match your search.");
         }
     });
     ui.ctx().request_repaint_after(Duration::from_secs(2));

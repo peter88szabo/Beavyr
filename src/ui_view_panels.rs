@@ -7,15 +7,10 @@ use crate::settings::{MolSettings, RepresentationMode};
 use crate::ui_style::{self, ResponseExt};
 
 pub fn representation_panel(ui: &mut egui::Ui, settings: &mut MolSettings, atom_count: usize) {
-    ui_style::heading(
-        ui,
-        "Choose how atoms are drawn",
-        "Change the display without changing the structure.",
-    );
     let mut changed = false;
     let mut mesh_changed = false;
     ui_style::group(ui, "Display style", |ui| {
-        let width = ((ui.available_width() - 8.0) / 2.0).max(100.0);
+        let width = ((ui.available_width() - 8.0) / 2.0).max(80.0);
         let choices = [
             (
                 RepresentationMode::BallAndStick,
@@ -53,8 +48,9 @@ pub fn representation_panel(ui: &mut egui::Ui, settings: &mut MolSettings, atom_
                 for &(mode, label, hint) in row {
                     if ui
                         .add_sized(
-                            [width, 36.0],
-                            egui::Button::new(label).selected(settings.representation == mode),
+                            [width, 26.0],
+                            egui::Button::new(egui::RichText::new(label).small())
+                                .selected(settings.representation == mode),
                         )
                         .on_hover_text(hint)
                         .clicked_once()

@@ -152,32 +152,25 @@ mod tests {
                     "Structure layout check",
                     |ui| {
                         ui.horizontal_wrapped(|ui| {
-                            for label in ["Open XYZ…", "View mode", "Copy XYZ", "Save XYZ"] {
+                            for label in ["Project", "Open structure…"] {
                                 let _ = ui.button(label);
                             }
                         });
+                        ui.horizontal_wrapped(|ui| {
+                            for label in ["View mode", "Copy XYZ", "Save XYZ"] {
+                                let _ = ui.button(label);
+                            }
+                        });
+                        summary(
+                            ui,
+                            &crate::molecule::composition(&vec!["C".into(); 3]),
+                            None,
+                        );
                         ui.horizontal(|ui| {
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    let _ = ui.small_button("Center");
-                                    for label in ["H-bonds", "Numbers", "Symbols"] {
-                                        ui.checkbox(&mut false, egui::RichText::new(label).small());
-                                    }
-                                    ui.with_layout(
-                                        egui::Layout::left_to_right(egui::Align::Center),
-                                        |ui| {
-                                            summary(
-                                                ui,
-                                                &crate::molecule::composition(
-                                                    &vec!["C".into(); 3],
-                                                ),
-                                                None,
-                                            );
-                                        },
-                                    );
-                                },
-                            );
+                            for label in ["Symbols", "Numbers", "H-bonds"] {
+                                ui.checkbox(&mut false, egui::RichText::new(label).small());
+                            }
+                            let _ = ui.small_button("Center");
                         });
                         let next = coordinates(ui, true, true, draft, &[]);
                         if next != CoordinateAction::None {
@@ -262,7 +255,7 @@ mod tests {
                     )
                 });
             assert!(
-                viewport.height() > size[1] * if size[1] >= 600.0 { 0.60 } else { 0.50 },
+                viewport.height() > size[1] * if size[1] >= 600.0 { 0.55 } else { 0.45 },
                 "Coordinates got only {viewport:?}"
             );
             for label in ["Apply coordinates", "Reset", "Clear"] {

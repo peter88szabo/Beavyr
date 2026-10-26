@@ -414,9 +414,6 @@ pub fn ui_panel(
                     });
 
                     ui.horizontal_wrapped(|ui| {
-                        let sel = ui.visuals().selection.bg_fill;
-                        let dim = ui.visuals().widgets.inactive.bg_fill;
-
                         crate::project::menu(ui, &mut project);
                         if ui.add(crate::ui_style::primary("Open structure…")).clicked_once() {
                             let dlg = crate::recent_dir::open().add_filter("Structures", &["xyz", "pdb", "ent", "cif", "mmcif"]);
@@ -441,6 +438,12 @@ pub fn ui_panel(
                                 }
                             }
                         }
+
+                    });
+                    // The coordinate actions on a row of their own.
+                    ui.horizontal_wrapped(|ui| {
+                        let sel = ui.visuals().selection.bg_fill;
+                        let dim = ui.visuals().widgets.inactive.bg_fill;
 
                         if ui
                             .add(
@@ -507,48 +510,43 @@ pub fn ui_panel(
                         }
                     });
 
-                    // The display toggles in plain sight on the right of the
-                    // summary line, rather than in a menu; the summary takes
-                    // what is left and truncates (full details on hover).
-                    ui.horizontal(|ui| {
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            let small = |s: &str| egui::RichText::new(s).small();
-                            if ui
-                                .small_button("Center")
-                                .on_hover_text("Center the view on the molecule")
-                                .clicked_once()
-                            {
-                                if let Some(c) = compute_centroid(&mol.pos) {
-                                    cam.target = c;
+                    let summary = ui.scope(|ui| {
+                        crate::ui_structure::summary(
+                            ui,
+                            &crate::molecule::composition(&mol.atoms),
+                            xyz_buf.current_file.as_deref(),
+                        );
+                    });
+                    // Successful file-loading details, on hover of the summary.
+                    if startup_report.messages.iter().any(|(_, error)| !error) {
+                        summary.response.on_hover_ui(|ui| {
+                            for (message, is_error) in &startup_report.messages {
+                                if !is_error {
+                                    ui.small(message);
                                 }
                             }
-                            ui.checkbox(&mut settings.show_hbonds, small("H-bonds"));
-                            if ui.checkbox(&mut show_index, small("Numbers")).changed() {
-                                ctx.data_mut(|d| d.insert_persisted(show_index_id, show_index));
-                            }
-                            if ui.checkbox(&mut show_type, small("Symbols")).changed() {
-                                ctx.data_mut(|d| d.insert_persisted(show_type_id, show_type));
-                            }
-                            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                                let summary = ui.scope(|ui| {
-                                    crate::ui_structure::summary(
-                                        ui,
-                                        &crate::molecule::composition(&mol.atoms),
-                                        xyz_buf.current_file.as_deref(),
-                                    );
-                                });
-                                // Successful file-loading details, on hover.
-                                if startup_report.messages.iter().any(|(_, error)| !error) {
-                                    summary.response.on_hover_ui(|ui| {
-                                        for (message, is_error) in &startup_report.messages {
-                                            if !is_error {
-                                                ui.small(message);
-                                            }
-                                        }
-                                    });
-                                }
-                            });
                         });
+                    }
+                    // Display toggles in plain sight, on a row of their own so
+                    // they do not widen the panel.
+                    ui.horizontal(|ui| {
+                        let small = |s: &str| egui::RichText::new(s).small();
+                        if ui.checkbox(&mut show_type, small("Symbols")).changed() {
+                            ctx.data_mut(|d| d.insert_persisted(show_type_id, show_type));
+                        }
+                        if ui.checkbox(&mut show_index, small("Numbers")).changed() {
+                            ctx.data_mut(|d| d.insert_persisted(show_index_id, show_index));
+                        }
+                        ui.checkbox(&mut settings.show_hbonds, small("H-bonds"));
+                        if ui
+                            .small_button("Center")
+                            .on_hover_text("Center the view on the molecule")
+                            .clicked_once()
+                        {
+                            if let Some(c) = compute_centroid(&mol.pos) {
+                                cam.target = c;
+                            }
+                        }
                     });
 
                     // Failed command-line loads and invalid drafts must remain
