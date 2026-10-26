@@ -106,13 +106,20 @@ fn existing_hydrogens_and_non_target_elements_are_preserved() {
 }
 
 #[test]
-fn carbonyl_alkene_aromatic_and_partial_bonds_are_not_saturated() {
-    for (symbols, distance) in [
-        (["C", "O"], 1.22),
-        (["C", "C"], 1.34),
-        (["C", "C"], 1.40),
-        (["C", "C"], 1.70),
-    ] {
+fn unsaturated_centres_get_only_their_open_valence() {
+    // C=O becomes formaldehyde and C=C ethylene: the double bond counts
+    // toward the valence, so each carbon gets two H and the oxygen none.
+    for (symbols, distance, added) in [(["C", "O"], 1.22, 2), (["C", "C"], 1.34, 4)] {
+        let mut mol = molecule(&symbols, &[Vec3::ZERO, Vec3::X * distance]);
+        let result = complete(&mut mol).unwrap();
+        assert_eq!(result.added, added, "{symbols:?} at {distance}");
+        assert_eq!(result.skipped, 0);
+    }
+}
+
+#[test]
+fn ambiguous_lone_aromatic_and_partial_bonds_are_not_saturated() {
+    for (symbols, distance) in [(["C", "C"], 1.40), (["C", "C"], 1.70)] {
         let mut mol = molecule(&symbols, &[Vec3::ZERO, Vec3::X * distance]);
         let result = complete(&mut mol).unwrap();
         assert_eq!(result.added, 0, "{symbols:?} at {distance}");
@@ -256,4 +263,94 @@ fn nitrogen_completion_adds_ammonia_and_planar_amide_hydrogens() {
     let hs:Vec<_>=amide.bonds.iter().filter_map(|&(a,b,_)| if a==2 && amide.atoms[b]=="H" {Some(b)} else if b==2 && amide.atoms[a]=="H" {Some(a)} else {None}).collect();
     assert_eq!(hs.len(),2);for h in hs {assert!(amide.pos[h].z.abs()<1e-4,"amide H must be planar");}
     assert_eq!(complete(&mut amide).unwrap().added,0);
+}
+
+#[test]
+fn open_sites_on_aromatic_alkene_and_carbonyl_carbons_get_one_h() {
+    // Benzene with one H removed (C6H5).
+    let r = 1.39_f32;
+    let rh = r + 1.09;
+    let mut atoms = vec![];
+    let mut pos = vec![];
+    for k in 0..6 {
+        let a = (k as f32) * std::f32::consts::PI / 3.0;
+        atoms.push("C");
+        pos.push(Vec3::new(r * a.cos(), r * a.sin(), 0.0));
+    }
+    for k in 1..6 {
+        let a = (k as f32) * std::f32::consts::PI / 3.0;
+        atoms.push("H");
+        pos.push(Vec3::new(rh * a.cos(), rh * a.sin(), 0.0));
+    }
+    let mut phenyl = molecule(&atoms, &pos);
+    // Vinyl, H2C=CH.
+    let mut vinyl = molecule(
+        &["C", "C", "H", "H", "H"],
+        &[
+            Vec3::ZERO,
+            Vec3::new(1.33, 0.0, 0.0),
+            Vec3::new(-0.55, 0.94, 0.0),
+            Vec3::new(-0.55, -0.94, 0.0),
+            Vec3::new(1.88, 0.94, 0.0),
+        ],
+    );
+    // Formyl, H-C=O.
+    let mut formyl = molecule(
+        &["C", "O", "H"],
+        &[Vec3::ZERO, Vec3::new(1.21, 0.0, 0.0), Vec3::new(-0.55, 0.94, 0.0)],
+    );
+    for (name, mol, host) in [
+        ("phenyl", &mut phenyl, 0),
+        ("vinyl", &mut vinyl, 1),
+        ("formyl", &mut formyl, 0),
+    ] {
+        let before = mol.pos.clone();
+        let result = complete(mol).unwrap();
+        assert_eq!((result.added, result.skipped), (1, 0), "{name}");
+        assert_eq!(mol.pos[..before.len()], before[..], "{name}: existing atoms moved");
+        let h = *mol.pos.last().unwrap();
+        let length = h.distance(mol.pos[host]);
+        assert!((length - single_bond_length("C", "H")).abs() < 1.0e-4, "{name}");
+        // The new H lies in the plane of the sp2 centre.
+        assert!(h.z.abs() < 1.0e-3, "{name}: H out of plane");
+        assert_eq!(complete(mol).unwrap().added, 0, "{name}: second click adds nothing");
+    }
+}
+
+#[test]
+fn conjugated_ring_carbon_with_double_bond_lengths_on_both_sides_gets_its_h() {
+    // N-methyl-2-nitropyrrole as drawn in the editor, missing the H on C6.
+    // C6 has C=N (1.30 Å) and C=C (1.34 Å) lengths at once; summing those
+    // orders reads as a full valence, which is impossible for a ring carbon.
+    let rows = [
+        ("C", [0.0, 0.0, 0.0]),
+        ("H", [1.08899999, 0.0, 0.0]),
+        ("H", [-0.36300099, 1.02671909, 0.0]),
+        ("H", [-0.36300302, -0.51335996, -0.88916808]),
+        ("N", [-0.48999652, -0.69296622, 1.20025051]),
+        ("C", [0.27723429, -1.40935135, 1.96885228]),
+        ("C", [-1.73024261, -0.64553106, 1.59030211]),
+        ("C", [-1.83181119, -1.37666774, 2.70266390]),
+        ("C", [-0.48010388, -1.89174235, 2.95868254]),
+        ("H", [-0.16203259, -2.53181744, 3.78162527]),
+        ("N", [-2.82193136, 0.08140799, 0.92646819]),
+        ("O", [-3.86514425, 0.19068474, 1.52968085]),
+        ("O", [-2.60509348, 0.52240282, -0.17924687]),
+        ("H", [-2.71235228, -1.55082357, 3.28508735]),
+    ];
+    let atoms: Vec<&str> = rows.iter().map(|r| r.0).collect();
+    let pos: Vec<Vec3> = rows.iter().map(|r| Vec3::from_array(r.1)).collect();
+    let mut mol = molecule(&atoms, &pos);
+    let result = complete(&mut mol).unwrap();
+    assert_eq!(result.added, 1, "{result:?}");
+    let h = mol.pos[14];
+    assert!((h.distance(mol.pos[5]) - single_bond_length("C", "H")).abs() < 1.0e-4);
+    // The new H sits in the ring plane, pointing away from the ring.
+    let ring_centre = [4, 5, 6, 7, 8].iter().map(|&i| mol.pos[i]).sum::<Vec3>() / 5.0;
+    assert!((h - mol.pos[5]).dot(mol.pos[5] - ring_centre) > 0.0);
+    // The single-atom tool agrees with the bulk one.
+    let mut smart = molecule(&atoms, &pos);
+    append_smart_hydrogen(&mut smart, 5).unwrap();
+    assert_eq!(smart.pos[14], h);
+    assert_eq!(complete(&mut mol).unwrap().added, 0);
 }

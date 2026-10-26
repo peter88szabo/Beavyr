@@ -70,7 +70,15 @@ pub(super) fn append_smart_hydrogen(mol: &mut Molecule, host: usize) -> Result<(
         })
         .collect();
     let total: f64 = orders.iter().sum();
-    if let Some(valences) = common_valences(symbol) {
+    let dirs_for_check: Vec<Vec3> = neighbors
+        .iter()
+        .map(|&i| (mol.pos[i] - center).normalize_or_zero())
+        .collect();
+    if let Some(open) = open_hydrogen_sites(symbol, &dirs_for_check, &orders) {
+        if open == 0 {
+            return Err(format!("{symbol}{} already has a full valence.", host + 1));
+        }
+    } else if let Some(valences) = common_valences(symbol) {
         if !valences.iter().any(|&v| total + 1.0 <= v + 1.0e-6) {
             return Err(format!(
                 "{symbol}{} already has a full valence ({total:.1}).",
@@ -191,6 +199,38 @@ pub(super) fn append_smart_hydrogen(mol: &mut Molecule, host: usize) -> Result<(
     Ok(())
 }
 
+/// How many H a C, N or O centre still lacks, or `None` when that cannot be
+/// told (another element, a stretched bond, a lone "aromatic" bond).
+///
+/// Counted from the neighbours and the hybridisation rather than by summing
+/// bond orders: in a conjugated ring every length sits between single and
+/// double, so the per-bond estimates can add up to more than the valence (a
+/// ring carbon reading as C=N and C=C at once) and hide an open site.
+fn open_hydrogen_sites(symbol: &str, dirs: &[Vec3], orders: &[f64]) -> Option<usize> {
+    let valence: usize = match symbol {
+        "C" => 4,
+        "N" => 3,
+        "O" => 2,
+        _ => return None,
+    };
+    if orders.iter().any(|&o| o < 1.0) {
+        return None;
+    }
+    let max_order = orders.iter().copied().fold(1.0_f64, f64::max);
+    if orders.len() == 1 && (max_order - 1.5).abs() < 1.0e-6 {
+        return None;
+    }
+    let linear = matches!(dirs, [a, b] if a.dot(*b) < -0.966);
+    let pi_bonds = if max_order >= 2.5 || (max_order > 1.0 && linear) {
+        2
+    } else if max_order > 1.0 {
+        1
+    } else {
+        0
+    };
+    Some(valence.saturating_sub(orders.len() + pi_bonds))
+}
+
 /// Synchronize the editor after adding H, retaining the actual host as each
 /// new row's bond reference rather than the preceding hydrogen in file order.
 pub(super) fn builder_zmat(mol: &Molecule, first_added: usize) -> Vec<ZAtom> {
@@ -300,9 +340,9 @@ pub(super) fn complete(mol: &mut Molecule) -> Result<Completion, String> {
         if neighbors.len() >= target {
             continue;
         }
-        // This action assumes saturated C and neutral divalent O. A shorter
-        // or stretched bond is evidence against that assumption, not another
-        // missing H. In particular leave carbonyl and aromatic centres alone.
+        // A carbonyl or aromatic carbon gets the one H it lacks, not one per
+        // missing neighbour (see `open_hydrogen_sites`). A stretched bond is
+        // ambiguous, not a missing H: skip it.
         let amide = mol.atoms[host] == "N"
             && neighbors.iter().any(|&c| {
                 symbols[c] == "C"
@@ -314,19 +354,29 @@ pub(super) fn complete(mol: &mut Molecule) -> Result<Completion, String> {
                                     >= 1.5
                         })
             });
-        if !amide
-            && neighbors.iter().any(|&i| {
-                estimate_bond_order(
-                    symbols[host],
-                    symbols[i],
-                    mol.pos[host].distance(mol.pos[i]),
-                ) != 1.0
+        let orders: Vec<f64> = neighbors
+            .iter()
+            .map(|&i| {
+                if amide && symbols[i] == "C" {
+                    1.0
+                } else {
+                    estimate_bond_order(
+                        symbols[host],
+                        symbols[i],
+                        mol.pos[host].distance(mol.pos[i]),
+                    )
+                }
             })
-        {
+            .collect();
+        let dirs: Vec<Vec3> = neighbors
+            .iter()
+            .map(|&i| (mol.pos[i] - mol.pos[host]).normalize_or_zero())
+            .collect();
+        let Some(missing) = open_hydrogen_sites(&mol.atoms[host], &dirs, &orders) else {
             result.skipped += 1;
             continue;
-        }
-        for _ in neighbors.len()..target {
+        };
+        for _ in 0..missing {
             if append_smart_hydrogen(mol, host).is_err() {
                 result.skipped += 1;
                 break;
