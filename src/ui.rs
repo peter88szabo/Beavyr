@@ -277,15 +277,22 @@ pub fn ui_panel(
         });
 
         if open {
-            egui::Area::new(egui::Id::new("rc_atom_popup"))
+            // Separate ids: the menu's buttons stretch to the area's remembered
+            // width, so sharing one with the wider atom popup kept the
+            // background menu wide for good.
+            egui::Area::new(egui::Id::new(if picked >= 0 {
+                "rc_atom_popup_v2"
+            } else {
+                "rc_background_popup_v2"
+            }))
                 .fixed_pos(pos_pts)
                 .order(egui::Order::Foreground)
                 .show(&ctx, |ui| {
                     egui::Frame::popup(ui.style()).corner_radius(10).inner_margin(12).show(ui, |ui| {
-                        if picked >= 0 {
-                            ui.set_min_width(220.0);
-                        }
-                        ui.vertical(|ui| {
+                        // Same menu for an atom and for the background, the atom's
+                        // extras below; as wide as the widest entry, every button
+                        // stretched to it.
+                        ui.with_layout(egui::Layout::top_down_justified(egui::Align::LEFT), |ui| {
                             if let Some(action) = crate::ui_background_menu::contents(
                                 ui, &mut settings, !mol.atoms.is_empty(),
                             ) {
@@ -317,8 +324,11 @@ pub fn ui_panel(
 
                             if picked >= 0 {
                                 ui.separator();
-                                ui.label(format!("Atom #{} (right-click)", picked));
-                                if ui.button("Use as rotation center").clicked() {
+                                ui.label(match mol.atoms.get(picked as usize) {
+                                    Some(symbol) => format!("Atom {symbol}{}", picked + 1),
+                                    None => format!("Atom {}", picked + 1),
+                                });
+                                if ui.button("Use as Rot-center").clicked() {
                                     let idx = picked as usize;
                                     if idx < mol.pos.len() {
                                         cam.target = mol.pos[idx];
