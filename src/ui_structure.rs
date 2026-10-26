@@ -157,12 +157,27 @@ mod tests {
                             }
                         });
                         ui.horizontal(|ui| {
-                            summary(
-                                ui,
-                                &crate::molecule::composition(&vec!["C".into(); 3]),
-                                None,
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    let _ = ui.small_button("Center");
+                                    for label in ["H-bonds", "Numbers", "Symbols"] {
+                                        ui.checkbox(&mut false, egui::RichText::new(label).small());
+                                    }
+                                    ui.with_layout(
+                                        egui::Layout::left_to_right(egui::Align::Center),
+                                        |ui| {
+                                            summary(
+                                                ui,
+                                                &crate::molecule::composition(
+                                                    &vec!["C".into(); 3],
+                                                ),
+                                                None,
+                                            );
+                                        },
+                                    );
+                                },
                             );
-                            ui.menu_button("View", |_| {});
                         });
                         let next = coordinates(ui, true, true, draft, &[]);
                         if next != CoordinateAction::None {

@@ -306,13 +306,13 @@ pub fn ui_panel(
                                     Action::Flip(axis) => Some(crate::orientation::flip(
                                         &mol.atoms, &mol.pos, axis,
                                     )),
-                                    Action::Close => None,
                                 };
                                 if let Some(positions) = positions {
                                     mol.set_pos(positions);
                                     ev_changed.write(MoleculeChanged::set_pos());
                                 }
-                                open = false;
+                                // The menu stays open for further actions; it
+                                // has its own Close button.
                             }
 
                             if picked >= 0 {
@@ -497,46 +497,52 @@ pub fn ui_panel(
                         }
                     });
 
+                    // The display toggles in plain sight on the right of the
+                    // summary line, rather than in a menu; the summary takes
+                    // what is left and truncates (full details on hover).
                     ui.horizontal(|ui| {
-                        let summary_width = (ui.available_width() - 72.0).max(60.0);
-                        ui.allocate_ui_with_layout(
-                            egui::vec2(summary_width, 30.0),
-                            egui::Layout::left_to_right(egui::Align::Center),
-                            |ui| {
-                                crate::ui_structure::summary(
-                                    ui,
-                                    &crate::molecule::composition(&mol.atoms),
-                                    xyz_buf.current_file.as_deref(),
-                                );
-                            },
-                        );
-                        ui.menu_button("View", |ui| {
-                            if ui.checkbox(&mut show_type, "Element symbols").changed() {
-                                ctx.data_mut(|d| d.insert_persisted(show_type_id, show_type));
-                            }
-                            if ui.checkbox(&mut show_index, "Atom numbers").changed() {
-                                ctx.data_mut(|d| d.insert_persisted(show_index_id, show_index));
-                            }
-                            ui.checkbox(&mut settings.show_hbonds, "Hydrogen bonds");
-                            if ui.button("Center molecule").clicked_once() {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            let small = |s: &str| egui::RichText::new(s).small();
+                            if ui
+                                .small_button("Center")
+                                .on_hover_text("Center the view on the molecule")
+                                .clicked_once()
+                            {
                                 if let Some(c) = compute_centroid(&mol.pos) {
                                     cam.target = c;
                                 }
-                                ui.close();
                             }
-                            if startup_report.messages.iter().any(|(_, error)| !error) {
-                                ui.separator();
-                                for (message, is_error) in &startup_report.messages {
-                                    if !is_error {
-                                        ui.small(message);
-                                    }
+                            ui.checkbox(&mut settings.show_hbonds, small("H-bonds"));
+                            if ui.checkbox(&mut show_index, small("Numbers")).changed() {
+                                ctx.data_mut(|d| d.insert_persisted(show_index_id, show_index));
+                            }
+                            if ui.checkbox(&mut show_type, small("Symbols")).changed() {
+                                ctx.data_mut(|d| d.insert_persisted(show_type_id, show_type));
+                            }
+                            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                                let summary = ui.scope(|ui| {
+                                    crate::ui_structure::summary(
+                                        ui,
+                                        &crate::molecule::composition(&mol.atoms),
+                                        xyz_buf.current_file.as_deref(),
+                                    );
+                                });
+                                // Successful file-loading details, on hover.
+                                if startup_report.messages.iter().any(|(_, error)| !error) {
+                                    summary.response.on_hover_ui(|ui| {
+                                        for (message, is_error) in &startup_report.messages {
+                                            if !is_error {
+                                                ui.small(message);
+                                            }
+                                        }
+                                    });
                                 }
-                            }
+                            });
                         });
                     });
 
                     // Failed command-line loads and invalid drafts must remain
-                    // visible; successful file-loading details live in View.
+                    // visible; successful file-loading details are on hover.
                     for (message, is_error) in &startup_report.messages {
                         if *is_error {
                             ui.colored_label(egui::Color32::from_rgb(220, 110, 60), message);
