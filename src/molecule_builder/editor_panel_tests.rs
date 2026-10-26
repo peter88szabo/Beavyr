@@ -121,8 +121,8 @@ impl EditorFixture {
             };
             if editor_docked(ui.ctx()) {
                 egui::Panel::right("test_editor_panel")
-                    .default_size(420.0)
-                    .min_size(380.0)
+                    .default_size(360.0)
+                    .min_size(340.0)
                     .show(ui, draw);
             } else {
                 crate::ui::molecule_editor_window(ui.ctx(), &mut true, draw);
@@ -276,7 +276,7 @@ fn hidden_and_frozen_atoms_can_be_restored_from_the_panel() {
 #[test]
 fn clear_display_is_a_visible_button_and_undo_brings_the_atoms_back() {
     let mut fixture = EditorFixture::new("3\n\nO 0 0 0\nH 1.1 0 0\nH -0.2 1.05 0\n");
-    fixture.click("Clear Display…");
+    fixture.click("Clear…");
     assert!(fixture.zmat.confirm_clear);
     fixture.click("Clear");
     assert!(fixture.mol.atoms.is_empty());
@@ -394,11 +394,12 @@ fn changing_element_preserves_coordinates_and_can_be_undone() {
 }
 
 #[test]
-fn live_fragment_adjustment_blocks_destructive_main_panel_edits() {
+fn an_edit_during_a_placed_fragment_slider_move_keeps_the_move_first() {
     let mut fixture = EditorFixture::new("1\ncarbon\nC 0 0 0\n");
     set_selected_atom(&mut fixture.zmat, &fixture.mol.atoms, Some(0));
     fixture.zmat.frag_name = "-OH".into();
     fixture.act(Action::Add).unwrap();
+    let placed = fixture.mol.pos.clone();
     assert!(fragment_editor_prepare(
         &mut fixture.zmat.placed_editor,
         &mut fixture.mol,
@@ -410,10 +411,40 @@ fn live_fragment_adjustment_blocks_destructive_main_panel_edits() {
         &mut fixture.mol,
         &mut fixture.settings,
     );
-    let preview = fixture.mol.pos.clone();
-    assert!(fixture.act(Action::Delete(0)).is_err());
-    assert_eq!(fixture.mol.pos, preview);
-    assert_eq!(fixture.zmat.history.depth(), 1);
+    let moved = fixture.mol.pos.clone();
+    assert_ne!(moved, placed);
+    // Delete the H: the slider move is applied first, as its own step.
+    fixture.act(Action::Delete(2)).unwrap();
+    assert_eq!(fixture.mol.atoms, ["C", "O"]);
+    assert_eq!(fixture.mol.pos[..], moved[..2]);
+    assert_eq!(fixture.zmat.history.depth(), 3);
+    fixture.act(Action::Undo).unwrap();
+    assert_eq!(fixture.mol.pos, moved);
+    fixture.act(Action::Undo).unwrap();
+    assert_eq!(fixture.mol.pos, placed);
+}
+
+#[test]
+fn moving_a_placed_fragment_slider_does_not_shift_or_disable_the_panel() {
+    let mut fixture = EditorFixture::new("1\ncarbon\nC 0 0 0\n");
+    set_selected_atom(&mut fixture.zmat, &fixture.mol.atoms, Some(0));
+    fixture.zmat.frag_name = "-OH".into();
+    fixture.act(Action::Add).unwrap();
+    fixture.frame(vec![], [1280.0, 720.0]);
+    let before = fixture.frame(vec![], [1280.0, 720.0]);
+    let tiles_before = label_rect(&before, "Built-in").expect("library row");
+    let placed = fixture.mol.pos.clone();
+    fixture.zmat.placed_editor.axis_len_target += 0.5;
+    recompute_preview(
+        &mut fixture.zmat.placed_editor,
+        &mut fixture.mol,
+        &mut fixture.settings,
+    );
+    assert_ne!(fixture.mol.pos, placed, "the slider must actually move the fragment");
+    let after = fixture.frame(vec![], [1280.0, 720.0]);
+    let tiles_after = label_rect(&after, "Built-in").expect("library row");
+    assert_eq!(tiles_before, tiles_after, "panel content moved during the slider drag");
+    assert!(label_rect(&after, "Apply or cancel the fragment adjustment before editing atoms.").is_none());
 }
 
 #[test]
@@ -481,4 +512,65 @@ fn protein_backbone_preview_apply_undo_and_freeze_after_preview() {
     let after=fixture.mol.clone();assert_ne!(after.pos,before.pos);
     fixture.act(Action::Undo).unwrap();assert_eq!(fixture.mol.pos,before.pos);assert_eq!(fixture.mol.topology,before.topology);
     fixture.act(Action::Redo).unwrap();assert_eq!(fixture.mol.pos,after.pos);assert_eq!(fixture.mol.topology,after.topology);
+}
+
+#[test]
+fn set_angles_button_fits_beside_add_and_replace() {
+    let mut fixture = EditorFixture::new("1\ncarbon\nC 0 0 0\n");
+    set_selected_atom(&mut fixture.zmat, &fixture.mol.atoms, Some(0));
+    // The app's text sizes (ui.rs), not egui's smaller defaults.
+    fixture.ctx.all_styles_mut(|style| {
+        style.text_styles = [
+            (egui::TextStyle::Heading, egui::FontId::proportional(22.0)),
+            (egui::TextStyle::Body, egui::FontId::proportional(16.0)),
+            (egui::TextStyle::Monospace, egui::FontId::monospace(15.0)),
+            (egui::TextStyle::Button, egui::FontId::proportional(16.0)),
+            (egui::TextStyle::Small, egui::FontId::proportional(13.0)),
+        ]
+        .into();
+    });
+    fixture.frame(vec![], [1280.0, 720.0]);
+    let output = fixture.frame(vec![], [1280.0, 720.0]);
+    fn find(shape: &egui::Shape, label: &str, clip: egui::Rect) -> Option<(egui::Rect, egui::Rect)> {
+        match shape {
+            egui::Shape::Text(t) if t.galley.text() == label => {
+                Some((egui::Rect::from_min_size(t.pos, t.galley.size()), clip))
+            }
+            egui::Shape::Vec(v) => v.iter().find_map(|s| find(s, label, clip)),
+            _ => None,
+        }
+    }
+    let locate = |label: &str| {
+        output
+            .shapes
+            .iter()
+            .find_map(|s| find(&s.shape, label, s.clip_rect))
+            .unwrap_or_else(|| panic!("no {label:?} button"))
+    };
+    let (orientation, clip) = locate("Set Angles ↗");
+    let (add, _) = locate("Add");
+    assert!(
+        clip.contains_rect(orientation),
+        "Set Angles text {orientation:?} is clipped by {clip:?}"
+    );
+    assert!(
+        (orientation.center().y - add.center().y).abs() < 1.0,
+        "Set Angles wrapped below Add: {orientation:?} vs {add:?}"
+    );
+}
+
+#[test]
+fn docked_title_has_its_own_line_above_formula_and_buttons() {
+    let mut fixture = EditorFixture::new("1\ncarbon\nC 0 0 0\n");
+    let mut state = panel_state(&fixture.ctx);
+    state.docked = true;
+    store_panel_state(&fixture.ctx, state);
+    fixture.frame(vec![], [1280.0, 720.0]);
+    let output = fixture.frame(vec![], [1280.0, 720.0]);
+    let title = label_rect(&output, "Molecular Editor").expect("docked title");
+    let formula = label_rect(&output, "C  ·  1 atoms").expect("formula");
+    let close = label_rect(&output, "×").expect("close button");
+    assert!(formula.top() >= title.bottom(), "{title:?} {formula:?}");
+    assert!(close.top() >= title.bottom(), "{title:?} {close:?}");
+    assert!((formula.center().y - close.center().y).abs() < 2.0);
 }

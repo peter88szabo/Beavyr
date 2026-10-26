@@ -152,7 +152,10 @@ pub(super) fn contents(
         settings.geometry_dirty = true;
     }
     let original_style = ui.style().clone();
-    let pending = pending_fragment_edit(editor, zmat, mol);
+    // Only the separate Fragment Editor window blocks the panel. Moving the
+    // newly placed fragment with its sliders does not: the panel must not
+    // change under the slider, and any edit applies that move first.
+    let pending = editor.base_pos.as_ref().is_some_and(|base| base != &mol.pos);
     let available = !pending && !traj.playing && !zmat.confirm_clear;
     let mut action = shortcut_action(
         ui,
@@ -190,9 +193,7 @@ pub(super) fn contents(
             .auto_shrink([false, false])
             .max_height(body_rect.height())
             .show(&mut body, |ui| {
-                if pending {
-                    ui.label("Apply or cancel the fragment adjustment before editing atoms.");
-                } else if traj.playing {
+                if traj.playing {
                     ui.label("Pause trajectory playback to edit this structure.");
                 }
                 ui.add_enabled_ui(available && !zmat.add_atom_active, |ui| {
@@ -313,11 +314,12 @@ fn header(
     action: &mut Option<Action>,
 ) {
     let comp = composition(&mol.atoms);
+    // The floating window shows the title in its title bar; docked, it gets
+    // a line of its own above the formula and the Dock and close buttons.
+    if panel.docked {
+        ui.label(egui::RichText::new("Molecular Editor").size(21.0).strong());
+    }
     ui.horizontal(|ui| {
-        // The floating window already shows the title in its title bar.
-        if panel.docked {
-            ui.label(egui::RichText::new("Molecular Editor").size(21.0).strong());
-        }
         // Formula and atom count share the row with Dock and close; an empty
         // structure has nothing to summarise.
         if comp.natoms > 0 {
@@ -377,26 +379,49 @@ fn header(
             *action = Some(Action::Redo);
         }
         ui.add_enabled_ui(available && !mol.atoms.is_empty(), |ui| {
-            ui.menu_button("Save to history", |ui| {
-                ui.label("Keep this version across sessions");
-                ui.add(
-                    egui::TextEdit::singleline(&mut history.save_name)
-                        .hint_text("Name (optional)")
-                        .desired_width(210.0),
-                );
-                if ui.button("Save version").clicked() {
+            // Short labels keep this row, and so the panel, narrow.
+            ui.menu_button("Save", |ui| {
+                // Every option also keeps this version in the editing history.
+                // File names are chosen in the save dialog.
+                let name = "structure";
+                let mut saved = None;
+                if ui.button("Copy XYZ to clipboard").clicked() {
+                    ui.ctx()
+                        .copy_text(super::super::export::xyz_text(mol, name));
+                    saved = Some("Copied XYZ to the clipboard".to_owned());
+                }
+                if ui.button("Save XYZ file…").clicked() {
+                    saved = save_text_file(
+                        &format!("{name}.xyz"),
+                        ("XYZ", &["xyz"]),
+                        &super::super::export::xyz_text(mol, name),
+                    );
+                }
+                if ui.button("Save Z-matrix file…").clicked() {
+                    saved = save_text_file(
+                        &format!("{name}.zmat"),
+                        ("Z-matrix", &["zmat", "txt"]),
+                        &super::super::export::zmat_text(mol),
+                    );
+                }
+                if ui.button("Save to editing history").clicked() {
+                    saved = Some("Saved to history".to_owned());
+                }
+                if let Some(message) = saved {
                     history.save_current(mol);
-                    panel.status = "Saved to history".into();
+                    panel.status = message;
                     ui.close();
                 }
-            });
+            })
+            .response
+            .on_hover_text("Save to history");
         });
         if ui
             .add_enabled(
                 available && !mol.atoms.is_empty(),
-                egui::Button::new("Clear Display…"),
+                egui::Button::new("Clear…"),
             )
-            .on_hover_text("Remove every atom on screen (asks first; Undo brings them back)")
+            .on_hover_text("Clear Display")
             .clicked()
         {
             zmat.confirm_clear = true;
@@ -465,6 +490,17 @@ fn selection(
             });
         }
     });
+}
+
+/// Asks where to write `text`; `None` when the dialog is cancelled, so a
+/// cancelled save adds nothing to the history either.
+fn save_text_file(suggested: &str, filter: (&str, &[&str]), text: &str) -> Option<String> {
+    let dialog = crate::recent_dir::save(suggested).add_filter(filter.0, filter.1);
+    let path = crate::recent_dir::save_file(dialog)?;
+    Some(match std::fs::write(&path, text) {
+        Ok(()) => format!("Saved {}", path.display()),
+        Err(error) => format!("Could not save {}: {error}", path.display()),
+    })
 }
 
 fn choose_atom(zmat: &mut ZMatrixBuilderState, symbol: &str) {
@@ -624,7 +660,7 @@ fn placement_controls(
             let button =
                 egui::Button::new(egui::RichText::new(primary).color(egui::Color32::WHITE))
                     .fill(ADD_FILL)
-                    .min_size(egui::vec2(90.0, 30.0));
+                    .min_size(egui::vec2(80.0, 30.0));
             let add = ui
                 .add_enabled(
                     chosen && (mol.atoms.is_empty() || selection.is_some()),
@@ -648,7 +684,7 @@ fn placement_controls(
                     egui::RichText::new("Replace").color(egui::Color32::WHITE),
                 )
                 .fill(REPLACE_FILL)
-                .min_size(egui::vec2(90.0, 30.0));
+                .min_size(egui::vec2(80.0, 30.0));
                 let replace = ui
                     .add_enabled(chosen && selection.is_some(), button)
                     .on_disabled_hover_text("Select the atom you want to replace.");
@@ -661,7 +697,15 @@ fn placement_controls(
                 }
             }
             if ui
-                .add(egui::Button::new("Placement…").selected(panel.placement_open))
+                .add(
+                    // Short, so it shares the row with Add and Replace in the
+                    // narrow panel; ↗ marks a button that opens a window, as on
+                    // Z-matrix ↗ and Fragment Editor ↗.
+                    egui::Button::new("Set Angles ↗")
+                        .wrap_mode(egui::TextWrapMode::Extend)
+                        .min_size(egui::vec2(0.0, 30.0))
+                        .selected(panel.placement_open),
+                )
                 .on_hover_text("Bond order, angle, dihedral and atom references")
                 .clicked()
             {
@@ -681,7 +725,7 @@ fn reference_controls(
     action: &mut Option<Action>,
 ) {
     let ctx = ui.ctx().clone();
-    egui::Window::new("Placement settings")
+    egui::Window::new("Set Angles")
         .id(egui::Id::new("modern_placement_settings_window"))
         .open(&mut panel.placement_open)
         .resizable(false)
@@ -811,7 +855,7 @@ fn footer(
         }
     });
     let status = if zmat.add_atom_active {
-        "Picking atom references — see Placement settings"
+        "Picking atom references — see Set Angles"
     } else if editor.active {
         "Fragment Editor is picking atoms in the 3D view"
     } else {
@@ -832,6 +876,9 @@ fn perform(
     settings: &mut MolSettings,
     traj: &mut TrajectoryState,
 ) -> Result<Option<(BuilderChange, String)>, String> {
+    // A slider move on the newly placed fragment is kept, as its own undo
+    // step, before the next edit.
+    commit_placed_preview(zmat, mol, settings);
     if pending_fragment_edit(editor, zmat, mol) {
         return Err("Apply or cancel the fragment adjustment first.".into());
     }

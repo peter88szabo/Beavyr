@@ -1920,7 +1920,7 @@ pub fn ui_panel(
         {
             ctx.data_mut(|data| {
                 data.get_temp::<f32>(egui::Id::new("modern_editor_docked_width"))
-                    .unwrap_or(420.0)
+                    .unwrap_or(360.0)
             })
         } else {
             0.0
@@ -1989,9 +1989,11 @@ pub fn ui_panel(
             }
         };
         if builder_open && crate::molecule_builder::builder_ui::editor_docked(&ctx) {
-            let panel = egui::Panel::right("modern_molecular_editor")
-                .default_size(420.0)
-                .min_size(380.0)
+            // The id changes with the size, so a remembered wider panel
+            // does not override the new default.
+            let panel = egui::Panel::right("modern_molecular_editor_v2")
+                .default_size(360.0)
+                .min_size(340.0)
                 .max_size(620.0)
                 .resizable(true)
                 .show(&mut viewport_ui, &mut draw_editor);
@@ -2302,17 +2304,17 @@ pub(crate) fn molecule_editor_window(
     open: &mut bool,
     add_contents: impl FnOnce(&mut egui::Ui),
 ) -> Option<egui::InnerResponse<Option<()>>> {
-    const EDITOR_WIDTH: f32 = 420.0;
+    const EDITOR_WIDTH: f32 = 360.0;
     const EDITOR_HEIGHT: f32 = 760.0;
     const EDITOR_MARGIN: f32 = 16.0;
     let viewport = ctx.viewport_rect();
     let height = EDITOR_HEIGHT.min(viewport.height() - 2.0 * EDITOR_MARGIN);
     egui::Window::new("Molecule Editor")
-        .id(egui::Id::new("molecule_editor_modern_v1"))
+        .id(egui::Id::new("molecule_editor_modern_v2"))
         .open(open)
         .resizable(true)
         .default_size([EDITOR_WIDTH, height])
-        .min_width(380.0)
+        .min_width(340.0)
         .min_height(440.0)
         .default_pos([
             (viewport.right() - EDITOR_WIDTH - EDITOR_MARGIN).max(viewport.left()),

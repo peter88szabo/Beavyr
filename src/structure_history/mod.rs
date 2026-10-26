@@ -339,7 +339,7 @@ pub fn panel(
             ui.menu_button("How history works", |ui| {
                 ui.set_max_width(320.0);
                 ui.label("Loading another structure or clearing the display preserves the previous one.");
-                ui.label("Use Save to history in Molecule Editor to keep an edited version. Edits and trajectory playback do not add entries automatically.");
+                ui.label("Use Save in Molecule Editor to keep an edited version. Edits and trajectory playback do not add entries automatically.");
             });
         });
         let filter_id = egui::Id::new("recent_structures_search_v1");

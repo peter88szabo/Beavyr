@@ -2166,12 +2166,18 @@ pub fn handle_viewport_click(
     mut ev: MessageReader<ViewportClicked>,
     mol: Option<Res<Molecule>>,
     mut zmat_state: ResMut<ZMatrixBuilderState>,
+    fragment_editor: Res<EditorRotateState>,
 ) {
     let Some(mol) = mol else {
         return;
     };
     for ViewportClicked { hit } in ev.read().copied() {
         zmat_state.last_click = Some(hit);
+        // While the Fragment Editor picks atoms, a click is one of its picks
+        // only; selecting the atom as well would show a second highlight.
+        if fragment_editor.active {
+            continue;
+        }
         if zmat_state.add_atom_active {
             collect_add_atom_pick(&mut zmat_state, &mol.atoms, hit);
             continue;
@@ -2318,61 +2324,89 @@ pub fn handle_builder_atom_picked(
             continue;
         }
 
-        match state.picks.len() {
-            0 => {
-                state.picks.push(hit_idx);
-                state.status = None;
-            }
-            1 => {
-                if hit_idx == state.picks[0] {
-                    continue;
-                }
-                let a = state.picks[0];
-                if split_sides_from_bonds(mol.atoms.len(), &mol.bonds, a, hit_idx).is_some() {
-                    state.picks.push(hit_idx);
-                    state.status = None;
-                } else {
-                    state.status = Some(
-                        "Select a displayed covalent bond that is not part of a ring.".to_string(),
-                    );
-                }
-            }
-            2 => {
-                let (a, b) = (state.picks[0], state.picks[1]);
-                let Some((side_a, side_b)) =
-                    split_sides_from_bonds(mol.atoms.len(), &mol.bonds, a, b)
-                else {
-                    state.picks.truncate(1);
-                    state.chosen_side = None;
-                    state.status = Some(
-                        "That bond no longer separates two fragments. Pick another bond."
-                            .to_string(),
-                    );
-                    continue;
-                };
+        record_pick(&mut state, &mol, hit_idx);
+    }
+}
 
-                if side_a.contains(&hit_idx) {
-                    state.picks.push(hit_idx);
-                    state.chosen_side = Some(RotateSide::A);
-                    state.status = None;
-                } else if side_b.contains(&hit_idx) {
-                    state.picks.push(hit_idx);
-                    state.chosen_side = Some(RotateSide::B);
-                    state.status = None;
-                } else {
-                    state.status = Some(
-                        "Pick an atom on one of the two fragments attached to this bond."
-                            .to_string(),
-                    );
-                }
+/// Arm the Fragment Editor's picking from scratch: earlier picks -- including
+/// the axis and atoms handed over from a just-placed fragment -- are dropped
+/// at once, so the next three clicks define the new axis and side.
+fn start_picking(state: &mut EditorRotateState) {
+    state.active = true;
+    state.picks.clear();
+    state.chosen_side = None;
+    state.moving = None;
+    state.status = None;
+}
+
+/// Disarm picking and forget the picks.
+fn stop_picking(state: &mut EditorRotateState) {
+    state.active = false;
+    state.picks.clear();
+    state.chosen_side = None;
+    state.moving = None;
+    state.status = None;
+}
+
+/// One click while the Fragment Editor is picking: two atoms for the bond
+/// axis, then one on the side to move.
+fn record_pick(state: &mut EditorRotateState, mol: &Molecule, hit_idx: usize) {
+    match state.picks.len() {
+        0 => {
+            state.picks.push(hit_idx);
+            state.status = None;
+        }
+        1 => {
+            if hit_idx == state.picks[0] {
+                return;
             }
-            _ => {
-                // A completed selection starts over with a new A endpoint.
-                state.picks.clear();
-                state.chosen_side = None;
-                state.status = None;
+            let a = state.picks[0];
+            if split_sides_from_bonds(mol.atoms.len(), &mol.bonds, a, hit_idx).is_some() {
                 state.picks.push(hit_idx);
+                state.status = None;
+            } else {
+                state.status = Some(
+                    "Select a displayed covalent bond that is not part of a ring.".to_string(),
+                );
             }
+        }
+        2 => {
+            let (a, b) = (state.picks[0], state.picks[1]);
+            let Some((side_a, side_b)) =
+                split_sides_from_bonds(mol.atoms.len(), &mol.bonds, a, b)
+            else {
+                state.picks.truncate(1);
+                state.chosen_side = None;
+                state.status = Some(
+                    "That bond no longer separates two fragments. Pick another bond."
+                        .to_string(),
+                );
+                return;
+            };
+
+            if side_a.contains(&hit_idx) {
+                state.picks.push(hit_idx);
+                state.chosen_side = Some(RotateSide::A);
+                state.status = None;
+            } else if side_b.contains(&hit_idx) {
+                state.picks.push(hit_idx);
+                state.chosen_side = Some(RotateSide::B);
+                state.status = None;
+            } else {
+                state.status = Some(
+                    "Pick an atom on one of the two fragments attached to this bond."
+                        .to_string(),
+                );
+            }
+        }
+        _ => {
+            // A completed selection starts over with a new A endpoint, and
+            // forgets any fixed set of moving atoms along with the old picks.
+            state.picks.clear();
+            state.chosen_side = None;
+            state.moving = None;
+            state.status = None;
+            state.picks.push(hit_idx);
         }
     }
 }
@@ -3320,10 +3354,10 @@ fn fragment_editor_form(
                     .button(if state.active { "Stop picking" } else { "Pick atoms" })
                     .clicked()
                 {
-                    state.active = !state.active;
-                    if !state.active {
-                        state.picks.clear();
-                        state.chosen_side = None;
+                    if state.active {
+                        stop_picking(state);
+                    } else {
+                        start_picking(state);
                     }
                 }
                 ui.weak("Click atoms in the 3D view.");
@@ -3443,6 +3477,33 @@ fn fragment_editor_form(
 }
 
 /// Carry out what the buttons asked for, then rebuild the preview.
+/// Apply an unfinished slider move of the newly placed fragment, exactly as
+/// its Apply button does. Returns whether there was one.
+fn commit_placed_preview(
+    zmat_state: &mut ZMatrixBuilderState,
+    mol: &mut Molecule,
+    settings: &mut MolSettings,
+) -> bool {
+    let pending = zmat_state
+        .placed_editor
+        .base_pos
+        .as_ref()
+        .is_some_and(|base| base != &mol.pos);
+    if !pending {
+        return false;
+    }
+    let mut editor = std::mem::take(&mut zmat_state.placed_editor);
+    let apply = EditorActions {
+        apply: true,
+        cancel: false,
+        reset: false,
+        restore: false,
+    };
+    fragment_editor_finish(apply, &mut editor, zmat_state, mol, settings, AxisSource::JustPlaced);
+    zmat_state.placed_editor = editor;
+    true
+}
+
 fn fragment_editor_finish(
     actions: EditorActions,
     state: &mut EditorRotateState,
@@ -3532,6 +3593,11 @@ fn fragment_editor_window(
         }
     } else {
         state.session_origin = None;
+        // Closing the window, by its × or the panel's toggle, ends picking
+        // and drops the picked atoms with it.
+        if state.active || !state.picks.is_empty() {
+            stop_picking(state);
+        }
     }
 
     let ready = fragment_editor_prepare(state, mol, settings);
@@ -3545,7 +3611,12 @@ fn fragment_editor_window(
         .resizable(true)
         .vscroll(true)
         .show(ctx, |ui| {
+            let was_picking = state.active;
             actions = fragment_editor_form(ui, state, ready, AxisSource::Picked);
+            if state.active && !was_picking {
+                zmat_state.selection.atoms.clear();
+                set_selected_atom(zmat_state, &mol.atoms, None);
+            }
         });
     state.window_open = open;
 
@@ -6870,5 +6941,73 @@ H   1.1405   1.0087  -0.1781
         ));
         assert_eq!(mol.atoms, before.atoms);
         assert_eq!(mol.pos, before.pos);
+    }
+}
+
+#[cfg(test)]
+mod fragment_editor_picking_tests {
+    use super::*;
+
+    /// Ethanol, bonds perceived: C1-C2 is a rotatable, non-ring bond.
+    fn ethanol() -> Molecule {
+        let mut mol = Molecule::from_xyz(
+            "9\n\nC 0 0 0\nC 1.52 0 0\nO 2.0 1.33 0\nH -0.36 1.03 0\nH -0.36 -0.51 0.89\n\
+             H -0.36 -0.51 -0.89\nH 1.88 -0.51 0.89\nH 1.88 -0.51 -0.89\nH 2.97 1.33 0\n",
+        );
+        mol.recompute_bonds(1.2, 2.5);
+        mol
+    }
+
+    #[test]
+    fn pick_atoms_drops_earlier_picks_and_a_handed_over_fragment_at_once() {
+        // As the editor is left after "Fragment Editor ↗" on a placed fragment.
+        let mut state = EditorRotateState {
+            picks: vec![0, 1, 2],
+            chosen_side: Some(RotateSide::B),
+            moving: Some(vec![2, 8]),
+            ..Default::default()
+        };
+        start_picking(&mut state);
+        assert!(state.active);
+        assert!(state.picks.is_empty());
+        assert!(state.chosen_side.is_none());
+        assert!(state.moving.is_none(), "an old moving set would move the wrong atoms");
+    }
+
+    #[test]
+    fn three_clicks_pick_axis_then_side_one_by_one() {
+        let mol = ethanol();
+        let mut state = EditorRotateState::default();
+        start_picking(&mut state);
+        record_pick(&mut state, &mol, 0);
+        record_pick(&mut state, &mol, 1);
+        record_pick(&mut state, &mol, 2);
+        assert_eq!(state.picks, [0, 1, 2]);
+        assert!(state.chosen_side.is_some());
+        assert!(state.status.is_none(), "{:?}", state.status);
+        // A fourth click starts a new axis and forgets any preset moving set.
+        state.moving = Some(vec![2, 8]);
+        record_pick(&mut state, &mol, 1);
+        assert_eq!(state.picks, [1]);
+        assert!(state.moving.is_none());
+    }
+
+    #[test]
+    fn closing_the_fragment_editor_ends_picking_and_drops_the_picks() {
+        let mut mol = ethanol();
+        let mut settings = MolSettings::default();
+        let mut zmat = ZMatrixBuilderState::default();
+        let mut state = EditorRotateState::default();
+        start_picking(&mut state);
+        record_pick(&mut state, &mol, 0);
+        record_pick(&mut state, &mol, 1);
+        state.window_open = false;
+        let ctx = egui::Context::default();
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            fragment_editor_window(ui.ctx(), &mut state, &mut zmat, &mut mol, &mut settings);
+        });
+        output.textures_delta.clear();
+        assert!(!state.active);
+        assert!(state.picks.is_empty());
     }
 }
