@@ -16,6 +16,9 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+mod calculation_start;
+mod endpoint_preparation;
+
 use anyhow::{bail, Context, Result};
 use bevy::prelude::*;
 use bevy::tasks::{block_on, futures_lite::future, AsyncComputeTaskPool, Task};
@@ -214,116 +217,9 @@ impl TsGeneration {
             .expect("just inserted if missing")
     }
 
-    pub fn input_options(&self) -> Result<RdaOptions> {
-        let reactant = self
-            .reactant
-            .as_ref()
-            .context("Capture or load the reactant structure.")?;
-        let product = self
-            .product
-            .as_ref()
-            .context("Capture or load the product structure.")?;
-        validate_endpoints(reactant, product)?;
-        if self.program == QcProgram::Dreiding {
-            bail!("Choose xTB or Behemoth for TS generation.");
-        }
-        let mol = Molecule {
-            atoms: reactant.atoms.clone(),
-            pos: reactant.positions.clone(),
-            bonds: vec![],
-            hydrogen_bonds: vec![],
-            topology: None,
-        };
-        valence::validate_electronic_state(&mol, self.charge, self.multiplicity)
-            .map_err(|error| anyhow::anyhow!("{error}"))?;
-        let issues = method::validate(
-            self.program,
-            &self.method,
-            self.multiplicity,
-            &reactant.atoms,
-        );
-        if let Some(issue) = issues
-            .iter()
-            .find(|i| i.severity == method::Severity::Block)
-        {
-            bail!("{}", issue.message);
-        }
-        if self.method.nproc == 0 {
-            bail!("Use at least one calculation thread.");
-        }
-        self.parameters.rda_options(reactant.atoms.len())
-    }
 
-    pub fn start(&mut self) -> Result<()> {
-        if self.is_running() {
-            bail!("A TS generation is already running.");
-        }
-        let options = self.input_options()?;
-        let configured = self.path_for(self.program).to_string();
-        let configured = &configured;
-        let binary =
-            resolve_program_executable(self.program, configured).map_err(anyhow::Error::msg)?;
-        // Subprocesses change directory; resolve relative executable paths first.
-        let binary =
-            std::fs::canonicalize(binary).context("Could not resolve the executable path")?;
-        let backend = BackendConfig {
-            program: self.program,
-            binary,
-            method: self.method.clone(),
-            charge: self.charge,
-            multiplicity: self.multiplicity,
-        };
-        config::save_path(self.program, configured);
-        let reactant = self.reactant.clone().unwrap();
-        let product = self.product.clone().unwrap();
-        let algorithm = self.parameters.algorithm;
-        let method = format!(
-            "{} / {}",
-            self.program.label(),
-            method_ui::method_summary(self.program, &self.method)
-        );
-        let run_dir = create_xtb_run_dir(&std::env::temp_dir().join("beavyr_ts"))
-            .map_err(anyhow::Error::msg)?;
-        self.control = Arc::new(RunControl::default());
-        let control = self.control.clone();
-        self.task = Some(AsyncComputeTaskPool::get().spawn(async move {
-            let mut objective = EnergyGradient::new(
-                backend,
-                reactant.atoms.clone(),
-                run_dir.join("energy"),
-                control.clone(),
-            );
-            let result = generate(
-                &mut objective,
-                &reactant,
-                &product,
-                options,
-                algorithm,
-                method,
-                &run_dir,
-            );
-            if control.cancelled.load(std::sync::atomic::Ordering::Relaxed) {
-                return Err(format!(
-                    "TS generation cancelled. Scratch files: {}",
-                    run_dir.display()
-                ));
-            }
-            match result {
-                Ok(output) => {
-                    let _ = std::fs::remove_dir_all(&run_dir);
-                    Ok(output)
-                }
-                Err(error) => Err(format!("{error:#}\nScratch files: {}", run_dir.display())),
-            }
-        }));
-        self.started = Some(Instant::now());
-        self.duration = None;
-        self.output = None;
-        self.energy_plot_open = false;
-        self.message = None;
-        self.is_error = false;
-        Ok(())
-    }
+
+
 }
 
 #[allow(clippy::too_many_arguments)]

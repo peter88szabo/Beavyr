@@ -632,7 +632,7 @@ pub fn ui_panel(
                         ui,
                         &mut xtb_panel_state,
                         &mut xtb_task,
-                        &mol,
+                        &mut mol,
                         traj.playing,
                     );
                 },
@@ -719,7 +719,7 @@ pub fn ui_panel(
                         &mut xtb_freq_panel_state,
                         &mut xtb_freq_task,
                         &xtb_panel_state,
-                        &mol,
+                        &mut mol,
                         &mut traj,
                     );
                     // A Hessian loaded from a file arrives with its own geometry.
@@ -767,7 +767,7 @@ pub fn ui_panel(
                         ui,
                         &mut uvvis_state,
                         &mut uvvis_task,
-                        &mol,
+                        &mut mol,
                         &behemoth_path,
                         traj.playing,
                         &mut orbital_state,
@@ -2048,17 +2048,20 @@ pub fn ui_panel(
             &mut qc_panel,
             &mut qc_task,
             &mut xtb_panel_state,
-            &mol,
+            &mut mol,
         ) {
             window_rects.push(rect);
         }
     }
     if let Some(rect) = crate::qchem_panel::ui::input_editor_window(
-        ctx, &mut qc_panel, &mut qc_task, &xtb_panel_state, &mol,
+        ctx, &mut qc_panel, &mut qc_task, &xtb_panel_state, &mut mol,
     ) {
         window_rects.push(rect);
     }
     crate::qchem_panel::ui::result_windows(ctx, &mut xtb_panel_state, &xtb_task);
+    if let Some(rect) = crate::qchem_panel::ui::dreiding_warning_window(ctx, &mut qc_task) {
+        window_rects.push(rect);
+    }
     if qc_panel.summary_open {
         if let Some(output) = &qc_task.last {
             let duration = qc_task.last_duration;
@@ -2087,6 +2090,15 @@ pub fn ui_panel(
 
     if !ui_layout.builder_open {
         zmat_state.cleanup.cancel();
+    }
+
+    if crate::calculation_geometry::finish_display_removal(
+        ctx, &mol, &mut zmat_state, &mut editor_rotate_state, &mut settings,
+        &mut traj, &mut structure_history, &mut conformer_run,
+    ) {
+        xtb_freq_panel_state.selected_mode = None;
+        xyz_buf.current_file = None;
+        ev_changed.write(MoleculeChanged::parse_xyz(false));
     }
 
     // Record what the panels ended up covering, now that they have all been

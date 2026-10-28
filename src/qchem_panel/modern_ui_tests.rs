@@ -62,10 +62,10 @@ impl Fixture {
                         &mut self.panel,
                         &mut self.task,
                         &mut self.opt,
-                        &self.mol,
+                        &mut self.mol,
                     );
                 }
-                input_editor_window(&ctx, &mut self.panel, &mut self.task, &self.opt, &self.mol);
+                input_editor_window(&ctx, &mut self.panel, &mut self.task, &self.opt, &mut self.mol);
             },
         );
         output.textures_delta.clear();

@@ -16,14 +16,16 @@ pub const ELEMENT_SYMBOLS: &[&str] = &[
 
 const HALO_F: Color = Color::srgb(0.22, 1.0, 0.08); // neon green
 const HALO_CL: Color = Color::srgb(0.70, 1.0, 0.05); // yellowish green
-const HALO_BR: Color = Color::srgb(0.65, 0.20, 0.05); // rusty red-brown
+const HALO_BR: Color = Color::srgb(235.0 / 255.0, 161.0 / 255.0, 0.0); // #EBA100
 const HALO_I: Color = Color::srgb(0.80, 0.20, 0.80); // purple-pink
+const IRON_COLOR: Color = Color::srgb(209.0 / 255.0, 114.0 / 255.0, 4.0 / 255.0); // #D17204
 
 fn base_map() -> HashMap<String, Color> {
     let mut m = HashMap::new();
     for &sym in ELEMENT_SYMBOLS {
         m.insert(sym.to_string(), Color::srgb(0.7, 0.7, 0.7));
     }
+    m.insert("Fe".into(), IRON_COLOR);
     m
 }
 
@@ -113,6 +115,9 @@ pub fn color_scheme_map(s: ColorScheme) -> HashMap<String, Color> {
 pub fn color_for(atom: &str, scheme: ColorScheme) -> Color {
     if crate::molecule::is_dummy(atom) {
         return DUMMY_COLOR;
+    }
+    if atom == "Fe" {
+        return IRON_COLOR;
     }
     match scheme {
         ColorScheme::Custom => default_custom(atom),

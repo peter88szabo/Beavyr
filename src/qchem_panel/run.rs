@@ -24,6 +24,14 @@ use crate::qchem_interfaces::xtb_optimize::{
     create_xtb_run_dir, discard_xtb_run_dir, xtb_scratch_dir,
 };
 
+#[path = "dreiding_job.rs"]
+mod dreiding_job;
+use dreiding_job::run as run_dreiding;
+
+#[cfg(test)]
+#[path = "dreiding_completion_tests.rs"]
+mod dreiding_completion_tests;
+
 /// How often a cancelled run is checked for having died.
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
 
@@ -73,6 +81,8 @@ pub struct QcRunTask {
     pub last_message: Option<String>,
     pub last_is_error: bool,
     pub last_duration: Option<Duration>,
+    /// An unsupported DREIDING system needs an acknowledgement popup.
+    pub dreiding_warning: Option<String>,
 }
 
 impl QcRunTask {
@@ -163,6 +173,7 @@ impl QcRunTask {
         self.run_dir = Some(run_dir);
         self.started_at = Some(Instant::now());
         self.last_message = None;
+        self.dreiding_warning = None;
         self.last_duration = None;
     }
 }
@@ -186,6 +197,9 @@ fn run_cancellable(
     cancel: &AtomicBool,
     child_slot: &Mutex<Option<Child>>,
 ) -> Result<QcRunOutput, String> {
+    let (real_atoms, real_positions) = crate::calculation_geometry::real_coordinates(atoms, positions_angstrom)?;
+    let atoms = real_atoms.as_slice();
+    let positions_angstrom = real_positions.as_slice();
     if program.needs_binary_path() && binary.as_os_str().is_empty() {
         return Err(format!("Set the {} executable path first.", program.label()));
     }
@@ -196,7 +210,7 @@ fn run_cancellable(
     // would refuse the only backend that needs nothing chosen. It also runs in
     // this process, so none of the machinery below applies.
     if program == QcProgram::Dreiding {
-        return run_dreiding(job, workdir, atoms, positions_angstrom);
+        return run_dreiding(job, workdir, atoms, positions_angstrom, cancel);
     }
     // xTB and Behemoth take their level of theory from the settings, not from
     // a method choice, so they are dispatched before the method is demanded.
@@ -823,115 +837,6 @@ fn spawn_and_wait(
     }
 }
 
-/// Runs a DREIDING job, here in this process.
-///
-/// No executable, no scratch process, nothing to cancel -- it answers in
-/// milliseconds. Results are still written into the run directory in the same
-/// formats every other backend uses, so the trajectory player, the Vibrations
-/// panel and the Save buttons need no force-field branch.
-fn run_dreiding(
-    job: JobType,
-    workdir: &Path,
-    atoms: &[String],
-    positions_angstrom: &[f64],
-) -> Result<QcRunOutput, String> {
-    use crate::forcefield::dreiding::hessian::hessian_and_gradient;
-    use crate::forcefield::dreiding::objective::BOHR_TO_ANGSTROM;
-    use crate::forcefield::dreiding::DreidingTopology;
-
-    // A saddle search, a reaction path and excited states are all beyond a
-    // generic force field. The panel disables them, so reaching here would be
-    // a bug rather than a user's mistake -- but it is said plainly either way.
-    if matches!(
-        job,
-        JobType::TransitionState | JobType::Irc | JobType::TdDft
-    ) {
-        return Err(format!(
-            "DREIDING is a force field and cannot do {}. Choose a quantum-chemistry program \
-             for that.",
-            job.label()
-        ));
-    }
-
-    let input_xyz = crate::qchem_interfaces::xtb_optimize::write_xyz_string(
-        atoms,
-        &positions_angstrom
-            .chunks_exact(3)
-            .map(|p| bevy::prelude::Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32))
-            .collect::<Vec<_>>(),
-    );
-
-    let mut trajectory_text = None;
-    let mut final_energy = None;
-    let mut saveable: Vec<(&'static str, PathBuf)> = Vec::new();
-
-    if job.produces_trajectory() {
-        let output = crate::qchem_interfaces::dreiding_run::optimize(workdir, &input_xyz)?;
-        final_energy = output.final_energy_hartree;
-        trajectory_text = Some(output.trajectory_text);
-    }
-
-    // The Hessian, at whichever geometry we ended up with.
-    let hessian_path = if job.produces_frequencies() || job == JobType::Hessian {
-        let geometry = trajectory_text
-            .as_deref()
-            .and_then(last_frame_xyz)
-            .unwrap_or_else(|| input_xyz.clone());
-        let molecule = crate::qchem_interfaces::dreiding_run::molecule_for_force_field(&geometry);
-        let topology = DreidingTopology::build(&molecule).map_err(|e| e.to_string())?;
-        let coords_bohr: Vec<f64> = molecule
-            .pos
-            .iter()
-            .flat_map(|p| {
-                [
-                    p.x as f64 / BOHR_TO_ANGSTROM,
-                    p.y as f64 / BOHR_TO_ANGSTROM,
-                    p.z as f64 / BOHR_TO_ANGSTROM,
-                ]
-            })
-            .collect();
-        let (hessian, _gradient) =
-            hessian_and_gradient(&topology, &coords_bohr).map_err(|e| e.to_string())?;
-
-        // Behind a `$hessian` header, the format every other backend's matrix
-        // is written in and the one Beavyr's reader takes.
-        let mut text = String::from("$hessian\n");
-        for row in hessian.rows() {
-            for value in row {
-                text.push_str(&format!(" {value:22.14e}"));
-            }
-            text.push('\n');
-        }
-        text.push_str("$end\n");
-        let path = workdir.join("hessian.txt");
-        fs::write(&path, text).map_err(|e| format!("Failed to write the Hessian: {e}"))?;
-        saveable.push(("Hessian ($hessian)", path.clone()));
-        Some(path)
-    } else {
-        None
-    };
-
-    Ok(QcRunOutput {
-        // A force field has no orbitals.
-        molden_path: None,
-        job,
-        program: QcProgram::Dreiding,
-        log: String::new(),
-        energetics: Energetics {
-            final_energy_hartree: final_energy,
-            ..Default::default()
-        },
-        // A force field has no self-consistent field to iterate.
-        scf: Vec::new(),
-        converged: job.produces_trajectory().then_some(true),
-        trajectory_text,
-        kept_dir: (hessian_path.is_some() || !saveable.is_empty())
-            .then(|| workdir.to_path_buf()),
-        hessian_path: job.produces_frequencies().then(|| hessian_path.clone()).flatten(),
-        saveable,
-    })
-}
-
 /// The last frame of a multi-frame XYZ, as its own single-frame XYZ.
 /// Runs an xTB or Behemoth job.
 ///
@@ -1462,7 +1367,13 @@ H -0.24 0.92 0.0
         let dir = std::env::temp_dir().join(format!("beavyr_dreiding_no_{}", std::process::id()));
         let atoms: Vec<String> = vec!["O".to_string()];
         for job in [JobType::TransitionState, JobType::Irc, JobType::TdDft] {
-            let err = match run_dreiding(job, &dir, &atoms, &[0.0, 0.0, 0.0]) {
+            let err = match run_dreiding(
+                job,
+                &dir,
+                &atoms,
+                &[0.0, 0.0, 0.0],
+                &AtomicBool::new(false),
+            ) {
                 Err(err) => err,
                 Ok(_) => panic!("a force field cannot do {}", job.label()),
             };
@@ -1513,6 +1424,17 @@ pub fn poll_qc_run(
     };
     let Some(result) = block_on(future::poll_once(running)) else {
         return;
+    };
+    // Cancel can arrive after the worker finishes but before this UI update.
+    // A completed, cancelled result must never replace the displayed structure.
+    let result = if task
+        .cancel
+        .as_ref()
+        .is_some_and(|flag| flag.load(Ordering::SeqCst))
+    {
+        Err("Cancelled.".to_string())
+    } else {
+        result
     };
     task.task = None;
     task.cancel = None;
@@ -1724,6 +1646,9 @@ pub fn poll_qc_run(
         Err(err) => {
             // Kept: its output is what explains a failure, and a cancelled job
             // may still be worth reading.
+            if err.starts_with(crate::forcefield::dreiding::diagnostics::UNSUPPORTED_SYSTEM) {
+                task.dreiding_warning = Some(err.clone());
+            }
             let where_to_look = run_dir
                 .as_ref()
                 .map(|dir| format!(" Output kept in {}.", dir.display()))

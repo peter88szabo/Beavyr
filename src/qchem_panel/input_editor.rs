@@ -124,7 +124,7 @@ pub(crate) fn show(
     panel: &mut QcPanelState,
     task: &mut QcRunTask,
     opt_panel: &XtbPanelState,
-    mol: &Molecule,
+    mol: &mut Molecule,
 ) -> Option<egui::Rect> {
     let mut state = state(ctx);
     if !state.open {
@@ -188,7 +188,7 @@ pub(crate) fn show(
                         run.clone().on_disabled_hover_text(reason);
                     }
                     if run.clicked_once() {
-                        start_run(panel, task, opt_panel, mol);
+                        start_run(ui.ctx(), panel, task, opt_panel, mol);
                     }
                 }
                 close = ui.button("Close editor").clicked_once();

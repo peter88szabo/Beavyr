@@ -22,6 +22,9 @@ use crate::qchem_interfaces::xtb_optimize::{
 
 #[path = "modern_ui.rs"]
 mod modern_ui;
+#[path = "dreiding_warning.rs"]
+mod dreiding_warning;
+pub(crate) use dreiding_warning::dreiding_warning_window;
 pub(crate) use modern_ui::{docked_width, input_editor_window, is_docked, project_presentation, restore_project_presentation, project_input_state, restore_project_input_state};
 
 /// Draws the panel and starts a run when the button is pressed.
@@ -32,7 +35,7 @@ pub fn qc_panel(
     panel: &mut QcPanelState,
     task: &mut QcRunTask,
     opt_panel: &mut XtbPanelState,
-    mol: &Molecule,
+    mol: &mut Molecule,
 ) -> Option<egui::Rect> {
     if !task.is_running() {
         panel.config.nproc = panel.config.nproc.clamp(1, 4);
@@ -59,7 +62,7 @@ fn body(
     panel: &mut QcPanelState,
     task: &mut QcRunTask,
     opt_panel: &mut XtbPanelState,
-    mol: &Molecule,
+    mol: &mut Molecule,
 ) {
     let running = task.is_running();
 
@@ -96,8 +99,8 @@ fn body(
     if dummies > 0 {
         ui.label(
             egui::RichText::new(match dummies {
-                1 => "1 dummy atom is a placeholder and is left out of the calculation.".to_string(),
-                n => format!("{n} dummy atoms are placeholders and are left out of the calculation."),
+                1 => "1 dummy atom will be removed from the geometry before the calculation.".to_string(),
+                n => format!("{n} dummy atoms will be removed from the geometry before the calculation."),
             })
             .small()
             .weak(),
@@ -626,7 +629,7 @@ fn run_row(
     panel: &mut QcPanelState,
     task: &mut QcRunTask,
     opt_panel: &XtbPanelState,
-    mol: &Molecule,
+    mol: &mut Molecule,
     running: bool,
     python_ready: bool,
     level_ok: bool,
@@ -651,7 +654,7 @@ fn run_row(
         };
 
         if button.clicked() {
-            start_run(panel, task, opt_panel, mol);
+            start_run(ui.ctx(), panel, task, opt_panel, mol);
         }
 
         if running {
@@ -677,11 +680,15 @@ fn run_row(
 
 /// Both presentations launch through the same calculation path.
 fn start_run(
+    ctx: &egui::Context,
     panel: &mut QcPanelState,
     task: &mut QcRunTask,
     opt_panel: &XtbPanelState,
-    mol: &Molecule,
+    mol: &mut Molecule,
 ) {
+    if task.is_running() {
+        return;
+    }
     panel.config.nproc = panel.config.nproc.clamp(1, 4);
     panel.show_warnings = true;
     let program = panel.program;
@@ -694,6 +701,11 @@ fn start_run(
         .unwrap_or_default();
     match resolve_program_executable(program, &entered) {
         Ok(binary) => {
+            if let Err(error) = crate::calculation_geometry::prepare_display(ctx, mol) {
+                task.last_message = Some(error);
+                task.last_is_error = true;
+                return;
+            }
             let positions: Vec<f64> = mol
                 .pos
                 .iter()

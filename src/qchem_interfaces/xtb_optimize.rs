@@ -447,7 +447,7 @@ pub fn xtb_optimization_panel(
     ui: &mut egui::Ui,
     panel_state: &mut XtbPanelState,
     task: &mut XtbOptimizationTask,
-    mol: &Molecule,
+    mol: &mut Molecule,
     // Whether a trajectory or mode animation is playing. While one is, the
     // molecule on screen is a frame of it, not the structure the user means
     // to optimize.
@@ -468,7 +468,7 @@ fn optimization_panel_body(
     ui: &mut egui::Ui,
     panel_state: &mut XtbPanelState,
     task: &mut XtbOptimizationTask,
-    mol: &Molecule,
+    mol: &mut Molecule,
     // Whether a trajectory or mode animation is playing. While one is, the
     // molecule on screen is a frame of it, not the structure the user means
     // to optimize.
@@ -645,6 +645,11 @@ fn optimization_panel_body(
             let entered = panel_state.path().to_string();
             match (uhf, resolve_program_executable(program, &entered)) {
                 (Some(uhf), Ok(binary)) => {
+                    if let Err(error) = crate::calculation_geometry::prepare_display(ui.ctx(), mol) {
+                        task.last_message = Some(error);
+                        task.last_is_error = true;
+                        return;
+                    }
                     config::save_path(program, &entered);
                     task.start(
                         program,

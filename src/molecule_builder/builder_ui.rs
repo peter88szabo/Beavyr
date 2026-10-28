@@ -2411,9 +2411,8 @@ fn record_pick(state: &mut EditorRotateState, mol: &Molecule, hit_idx: usize) {
     }
 }
 
-/// Draw pending highlights and axis line using the same color/radius style as measurements.
+/// Draw pending highlights using the same color/radius style as measurements.
 pub fn draw_builder_highlights(
-    mut gizmos: Gizmos<BuilderGizmos>,
     mut highlights: Gizmos<BuilderHighlightGizmos>,
     state: Res<EditorRotateState>,
     zmat_state: Res<ZMatrixBuilderState>,
@@ -2465,21 +2464,6 @@ pub fn draw_builder_highlights(
             };
             draw_hl(&mut highlights, idx, color);
         }
-        let mut connect = |a: Option<&usize>, b: Option<&usize>| {
-            if let (Some(&a), Some(&b)) = (a, b) {
-                if a < mol.pos.len() && b < mol.pos.len() {
-                    gizmos.line(mol.pos[a], mol.pos[b], Color::WHITE);
-                }
-            }
-        };
-        connect(
-            zmat_state.add_atom_picks.first(),
-            zmat_state.add_atom_picks.get(1),
-        );
-        connect(
-            zmat_state.add_atom_picks.get(1),
-            zmat_state.add_atom_picks.get(2),
-        );
     }
 
     // The one selected atom, however it was selected -- clicked in the 3D

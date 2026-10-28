@@ -23,7 +23,7 @@ fn run_block(
     ui: &mut egui::Ui,
     state: &mut UvVisState,
     task: &mut SpectrumTask,
-    mol: &Molecule,
+    mol: &mut Molecule,
     behemoth_path: &str,
     animating: bool,
 ) {
@@ -230,6 +230,10 @@ fn run_block(
             button.clone().on_disabled_hover_text("See the note above.");
         }
         if button.clicked_once() {
+            if let Err(error) = crate::calculation_geometry::prepare_display(ui.ctx(), mol) {
+                task.last_message = Some(error);
+                return;
+            }
             task.start(
                 std::path::Path::new(behemoth_path.trim()),
                 &mol.atoms,
@@ -271,7 +275,7 @@ pub fn uvvis_panel(
     ui: &mut egui::Ui,
     state: &mut UvVisState,
     task: &mut SpectrumTask,
-    mol: &Molecule,
+    mol: &mut Molecule,
     behemoth_path: &str,
     animating: bool,
     orbitals: &mut crate::orbitals::OrbitalState,
@@ -291,7 +295,7 @@ fn panel_body(
     ui: &mut egui::Ui,
     state: &mut UvVisState,
     task: &mut SpectrumTask,
-    mol: &Molecule,
+    mol: &mut Molecule,
     behemoth_path: &str,
     animating: bool,
     orbitals: &mut crate::orbitals::OrbitalState,

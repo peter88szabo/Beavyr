@@ -521,9 +521,20 @@ fn panel_body(
             )
             .clicked_once()
         {
-            if let Err(error) = state.start() {
-                state.message = Some(error.to_string());
-                state.is_error = true;
+            let displayed_endpoint = [&state.reactant, &state.product].into_iter()
+                .flatten().any(|endpoint| endpoint.atoms == mol.atoms && endpoint.positions == mol.pos);
+            match state.start() {
+                Ok(()) if displayed_endpoint => {
+                    if let Err(error) = crate::calculation_geometry::prepare_display(ui.ctx(), mol) {
+                        state.message = Some(error);
+                        state.is_error = true;
+                    }
+                }
+                Ok(()) => {},
+                Err(error) => {
+                    state.message = Some(error.to_string());
+                    state.is_error = true;
+                }
             }
         }
     }

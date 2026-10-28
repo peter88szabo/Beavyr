@@ -32,6 +32,7 @@
 //! `energy_and_forces`, rather than three engines.
 
 pub mod typer;
+pub(crate) mod diagnostics;
 
 /// DREIDING parameters, transcribed from the paper.
 pub mod params;

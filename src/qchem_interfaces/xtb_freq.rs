@@ -290,7 +290,8 @@ impl XtbFrequencyTask {
         if self.is_running() {
             return;
         }
-        let input_xyz = super::xtb_optimize::write_xyz_string(atoms, pos);
+        let (atoms, pos) = crate::molecule::without_dummies(atoms, pos);
+        let input_xyz = super::xtb_optimize::write_xyz_string(&atoms, &pos);
         // Owned, because the task outlives the caller's borrow.
         let method = method.clone();
         let binary = binary.to_path_buf();
@@ -1754,7 +1755,7 @@ pub fn xtb_frequency_panel(
     freq_panel: &mut XtbFreqPanelState,
     freq_task: &mut XtbFrequencyTask,
     opt_panel: &super::xtb_optimize::XtbPanelState,
-    mol: &Molecule,
+    mol: &mut Molecule,
     traj: &mut TrajectoryState,
 ) {
     ui.scope(|ui| {
@@ -1783,7 +1784,7 @@ fn frequency_panel_body(
     freq_panel: &mut XtbFreqPanelState,
     freq_task: &mut XtbFrequencyTask,
     opt_panel: &super::xtb_optimize::XtbPanelState,
-    mol: &Molecule,
+    mol: &mut Molecule,
     traj: &mut TrajectoryState,
 ) {
     let running = freq_task.is_running();
@@ -2097,6 +2098,11 @@ fn frequency_panel_body(
                     match super::xtb_optimize::resolve_program_executable(program, &configured) {
                         Ok(binary) => {
                             if let Some(uhf) = uhf {
+                                if let Err(error) = crate::calculation_geometry::prepare_display(ui.ctx(), mol) {
+                                    freq_task.last_message = Some(error);
+                                    freq_task.last_is_error = true;
+                                    return;
+                                }
                                 let need_gradient =
                                     freq_panel.eckart_mode == EckartMode::ReactionPath;
                                 freq_task.start(

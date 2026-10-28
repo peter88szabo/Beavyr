@@ -797,7 +797,7 @@ fn footer(
     panel: &PanelState,
     editor: &mut EditorRotateState,
     zmat: &mut ZMatrixBuilderState,
-    mol: &Molecule,
+    mol: &mut Molecule,
     available: bool,
     action: &mut Option<Action>,
 ) {
@@ -829,12 +829,15 @@ fn footer(
                 egui::Button::new("Clean up geometry"),
             )
             .on_hover_text(
-                "Optimise the whole structure with the DREIDING force field. One undoable step.",
+                "Optimise the whole structure with DREIDING. Dummy atoms are removed first; changes can be undone.",
             )
             .clicked()
         {
             zmat.cleanup_report = None;
-            zmat.cleanup.start(mol);
+            match crate::calculation_geometry::prepare_display(ui.ctx(), mol) {
+                Ok(()) => zmat.cleanup.start(mol),
+                Err(error) => zmat.cleanup_report = Some(Err(error)),
+            }
         }
     });
     ui.horizontal(|ui| {

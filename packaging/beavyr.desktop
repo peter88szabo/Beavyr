@@ -9,5 +9,5 @@ Icon=beavyr
 Terminal=false
 Categories=Science;Chemistry;
 Keywords=molecule;chemistry;xyz;orbital;spectrum;vibration;xtb;orca;
-StartupNotify=true
+StartupNotify=false
 StartupWMClass=Beavyr

@@ -22,10 +22,12 @@
 
 use anyhow::{anyhow, Result};
 use ndarray::Array2;
+use std::sync::atomic::AtomicBool;
 
 use crate::normalmode::fd_hessian::numerical_hessian_from_gradients;
 use crate::optimizer::traits::Objective;
 
+use super::objective::cancellation::{check_cancelled, CancellableObjective};
 use super::objective::DreidingObjective;
 use super::DreidingTopology;
 
@@ -46,6 +48,15 @@ pub fn hessian_and_gradient(
     topology: &DreidingTopology,
     coords_bohr: &[f64],
 ) -> Result<(Array2<f64>, Vec<f64>)> {
+    hessian_and_gradient_cancellable(topology, coords_bohr, None)
+}
+
+pub(crate) fn hessian_and_gradient_cancellable(
+    topology: &DreidingTopology,
+    coords_bohr: &[f64],
+    cancel: Option<&AtomicBool>,
+) -> Result<(Array2<f64>, Vec<f64>)> {
+    check_cancelled(cancel)?;
     if coords_bohr.len() != topology.natoms() * 3 {
         return Err(anyhow!(
             "DREIDING Hessian expected {} coordinates for {} atoms, got {}",
@@ -55,7 +66,7 @@ pub fn hessian_and_gradient(
         ));
     }
 
-    let mut objective = DreidingObjective::new(topology);
+    let mut objective = CancellableObjective::new(DreidingObjective::new(topology), cancel);
     let mut gradient = vec![0.0; coords_bohr.len()];
     objective
         .gradient(coords_bohr, &mut gradient)
@@ -67,6 +78,7 @@ pub fn hessian_and_gradient(
         Ok(g)
     })?;
 
+    check_cancelled(cancel)?;
     Ok((hessian, gradient))
 }
 

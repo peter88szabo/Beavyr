@@ -259,6 +259,21 @@ fn the_cleanup_button_relaxes_the_whole_structure_with_one_click() {
 }
 
 #[test]
+fn cleanup_button_removes_dummy_atoms_before_the_worker_starts() {
+    bevy::tasks::AsyncComputeTaskPool::get_or_init(bevy::tasks::TaskPool::default);
+    let mut fixture = EditorFixture::new("5\n\nX 0 0 0\nO 0 0 0\nH 1.1 0 0\nXx 3 0 0\nH -0.2 1.05 0\n");
+    fixture.click("Clean up geometry");
+    assert_eq!(fixture.mol.atoms, ["O", "H", "H"]);
+    let start = std::time::Instant::now();
+    while fixture.zmat.cleanup_report.is_none() && start.elapsed().as_secs() < 10 {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        fixture.frame(vec![], [1280.0, 720.0]);
+    }
+    assert!(matches!(fixture.zmat.cleanup_report, Some(Ok(_))), "{:?}", fixture.zmat.cleanup_report);
+    assert_eq!(fixture.mol.pos.len(), 3);
+}
+
+#[test]
 fn hidden_and_frozen_atoms_can_be_restored_from_the_panel() {
     let mut fixture = EditorFixture::new("3\n\nO 0 0 0\nH 1.1 0 0\nH -0.2 1.05 0\n");
     fixture.zmat.selection.sync(&fixture.mol);

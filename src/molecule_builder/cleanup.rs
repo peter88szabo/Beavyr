@@ -201,12 +201,13 @@ pub fn relax(
         .filter(|(_, s)| !is_dummy(s))
         .map(|(i, _)| i)
         .collect();
-    let mut perceived = mol.clone();
-    perceived.atoms = real.iter().map(|&i| mol.atoms[i].clone()).collect();
-    perceived.pos = real.iter().map(|&i| mol.pos[i]).collect();
+    let (mut perceived, _) = crate::calculation_geometry::prepare(mol)
+        .map_err(anyhow::Error::msg)?;
     perceived.recompute_bonds(1.2, 2.5);
     let topology =
-        DreidingTopology::build(&perceived).map_err(|e| anyhow::anyhow!(e.to_string()))?;
+        DreidingTopology::build(&perceived).map_err(|e| {
+            anyhow::anyhow!(crate::forcefield::dreiding::diagnostics::message(&e))
+        })?;
     let full: Vec<_> = perceived
         .pos
         .iter()

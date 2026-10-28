@@ -1,0 +1,2 @@
+- CLI tool to run calculations or anything (make it linux and windows specific)
+

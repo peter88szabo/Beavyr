@@ -12,8 +12,12 @@
 
 use std::fs;
 use std::path::Path;
+use std::sync::atomic::AtomicBool;
 
-use crate::forcefield::dreiding::objective::{relax_angstrom, Relaxation, HARTREE_TO_KCAL};
+use crate::forcefield::dreiding::objective::cancellation::check_cancelled;
+use crate::forcefield::dreiding::objective::{
+    relax_angstrom_cancellable, Relaxation, HARTREE_TO_KCAL,
+};
 use crate::forcefield::dreiding::DreidingTopology;
 use crate::molecule::Molecule;
 use crate::optimizer::minimum_cartesian::{CartesianMinimumMethod, CartesianMinimumOptions};
@@ -27,7 +31,7 @@ use super::xtb_optimize::{EnergyHistoryPoint, XtbOptimizationOutput};
 /// for an optimised structure rather than for a sketch to be tidied. It is still not
 /// quantum-chemistry tight: there is no point converging a generic force field's geometry beyond
 /// the accuracy of its own parameters.
-fn optimization_options() -> CartesianMinimumOptions {
+pub(crate) fn optimization_options() -> CartesianMinimumOptions {
     CartesianMinimumOptions {
         method: CartesianMinimumMethod::Bfgs,
         max_cycles: 1_000,
@@ -58,17 +62,26 @@ pub fn optimize(workdir: &Path, input_xyz: &str) -> Result<XtbOptimizationOutput
 
 /// Keep the builder's explicit connectivity and bond orders for annotated structures.
 pub fn optimize_molecule(workdir: &Path, mol: &Molecule) -> Result<XtbOptimizationOutput, String> {
-    optimize_with_options(workdir, mol, optimization_options())
+    optimize_with_options(workdir, mol, optimization_options(), None).map(|result| result.output)
 }
 
-fn optimize_with_options(
+/// Preserve the optimizer's convergence result independently of its text log.
+pub(crate) struct OptimizationResult {
+    pub output: XtbOptimizationOutput,
+    pub converged: bool,
+}
+
+pub(crate) fn optimize_with_options(
     workdir: &Path,
     mol: &Molecule,
     options: CartesianMinimumOptions,
-) -> Result<XtbOptimizationOutput, String> {
-    let mut mol = mol.clone();
+    cancel: Option<&AtomicBool>,
+) -> Result<OptimizationResult, String> {
+    check_cancelled(cancel).map_err(|e| e.to_string())?;
+    let (mut mol, _) = crate::calculation_geometry::prepare(mol)?;
     mol.recompute_bonds(1.2, 2.5);
-    let topology = DreidingTopology::build(&mol).map_err(|e| e.to_string())?;
+    let topology = DreidingTopology::build(&mol)
+        .map_err(|e| crate::forcefield::dreiding::diagnostics::message(&e))?;
     let atoms = &mol.atoms;
 
     let start: Vec<f64> = mol
@@ -76,14 +89,16 @@ fn optimize_with_options(
         .iter()
         .flat_map(|p| [p.x as f64, p.y as f64, p.z as f64])
         .collect();
-    let (relaxed, mut relaxation) = relax_angstrom(&topology, &start, options.clone())
-        .map_err(|e| format!("DREIDING optimisation failed: {e}"))?;
+    let (relaxed, mut relaxation) =
+        relax_angstrom_cancellable(&topology, &start, options.clone(), cancel)
+            .map_err(|e| format!("DREIDING optimisation failed: {e}"))?;
 
     // A fresh inverse Hessian can recover from a stale BFGS approximation on
     // a flexible peptide. Bound the recovery to one additional 1000-step pass.
     if !relaxation.converged {
-        let (_, mut continuation) = relax_angstrom(&topology, &relaxed, options)
-            .map_err(|e| format!("DREIDING restart failed: {e}"))?;
+        let (_, mut continuation) =
+            relax_angstrom_cancellable(&topology, &relaxed, options, cancel)
+                .map_err(|e| format!("DREIDING restart failed: {e}"))?;
         continuation.initial_energy = relaxation.initial_energy;
         continuation.cycles += relaxation.cycles;
         relaxation.trajectory.append(&mut continuation.trajectory);
@@ -96,6 +111,7 @@ fn optimize_with_options(
         relaxation = continuation;
     }
 
+    check_cancelled(cancel).map_err(|e| e.to_string())?;
     let trajectory_text = trajectory_xyz(atoms, &relaxation);
     let energy_history = relaxation
         .trajectory_energies
@@ -126,11 +142,15 @@ fn optimize_with_options(
         );
     }
 
-    Ok(XtbOptimizationOutput {
-        trajectory_text,
-        final_energy_hartree: Some(relaxation.final_energy / HARTREE_TO_KCAL),
-        energy_history,
-        log: summary_log(&topology, &relaxation),
+    check_cancelled(cancel).map_err(|e| e.to_string())?;
+    Ok(OptimizationResult {
+        converged: relaxation.converged,
+        output: XtbOptimizationOutput {
+            trajectory_text,
+            final_energy_hartree: Some(relaxation.final_energy / HARTREE_TO_KCAL),
+            energy_history,
+            log: summary_log(&topology, &relaxation),
+        },
     })
 }
 
@@ -250,7 +270,9 @@ mod tests {
         let mol = molecule_for_force_field("3\n\nO 0 0 0\nH 1.3 0 0\nH 0 1.3 0\n");
         let mut options = optimization_options();
         options.max_cycles = 1;
-        let result = optimize_with_options(&dir, &mol, options).unwrap();
+        let result = optimize_with_options(&dir, &mol, options, None).unwrap();
+        assert!(!result.converged);
+        let result = result.output;
         assert!(result.log.contains("One BFGS restart"));
         assert!(result.log.contains("cycles                2"));
         assert!(result.log.contains("converged             no"));

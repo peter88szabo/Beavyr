@@ -6,6 +6,11 @@
 //! boundary, so neither side has to know about the other's convention.
 
 use anyhow::Result;
+use std::sync::atomic::AtomicBool;
+
+#[path = "cancellation.rs"]
+pub(crate) mod cancellation;
+use cancellation::{check_cancelled, CancellableObjective};
 
 use crate::optimizer::minimum_cartesian::{
     minimize_cartesian, CartesianMinimumMethod, CartesianMinimumOptions,
@@ -50,9 +55,9 @@ impl<'a> DreidingObjective<'a> {
             *a = b * BOHR_TO_ANGSTROM;
         }
         // `energy_and_forces` returns forces; the optimizer wants the gradient.
-        let energy = self
-            .topology
-            .energy_and_forces(&self.angstrom, &mut self.work, &mut self.scratch);
+        let energy =
+            self.topology
+                .energy_and_forces(&self.angstrom, &mut self.work, &mut self.scratch);
         for g in self.scratch.iter_mut() {
             *g = -*g;
         }
@@ -131,17 +136,22 @@ pub fn relax_angstrom(
     pos_angstrom: &[f64],
     options: CartesianMinimumOptions,
 ) -> Result<(Vec<f64>, Relaxation)> {
-    let mut objective = DreidingObjective::new(topology);
+    relax_angstrom_cancellable(topology, pos_angstrom, options, None)
+}
 
-    let initial_energy = objective.evaluate(
-        &pos_angstrom
-            .iter()
-            .map(|a| a / BOHR_TO_ANGSTROM)
-            .collect::<Vec<_>>(),
-    );
+pub(crate) fn relax_angstrom_cancellable(
+    topology: &DreidingTopology,
+    pos_angstrom: &[f64],
+    options: CartesianMinimumOptions,
+    cancel: Option<&AtomicBool>,
+) -> Result<(Vec<f64>, Relaxation)> {
+    check_cancelled(cancel)?;
+    let mut objective = CancellableObjective::new(DreidingObjective::new(topology), cancel);
 
     let x_bohr: Vec<f64> = pos_angstrom.iter().map(|a| a / BOHR_TO_ANGSTROM).collect();
+    let initial_energy = objective.energy(&x_bohr)? * HARTREE_TO_KCAL;
     let result = minimize_cartesian(x_bohr, &mut objective, options)?;
+    check_cancelled(cancel)?;
 
     let relaxed: Vec<f64> = result.x.iter().map(|b| b * BOHR_TO_ANGSTROM).collect();
 
@@ -155,6 +165,7 @@ pub fn relax_angstrom(
 
     let mut work = Workspace::new();
     let breakdown = topology.energy_breakdown(&relaxed, &mut work);
+    check_cancelled(cancel)?;
 
     let relaxation = Relaxation {
         cycles: result.cycles,

@@ -203,7 +203,11 @@ fn panel_body(
         )
         .clicked_once()
     {
-        run.start(mol);
+        let before = mol.clone();
+        match crate::calculation_geometry::prepare_display(ui.ctx(), mol) {
+            Ok(()) => run.start(&before),
+            Err(error) => run.error = Some(error),
+        }
     }
     if run.is_running() {
         ui.horizontal(|ui| {
@@ -540,7 +544,7 @@ fn resolve_xtb(path: &str) -> Result<std::path::PathBuf, String> {
 /// Its own section rather than part of the ordinary search, because it answers a different
 /// question and costs differently: minutes of xTB rather than seconds of force field, and it needs
 /// to be told which bonds are reacting.
-fn trail_section(ui: &mut egui::Ui, run: &mut ConformerRun, mol: &Molecule) {
+fn trail_section(ui: &mut egui::Ui, run: &mut ConformerRun, mol: &mut Molecule) {
     ui.add_space(8.0);
     egui::CollapsingHeader::new("Transition-state conformers")
         .id_salt("conformer_tstrail")
@@ -620,7 +624,11 @@ fn trail_section(ui: &mut egui::Ui, run: &mut ConformerRun, mol: &Molecule) {
                     .clicked_once()
                 {
                     if let Ok(binary) = &resolved {
-                        run.start_trail(mol, binary.clone());
+                        let before = mol.clone();
+                        match crate::calculation_geometry::prepare_display(ui.ctx(), mol) {
+                            Ok(()) => run.start_trail(&before, binary.clone()),
+                            Err(error) => run.trail_error = Some(error),
+                        }
                     }
                 }
                 if run.is_trailing() {

@@ -160,6 +160,16 @@ pub fn run(
     binary: &Path,
     scratch: &Path,
 ) -> Result<TrailOutcome> {
+    let (prepared, mapping) = crate::calculation_geometry::prepare(reactant)
+        .map_err(anyhow::Error::msg)?;
+    let reactant = &prepared;
+    let mut settings = settings.clone();
+    settings.active = super::preparation::remap_active(&settings.active, &mapping)
+        .map_err(anyhow::Error::msg)?;
+    let mut conformer_settings = conformer_settings.clone();
+    conformer_settings.constraints = super::preparation::remap_constraints(
+        &conformer_settings.constraints, &mapping,
+    ).map_err(anyhow::Error::msg)?;
     if settings.active.is_empty() {
         return Err(anyhow!(
             "no active bonds were given; TStrail needs to know which bonds are forming or breaking"

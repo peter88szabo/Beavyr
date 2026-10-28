@@ -98,7 +98,7 @@ pub(super) fn show(
     panel: &mut QcPanelState,
     task: &mut QcRunTask,
     opt_panel: &mut XtbPanelState,
-    mol: &Molecule,
+    mol: &mut Molecule,
 ) -> Option<egui::Rect> {
     let mut open = panel.open;
     let mut close = false;
@@ -284,7 +284,7 @@ fn electronic_state_row(
     let dummies = dummy_count(&mol.atoms);
     if dummies > 0 {
         ui.small(format!(
-            "{dummies} dummy atom(s) excluded from the calculation"
+            "{dummies} dummy atom(s) will be removed from the geometry before calculation"
         ));
     }
 }
@@ -813,7 +813,7 @@ fn footer(
     panel: &mut QcPanelState,
     task: &mut QcRunTask,
     opt_panel: &XtbPanelState,
-    mol: &Molecule,
+    mol: &mut Molecule,
     code: &CodeStatus,
 ) {
     ui.separator();
@@ -890,7 +890,7 @@ fn footer(
             response.clone().on_disabled_hover_text(reason);
         }
         if response.clicked_once() {
-            start_run(panel, task, opt_panel, mol);
+            start_run(ui.ctx(), panel, task, opt_panel, mol);
         }
     }
     if task.last.is_some() {
@@ -912,7 +912,7 @@ fn contents(
     panel: &mut QcPanelState,
     task: &mut QcRunTask,
     opt_panel: &mut XtbPanelState,
-    mol: &Molecule,
+    mol: &mut Molecule,
 ) -> bool {
     let mut state = presentation(ui.ctx());
     let mut close = false;
