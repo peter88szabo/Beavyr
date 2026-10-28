@@ -55,6 +55,7 @@ fn panel_body(
         // --- Engine -------------------------------------------------------------------------------
         ui.horizontal(|ui| {
             ui.label("Engine");
+            let previous_engine = run.settings.engine;
             egui::ComboBox::from_id_salt("conformer_engine")
                 .selected_text(run.settings.engine.label())
                 .show_ui(ui, |ui| {
@@ -62,6 +63,9 @@ fn panel_body(
                         ui.selectable_value(&mut run.settings.engine, engine, engine.label());
                     }
                 });
+            if run.settings.engine != previous_engine {
+                run.error = None;
+            }
         });
         ui.small(run.settings.engine.speed_note());
 

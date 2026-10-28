@@ -2,6 +2,9 @@
 
 use super::*;
 
+#[path = "search_engine.rs"]
+mod engine;
+
 /// Runs a conformer search. Blocking: call it on a background task.
 pub fn search(
     mol: &Molecule,
@@ -13,7 +16,11 @@ pub fn search(
         .map_err(ConformerError::Constraints)?;
     let mol = &prepared;
     let started = Instant::now();
-    let topology = DreidingTopology::build(mol).map_err(ConformerError::ForceField)?;
+    let topology = if settings.engine == SearchEngine::Dreiding {
+        Some(DreidingTopology::build(mol).map_err(ConformerError::ForceField)?)
+    } else {
+        None
+    };
 
     let atoms = mol.atoms.clone();
     let coordinates_bohr: Vec<f64> = mol
@@ -52,7 +59,7 @@ pub fn search(
         // Perception only refuses when there is nothing to sample at all. Whether that is
         // because the molecule is genuinely rigid or because its flexibility is in a ring too
         // large for the pucker treatment changes what the user should be told.
-        Err(_) => return Err(nothing_to_rotate(&topology)),
+        Err(_) => return Err(engine::no_torsions(mol, topology.as_ref())),
     };
     let rings = degrees_of_freedom
         .iter()
@@ -60,7 +67,7 @@ pub fn search(
         .count();
     let rotors = degrees_of_freedom.len() - rings;
     if degrees_of_freedom.is_empty() {
-        return Err(nothing_to_rotate(&topology));
+        return Err(engine::no_torsions(mol, topology.as_ref()));
     }
 
     let (requested_population, max_generations) =
@@ -102,47 +109,13 @@ pub fn search(
             &atoms,
             connectivity.clone(),
             || {
-                let slot = || worker.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                if let Some(args) = settings.engine.xtb_args() {
-                    let binary = settings.xtb_binary.as_ref().ok_or_else(|| {
-                        anyhow::anyhow!(
-                            "{} needs the xTB executable, which is not set",
-                            settings.engine.label()
-                        )
-                    })?;
-                    return Ok(SearchObjective::Xtb(refine::XtbObjective::new(
-                        external_scratch().join(format!("worker_{:03}", slot())),
-                        &atoms,
-                        binary,
-                        args,
-                        settings.charge,
-                        settings.multiplicity,
-                    )));
-                }
-                if settings.engine.needs_behemoth() {
-                    let binary = settings.behemoth_binary.as_ref().ok_or_else(|| {
-                        anyhow::anyhow!(
-                            "{} needs the Behemoth executable, which is not set",
-                            settings.engine.label()
-                        )
-                    })?;
-                    // TASI takes no functional or basis of its own, and one thread each so that
-                    // several workers do not oversubscribe the machine.
-                    let method = crate::qchem_interfaces::method::MethodConfig {
-                        behemoth: crate::qchem_interfaces::method::BehemothMethod::Tasi,
-                        nproc: 1,
-                        ..crate::qchem_interfaces::method::MethodConfig::default()
-                    };
-                    return Ok(SearchObjective::Behemoth(refine::BehemothObjective::new(
-                        external_scratch().join(format!("worker_{:03}", slot())),
-                        &atoms,
-                        binary,
-                        method,
-                        settings.charge,
-                        settings.multiplicity,
-                    )));
-                }
-                Ok(SearchObjective::Dreiding(DreidingObjective::new(&topology)))
+                let slot = worker.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                engine::objective(
+                    &settings,
+                    topology.as_ref(),
+                    &atoms,
+                    external_scratch().join(format!("worker_{slot:03}")),
+                )
             },
             options,
         ) {
@@ -155,7 +128,7 @@ pub fn search(
                     settings.local_optimizer,
                     rings,
                 );
-                outcome.radical_warning = topology.radical_warning();
+                outcome.radical_warning = topology.as_ref().and_then(|t| t.radical_warning());
                 outcome.constrained = settings.constraints.len();
                 return Ok(outcome);
             }
@@ -177,9 +150,20 @@ pub fn search(
     // a saddle point, and an unconstrained relaxation would slide it down to reactant or product
     // and report the result as a conformer.
     if last_error.contains("distinct converged minima") && settings.constraints.is_empty() {
-        return single_conformer(
-            &topology,
-            mol,
+        if let Some(topology) = topology.as_ref() {
+            return single_conformer(
+                topology,
+                mol,
+                &atoms,
+                started.elapsed(),
+                workers,
+                rotors,
+                rings,
+            );
+        }
+        return engine::single_external_conformer(
+            &settings,
+            &coordinates_bohr,
             &atoms,
             started.elapsed(),
             workers,
