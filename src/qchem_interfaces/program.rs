@@ -15,7 +15,7 @@
 //! [`QcProgram::PySCF`] is a Python library with no command line at all, so there is no
 //! executable to point at either. It still runs as a separate process, from a script Beavyr
 //! generates; what it needs is a Python environment that can import it, which is the user's to
-//! arrange before launching Beavyr.
+//! select in Configure, by interpreter path or an activation command.
 //!
 //! So "does this need a path field?" is [`QcProgram::needs_binary_path`], and is not the same
 //! question as "does this run inside Beavyr?" ([`QcProgram::runs_in_process`]). What each backend
@@ -43,7 +43,7 @@ pub enum QcProgram {
     /// ORCA, driven by writing an input file and running the executable on it.
     Orca,
     /// PySCF, driven by generating a Python script and running it with `python3`
-    /// from the environment Beavyr was launched in.
+    /// from the environment selected in Configure.
     PySCF,
     /// Psi4, driven through its own executable.
     ///
@@ -54,7 +54,7 @@ pub enum QcProgram {
     Psi4,
     /// Psi4, driven as a Python module through `python3`.
     ///
-    /// Needs Beavyr to have been launched from the environment holding Psi4.
+    /// Uses the Python interpreter or activation command saved for Psi4.
     /// Same engine as [`QcProgram::Psi4`]; the difference is only how it is
     /// reached.
     Psi4Py,

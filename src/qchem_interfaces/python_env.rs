@@ -14,26 +14,27 @@
 //! The check is cheap because it does not import anything. `find_spec` answers
 //! "is this module here?" by looking, measured at 48 ms against this machine's
 //! PySCF where a real import costs 0.7 s. Cheap enough to run on opening a
-//! panel; the answer is then cached for the session, because the environment
-//! cannot change under a running process anyway.
+//! panel; the answer is cached until the user saves new environment settings
+//! or requests another check.
 //!
 //! Beavyr never falls back to another backend when an environment is missing.
 //! The run is blocked and the reason is named.
 
-use std::process::Command;
 use std::sync::Mutex;
 
-/// The interpreter Beavyr runs Python backends with.
-///
-/// Deliberately the bare name rather than a configured path: it resolves
-/// through `PATH`, which is what makes an activated environment take effect,
-/// and activating one is the user's job by design.
-pub const PYTHON: &str = "python3";
+#[path = "python_launch.rs"]
+pub(crate) mod launch;
+#[path = "python_env_ui.rs"]
+mod environment_ui;
+pub(crate) use environment_ui::environment_row;
+
+/// Default Python name, resolved after any configured activation command.
+pub const PYTHON: &str = if cfg!(windows) { "python" } else { "python3" };
 
 /// What was found when we went looking.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PythonEnv {
-    /// `python3` itself could not be run.
+    /// The interpreter, shell, or environment activation could not be run.
     NoInterpreter {
         /// Why it could not be started, as the operating system put it.
         detail: String,
@@ -71,7 +72,7 @@ impl PythonEnv {
     /// in [`PythonEnv::detail`] on hover.
     pub fn short(&self) -> String {
         match self {
-            PythonEnv::NoInterpreter { .. } => format!("no `{PYTHON}` found"),
+            PythonEnv::NoInterpreter { .. } => "Python environment unavailable".into(),
             PythonEnv::ModuleMissing { module, prefix, .. } => {
                 format!("{module} not found in {}", shorten(prefix))
             }
@@ -88,20 +89,19 @@ impl PythonEnv {
     /// The full explanation, for a tooltip.
     ///
     /// Everything the short line leaves out: which interpreter was searched,
-    /// what to do about it, and why activating an environment now would not
-    /// help. Worth saying, but not worth saying in the form.
+    /// how to change the interpreter or activation command in Configure.
     pub fn detail(&self) -> String {
         match self {
             PythonEnv::NoInterpreter { detail } => format!(
-                "Beavyr runs Python backends with the `{PYTHON}` of the environment it was \
-                 started in, and none was found there. Activate an environment with one and \
-                 start Beavyr from it.\n\n{detail}"
+                "The selected Python environment could not be started. Open Configure and set \
+                 the Python interpreter or an Environment activation command for your venv, \
+                 Conda or micromamba environment. Save & Check to try again; no restart is needed.\n\n{detail}"
             ),
             PythonEnv::ModuleMissing { module, executable, prefix } => format!(
-                "{module} is not installed in {prefix}.\n\nBeavyr searched {executable}, which \
-                 is the `{PYTHON}` of the environment it was launched from. Activate the \
-                 environment that has {module} and restart Beavyr \u{2014} activating one now \
-                 has no effect on this session."
+                "{module} was not found in {prefix}.\n\nBeavyr searched {executable}. Open Configure \
+                 and select the Python interpreter or Environment activation command for the venv, \
+                 Conda or micromamba environment containing {module}. Save & Check applies the \
+                 setting immediately; no restart is needed."
             ),
             PythonEnv::Ready { module, version, executable, prefix } => {
                 let version = if version.is_empty() {
@@ -112,6 +112,12 @@ impl PythonEnv {
                 format!("{module}{version}, found in {prefix} via {executable}.")
             }
         }
+    }
+}
+
+pub(crate) fn notify_missing(ctx: &bevy_egui::egui::Context, environment: &PythonEnv) {
+    if !environment.is_ready() {
+        crate::runtime_warning::once(ctx, "Python environment setup required", &environment.detail());
     }
 }
 
@@ -163,18 +169,23 @@ fn field<'a>(text: &'a str, key: &str) -> &'a str {
         .unwrap_or("")
 }
 
-/// Runs the probe. Prefer [`cached`], which runs this once per session.
+/// Runs a fresh probe using the backend's saved settings.
+#[cfg(test)]
 pub fn probe(module: &'static str) -> PythonEnv {
-    let output = Command::new(PYTHON)
-        .arg("-c")
-        .arg(probe_source(module))
-        .output();
+    match launch::settings(module) {
+        Ok(settings) => probe_with_settings(module, &settings),
+        Err(detail) => PythonEnv::NoInterpreter { detail },
+    }
+}
+
+pub(crate) fn probe_with_settings(module: &'static str, settings: &launch::Settings) -> PythonEnv {
+    let output = settings.command(["-c", &probe_source(module)]).output();
 
     let output = match output {
         Ok(output) => output,
         Err(err) => {
             return PythonEnv::NoInterpreter {
-                detail: err.to_string(),
+                detail: format!("{}: {err}", settings.interpreter().to_string_lossy()),
             }
         }
     };
@@ -183,14 +194,14 @@ pub fn probe(module: &'static str) -> PythonEnv {
     let executable = field(&stdout, "executable").to_string();
     // No interpreter line means the interpreter ran but produced nothing we
     // recognise, which is not a working Python for our purposes either.
-    if executable.is_empty() {
+    if !output.status.success() || executable.is_empty() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let detail = stderr
             .lines()
             .rev()
-            .find(|line| !line.trim().is_empty())
-            .unwrap_or("it produced no output")
-            .to_string();
+            .take(8)
+            .collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join("\n");
+        let detail = if detail.trim().is_empty() { "Python or environment activation failed without diagnostic output".into() } else { detail };
         return PythonEnv::NoInterpreter { detail };
     }
 
@@ -211,31 +222,30 @@ pub fn probe(module: &'static str) -> PythonEnv {
     }
 }
 
-/// One probe per module per session, because the environment a process was
-/// started in does not change while it runs.
-static CACHE: Mutex<Vec<(&'static str, PythonEnv)>> = Mutex::new(Vec::new());
+/// Keep a result associated with the exact configuration that was checked.
+static CACHE: Mutex<Vec<(&'static str, launch::Settings, PythonEnv)>> = Mutex::new(Vec::new());
 
 /// The cached answer for `module`, probing the first time it is asked for.
 pub fn cached(module: &'static str) -> PythonEnv {
+    let settings = match launch::settings(module) {
+        Ok(settings) => settings,
+        Err(detail) => return PythonEnv::NoInterpreter { detail },
+    };
     if let Ok(cache) = CACHE.lock() {
-        if let Some((_, env)) = cache.iter().find(|(name, _)| *name == module) {
+        if let Some((_, _, env)) = cache.iter().find(|(name, checked, _)| *name == module && *checked == settings) {
             return env.clone();
         }
     }
-    let env = probe(module);
+    let env = probe_with_settings(module, &settings);
     if let Ok(mut cache) = CACHE.lock() {
-        if !cache.iter().any(|(name, _)| *name == module) {
-            cache.push((module, env.clone()));
-        }
+        cache.retain(|(name, _, _)| *name != module);
+        cache.push((module, settings, env.clone()));
     }
     env
 }
 
-/// Forgets what was found, so a "check again" button can look afresh.
-///
-/// Worth having even though the environment cannot change under a running
-/// process: a user who installs the missing module in another terminal will
-/// try this before believing they have to restart.
+/// Saving settings also clears probes, including when packages were installed
+/// into the same environment since its previous check.
 pub fn forget() {
     if let Ok(mut cache) = CACHE.lock() {
         cache.clear();
@@ -299,7 +309,7 @@ mod tests {
                 assert!(detail.contains(module), "{detail}");
                 assert!(detail.contains(&prefix), "{detail}");
                 assert!(detail.contains(&executable), "{detail}");
-                assert!(detail.contains("restart"), "{detail}");
+                assert!(detail.contains("Save & Check"), "{detail}");
             }
             PythonEnv::NoInterpreter { .. } => {}
             other => panic!("that module cannot exist: {other:?}"),

@@ -24,7 +24,6 @@ impl Fixture {
         store(
             &ctx,
             Presentation {
-                modern: true,
                 ..Default::default()
             },
         );
@@ -148,7 +147,7 @@ fn prominent_code_chooser_uses_existing_program_defaults_without_changing_geomet
 }
 
 #[test]
-fn switching_classic_and_docking_preserves_the_shared_setup_and_last_run() {
+fn docking_and_floating_preserve_the_shared_setup_and_last_run() {
     let mut fixture = Fixture::new();
     fixture.panel.config.basis = "def2-TZVP".into();
     fixture.panel.config.nproc = 3;
@@ -159,26 +158,6 @@ fn switching_classic_and_docking_preserves_the_shared_setup_and_last_run() {
     let input = fixture.panel.advanced_text.clone();
     assert!(!is_docked(&fixture.ctx));
     fixture.click("Dock");
-    assert!(is_docked(&fixture.ctx));
-    fixture.click("Classic");
-    assert!(!is_modern(&fixture.ctx));
-    fixture.frame(vec![], 720.0);
-    let classic = fixture.frame(vec![], 720.0);
-    assert!(
-        label_rect(&classic, "Program").is_some(),
-        "Classic window open={}; painted labels={:?}",
-        fixture.panel.open,
-        classic
-            .shapes
-            .iter()
-            .filter_map(|shape| match &shape.shape {
-                egui::Shape::Text(text) => Some(text.galley.text()),
-                _ => None,
-            })
-            .collect::<Vec<_>>()
-    );
-    fixture.click("Modern");
-    assert!(is_modern(&fixture.ctx));
     assert!(is_docked(&fixture.ctx));
     fixture.click("Float");
     assert!(!is_docked(&fixture.ctx));
@@ -233,8 +212,15 @@ fn code_chooser_and_action_stay_visible_with_long_input_at_laptop_height() {
         for height in [720.0, 600.0] {
             fixture.frame(vec![], height);
             let output = fixture.frame(vec![], height);
+            for removed in ["Classic", "Modern", "Calculation setup", "Quantum chemistry code", fixture.panel.job.description()] {
+                assert!(label_rect(&output, removed).is_none(), "Unexpected text: {removed}");
+            }
+            if !docked {
+                let rect = fixture.ctx.memory(|m| m.area_rect(egui::Id::new("quantum_chemistry_window_v2"))).unwrap();
+                assert!(rect.width() < 440.0, "Panel expanded beyond its narrower width: {rect:?}");
+                assert!(rect.left() > 800.0, "Panel should open on the right: {rect:?}");
+            }
             for label in [
-                "Quantum chemistry code",
                 "ORCA",
                 "Configure…",
                 "CPU cores",
@@ -300,14 +286,13 @@ fn unavailable_code_is_blocked_and_custom_input_is_ignored_for_non_file_backends
 }
 
 #[test]
-fn resources_remain_within_the_four_core_limit_in_both_layouts() {
+fn resources_and_docking_survive_restoring_an_old_classic_preference() {
     let mut fixture = Fixture::new();
     fixture.panel.config.nproc = 64;
     fixture.frame(vec![], 720.0);
     assert_eq!(fixture.panel.config.nproc, 4);
-    let mut state = presentation(&fixture.ctx);
-    state.modern = false;
-    store(&fixture.ctx, state);
+    restore_project_presentation(&fixture.ctx, (false, true));
+    assert_eq!(project_presentation(&fixture.ctx), (true, true));
     fixture.panel.config.nproc = 64;
     fixture.frame(vec![], 720.0);
     assert_eq!(fixture.panel.config.nproc, 4);

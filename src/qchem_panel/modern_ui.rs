@@ -1,5 +1,4 @@
-//! Modern calculation setup. Presentation state lives in egui; chemistry and
-//! running jobs remain shared with the Classic form in `ui`.
+//! Quantum Chemistry panel. Presentation state lives in egui.
 
 use crate::ui_style::ResponseExt;
 
@@ -15,12 +14,11 @@ pub(crate) use input_editor::{show as input_editor_window, project_input_state, 
 const ACCENT: egui::Color32 = egui::Color32::from_rgb(104, 174, 255);
 const WARNING: egui::Color32 = egui::Color32::from_rgb(230, 170, 90);
 const ERROR: egui::Color32 = egui::Color32::from_rgb(230, 120, 90);
-const WIDTH: f32 = 500.0;
+const WIDTH: f32 = 400.0;
 const PREFS_ID: &str = "qc_panel_presentation_v1";
 
 #[derive(Clone)]
 struct Presentation {
-    modern: bool,
     docked: bool,
     configure: bool,
     method_search: String,
@@ -32,7 +30,6 @@ struct Presentation {
 impl Default for Presentation {
     fn default() -> Self {
         Self {
-            modern: std::env::var_os("BEAVYR_CLASSIC_QC").is_none(),
             docked: false,
             configure: false,
             method_search: String::new(),
@@ -54,24 +51,20 @@ fn store(ctx: &egui::Context, state: Presentation) {
     ctx.data_mut(|data| data.insert_temp(egui::Id::new(PREFS_ID), state));
 }
 
-pub(super) fn is_modern(ctx: &egui::Context) -> bool {
-    presentation(ctx).modern
-}
-
 pub(crate) fn project_presentation(ctx: &egui::Context) -> (bool, bool) {
     let state = presentation(ctx);
-    (state.modern, state.docked)
+    (true, state.docked)
 }
 
 pub(crate) fn restore_project_presentation(ctx: &egui::Context, value: (bool, bool)) {
     let mut state = presentation(ctx);
-    state.modern = value.0; state.docked = value.1;
+    state.docked = value.1;
     store(ctx, state);
 }
 
 pub(crate) fn is_docked(ctx: &egui::Context) -> bool {
     let state = presentation(ctx);
-    state.modern && state.docked
+    state.docked
 }
 
 pub(crate) fn docked_width(ctx: &egui::Context) -> f32 {
@@ -79,17 +72,6 @@ pub(crate) fn docked_width(ctx: &egui::Context) -> f32 {
         data.get_temp::<f32>(egui::Id::new("qc_panel_docked_width"))
             .unwrap_or(WIDTH)
     })
-}
-
-pub(super) fn layout_switch(ui: &mut egui::Ui) {
-    let mut state = presentation(ui.ctx());
-    ui.horizontal(|ui| {
-        ui.small("Layout");
-        ui.selectable_value(&mut state.modern, true, "Modern");
-        ui.selectable_value(&mut state.modern, false, "Classic");
-    });
-    store(ui.ctx(), state);
-    ui.separator();
 }
 
 pub(super) fn show(
@@ -105,8 +87,8 @@ pub(super) fn show(
     let rect = if is_docked(ctx) {
         let result = egui::Panel::right("modern_quantum_chemistry")
             .default_size(WIDTH)
-            .min_size(440.0)
-            .max_size(720.0)
+            .min_size(352.0)
+            .max_size(576.0)
             .resizable(true)
             .show(host_ui, |ui| {
                 close = contents(ui, panel, task, opt_panel, mol)
@@ -121,13 +103,16 @@ pub(super) fn show(
     } else {
         let viewport = ctx.viewport_rect();
         egui::Window::new("Quantum Chemistry")
-            .id(egui::Id::new("modern_quantum_chemistry_window_v1"))
+            .id(egui::Id::new("quantum_chemistry_window_v2"))
             .open(&mut open)
             .resizable(true)
             .default_size([WIDTH, 760.0_f32.min(viewport.height() - 32.0)])
-            .min_width(440.0)
+            .min_width(352.0)
             .min_height(540.0)
-            .default_pos([viewport.left() + 64.0, viewport.top() + 16.0])
+            .default_pos([
+                (viewport.right() - WIDTH - 16.0).max(viewport.left()),
+                viewport.top() + 16.0,
+            ])
             .show(ctx, |ui| close = contents(ui, panel, task, opt_panel, mol))
             .map(|window| window.response.rect)
     };
@@ -228,7 +213,6 @@ fn header(
 ) -> bool {
     let mut close = false;
     ui.horizontal(|ui| {
-        ui.label(egui::RichText::new("Calculation setup").size(18.0).strong());
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             close = ui
                 .small_button("×")
@@ -240,14 +224,10 @@ fn header(
             {
                 state.docked = !state.docked;
             }
-            ui.selectable_value(&mut state.modern, false, "Classic")
-                .on_hover_text("Use the previous form with the same settings and running job");
-            ui.selectable_value(&mut state.modern, true, "Modern");
         });
     });
 
     // The code chooser is deliberately outside the scrolling settings.
-    ui.strong("Quantum chemistry code");
     ui.horizontal(|ui| {
         let mut chosen = panel.program;
         ui.add_enabled_ui(!running, |ui| {
@@ -313,42 +293,29 @@ fn job_choices(ui: &mut egui::Ui, panel: &mut QcPanelState, running: bool) {
                 });
             });
         });
-        let width = (ui.available_width() - 8.0) / 2.0;
-        egui::Grid::new("modern_qc_job_tiles")
-            .spacing([8.0, 6.0])
-            .show(ui, |ui| {
-                for (index, (job, label)) in [
-                    (JobType::SinglePoint, "Energy"),
-                    (JobType::Optimize, "Optimize"),
-                    (JobType::Frequencies, "Frequencies"),
-                    (JobType::OptimizeThenFrequencies, "Optimize + frequencies"),
-                ]
-                .into_iter()
-                .enumerate()
-                {
-                    let reason = job::unsupported_reason(panel.program, job);
-                    let response = ui.add_enabled(
-                        !running && reason.is_none(),
-                        egui::Button::new(label)
-                            .selected(panel.job == job)
-                            .min_size([width, 34.0].into()),
-                    );
-                    if let Some(reason) = reason {
-                        response.clone().on_disabled_hover_text(reason);
-                    }
-                    if response.clicked_once() {
-                        panel.job = job;
-                    }
-                    if index % 2 == 1 {
-                        ui.end_row();
-                    }
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.x = 6.0;
+            ui.spacing_mut().button_padding = egui::vec2(8.0, 4.0);
+            for (job, label) in [
+                (JobType::SinglePoint, "Energy"),
+                (JobType::Optimize, "Optimize"),
+                (JobType::Frequencies, "Freq/Hessian"),
+                (JobType::OptimizeThenFrequencies, "Opt+Freq"),
+            ]
+            {
+                let reason = job::unsupported_reason(panel.program, job);
+                let response = ui.add_enabled(
+                    !running && reason.is_none(),
+                    egui::Button::new(label).selected(panel.job == job),
+                );
+                if let Some(reason) = reason {
+                    response.clone().on_disabled_hover_text(reason);
                 }
-            });
-        ui.add(
-            egui::Label::new(egui::RichText::new(panel.job.description()).small().weak())
-                .truncate(),
-        )
-        .on_hover_text(panel.job.description());
+                if response.clicked_once() {
+                    panel.job = job;
+                }
+            }
+        });
         if panel.needs_excited_state_options() {
             excited_state_row(ui, panel, running);
         }
@@ -920,6 +887,11 @@ fn contents(
         style(ui);
         close = header(ui, &mut state, panel, task.is_running());
         let code = code_status(&mut state, panel, opt_panel);
+        if let Some(module) = panel.program.python_module() {
+            crate::qchem_interfaces::python_env::notify_missing(
+                ui.ctx(), &crate::qchem_interfaces::python_env::cached(module),
+            );
+        }
         let response = ui
             .add(
                 egui::Button::new(

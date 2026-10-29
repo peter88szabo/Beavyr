@@ -20,7 +20,6 @@ use std::process::Command;
 
 use super::job::JobType;
 use super::method::MethodConfig;
-use super::python_env::PYTHON;
 
 /// The script Beavyr writes into the run directory.
 pub const SCRIPT_FILE: &str = "run_sparrow.py";
@@ -55,8 +54,8 @@ pub fn job_files(run_dir: &Path) -> JobFiles {
 
 /// The command for a prepared script.
 pub fn run_command(run_dir: &Path) -> Command {
-    let mut command = Command::new(PYTHON);
-    command.current_dir(run_dir).arg(SCRIPT_FILE);
+    let mut command = super::python_env::launch::command("scine_sparrow", [SCRIPT_FILE]);
+    command.current_dir(run_dir);
     command
 }
 

@@ -27,6 +27,7 @@ mod project;
 mod qchem_interfaces;
 mod qchem_panel;
 mod recent_dir;
+mod runtime_warning;
 mod rmsd;
 mod scene;
 mod settings;

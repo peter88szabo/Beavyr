@@ -32,11 +32,6 @@ pub fn conformer_panel(
 ) -> bool {
     ui.scope(|ui| {
         crate::ui_style::modern(ui);
-        crate::ui_style::heading(
-            ui,
-            "Find stable conformers",
-            "Choose the energy model and how thoroughly to search.",
-        );
         panel_body(ui, run, mol, traj, settings)
     })
     .inner
@@ -51,7 +46,7 @@ fn panel_body(
 ) -> bool {
     let mut loaded = false;
 
-    crate::ui_style::group(ui, "Energy model", |ui| {
+    crate::ui_style::group(ui, "", |ui| {
         // --- Engine -------------------------------------------------------------------------------
         ui.horizontal(|ui| {
             ui.label("Engine");
@@ -67,7 +62,9 @@ fn panel_body(
                 run.error = None;
             }
         });
-        ui.small(run.settings.engine.speed_note());
+        if run.settings.engine != SearchEngine::Dreiding {
+            ui.small(run.settings.engine.speed_note());
+        }
 
         engine_path_rows(ui, run);
         if run.settings.engine.needs_xtb() || run.settings.engine.needs_behemoth() {
@@ -86,7 +83,16 @@ fn panel_body(
         }
     });
 
-    crate::ui_style::group(ui, "Search effort", |ui| {
+    crate::ui_style::group(ui, "", |ui| {
+        ui.horizontal(|ui| {
+            ui.strong("Search effort");
+            ui.add_space(56.0);
+            ui.checkbox(&mut run.settings.reproducible, "Repeatable")
+                .on_hover_text(
+                    "Fixes the random seed, so running the search again on the same structure gives \
+                     the same conformers.",
+                );
+        });
         // --- How hard to look ---------------------------------------------------------------------
         let effort_width = (ui.available_width() - 16.0) / 3.0;
         ui.horizontal(|ui| {
@@ -109,15 +115,11 @@ fn panel_body(
             }
         });
         ui.add_space(4.0);
-        ui.checkbox(&mut run.settings.reproducible, "Repeatable")
-            .on_hover_text(
-                "Fixes the random seed, so running the search again on the same structure gives \
-             the same conformers.",
-            );
-
-        ui.add_space(4.0);
+        let cores = available_cores().min(4);
+        if !run.is_running() {
+            run.settings.ncore = run.settings.ncore.clamp(1, cores);
+        }
         ui.horizontal(|ui| {
-            ui.label("Optimiser");
             egui::ComboBox::from_id_salt("conformer_local_optimiser")
                 .selected_text(run.settings.local_optimizer.label())
                 .show_ui(ui, |ui| {
@@ -130,27 +132,19 @@ fn panel_body(
                         .on_hover_text(method.description());
                     }
                 });
-        });
-
-        ui.add_space(4.0);
-        let cores = available_cores().min(4);
-        if !run.is_running() {
-            run.settings.ncore = run.settings.ncore.clamp(1, cores);
-        }
-        ui.horizontal(|ui| {
+            ui.add_space(40.0);
             ui.label("Cores");
             ui.add_enabled(
-            !run.is_running(),
-            egui::DragValue::new(&mut run.settings.ncore)
-                .speed(1.0)
-                .range(1..=cores),
-        )
-        .on_hover_text(
-            "How many structures to optimise at once. Every local optimisation is independent, \
-             so this scales almost linearly. It does not change the answer: with a fixed seed the \
-             same conformers come back on any number of cores.",
-        );
-            ui.label(egui::RichText::new(format!("up to {cores}")).weak().small());
+                !run.is_running(),
+                egui::DragValue::new(&mut run.settings.ncore)
+                    .speed(1.0)
+                    .range(1..=cores),
+            )
+            .on_hover_text(
+                "How many structures to optimise at once. Every local optimisation is independent, \
+                 so this scales almost linearly. It does not change the answer: with a fixed seed the \
+                 same conformers come back on any number of cores.",
+            );
         });
 
         ui.add_space(4.0);

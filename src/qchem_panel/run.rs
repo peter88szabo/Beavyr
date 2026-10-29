@@ -32,6 +32,10 @@ use dreiding_job::run as run_dreiding;
 #[path = "dreiding_completion_tests.rs"]
 mod dreiding_completion_tests;
 
+#[cfg(all(test, unix))]
+#[path = "orca_launch_tests.rs"]
+mod orca_launch_tests;
+
 /// How often a cancelled run is checked for having died.
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
 
@@ -200,6 +204,10 @@ fn run_cancellable(
     let (real_atoms, real_positions) = crate::calculation_geometry::real_coordinates(atoms, positions_angstrom)?;
     let atoms = real_atoms.as_slice();
     let positions_angstrom = real_positions.as_slice();
+    if let Some(module) = program.python_module() {
+        let environment = crate::qchem_interfaces::python_env::cached(module);
+        if !environment.is_ready() { return Err(environment.detail()); }
+    }
     if program.needs_binary_path() && binary.as_os_str().is_empty() {
         return Err(format!("Set the {} executable path first.", program.label()));
     }

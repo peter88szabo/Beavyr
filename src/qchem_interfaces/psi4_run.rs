@@ -28,7 +28,6 @@ use std::process::Command;
 use super::job::{ExcitedStateOptions, JobType, QcMethod};
 use super::method::MethodConfig;
 use super::psi4_method;
-use super::python_env::PYTHON;
 
 /// The input file the executable route runs.
 pub const INPUT_FILE: &str = "input.dat";
@@ -102,8 +101,8 @@ pub fn run_command(route: Route, binary: &Path, run_dir: &Path, nproc: u32) -> C
             command
         }
         Route::Python => {
-            let mut command = Command::new(PYTHON);
-            command.current_dir(run_dir).arg(SCRIPT_FILE);
+            let mut command = super::python_env::launch::command("psi4", [SCRIPT_FILE]);
+            command.current_dir(run_dir);
             command
         }
     }

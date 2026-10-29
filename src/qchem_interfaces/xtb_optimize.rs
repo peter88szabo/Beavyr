@@ -528,10 +528,7 @@ fn optimization_panel_body(
     });
 
     // A backend reached through Python is blocked before it starts if the
-    // environment Beavyr was launched in cannot import it. Checked here rather
-    // than at run time: the failure this catches is launching Beavyr from a
-    // desktop icon after activating the environment in a terminal, and finding
-    // that out minutes into a job is far worse than finding it out now.
+    // configured Python environment cannot find the module.
     let python_ready = python_environment_row(ui, panel_state.program, running);
     // A built-in backend has no executable, so offering a path field would be a dead end.
     if panel_state.program.runs_in_process() {
@@ -1176,41 +1173,10 @@ pub fn python_environment_row(
     program: QcProgram,
     running: bool,
 ) -> bool {
-    use super::python_env;
-
     let Some(module) = program.python_module() else {
         return true;
     };
-
-    let env = python_env::cached(module);
-    let ready = env.is_ready();
-
-    ui.horizontal(|ui| {
-        // One short line, with the whole explanation on hover. In the middle of
-        // a form a paragraph pushes everything below it off the panel and reads
-        // as an error even when it is only a note.
-        if ready {
-            ui.label(egui::RichText::new(env.short()).small().weak())
-                .on_hover_text(env.detail());
-        } else {
-            ui.colored_label(
-                egui::Color32::from_rgb(230, 120, 90),
-                format!("\u{26a0} {}", env.short()),
-            )
-            .on_hover_text(env.detail());
-        }
-        // Worth offering even though the environment cannot change under a
-        // running process: someone who installs the module in another terminal
-        // will try this before believing they have to restart.
-        if ui
-            .add_enabled(!running, egui::Button::new("Check again").small())
-            .clicked()
-        {
-            python_env::forget();
-        }
-    });
-
-    ready
+    super::python_env::environment_row(ui, module, running)
 }
 
 /// The structure as an XYZ file, for a program to read.
@@ -1669,8 +1635,7 @@ pub(crate) fn run_optimize_cancellable(
         // Unreachable: the DREIDING branch returned above, before any command was built.
         QcProgram::Dreiding => unreachable!("DREIDING runs in process"),
         QcProgram::Orca => super::orca_run::run_command(binary, workdir),
-        // No executable: `python3` comes from the environment Beavyr was
-        // started in, which was checked before the panel let this start.
+        // Python backends use their saved interpreter and activation command.
         QcProgram::PySCF => super::pyscf_run::run_command(workdir),
         // Unreachable: the Sparrow branch returned above.
         QcProgram::SparrowPy => unreachable!("Sparrow has no optimizer"),

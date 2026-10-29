@@ -187,6 +187,22 @@ detaches it again. The **Quantum chemistry code** selector stays at the top,
 with all eight existing backends and **Configure…** beside it. Its status tells
 you whether the executable or Python environment is available.
 
+For PySCF, Psi4 (Python), and Sparrow (Python), open **Configure** and enter an
+**Environment activation** command, then click **Save & Check**. Settings are
+remembered separately for each backend and apply without restarting Beavyr.
+On Linux/macOS, examples are `source /any/path/to/venv/bin/activate`,
+`conda activate myenv`, or `micromamba activate psi4env`. Environment paths may
+be anywhere; quote paths containing spaces. Conda and micromamba shell hooks
+must already be initialized in the selected shell, as for normal terminal use.
+
+Under **Python interpreter and activation shell**, you can instead browse to
+the environment's Python executable, leaving activation empty. Beavyr detects
+the OS and defaults to Bash on Linux, zsh on macOS, and PowerShell on Windows;
+an existing Bash/zsh login-shell choice is respected. Windows venv activation
+uses `& 'C:\path\to\venv\Scripts\Activate.ps1'`, or select `python.exe`
+directly. Activation runs in the calculation's child process and does not
+change Beavyr's own environment. Failed activation prevents the calculation.
+
 Choose **Energy**, **Optimize**, **Frequencies**, or **Optimize + frequencies**;
 **More…** offers the other supported calculations. Search the program's method,
 functional and basis lists by name or keyword. Charge, multiplicity, CPU cores

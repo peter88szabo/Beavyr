@@ -2,8 +2,8 @@
 //!
 //! PySCF has no command line, so unlike every other backend there is nothing
 //! to point at and no flags to build. What Beavyr writes instead is a small
-//! script, run with `python3` from the environment Beavyr itself was launched
-//! in. Whether that environment can import PySCF is settled before the run, by
+//! script, run with the interpreter and activation command saved for PySCF.
+//! Whether that environment contains PySCF is checked before the run by
 //! [`super::python_env`].
 //!
 //! The script writes its results into files rather than printing them, and it
@@ -28,7 +28,6 @@ use std::process::Command;
 use super::job::JobType;
 use super::method::MethodConfig;
 use super::pyscf_method;
-use super::python_env::PYTHON;
 
 /// The script Beavyr writes into the run directory.
 pub const SCRIPT_FILE: &str = "run_pyscf.py";
@@ -76,8 +75,8 @@ pub fn job_files(run_dir: &Path) -> JobFiles {
 
 /// The command that runs a prepared script.
 pub fn run_command(run_dir: &Path) -> Command {
-    let mut command = Command::new(PYTHON);
-    command.current_dir(run_dir).arg(SCRIPT_FILE);
+    let mut command = super::python_env::launch::command("pyscf", [SCRIPT_FILE]);
+    command.current_dir(run_dir);
     command
 }
 
