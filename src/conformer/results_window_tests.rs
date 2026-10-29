@@ -6,6 +6,7 @@ struct Fixture {
     mol: Molecule,
     traj: TrajectoryState,
     settings: MolSettings,
+    open_trajectory: bool,
 }
 
 impl Fixture {
@@ -20,6 +21,7 @@ impl Fixture {
             mol: Molecule::empty(),
             traj: TrajectoryState::default(),
             settings: MolSettings::default(),
+            open_trajectory: false,
         }
     }
 
@@ -28,7 +30,7 @@ impl Fixture {
         events: Vec<egui::Event>,
         reopen: bool,
     ) -> (egui::FullOutput, Option<egui::Rect>, bool) {
-        let mut result = (None, false);
+        let mut result = (None, ResultActions::default());
         let mut output = self.ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
@@ -52,7 +54,8 @@ impl Fixture {
             },
         );
         output.textures_delta.clear();
-        (output, result.0, result.1)
+        self.open_trajectory = result.1.open_trajectory;
+        (output, result.0, result.1.loaded)
     }
 
     fn close(&mut self) {
@@ -142,6 +145,7 @@ fn viewing_a_result_restores_its_atoms_and_reports_a_geometry_change() {
     assert!(fixture.click(position, false));
     assert_eq!(fixture.mol.atoms, ["C", "H"]);
     assert_eq!(fixture.run.previewing, Some(0));
+    assert!(!fixture.open_trajectory);
     assert!((fixture.mol.pos[1].x - 1.1).abs() < 1.0e-5);
 }
 
@@ -153,5 +157,6 @@ fn loading_results_as_a_trajectory_works_from_the_separate_window() {
     let position = text_position(&output, "Load as trajectory");
     assert!(fixture.click(position, false));
     assert_eq!(fixture.traj.frames.len(), 2);
+    assert!(fixture.open_trajectory);
     assert_eq!(fixture.mol.atoms, ["C", "H"]);
 }

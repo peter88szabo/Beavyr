@@ -1256,10 +1256,6 @@ pub fn animate_mode(
         .collect()
 }
 
-/// Loads a mode's animation into the trajectory player, looping (a
-/// vibration genuinely repeats, unlike an optimization path) and
-/// deliberately overwriting whatever trajectory was already loaded -- the
-/// caller is responsible for having told the user this will happen.
 /// Stops a mode animation and puts the molecule back at its equilibrium
 /// geometry.
 ///
@@ -1320,6 +1316,7 @@ pub fn stop_animation_when_panel_closes(
     }
 }
 
+/// Loads one vibration cycle, with Once playback as for other trajectories.
 pub fn load_mode_animation(
     traj: &mut TrajectoryState,
     atoms: &[String],
@@ -1331,7 +1328,7 @@ pub fn load_mode_animation(
 ) {
     traj.frames = animate_mode(atoms, coords_angstrom, modes, mode_index, amplitude_angstrom, 60);
     traj.current_frame = 0;
-    traj.mode = PlaybackMode::Loop;
+    traj.mode = PlaybackMode::Once;
     traj.direction = 1;
     traj.playing = true;
     traj.fps = speed_fps;
@@ -1760,11 +1757,6 @@ pub fn xtb_frequency_panel(
 ) {
     ui.scope(|ui| {
         crate::ui_style::modern(ui);
-        crate::ui_style::heading(
-            ui,
-            "Explore vibrational modes",
-            "Load a Hessian or calculate frequencies for the current structure.",
-        );
         if ui
             .add_enabled(
                 !freq_task.is_running(),
@@ -3984,19 +3976,19 @@ mod tests {
     }
 
     #[test]
-    fn load_mode_animation_sets_speed_amplitude_and_loops() {
+    fn load_mode_animation_sets_speed_amplitude_and_plays_once() {
         let atoms = vec!["H".to_string(), "H".to_string()];
         let coords = vec![Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 0.74)];
         let mut modes = Array2::<f64>::zeros((6, 6));
         modes[(2, 0)] = 1.0;
         modes[(5, 0)] = -1.0;
         let mut traj = TrajectoryState::default();
-        traj.mode = PlaybackMode::Once; // as an optimization would have left it
+        traj.mode = PlaybackMode::Loop;
         traj.playing = false;
 
         load_mode_animation(&mut traj, &atoms, &coords, &modes, 0, 0.4, 25.0);
 
-        assert_eq!(traj.mode, PlaybackMode::Loop, "a vibration genuinely repeats");
+        assert_eq!(traj.mode, PlaybackMode::Once);
         assert!(traj.playing);
         assert_eq!(traj.fps, 25.0);
         assert_eq!(traj.current_frame, 0);

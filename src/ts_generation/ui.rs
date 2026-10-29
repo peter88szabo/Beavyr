@@ -318,11 +318,6 @@ pub fn panel(
 ) -> bool {
     ui.scope(|ui| {
         crate::ui_style::modern(ui);
-        crate::ui_style::heading(
-            ui,
-            "Build a transition-state guess",
-            "Capture the reactant and product, then choose a search method.",
-        );
         panel_body(ui, state, mol, traj)
     })
     .inner

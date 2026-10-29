@@ -21,11 +21,6 @@ pub fn panel(
 ) -> bool {
     ui.scope(|ui| {
         ui_style::modern(ui);
-        ui_style::heading(
-            ui,
-            "Export the current view",
-            "Choose a region and the output size.",
-        );
         ui_style::group(ui, "File format", |ui| {
             let width = (ui.available_width() - 8.0) / 2.0;
             ui.horizontal(|ui| {

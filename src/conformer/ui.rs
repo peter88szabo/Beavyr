@@ -830,6 +830,9 @@ fn load_as_trajectory(
     traj.current_frame = 0;
     traj.last_applied = None;
     traj.playing = false;
+    traj.mode = crate::trajectory::PlaybackMode::Once;
+    traj.direction = 1;
+    traj.accum = 0.0;
     traj.overlay_dirty = true;
     traj.current_file = None;
     // Conformers differ only in torsion angles, so the bond graph is the same in every frame.

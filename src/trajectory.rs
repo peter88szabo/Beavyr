@@ -1,4 +1,7 @@
 // src/trajectory.rs
+#[path = "trajectory_controls.rs"]
+pub(crate) mod controls;
+
 use bevy::prelude::*;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -101,7 +104,7 @@ impl Default for TrajectoryState {
             current_frame: 0,
             playing: false,
             direction: 1,
-            mode: PlaybackMode::Loop,
+            mode: PlaybackMode::Once,
             overlay_enabled: false,
             overlay_dirty: false,
             overlay_full_stride: 1,
@@ -700,5 +703,23 @@ mod default_tests {
     #[test]
     fn playback_follows_bond_changes_by_default() {
         assert!(!TrajectoryState::default().fixed_bonds);
+    }
+
+    #[test]
+    fn default_playback_stops_at_the_end_in_both_directions() {
+        let mut traj = TrajectoryState::default();
+        traj.frames = vec![TrajectoryFrame { atoms: vec!["H".into()], pos: vec![Vec3::ZERO] }; 2];
+        assert_eq!(traj.mode, PlaybackMode::Once);
+        traj.current_frame = 1;
+        traj.playing = true;
+        step_frame(&mut traj);
+        assert!(!traj.playing);
+        assert_eq!(traj.current_frame, 1);
+        traj.current_frame = 0;
+        traj.direction = -1;
+        traj.playing = true;
+        step_frame(&mut traj);
+        assert!(!traj.playing);
+        assert_eq!(traj.current_frame, 0);
     }
 }

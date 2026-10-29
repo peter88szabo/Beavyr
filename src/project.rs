@@ -331,6 +331,7 @@ impl Snapshot {
         self.camera.rotating = false;
         self.camera.panning = false;
         self.trajectory.playing = false;
+        self.trajectory.mode = crate::trajectory::PlaybackMode::Once;
         self.trajectory.accum = 0.0;
         self.trajectory.overlay_dirty = true;
         self.trajectory.last_applied = Some(self.trajectory.current_frame);

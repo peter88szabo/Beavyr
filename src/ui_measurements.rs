@@ -74,7 +74,10 @@ fn panel_body(
         }
 
         // Global style
-        crate::ui_style::collapsible_group(ui, "Distance appearance", false, |ui| {
+        egui::CollapsingHeader::new(egui::RichText::new("Distance appearance").small().weak())
+            .id_salt("compact_distance_appearance")
+            .default_open(false)
+            .show(ui, |ui| {
             ui.separator();
             ui.label("Global style");
             ui.add(egui::Slider::new(&mut measurements.line_width, 1.0..=20.0).text("Line width"));
@@ -133,9 +136,7 @@ fn panel_body(
 
         // Pairs list
         ui.separator();
-        if measurements.pairs.is_empty() {
-            ui.weak("No measurement pairs yet. Activate picking, then click two atoms.");
-        } else {
+        if !measurements.pairs.is_empty() {
             egui::ScrollArea::vertical()
                 .id_salt("measure_pairs_scroll")
                 .max_height(240.0)

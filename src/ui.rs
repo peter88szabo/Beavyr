@@ -791,11 +791,6 @@ pub fn ui_panel(
                 Tab::Trajectory.default_size(),
                 "Trajectory",
                 |ui| {
-                    crate::ui_style::heading(
-                        ui,
-                        "Explore a trajectory",
-                        "Browse frames, play motion and compare overlays.",
-                    );
                     crate::ui_style::group(ui, "Trajectory file", |ui| {
                         if ui
                             .add(crate::ui_style::primary("Open trajectory XYZ…"))
@@ -811,6 +806,8 @@ pub fn ui_panel(
                                         Ok(frames) => {
                                             let previous = structure_history.before(&mol, &traj);
                                             traj.frames = frames;
+                                            traj.mode = trajectory::PlaybackMode::Once;
+                                            traj.direction = 1;
                                             traj.current_frame = 0;
                                             traj.playing = false;
                                             traj.accum = 0.0;
@@ -846,13 +843,6 @@ pub fn ui_panel(
                             }
                         }
 
-                        let traj_file_label = match &traj.current_file {
-                            Some(path) => format!("File: {}", path.display()),
-                            None => "File: (none)".to_string(),
-                        };
-                        ui.collapsing("File location", |ui| {
-                            ui.weak(traj_file_label);
-                        });
                     });
 
                     if traj.frames.is_empty() {
@@ -895,14 +885,14 @@ pub fn ui_panel(
                                         None,
                                     );
                                 }
-                                if ui.button("Play backward").clicked_once() {
+                                if trajectory::controls::play_button(ui, -1).clicked_once() {
                                     traj.direction = -1;
                                     traj.playing = true;
                                 }
                                 if ui.button("Pause").clicked_once() {
                                     traj.playing = false;
                                 }
-                                if ui.add(crate::ui_style::primary("Play")).clicked_once() {
+                                if trajectory::controls::play_button(ui, 1).clicked_once() {
                                     traj.direction = 1;
                                     traj.playing = true;
                                 }
@@ -958,69 +948,7 @@ pub fn ui_panel(
                                 );
                             });
 
-                            ui.horizontal_wrapped(|ui| {
-                                let sel = ui.visuals().selection.bg_fill;
-                                let dim = ui.visuals().widgets.inactive.bg_fill;
-                                if ui
-                            .add(
-                                egui::Button::new("Fixed bonds")
-                                    .fill(if traj.fixed_bonds { sel } else { dim }),
-                            )
-                            .on_hover_text(
-                                "Keep the current bond topology during playback instead of \
-                                 perceiving it per frame. Off by default -- a reactive \
-                                 trajectory needs bonds that follow the reaction.",
-                            )
-                            .clicked_once()
-                        {
-                            traj.fixed_bonds = !traj.fixed_bonds;
-                            traj.last_applied = None;
-                            if traj.fixed_bonds {
-                                traj.overlay_dirty = true;
-                            }
-                        }
-                            });
-
-                            ui.horizontal_wrapped(|ui| {
-                                let sel = ui.visuals().selection.bg_fill;
-                                let dim = ui.visuals().widgets.inactive.bg_fill;
-
-                                let is_loop = matches!(traj.mode, trajectory::PlaybackMode::Loop);
-                                let is_once = matches!(traj.mode, trajectory::PlaybackMode::Once);
-                                let is_ping =
-                                    matches!(traj.mode, trajectory::PlaybackMode::PingPong);
-
-                                if ui
-                                    .add(egui::Button::new("Loop").fill(if is_loop {
-                                        sel
-                                    } else {
-                                        dim
-                                    }))
-                                    .clicked_once()
-                                {
-                                    traj.mode = trajectory::PlaybackMode::Loop;
-                                }
-                                if ui
-                                    .add(egui::Button::new("Once").fill(if is_once {
-                                        sel
-                                    } else {
-                                        dim
-                                    }))
-                                    .clicked_once()
-                                {
-                                    traj.mode = trajectory::PlaybackMode::Once;
-                                }
-                                if ui
-                                    .add(egui::Button::new("Ping-pong").fill(if is_ping {
-                                        sel
-                                    } else {
-                                        dim
-                                    }))
-                                    .clicked_once()
-                                {
-                                    traj.mode = trajectory::PlaybackMode::PingPong;
-                                }
-                            });
+                            trajectory::controls::mode_row(ui, &mut traj);
                         });
                         crate::ui_style::group(ui, "Frame overlays", |ui| {
                             ui.horizontal_wrapped(|ui| {
@@ -2033,17 +1961,20 @@ pub fn ui_panel(
     let previous = if crate::conformer::ui::results_open(ctx, &conformer_run) {
         structure_history.before(&mol, &traj)
     } else { None };
-    let (conformer_rect, loaded) = crate::conformer::ui::results_window(
+    let (conformer_rect, actions) = crate::conformer::ui::results_window(
         ctx, &mut conformer_run, &mut mol, &mut traj, &settings,
     );
     if let Some(rect) = conformer_rect {
         window_rects.push(rect);
     }
-    if loaded {
+    if actions.open_trajectory {
+        ui_layout.open[Tab::Trajectory.index()] = true;
+    }
+    if actions.loaded {
         xtb_freq_panel_state.selected_mode = None;
         structure_history.replaced(previous, &mol, &traj, "Conformer");
     }
-    crate::conformer::ui::announce(loaded, &mut ev_changed);
+    crate::conformer::ui::announce(actions.loaded, &mut ev_changed);
 
     // The calculator opens from the launcher beside the editor. Its modern
     // form can float or dock; finished results use their own summary window.
@@ -2468,6 +2399,8 @@ pub(crate) fn load_xyz_from_path(
         traj.last_dir = path.parent().map(|p| p.to_path_buf());
         traj.current_file = Some(path.to_path_buf());
         traj.frames = frames;
+        traj.mode = trajectory::PlaybackMode::Once;
+        traj.direction = 1;
         traj.current_frame = 0;
         traj.playing = false;
         traj.accum = 0.0;

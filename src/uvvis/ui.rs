@@ -282,11 +282,6 @@ pub fn uvvis_panel(
 ) {
     ui.scope(|ui| {
         crate::ui_style::modern(ui);
-        crate::ui_style::heading(
-            ui,
-            "Explore electronic excitations",
-            "Load TD-DFT output or calculate an absorption spectrum.",
-        );
         panel_body(ui, state, task, mol, behemoth_path, animating, orbitals);
     });
 }

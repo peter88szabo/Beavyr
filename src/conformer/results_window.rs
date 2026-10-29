@@ -3,6 +3,12 @@
 use super::*;
 use std::time::Instant;
 
+#[derive(Default)]
+pub(crate) struct ResultActions {
+    pub loaded: bool,
+    pub open_trajectory: bool,
+}
+
 #[derive(Clone, Default)]
 struct WindowState {
     open: bool,
@@ -55,10 +61,10 @@ pub(crate) fn window(
     mol: &mut Molecule,
     traj: &mut TrajectoryState,
     settings: &MolSettings,
-) -> (Option<egui::Rect>, bool) {
+) -> (Option<egui::Rect>, ResultActions) {
     let mut value = state(ctx);
     value.sync(run);
-    let mut loaded = false;
+    let mut actions = ResultActions::default();
     let rect = if value.open {
         let outcome = run
             .outcome
@@ -66,11 +72,11 @@ pub(crate) fn window(
             .expect("an open result window has an outcome");
         let available = ctx.content_rect();
         let size = egui::vec2(
-            680.0_f32.min((available.width() - 32.0).max(300.0)),
+            520.0_f32.min((available.width() - 32.0).max(300.0)),
             680.0_f32.min((available.height() - 32.0).max(240.0)),
         );
         egui::Window::new("Conformer Search Results")
-            .id(egui::Id::new("conformer_results_window"))
+            .id(egui::Id::new("conformer_results_window_v2"))
             .open(&mut value.open)
             .resizable(true)
             .default_size(size)
@@ -78,14 +84,14 @@ pub(crate) fn window(
             .vscroll(true)
             .show(ctx, |ui| {
                 crate::ui_style::modern(ui);
-                loaded = results_section(ui, run, &outcome, mol, traj, settings);
+                actions = results_section(ui, run, &outcome, mol, traj, settings);
             })
             .map(|response| response.response.rect)
     } else {
         None
     };
     store(ctx, value);
-    (rect, loaded)
+    (rect, actions)
 }
 
 fn results_section(
@@ -95,10 +101,9 @@ fn results_section(
     mol: &mut Molecule,
     traj: &mut TrajectoryState,
     settings: &MolSettings,
-) -> bool {
-    let mut loaded = false;
+) -> ResultActions {
+    let mut actions = ResultActions::default();
 
-    ui.label(egui::RichText::new("Results").strong());
     // Rings and rotatable bonds are both degrees of freedom but they are not the same thing, and
     // calling a ring a "rotatable bond" would be wrong in a way a chemist would notice.
     let freedom = match (outcome.rotors, outcome.rings) {
@@ -126,19 +131,6 @@ fn results_section(
         outcome.workers,
         if outcome.workers == 1 { "" } else { "s" }
     ));
-    ui.label(
-        egui::RichText::new(format!(
-            "Local optimiser: {}. Energies from {}.",
-            outcome.local_optimizer.label(),
-            if outcome.refined_with_xtb {
-                "xTB GFN2"
-            } else {
-                "the DREIDING force field"
-            }
-        ))
-        .small()
-        .weak(),
-    );
     ui.label(
         egui::RichText::new(format!(
             "{} generations, {} structures tried, {} local optimisations. Finished: {}.",
@@ -185,7 +177,8 @@ fn results_section(
             .clicked_once()
         {
             load_as_trajectory(outcome, mol, traj, settings);
-            loaded = true;
+            actions.loaded = true;
+            actions.open_trajectory = true;
         }
         if ui
             .button("Save as XYZ trajectory")
@@ -242,7 +235,7 @@ fn results_section(
                             );
                             mol.recompute_bonds(settings.bond_thresh_scale, settings.hbond_cutoff);
                             run.previewing = Some(index);
-                            loaded = true;
+                            actions.loaded = true;
                         }
                         ui.end_row();
                     }
@@ -263,7 +256,7 @@ fn results_section(
     ui.add_space(6.0);
     ui.collapsing("References", |ui| citation(ui));
 
-    loaded
+    actions
 }
 
 #[cfg(test)]
