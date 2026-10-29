@@ -85,7 +85,10 @@ pub(crate) fn environment_row(ui: &mut egui::Ui, module: &'static str, running: 
                 draft.error = None;
                 notify_missing(ui.ctx(), &cached(module));
             }
-            Err(error) => draft.error = Some(error),
+            Err(error) => {
+                crate::runtime_warning::push(ui.ctx(), "Python settings error", &error);
+                draft.error = Some(error);
+            }
         }
     }
     if let Some(error) = &draft.error {

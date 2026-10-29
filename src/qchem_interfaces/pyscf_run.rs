@@ -320,19 +320,17 @@ pub fn parse_energy(stdout: &str) -> Option<f64> {
         .and_then(|rest| rest.trim().parse().ok())
 }
 
-/// The last thing Python said before giving up, for a message worth reading.
-///
-/// A traceback's final line is the exception and its text, which is the useful
-/// part; everything above it is the call stack, which stays in the run
-/// directory for when it is wanted.
+/// Preserve diagnostics for the copyable error window, with a clear explanation
+/// when the optional geometry optimizer is missing.
 pub fn failure_detail(stderr: &str) -> String {
-    stderr
-        .lines()
-        .rev()
-        .find(|line| !line.trim().is_empty())
-        .unwrap_or("see xtb.stderr in the run directory")
-        .trim()
-        .to_string()
+    let detail = stderr.trim();
+    if detail.is_empty() {
+        return "PySCF failed without diagnostic output. See its output files in the run directory.".into();
+    }
+    if detail.contains("No module named 'geometric'") || detail.contains("No module named \"geometric\"") {
+        return format!("PySCF geometry optimization requires the optional geomeTRIC package, which is missing from the selected Python environment.\n\nInstall the package named geometric in that same environment, then try again. Beavyr has not changed your Python installation.\n\n{detail}");
+    }
+    detail.to_owned()
 }
 
 #[cfg(test)]
@@ -500,20 +498,26 @@ mod tests {
         assert_eq!(parse_energy("natoms 3\n"), None);
     }
 
-    /// The exception is the useful line, not the top of the traceback.
+    /// Copying a failure preserves its traceback, not only its last line.
     #[test]
-    fn the_failure_detail_is_the_last_line_of_the_traceback() {
+    fn the_failure_detail_preserves_the_full_traceback() {
         let stderr = concat!(
             "Traceback (most recent call last):\n",
             "  File \"run_pyscf.py\", line 12, in <module>\n",
             "    mf.kernel()\n",
             "ValueError: basis not found for element Uuo\n"
         );
-        assert_eq!(
-            failure_detail(stderr),
-            "ValueError: basis not found for element Uuo"
-        );
-        assert!(failure_detail("").contains("xtb.stderr"));
+        assert_eq!(failure_detail(stderr), stderr.trim());
+        assert!(failure_detail("").contains("output files"));
+    }
+
+    #[test]
+    fn missing_geometric_explains_the_optional_dependency_and_keeps_diagnostics() {
+        let stderr = "Traceback (most recent call last):\n  File \"run_pyscf.py\", line 44\nModuleNotFoundError: No module named 'geometric'\n";
+        let message = failure_detail(stderr);
+        for expected in ["PySCF geometry optimization", "optional geomeTRIC", "selected Python environment", stderr.trim()] {
+            assert!(message.contains(expected), "Missing {expected}: {message}");
+        }
     }
 
     /// Generates a real script, runs it with the real PySCF, and checks what
@@ -589,7 +593,9 @@ mod tests {
             .get_args()
             .map(|a| a.to_string_lossy().to_string())
             .collect();
-        assert_eq!(args, vec!["run_pyscf.py"]);
+        // The saved activation command may wrap Python in a shell. The
+        // prepared script must still be the script passed to that interpreter.
+        assert!(args.last().is_some_and(|arg| arg == SCRIPT_FILE || arg.contains("'run_pyscf.py'")), "{args:?}");
         assert_eq!(command.get_current_dir(), Some(Path::new("/tmp/run")));
     }
 }

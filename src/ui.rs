@@ -676,21 +676,11 @@ pub fn ui_panel(
                 Tab::Conformers.default_size(),
                 "Conformer Search",
                 |ui| {
-                    let previous = structure_history.before(&mol, &traj);
-                    let loaded = crate::conformer::ui::conformer_panel(
+                    crate::conformer::ui::conformer_panel(
                         ui,
                         &mut conformer_run,
                         &mut mol,
-                        &mut traj,
-                        &settings,
                     );
-                    // Showing a conformer, or loading the set as a trajectory, replaces the
-                    // geometry -- so the renderer, measurements and bond lists have to be told.
-                    if loaded {
-                        xtb_freq_panel_state.selected_mode = None;
-                        structure_history.replaced(previous, &mol, &traj, "Conformer");
-                    }
-                    crate::conformer::ui::announce(loaded, &mut ev_changed);
                 },
             );
             // ===========================
@@ -2039,6 +2029,22 @@ pub fn ui_panel(
         ev_changed.write(MoleculeChanged::parse_xyz(peptide_change.recenter()));
     }
 
+    // Result windows keep working even when their calculation setup is closed.
+    let previous = if crate::conformer::ui::results_open(ctx, &conformer_run) {
+        structure_history.before(&mol, &traj)
+    } else { None };
+    let (conformer_rect, loaded) = crate::conformer::ui::results_window(
+        ctx, &mut conformer_run, &mut mol, &mut traj, &settings,
+    );
+    if let Some(rect) = conformer_rect {
+        window_rects.push(rect);
+    }
+    if loaded {
+        xtb_freq_panel_state.selected_mode = None;
+        structure_history.replaced(previous, &mol, &traj, "Conformer");
+    }
+    crate::conformer::ui::announce(loaded, &mut ev_changed);
+
     // The calculator opens from the launcher beside the editor. Its modern
     // form can float or dock; finished results use their own summary window.
     if qc_panel.open {
@@ -2061,6 +2067,31 @@ pub fn ui_panel(
     crate::qchem_panel::ui::result_windows(ctx, &mut xtb_panel_state, &xtb_task);
     if let Some(rect) = crate::qchem_panel::ui::dreiding_warning_window(ctx, &mut qc_task) {
         window_rects.push(rect);
+    }
+    for (source, title, error) in [
+        ("quantum_chemistry", "Quantum chemistry calculation failed",
+            qc_task.last_message.as_deref().filter(|message| qc_task.last_is_error &&
+                !message.starts_with(crate::forcefield::dreiding::diagnostics::UNSUPPORTED_SYSTEM))),
+        ("optimization", "Geometry optimization failed",
+            xtb_task.last_message.as_deref().filter(|_| xtb_task.last_is_error)),
+        ("frequency", "Frequency calculation failed",
+            xtb_freq_task.last_message.as_deref().filter(|_| xtb_freq_task.last_is_error)),
+        ("conformer_search", "Conformer search failed", conformer_run.error.as_deref()),
+        ("conformer_pathways", "Conformer pathway search failed", conformer_run.trail_error.as_deref()),
+        ("conformer_refinement", "Conformer refinement failed",
+            conformer_run.refinement.as_ref().and_then(|result| result.as_ref().err()).map(String::as_str)),
+        ("transition_state", "Transition state calculation failed",
+            ts_generation.message.as_deref().filter(|_| ts_generation.is_error)),
+        ("spectrum_calculation", "Spectrum calculation failed",
+            uvvis_task.last_message.as_deref().filter(|_| uvvis_task.last_is_error)),
+        ("spectrum_load", "Cannot load spectrum", uvvis_state.load_error.as_deref()),
+        ("molecule_editor", "Molecule editor error", zmat_state.last_error.as_deref()),
+        ("geometry_cleanup", "Geometry cleanup failed",
+            zmat_state.cleanup_report.as_ref().and_then(|result| result.as_ref().err()).map(String::as_str)),
+        ("orbital_browser", "Cannot load orbital data", orbital_state.browser.error.as_deref()),
+        ("structure_comparison", "Structure comparison failed", rmsd_state.last_error.as_deref()),
+    ] {
+        crate::runtime_warning::observe(ctx, source, title, error);
     }
     if let Some(rect) = crate::runtime_warning::window(ctx) {
         window_rects.push(rect);

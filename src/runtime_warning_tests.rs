@@ -105,3 +105,68 @@ fn no_python_interpreter_message_explains_saved_environment_settings() {
         "{text}"
     );
 }
+
+#[test]
+fn copying_an_error_copies_all_diagnostics_and_keeps_the_popup_open() {
+    let ctx = egui::Context::default();
+    let message = "PySCF optimization failed.\n\nTraceback:\nModuleNotFoundError: No module named 'geometric'\nOutput kept in /tmp/example.";
+    observe(&ctx, "calculator", "Calculation failed", Some(message));
+    frame(&ctx, vec![]);
+    let (output, _) = frame(&ctx, vec![]);
+    let position = output
+        .shapes
+        .iter()
+        .find_map(|shape| match &shape.shape {
+            egui::Shape::Text(text) if text.galley.text() == "Copy error" => {
+                Some(text.pos + text.galley.size() / 2.0)
+            }
+            _ => None,
+        })
+        .expect("The error window needs a visible Copy error button");
+    let mut copied = false;
+    for pressed in [true, false] {
+        let (output, rect) = frame(
+            &ctx,
+            vec![
+                egui::Event::PointerMoved(position),
+                egui::Event::PointerButton {
+                    pos: position,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+        );
+        copied |= output.platform_output.commands.iter().any(|command| {
+            matches!(command,
+            egui::OutputCommand::CopyText(text) if text == message)
+        });
+        assert!(rect.is_some());
+    }
+    assert!(copied, "The full error text must be sent to the clipboard");
+}
+
+#[test]
+fn stored_errors_do_not_reopen_every_frame_and_can_report_a_later_failure() {
+    let ctx = egui::Context::default();
+    observe(&ctx, "calculator", "Calculation failed", Some("Failed"));
+    // Acknowledge the queue directly; GUI dismissal is covered above.
+    ctx.data_mut(|data| {
+        data.get_temp_mut_or_default::<Notices>(egui::Id::new("runtime_setup_notices"))
+            .0
+            .clear()
+    });
+    observe(&ctx, "calculator", "Calculation failed", Some("Failed"));
+    assert!(frame(&ctx, vec![]).1.is_none());
+    observe(&ctx, "calculator", "Calculation failed", None);
+    observe(&ctx, "calculator", "Calculation failed", Some("Failed"));
+    assert!(frame(&ctx, vec![]).1.is_some());
+}
+
+#[test]
+fn successful_and_cancelled_calculations_do_not_raise_an_error_popup() {
+    let ctx = egui::Context::default();
+    observe(&ctx, "calculator", "Calculation failed", None);
+    observe(&ctx, "optimizer", "Optimization failed", Some("Cancelled."));
+    assert!(frame(&ctx, vec![]).1.is_none());
+}

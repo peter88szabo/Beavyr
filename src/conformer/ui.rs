@@ -8,6 +8,10 @@
 
 use crate::ui_style::ResponseExt;
 
+#[path = "results_window.rs"]
+mod results_window;
+pub(crate) use results_window::{window as results_window, is_open as results_open};
+
 use bevy::prelude::*;
 use bevy_egui::egui;
 
@@ -21,31 +25,23 @@ use crate::qchem_interfaces::program::QcProgram;
 
 use super::{available_cores, ConformerOutcome, ConformerRun, SearchEngine, Thoroughness};
 
-/// Draws the panel. Returns `true` if the conformers were just loaded into the viewer, so the
-/// caller can announce the structure change.
+/// Draws search setup; completed results are displayed in their own window.
 pub fn conformer_panel(
     ui: &mut egui::Ui,
     run: &mut ConformerRun,
     mol: &mut Molecule,
-    traj: &mut TrajectoryState,
-    settings: &MolSettings,
-) -> bool {
+) {
     ui.scope(|ui| {
         crate::ui_style::modern(ui);
-        panel_body(ui, run, mol, traj, settings)
-    })
-    .inner
+        panel_body(ui, run, mol)
+    });
 }
 
 fn panel_body(
     ui: &mut egui::Ui,
     run: &mut ConformerRun,
     mol: &mut Molecule,
-    traj: &mut TrajectoryState,
-    settings: &MolSettings,
-) -> bool {
-    let mut loaded = false;
-
+) {
     crate::ui_style::group(ui, "", |ui| {
         // --- Engine -------------------------------------------------------------------------------
         ui.horizontal(|ui| {
@@ -234,190 +230,7 @@ fn panel_body(
 
     trail_section(ui, run, mol);
 
-    // --- Results ------------------------------------------------------------------------------
-    if let Some(outcome) = run.outcome.clone() {
-        ui.add_space(8.0);
-        ui.separator();
-        ui.add_space(8.0);
-        loaded |= crate::ui_style::group(ui, "", |ui| {
-            results_section(ui, run, &outcome, mol, traj, settings)
-        });
-    }
-
-    loaded
-}
-
-fn results_section(
-    ui: &mut egui::Ui,
-    run: &mut ConformerRun,
-    outcome: &ConformerOutcome,
-    mol: &mut Molecule,
-    traj: &mut TrajectoryState,
-    settings: &MolSettings,
-) -> bool {
-    let mut loaded = false;
-
-    ui.label(egui::RichText::new("Results").strong());
-    // Rings and rotatable bonds are both degrees of freedom but they are not the same thing, and
-    // calling a ring a "rotatable bond" would be wrong in a way a chemist would notice.
-    let freedom = match (outcome.rotors, outcome.rings) {
-        (0, 1) => "1 ring".to_string(),
-        (0, rings) => format!("{rings} rings"),
-        (rotors, 0) => format!(
-            "{rotors} rotatable bond{}",
-            if rotors == 1 { "" } else { "s" }
-        ),
-        (rotors, rings) => format!(
-            "{rotors} rotatable bond{} and {rings} ring{}",
-            if rotors == 1 { "" } else { "s" },
-            if rings == 1 { "" } else { "s" }
-        ),
-    };
-    ui.label(format!(
-        "{} conformer{} from {freedom}, in {:.1} s on {} core{}.",
-        outcome.conformers.len(),
-        if outcome.conformers.len() == 1 {
-            ""
-        } else {
-            "s"
-        },
-        outcome.elapsed.as_secs_f64(),
-        outcome.workers,
-        if outcome.workers == 1 { "" } else { "s" }
-    ));
-    ui.label(
-        egui::RichText::new(format!(
-            "Local optimiser: {}. Energies from {}.",
-            outcome.local_optimizer.label(),
-            if outcome.refined_with_xtb {
-                "xTB GFN2"
-            } else {
-                "the DREIDING force field"
-            }
-        ))
-        .small()
-        .weak(),
-    );
-    ui.label(
-        egui::RichText::new(format!(
-            "{} generations, {} structures tried, {} local optimisations. Finished: {}.",
-            outcome.generations,
-            outcome.structures_tried,
-            outcome.local_optimizations,
-            outcome.termination
-        ))
-        .small()
-        .weak(),
-    );
-    // If the winner only appeared at the very end, the search had not settled and more effort is
-    // likely to find something better. Saying so is more use than the raw generation number.
-    if outcome.generations > 1 && outcome.best_found_in_generation >= outcome.generations {
-        ui.label(
-            egui::RichText::new(
-                "The best conformer was found in the last generation, so the search was still \
-                 improving when it stopped -- try a higher search effort.",
-            )
-            .small()
-            .color(egui::Color32::from_rgb(200, 160, 70)),
-        );
-    }
-
-    if let Some(warning) = &outcome.radical_warning {
-        ui.add_space(4.0);
-        ui.label(
-            egui::RichText::new(warning)
-                .small()
-                .color(egui::Color32::from_rgb(200, 160, 70)),
-        );
-    }
-
-    refinement_row(ui, run, outcome);
-
-    ui.add_space(8.0);
-    ui.horizontal(|ui| {
-        if ui
-            .button("Load as trajectory")
-            .on_hover_text(
-                "Puts every conformer in the Trajectory tool, so they can be stepped through \
-                 or played as an animation.",
-            )
-            .clicked_once()
-        {
-            load_as_trajectory(outcome, mol, traj, settings);
-            loaded = true;
-        }
-        if ui
-            .button("Save as XYZ trajectory")
-            .on_hover_text("One XYZ frame per conformer, ordered by energy.")
-            .clicked_once()
-        {
-            save_trajectory(outcome);
-        }
-    });
-
-    ui.add_space(8.0);
-    egui::ScrollArea::vertical()
-        .max_height(260.0)
-        .show(ui, |ui| {
-            egui::Grid::new("conformer_table")
-                .num_columns(4)
-                .spacing([18.0, 8.0])
-                .striped(true)
-                .show(ui, |ui| {
-                    ui.label(egui::RichText::new("#").strong());
-                    ui.label(egui::RichText::new("ΔE (kcal/mol)").strong());
-                    ui.label(egui::RichText::new("Population").strong());
-                    ui.label("");
-                    ui.end_row();
-
-                    for (index, conformer) in outcome.conformers.iter().enumerate() {
-                        let showing = run.previewing == Some(index);
-                        ui.label(format!("{}", index + 1));
-                        ui.label(format!("{:.2}", conformer.relative_energy_kcal));
-                        // Below a tenth of a percent the number stops being informative.
-                        if conformer.population_fraction >= 0.001 {
-                            ui.label(format!("{:.1} %", conformer.population_fraction * 100.0));
-                        } else {
-                            ui.label(egui::RichText::new("< 0.1 %").weak());
-                        }
-                        if ui
-                            .add(
-                                egui::Button::new(if showing { "Viewing" } else { "View" })
-                                    .selected(showing),
-                            )
-                            .clicked_once()
-                        {
-                            mol.set_pos(
-                                conformer
-                                    .positions_angstrom
-                                    .chunks_exact(3)
-                                    .map(|c| Vec3::new(c[0] as f32, c[1] as f32, c[2] as f32))
-                                    .collect(),
-                            );
-                            mol.recompute_bonds(settings.bond_thresh_scale, settings.hbond_cutoff);
-                            run.previewing = Some(index);
-                            loaded = true;
-                        }
-                        ui.end_row();
-                    }
-                });
-        });
-
-    ui.add_space(4.0);
-    ui.label(
-        egui::RichText::new(
-            "Populations are Boltzmann factors at 298 K, without vibrational entropy or symmetry.",
-        )
-        .small()
-        .weak(),
-    );
-
-    ui.add_space(8.0);
-    ui.separator();
-    ui.add_space(6.0);
-    ui.collapsing("References", |ui| citation(ui));
-
-    loaded
+    results_window::reopen_button(ui, run);
 }
 
 /// The reference for the search algorithm, shown once a search has produced results.
@@ -1032,7 +845,7 @@ fn load_as_trajectory(
 }
 
 /// Writes one XYZ frame per conformer, with the relative energy on each comment line.
-fn save_trajectory(outcome: &ConformerOutcome) {
+fn save_trajectory(ctx: &egui::Context, outcome: &ConformerOutcome) {
     let dialog = rfd::FileDialog::new()
         .set_file_name("conformers.xyz")
         .add_filter("XYZ trajectory", &["xyz"]);
@@ -1064,7 +877,7 @@ fn save_trajectory(outcome: &ConformerOutcome) {
     }
 
     if let Err(error) = std::fs::write(&path, text) {
-        warn!("could not write {}: {error}", path.display());
+        crate::runtime_warning::push(ctx, "Cannot save conformers", &format!("{}: {error}", path.display()));
     }
 }
 
@@ -1081,7 +894,7 @@ mod tests {
     use crate::conformer::Conformer;
     use std::time::Duration;
 
-    fn outcome() -> ConformerOutcome {
+    pub(super) fn outcome() -> ConformerOutcome {
         ConformerOutcome {
             conformers: vec![
                 Conformer {
