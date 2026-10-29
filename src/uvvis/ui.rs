@@ -1,6 +1,10 @@
 //! The UV-Vis tool's panel and its absorption-spectrum window.
 
 use crate::ui_style::ResponseExt;
+
+#[path = "table_energy.rs"]
+mod table_energy;
+use table_energy::EnergyUnit;
 use bevy_egui::egui;
 
 use super::excited_state::{spectrum_functionals, visible_fields, ExcitedStateMethod};
@@ -361,7 +365,7 @@ fn panel_body(
         if result.unrestricted {
             match result.ground_state_s2 {
                 Some(s2) => ui.label(format!(
-                    "Unrestricted reference, ground-state \u{27e8}S\u{b2}\u{27e9} = {s2:.4}"
+                    "Unrestricted reference, ground-state <S^2> = {s2:.4}"
                 )),
                 None => ui.label("Unrestricted reference"),
             };
@@ -372,7 +376,7 @@ fn panel_body(
     });
     let has_intensities = result.has_intensities();
     ui.add_space(6.0);
-    ui.horizontal_wrapped(|ui| {
+    ui.horizontal(|ui| {
         let label = if *spectrum_window_open {
             "Hide Absorption Spectrum"
         } else {
@@ -383,10 +387,12 @@ fn panel_body(
                 *spectrum_window_open = !*spectrum_window_open;
             }
         });
-        if !has_intensities {
-            ui.weak("(no oscillator strengths in this file)");
-        }
+        ui.add_space(56.0);
+        table_energy::switcher(ui);
     });
+    if !has_intensities {
+        ui.weak("(no oscillator strengths in this file)");
+    }
 
     ui.add_space(6.0);
     ui.label(egui::RichText::new("Click a root to see the orbital excitations behind it.").weak());
@@ -445,7 +451,7 @@ pub(crate) fn load_tddft_from_path(path: &std::path::Path, state: &mut UvVisStat
 /// string per row cannot wrap, so a contribution and its percentage always
 /// stay on the same line, and the columns line up by construction.
 ///
-/// `<S²>` and `Mult` appear only for an unrestricted reference -- an empty
+/// `<S^2>` and `Mult` appear only for an unrestricted reference -- an empty
 /// column for a closed-shell run is just noise.
 fn state_table(
     ui: &mut egui::Ui,
@@ -455,12 +461,13 @@ fn state_table(
     orbitals: &mut crate::orbitals::OrbitalState,
 ) {
     let show_spin = result.unrestricted;
+    let unit = table_energy::selected(ui.ctx());
     egui::ScrollArea::both()
         .auto_shrink([false, false])
         .show(ui, |ui| {
             ui.add(
                 egui::Label::new(
-                    egui::RichText::new(header_text(show_spin))
+                    egui::RichText::new(header_text(show_spin, unit))
                         .monospace()
                         .strong(),
                 )
@@ -474,8 +481,8 @@ fn state_table(
 }
 
 /// Column headings, spaced to match `state_row_text`.
-fn header_text(show_spin: bool) -> String {
-    let mut text = format!("  {:>3}  {:>8}  {:>8}  {:>10}", "#", "E (eV)", "nm", "f");
+fn header_text(show_spin: bool, unit: EnergyUnit) -> String {
+    let mut text = format!("  {:>3}  {:>8}  {:>8}  {:>10}", "#", unit.header(), "nm", "f");
     if show_spin {
         text.push_str(&format!("  {:>8}  {:>4}", "<S^2>", "Mult"));
     }
@@ -484,15 +491,15 @@ fn header_text(show_spin: bool) -> String {
 
 /// One row of the list, preformatted so every column lands at the same
 /// character offset on every row.
-fn state_row_text(st: &ExcitedState, show_spin: bool, is_open: bool) -> String {
+fn state_row_text(st: &ExcitedState, show_spin: bool, is_open: bool, unit: EnergyUnit) -> String {
     let marker = if is_open { "\u{25be}" } else { "\u{25b8}" };
     let fosc = match st.oscillator_strength {
         Some(f) => format!("{f:>10.6}"),
         None => format!("{:>10}", "--"),
     };
     let mut text = format!(
-        "{marker} {:>3}  {:>8.3}  {:>8.1}  {fosc}",
-        st.root, st.energy_ev, st.wavelength_nm
+        "{marker} {:>3}  {}  {:>8.1}  {fosc}",
+        st.root, unit.value(st), st.wavelength_nm
     );
     if show_spin {
         match st.s2 {
@@ -518,7 +525,7 @@ fn state_row(
 ) {
     let is_open = *expanded == Some(st.root);
     let row = ui.add(
-        egui::Button::new(egui::RichText::new(state_row_text(st, show_spin, is_open)).monospace())
+        egui::Button::new(egui::RichText::new(state_row_text(st, show_spin, is_open, table_energy::selected(ui.ctx()))).monospace())
             .frame(false)
             .selected(is_open)
             .wrap_mode(egui::TextWrapMode::Extend),
@@ -526,32 +533,6 @@ fn state_row(
     if row.clicked_once() {
         *expanded = if is_open { None } else { Some(st.root) };
     }
-    // The energy in the other two units, and the transition dipole where the
-    // program reported one, ride along as a tooltip rather than as lines in
-    // the expanded block: worth keeping, but not what the expansion is for,
-    // and they crowded out the orbital list.
-    //
-    // The energy is shown unconditionally. It used to hang off the dipole
-    // being present, which meant a program that prints no dipole -- Behemoth
-    // does not -- lost the au and cm-1 figures too.
-    row.on_hover_text(format!(
-        "{:.6} au   {:.1} cm\u{207b}\u{b9}{}",
-        st.energy_au,
-        st.energy_cm1,
-        match st.transition_dipole_au {
-            Some(d) => format!(
-                "\n\u{3bc} = ({:.5}, {:.5}, {:.5}) au{}",
-                d[0],
-                d[1],
-                d[2],
-                st.d2_au2
-                    .map(|d2| format!("\nD\u{b2} = {d2:.5} au\u{b2}"))
-                    .unwrap_or_default()
-            ),
-            None => String::new(),
-        }
-    ));
-
     if !is_open {
         return;
     }
@@ -685,7 +666,7 @@ fn hover_label(st: &ExcitedState) -> String {
         text.push_str(&format!("\n{}  ({:.0}%)", e.label(), e.weight * 100.0));
     }
     if let Some(s2) = st.s2 {
-        text.push_str(&format!("\n\u{27e8}S\u{b2}\u{27e9} = {s2:.3}"));
+        text.push_str(&format!("\n<S^2> = {s2:.3}"));
     }
     text
 }
@@ -766,8 +747,8 @@ mod tests {
 
         // Every column lands at the same offset, for a restricted reference
         // in both cases (no spin columns).
-        let orca_row = state_row_text(&orca.states[0], false, false);
-        let behemoth_row = state_row_text(&behemoth.states[0], false, false);
+        let orca_row = state_row_text(&orca.states[0], false, false, EnergyUnit::ElectronVolts);
+        let behemoth_row = state_row_text(&behemoth.states[0], false, false, EnergyUnit::ElectronVolts);
         assert_eq!(
             orca_row.len(),
             behemoth_row.len(),
@@ -776,8 +757,8 @@ mod tests {
 
         // And with the spin columns, which an unrestricted ORCA run shows.
         assert_eq!(
-            state_row_text(&orca.states[0], true, false).len(),
-            state_row_text(&behemoth.states[0], true, false).len()
+            state_row_text(&orca.states[0], true, false, EnergyUnit::ElectronVolts).len(),
+            state_row_text(&behemoth.states[0], true, false, EnergyUnit::ElectronVolts).len()
         );
 
         // The contribution lines are the same shape too: an orbital pair and
@@ -888,7 +869,7 @@ mod tests {
         assert!(label.contains("0.002236"), "{label}");
         assert!(label.contains("b89 --> b90"), "{label}");
         assert!(label.contains("99%"), "{label}");
-        assert!(label.contains("\u{27e8}S\u{b2}\u{27e9} = 8.871"), "{label}");
+        assert!(label.contains("<S^2> = 8.871"), "{label}");
     }
 
     /// Every column must land at the same character offset on every row --
@@ -899,7 +880,7 @@ mod tests {
         let widths: Vec<usize> = result
             .states
             .iter()
-            .map(|st| state_row_text(st, true, false).chars().count())
+            .map(|st| state_row_text(st, true, false, EnergyUnit::ElectronVolts).chars().count())
             .collect();
         let first = widths[0];
         assert!(
@@ -907,13 +888,13 @@ mod tests {
             "ragged rows would misalign every column: {widths:?}"
         );
         // ...and the heading lines up with them.
-        assert_eq!(header_text(true).chars().count(), first);
+        assert_eq!(header_text(true, EnergyUnit::ElectronVolts).chars().count(), first);
     }
 
     #[test]
     fn a_row_carries_its_root_energy_wavelength_and_intensity() {
         let result = parsed();
-        let row = state_row_text(&result.states[0], true, false);
+        let row = state_row_text(&result.states[0], true, false, EnergyUnit::ElectronVolts);
         assert!(row.contains("1.935"), "{row}");
         assert!(row.contains("640.8"), "{row}");
         assert!(row.contains("0.002236"), "{row}");
@@ -926,17 +907,17 @@ mod tests {
     #[test]
     fn a_restricted_run_drops_the_spin_columns_from_row_and_heading() {
         let result = parsed();
-        let row = state_row_text(&result.states[0], false, false);
+        let row = state_row_text(&result.states[0], false, false, EnergyUnit::ElectronVolts);
         assert!(!row.contains("8.8709"), "{row}");
-        assert_eq!(header_text(false).chars().count(), row.chars().count());
-        assert!(!header_text(false).contains("S^2"));
+        assert_eq!(header_text(false, EnergyUnit::ElectronVolts).chars().count(), row.chars().count());
+        assert!(!header_text(false, EnergyUnit::ElectronVolts).contains("S^2"));
     }
 
     #[test]
     fn the_expansion_marker_does_not_change_the_row_width() {
         let result = parsed();
-        let closed = state_row_text(&result.states[0], true, false);
-        let open = state_row_text(&result.states[0], true, true);
+        let closed = state_row_text(&result.states[0], true, false, EnergyUnit::ElectronVolts);
+        let open = state_row_text(&result.states[0], true, true, EnergyUnit::ElectronVolts);
         assert_eq!(closed.chars().count(), open.chars().count());
         assert_ne!(closed, open, "an expanded row must look expanded");
     }
@@ -1035,5 +1016,68 @@ mod tests {
         }
         assert!(nm[0].0 > nm[79].0, "wavelength descends with root number");
         assert!(ev[0].0 < ev[79].0, "energy ascends with root number");
+    }
+
+    #[test]
+    fn table_unit_switching_changes_only_energy_and_preserves_column_alignment() {
+        let result = parsed();
+        for show_spin in [false, true] {
+            for st in &result.states {
+                let ev = state_row_text(st, show_spin, false, EnergyUnit::ElectronVolts);
+                let cm = state_row_text(st, show_spin, false, EnergyUnit::Wavenumbers);
+                let ev_parts: Vec<_> = ev.split_whitespace().collect();
+                let cm_parts: Vec<_> = cm.split_whitespace().collect();
+                assert_eq!(&ev_parts[..2], &cm_parts[..2]);
+                assert_eq!(&ev_parts[3..], &cm_parts[3..], "Wavelength, f, and spin columns must stay unchanged");
+                assert_eq!(cm_parts[2], format!("{:.1}", st.energy_cm1));
+                assert_eq!(header_text(show_spin, EnergyUnit::ElectronVolts).chars().count(), ev.chars().count());
+                assert_eq!(header_text(show_spin, EnergyUnit::Wavenumbers).chars().count(), cm.chars().count());
+            }
+        }
+    }
+
+    #[test]
+    fn the_energy_selector_defaults_to_ev_and_switches_beside_the_spectrum_button() {
+        fn frame(ctx: &egui::Context, state: &mut UvVisState, events: Vec<egui::Event>) -> egui::FullOutput {
+            let mut output = ctx.run_ui(egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 900.0))),
+                events,
+                ..Default::default()
+            }, |ui| {
+                crate::ui_style::modern(ui);
+                panel_body(ui, state, &mut SpectrumTask::default(), &mut Molecule::empty(), "", false,
+                    &mut crate::orbitals::OrbitalState::default());
+            });
+            output.textures_delta.clear();
+            output
+        }
+        fn text_rect(output: &egui::FullOutput, label: &str) -> egui::Rect {
+            output.shapes.iter().find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.text() == label =>
+                    Some(egui::Rect::from_min_size(text.pos, text.galley.size())),
+                _ => None,
+            }).unwrap_or_else(|| panic!("Missing {label}"))
+        }
+
+        let ctx = egui::Context::default();
+        let mut state = UvVisState { result: Some(parsed()), ..Default::default() };
+        assert!(table_energy::selected(&ctx) == EnergyUnit::ElectronVolts);
+        frame(&ctx, &mut state, vec![]);
+        let output = frame(&ctx, &mut state, vec![]);
+        let spectrum = text_rect(&output, "Show Absorption Spectrum");
+        let ev = text_rect(&output, "eV");
+        assert!(ev.left() - spectrum.right() >= 48.0);
+        assert!((ev.center().y - spectrum.center().y).abs() < 2.0);
+        let position = text_rect(&output, "cm-1").center();
+        for pressed in [true, false] {
+            frame(&ctx, &mut state, vec![egui::Event::PointerMoved(position), egui::Event::PointerButton {
+                pos: position, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE,
+            }]);
+        }
+        assert!(table_energy::selected(&ctx) == EnergyUnit::Wavenumbers);
+        assert_eq!(state.unit, SpectrumUnit::Nanometres, "The spectrum axis must remain independent");
+        let output = frame(&ctx, &mut state, vec![]);
+        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::Shape::Text(text) if text.galley.text().contains("E(cm-1)"))));
     }
 }

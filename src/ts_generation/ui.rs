@@ -338,7 +338,6 @@ fn panel_body(
     {
         state.help_open = true;
     }
-    ui.small("Draw or optimize A, capture it, then do the same for B. Captures stay stored while you edit the viewer. Use Show A/B to display a stored endpoint; capture again to keep subsequent edits.");
     ui.add_enabled_ui(!running, |ui| {
         crate::ui_style::group(ui, "Search method", |ui| {
             let width = (ui.available_width() - 8.0) / 2.0;

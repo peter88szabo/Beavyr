@@ -1316,7 +1316,7 @@ pub fn stop_animation_when_panel_closes(
     }
 }
 
-/// Loads one vibration cycle, with Once playback as for other trajectories.
+/// Vibrational animations repeat by default, independently of trajectory playback.
 pub fn load_mode_animation(
     traj: &mut TrajectoryState,
     atoms: &[String],
@@ -1328,7 +1328,7 @@ pub fn load_mode_animation(
 ) {
     traj.frames = animate_mode(atoms, coords_angstrom, modes, mode_index, amplitude_angstrom, 60);
     traj.current_frame = 0;
-    traj.mode = PlaybackMode::Once;
+    traj.mode = PlaybackMode::Loop;
     traj.direction = 1;
     traj.playing = true;
     traj.fps = speed_fps;
@@ -3976,19 +3976,19 @@ mod tests {
     }
 
     #[test]
-    fn load_mode_animation_sets_speed_amplitude_and_plays_once() {
+    fn load_mode_animation_sets_speed_amplitude_and_loops() {
         let atoms = vec!["H".to_string(), "H".to_string()];
         let coords = vec![Vec3::new(0.0, 0.0, 0.0), Vec3::new(0.0, 0.0, 0.74)];
         let mut modes = Array2::<f64>::zeros((6, 6));
         modes[(2, 0)] = 1.0;
         modes[(5, 0)] = -1.0;
         let mut traj = TrajectoryState::default();
-        traj.mode = PlaybackMode::Loop;
+        traj.mode = PlaybackMode::Once;
         traj.playing = false;
 
         load_mode_animation(&mut traj, &atoms, &coords, &modes, 0, 0.4, 25.0);
 
-        assert_eq!(traj.mode, PlaybackMode::Once);
+        assert_eq!(traj.mode, PlaybackMode::Loop);
         assert!(traj.playing);
         assert_eq!(traj.fps, 25.0);
         assert_eq!(traj.current_frame, 0);

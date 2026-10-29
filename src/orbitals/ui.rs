@@ -270,124 +270,70 @@ fn panel_body(
                 "Isovalue exceeds the peak; nothing will be drawn.",
             );
         }
-    });
-    egui::CollapsingHeader::new(egui::RichText::new("Surface detail and colors").strong())
-        .default_open(false)
-        .show(ui, |ui| {
-            // Keep advanced settings from pushing the orbital list out of the
-            // floating window when expanded.
-            egui::ScrollArea::vertical()
-                .id_salt("surface_detail")
-                .max_height(if windowed { 140.0 } else { 360.0 })
-                .show(ui, |ui| {
-                    ui.add_space(4.0);
-                    // Resolution changes the sampling density, so unlike the controls above it
-                    // forces a resample rather than a remesh.  Showing the grid it produces
-                    // makes that cost visible before it is paid.
-                    ui.add(
-                        egui::Slider::new(
-                            &mut state.resolution,
-                            crate::orbitals::MIN_RESOLUTION..=crate::orbitals::MAX_RESOLUTION,
-                        )
-                        .text("Surface resolution"),
-                    );
-                    let planned = state.planned_grid(&data);
-                    ui.label(
-                        egui::RichText::new(format!(
-                            "{:.2} Å grid, {}×{}×{} = {} points",
-                            planned.step,
-                            planned.dims[0],
-                            planned.dims[1],
-                            planned.dims[2],
-                            planned.point_count()
-                        ))
-                        .small()
-                        .weak(),
-                    );
-                    ui.label(
-                        egui::RichText::new(
-                            "Higher resolution gives a smoother surface but is slower to compute.",
-                        )
-                        .small()
-                        .weak(),
-                    );
-
-                    ui.add_space(6.0);
-                    ui.horizontal_wrapped(|ui| {
-                        ui.label("Style:");
-                        let selected = ui.visuals().selection.bg_fill;
-                        let dim = ui.visuals().widgets.inactive.bg_fill;
-                        for (style, label) in
-                            [(SurfaceStyle::Solid, "Solid"), (SurfaceStyle::Mesh, "Mesh")]
-                        {
-                            let fill = if state.style == style { selected } else { dim };
-                            if ui.add(egui::Button::new(label).fill(fill)).clicked_once()
-                                && state.style != style
-                            {
-                                state.style = style;
-                                surface_changed = true;
-                            }
-                        }
-                    });
-
-                    // Mesh controls only exist while the mesh style is active.
-                    if matches!(state.style, SurfaceStyle::Mesh) {
-                        surface_changed |= ui
-                            .add(
-                                egui::Slider::new(
-                                    &mut state.mesh_density,
-                                    crate::orbitals::MIN_MESH_DENSITY
-                                        ..=crate::orbitals::MAX_MESH_DENSITY,
-                                )
-                                .text("Mesh grid"),
-                            )
-                            .changed();
-                        ui.label(
-                            egui::RichText::new(format!(
-                                "Higher is denser: contour planes every {:.2} Å.",
-                                state.mesh_plane_spacing()
-                            ))
-                            .small()
-                            .weak(),
-                        );
-                        // Width is a gizmo setting, so it needs no rebuild.
-                        ui.add(
-                            egui::Slider::new(&mut state.mesh_width, 0.5..=8.0)
-                                .text("Mesh line width"),
-                        );
-                    }
-
-                    ui.horizontal_wrapped(|ui| {
-                        ui.label("Lobe colours:");
-                        let mut positive = to_egui(state.positive_color);
-                        if ui.color_edit_button_srgba(&mut positive).changed() {
-                            state.positive_color = from_egui(positive);
-                            surface_changed = true;
-                        }
-                        let mut negative = to_egui(state.negative_color);
-                        if ui.color_edit_button_srgba(&mut negative).changed() {
-                            state.negative_color = from_egui(negative);
-                            surface_changed = true;
-                        }
-                    });
-                    if let Some(peak) = state.field_peak() {
-                        let unit = match state.style {
-                            SurfaceStyle::Solid => "triangles",
-                            SurfaceStyle::Mesh => "segments",
-                        };
-                        ui.weak(format!(
-                            "Peak value {peak:.4}   surface {} {unit}",
-                            state.triangle_count
-                        ));
-                        if state.isovalue > peak {
-                            ui.colored_label(
-                                egui::Color32::from_rgb(220, 160, 60),
-                                "Isovalue exceeds the peak; nothing will be drawn.",
-                            );
-                        }
-                    }
-                });
+        ui.separator();
+        ui.add_space(4.0);
+        // Resolution changes the sampling density, so unlike the controls above it
+        // forces a resample rather than a remesh.
+        ui.add(
+            egui::Slider::new(
+                &mut state.resolution,
+                crate::orbitals::MIN_RESOLUTION..=crate::orbitals::MAX_RESOLUTION,
+            )
+            .text("Surface resolution"),
+        );
+        ui.add_space(6.0);
+        ui.horizontal_wrapped(|ui| {
+            ui.label("Style:");
+            let selected = ui.visuals().selection.bg_fill;
+            let dim = ui.visuals().widgets.inactive.bg_fill;
+            for (style, label) in [(SurfaceStyle::Solid, "Solid"), (SurfaceStyle::Mesh, "Mesh")] {
+                let fill = if state.style == style { selected } else { dim };
+                if ui.add(egui::Button::new(label).fill(fill)).clicked_once()
+                    && state.style != style
+                {
+                    state.style = style;
+                    surface_changed = true;
+                }
+            }
         });
+
+        // Mesh controls only exist while the mesh style is active.
+        if matches!(state.style, SurfaceStyle::Mesh) {
+            surface_changed |= ui
+                .add(
+                    egui::Slider::new(
+                        &mut state.mesh_density,
+                        crate::orbitals::MIN_MESH_DENSITY..=crate::orbitals::MAX_MESH_DENSITY,
+                    )
+                    .text("Mesh grid"),
+                )
+                .changed();
+            ui.label(
+                egui::RichText::new(format!(
+                    "Higher is denser: contour planes every {:.2} Å.",
+                    state.mesh_plane_spacing()
+                ))
+                .small()
+                .weak(),
+            );
+            // Width is a gizmo setting, so it needs no rebuild.
+            ui.add(egui::Slider::new(&mut state.mesh_width, 0.5..=8.0).text("Mesh line width"));
+        }
+
+        ui.horizontal_wrapped(|ui| {
+            ui.label("Lobe colours:");
+            let mut positive = to_egui(state.positive_color);
+            if ui.color_edit_button_srgba(&mut positive).changed() {
+                state.positive_color = from_egui(positive);
+                surface_changed = true;
+            }
+            let mut negative = to_egui(state.negative_color);
+            if ui.color_edit_button_srgba(&mut negative).changed() {
+                state.negative_color = from_egui(negative);
+                surface_changed = true;
+            }
+        });
+    });
     ui.add_space(2.0);
     // The orbital list is only meaningful when plotting one orbital.
     if showing_orbital {
@@ -407,9 +353,9 @@ fn panel_body(
             let row_height = (ui.text_style_height(&egui::TextStyle::Monospace) + 4.0)
                 .max(ui.spacing().interact_size.y);
             let list_height = if windowed {
-                ui.available_height().max(row_height)
+                ui.available_height().min(180.0).max(row_height)
             } else {
-                360.0
+                180.0
             };
             let mut scroll = egui::ScrollArea::vertical()
                 .id_salt("surface_orbitals")

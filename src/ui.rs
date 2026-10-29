@@ -378,6 +378,7 @@ pub fn ui_panel(
     // Both layouts draw exactly the same sections; only the container
     // differs, so the bodies live in one closure rather than being copied.
     let windowed = ui_layout.windowed;
+    let trajectory_was_open = ui_layout.open[Tab::Trajectory.index()];
     let mut open_windows = ui_layout.open;
     // Rects of everything egui drew as a floating window this frame, so the
     // 3D picker knows not to select atoms behind them.
@@ -1143,12 +1144,8 @@ pub fn ui_panel(
                 |ui| {
                     ui.add_space(8.0);
 
-                    crate::ui_style::heading(
-                        ui,
-                        "Style the molecular view",
-                        "Colors, lighting, sizes and element visibility.",
-                    );
-                    crate::ui_style::collapsible_group(ui, "Colors and materials", true, |ui| {
+                    ui.push_id("appearance_sections_collapsed_v2", |ui| {
+                    crate::ui_style::collapsible_group(ui, "Colors and materials", false, |ui| {
                         // Background quick picks + picker
                         ui.horizontal_wrapped(|ui| {
                             ui.label("Background:");
@@ -1751,6 +1748,7 @@ pub fn ui_panel(
                         }
                     });
 
+                    });
                     ui.add_space(8.0);
                 },
             );
@@ -1843,6 +1841,9 @@ pub fn ui_panel(
     };
 
     ui_layout.open = open_windows;
+    trajectory::controls::stop_when_panel_closes(
+        &mut traj, trajectory_was_open, ui_layout.open[Tab::Trajectory.index()],
+    );
 
     // The editor opens floating in either application layout. Docking is an
     // explicit choice in the editor, independent of the other tool windows.

@@ -77,3 +77,44 @@ pub(crate) fn mode_row(ui: &mut egui::Ui, traj: &mut TrajectoryState) {
         });
     });
 }
+
+pub(crate) fn stop_when_panel_closes(traj: &mut TrajectoryState, was_open: bool, is_open: bool) {
+    if was_open && !is_open {
+        traj.playing = false;
+        traj.accum = 0.0;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn closing_the_panel_stops_at_the_current_frame_and_reopening_does_not_resume() {
+        let mut traj = TrajectoryState {
+            playing: true,
+            current_frame: 4,
+            accum: 0.04,
+            ..Default::default()
+        };
+        stop_when_panel_closes(&mut traj, true, true);
+        assert!(traj.playing);
+        stop_when_panel_closes(&mut traj, true, false);
+        assert!(!traj.playing);
+        assert_eq!(traj.current_frame, 4);
+        assert_eq!(traj.accum, 0.0);
+        stop_when_panel_closes(&mut traj, false, true);
+        assert!(!traj.playing);
+    }
+
+    #[test]
+    fn a_closed_trajectory_panel_does_not_stop_a_frequency_animation() {
+        let mut traj = TrajectoryState {
+            playing: true,
+            mode: PlaybackMode::Loop,
+            ..Default::default()
+        };
+        stop_when_panel_closes(&mut traj, false, false);
+        assert!(traj.playing);
+    }
+}
