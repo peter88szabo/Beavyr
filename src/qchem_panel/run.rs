@@ -36,6 +36,10 @@ mod dreiding_completion_tests;
 #[path = "orca_launch_tests.rs"]
 mod orca_launch_tests;
 
+#[cfg(all(test, unix))]
+#[path = "pyscf_completion_tests.rs"]
+mod pyscf_completion_tests;
+
 /// How often a cancelled run is checked for having died.
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
 
@@ -745,6 +749,14 @@ fn run_pyscf(
         ));
     }
 
+    let converged = if job.produces_trajectory() {
+        Some(pyscf_run::parse_geometry_convergence(&log).ok_or_else(|| {
+            "PySCF returned without a valid geometry-optimization convergence status. The structure cannot be reported as converged.".to_string()
+        })?)
+    } else {
+        None
+    };
+
     let trajectory_text = job.produces_trajectory().then(|| {
         fs::read_to_string(&files.trajectory)
             .or_else(|_| fs::read_to_string(&files.geometry))
@@ -785,7 +797,7 @@ fn run_pyscf(
             ..Default::default()
         },
         scf: Vec::new(),
-        converged: job.produces_trajectory().then_some(true),
+        converged,
         trajectory_text: trajectory_text.filter(|t| !t.trim().is_empty()),
         kept_dir: (hessian_path.is_some() || !saveable.is_empty())
             .then(|| workdir.to_path_buf()),

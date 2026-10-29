@@ -46,6 +46,78 @@ fn torsion_builder_sets_the_requested_angle() {
 }
 
 #[test]
+fn fixed_axis_lengths_and_adjacent_angles_allow_torsional_sampling() {
+    use crate::conformer::constraints::{measure_angle, measure_bond};
+    use crate::optimizer::constrained::ConstraintTarget;
+
+    let coordinates = chain_geometry();
+    let bond01 = measure_bond(&coordinates, 0, 1);
+    let bond12 = measure_bond(&coordinates, 1, 2);
+    let angle012 = measure_angle(&coordinates, 0, 1, 2);
+    let angle123 = measure_angle(&coordinates, 1, 2, 3);
+    let constraints = [
+        ConstraintTarget::bond_bohr([0, 1], bond01),
+        ConstraintTarget::bond_bohr([1, 2], bond12),
+        ConstraintTarget::angle_radian([0, 1, 2], angle012),
+        ConstraintTarget::angle_radian([1, 2, 3], angle123),
+    ];
+    let (_, torsions) = super::discover_torsions(
+        &coordinates,
+        &vec!["C".into(); 4],
+        &chain_connectivity(),
+        &[],
+        &[],
+        true,
+        &constraints,
+    )
+    .expect("fixed lengths and angles leave the central torsion free");
+    assert_eq!(torsions.len(), 1);
+    let initial = dihedral_angle(&coordinates, torsions[0].atoms);
+    for target in [initial - 1.0, initial + 1.0] {
+        let sampled = coordinates_from_genome(&coordinates, &torsions, &[target]).unwrap();
+        assert!(wrap_angle(dihedral_angle(&sampled, torsions[0].atoms) - target).abs() < 1e-8);
+        assert!((measure_bond(&sampled, 0, 1) - bond01).abs() < 1e-10);
+        assert!((measure_bond(&sampled, 1, 2) - bond12).abs() < 1e-10);
+        assert!((measure_angle(&sampled, 0, 1, 2) - angle012).abs() < 1e-10);
+        assert!((measure_angle(&sampled, 1, 2, 3) - angle123).abs() < 1e-10);
+    }
+}
+
+#[test]
+fn fixed_cross_branch_coordinates_block_automatic_and_explicit_rotations() {
+    use crate::optimizer::constrained::ConstraintTarget;
+
+    let coordinates = chain_geometry();
+    let elements = vec!["C".into(); 4];
+    for constraint in [
+        ConstraintTarget::bond_bohr([0, 3], 5.0),
+        ConstraintTarget::angle_radian([0, 1, 3], 1.5),
+        ConstraintTarget::dihedral_radian([0, 1, 2, 3], 1.0),
+        ConstraintTarget::dihedral_radian([3, 2, 1, 0], -1.0),
+    ] {
+        for (rotatable, cis_trans) in [
+            (vec![], vec![]),
+            (vec![[0, 1, 2, 3]], vec![]),
+            (vec![], vec![[0, 1, 2, 3]]),
+        ] {
+            assert!(
+                super::discover_torsions(
+                    &coordinates,
+                    &elements,
+                    &chain_connectivity(),
+                    &rotatable,
+                    &cis_trans,
+                    true,
+                    &[constraint.clone()],
+                )
+                .is_err(),
+                "a rotation must not change {constraint:?}"
+            );
+        }
+    }
+}
+
+#[test]
 fn heavy_atom_rmsd_removes_translation_and_rotation() {
     let reference = vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 2.0, 0.0];
     let transformed = vec![3.0, -2.0, 1.0, 3.0, -1.0, 1.0, 1.0, -2.0, 1.0];
@@ -169,6 +241,9 @@ fn parallel_search_overlaps_initial_local_optimizations() {
     .unwrap();
 
     assert_eq!(result.final_population.len(), 4);
-    let expected = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1).min(4);
+    let expected = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1)
+        .min(4);
     assert_eq!(maximum.load(Ordering::SeqCst), expected);
 }

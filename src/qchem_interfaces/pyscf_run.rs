@@ -182,9 +182,10 @@ def record(envs):
         return
     frames.append((coords, energy))
 
-from pyscf.geomopt.geometric_solver import optimize
+from pyscf.geomopt.geometric_solver import kernel
 mf = build(mol)
-optimised = optimize(mf, callback=record)
+geometry_converged, optimised = kernel(mf, callback=record)
+print("BEAVYR_GEOMETRY_CONVERGED %d" % bool(geometry_converged))
 
 with open("trajectory.xyz", "w") as handle:
     for index, (coords, energy) in enumerate(frames, start=1):
@@ -193,7 +194,10 @@ with open("trajectory.xyz", "w") as handle:
             handle.write("%-3s %18.10f %18.10f %18.10f\n" % (symbol, xyz[0], xyz[1], xyz[2]))
 
 mol = optimised
-write_xyz("final.xyz", mol, "PySCF optimised geometry")
+write_xyz("final.xyz", mol, "PySCF optimised geometry" if geometry_converged
+          else "PySCF unconverged geometry")
+if not geometry_converged:
+    sys.stderr.write("PySCF geometry optimization did not converge. The saved geometry is not a stationary point.\n")
 "#,
         );
     }
@@ -320,6 +324,21 @@ pub fn parse_energy(stdout: &str) -> Option<f64> {
         .and_then(|rest| rest.trim().parse().ok())
 }
 
+/// The optimizer's own status, independent of the later SCF calculation.
+/// Missing or malformed status must never be treated as successful convergence.
+pub fn parse_geometry_convergence(stdout: &str) -> Option<bool> {
+    const PREFIX: &str = "BEAVYR_GEOMETRY_CONVERGED ";
+    let status = stdout
+        .lines()
+        .rev()
+        .find_map(|line| line.strip_prefix(PREFIX))?;
+    match status.trim() {
+        "1" => Some(true),
+        "0" => Some(false),
+        _ => None,
+    }
+}
+
 /// Preserve diagnostics for the copyable error window, with a clear explanation
 /// when the optional geometry optimizer is missing.
 pub fn failure_detail(stderr: &str) -> String {
@@ -343,6 +362,30 @@ mod tests {
 
     fn water() -> Vec<f64> {
         vec![0.0, 0.0, 0.1173, 0.0, 0.7572, -0.4692, 0.0, -0.7572, -0.4692]
+    }
+
+    #[test]
+    fn geometry_convergence_is_explicit_and_independent_of_scf_success() {
+        for (marker, expected) in [
+            ("1", Some(true)),
+            ("0", Some(false)),
+            ("unknown", None),
+        ] {
+            let log = format!("BEAVYR_GEOMETRY_CONVERGED {marker}\nSCF converged\nenergy -75.0\n");
+            assert_eq!(parse_geometry_convergence(&log), expected);
+        }
+        assert_eq!(
+            parse_geometry_convergence("SCF converged\nenergy -75.0\n"),
+            None
+        );
+        assert_eq!(
+            parse_geometry_convergence("BEAVYR_GEOMETRY_CONVERGED 1\nBEAVYR_GEOMETRY_CONVERGED 0\n"),
+            Some(false)
+        );
+        assert_eq!(
+            parse_geometry_convergence("BEAVYR_GEOMETRY_CONVERGED 1\nBEAVYR_GEOMETRY_CONVERGED unknown\n"),
+            None
+        );
     }
 
     fn method() -> MethodConfig {

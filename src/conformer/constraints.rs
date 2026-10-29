@@ -259,18 +259,14 @@ fn substituent(adjacency: &[Vec<usize>], atom: usize, avoid: &[usize]) -> Option
         .or_else(|| candidates.iter().copied().find(|n| !avoid.contains(n)))
 }
 
-/// Whether a constraint and a search degree of freedom would fight over the same coordinate.
-///
-/// A fixed dihedral must not also be sampled, and a bond held at a length must not have the search
-/// twisting the torsion about it: the constrained optimiser would pull the geometry back every
-/// time, wasting the whole generation. The clash is reported so the caller can drop the degree of
-/// freedom instead.
+/// Whether a constraint directly fixes the dihedral about this central bond.
+/// Bond lengths and adjacent angles do not fix that torsion. Constraints
+/// spanning other branches require the full rotating-atom partition, which
+/// the search topology checks separately.
 pub fn clashes_with_central_bond(constraint: &Constraint, j: usize, k: usize) -> bool {
     let same_pair = |p: usize, q: usize| (p == j && q == k) || (p == k && q == j);
     match constraint.coordinate {
-        ConstraintCoordinate::Bond([a, b]) => same_pair(a, b),
-        // An angle pins the bond pair at its centre, so a torsion about either is constrained too.
-        ConstraintCoordinate::Angle([a, b, c]) => same_pair(a, b) || same_pair(b, c),
+        ConstraintCoordinate::Bond(_) | ConstraintCoordinate::Angle(_) => false,
         // A dihedral's own central bond is exactly the torsion it fixes.
         ConstraintCoordinate::Dihedral([_, b, c, _]) => same_pair(b, c),
     }
@@ -468,17 +464,16 @@ mod tests {
             coordinate: ConstraintCoordinate::Bond([1, 2]),
             value: 1.0,
         };
-        assert!(clashes_with_central_bond(&bond, 1, 2));
-        assert!(clashes_with_central_bond(&bond, 2, 1), "either direction");
+        assert!(!clashes_with_central_bond(&bond, 1, 2));
+        assert!(!clashes_with_central_bond(&bond, 2, 1), "either direction");
         assert!(!clashes_with_central_bond(&bond, 3, 4));
 
         let angle = Constraint {
             coordinate: ConstraintCoordinate::Angle([1, 2, 3]),
             value: 1.0,
         };
-        // Both bonds of the angle are claimed.
-        assert!(clashes_with_central_bond(&angle, 1, 2));
-        assert!(clashes_with_central_bond(&angle, 2, 3));
+        assert!(!clashes_with_central_bond(&angle, 1, 2));
+        assert!(!clashes_with_central_bond(&angle, 2, 3));
         assert!(!clashes_with_central_bond(&angle, 1, 3));
 
         let dihedral = Constraint {

@@ -1,0 +1,226 @@
+   Compiling Beavyr v0.2.1 (/home/peter/DevCode/Beavyr)
+warning: unused import: `PathBuf`
+  --> src/conformer/tstrail.rs:42:23
+   |
+42 | use std::path::{Path, PathBuf};
+   |                       ^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `crate::vibronic::*`
+   --> src/vibronic/mod.rs:366:9
+    |
+366 |     use crate::vibronic::*;
+    |         ^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `crate::optimizer::traits::Objective`
+  --> src/conformer/mod.rs:44:5
+   |
+44 | use crate::optimizer::traits::Objective as _;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: value assigned to `energy` is never read
+   --> src/optimizer/minimum_redundant.rs:598:13
+    |
+598 |             energy = old_energy;
+    |             ^^^^^^^^^^^^^^^^^^^ this value is reassigned later and never used
+...
+602 |             energy = obj.energy_gradient(&x, &mut grad_x)?;
+    |             ---------------------------------------------- `energy` is overwritten here before the previous value is read
+    |
+    = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `gnorm`
+   --> src/optimizer/geom_opt.rs:357:13
+    |
+357 |         let gnorm = vec_norm(&grad_x);
+    |             ^^^^^ help: if this is intentional, prefix it with an underscore: `_gnorm`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: value assigned to `grad_x` is never read
+   --> src/optimizer/rda.rs:808:9
+    |
+808 |         grad_x = trial_grad_x;
+    |         ^^^^^^
+    |
+    = help: maybe it is overwritten before being read?
+
+warning: variable `previous_x` is assigned to, but never used
+   --> src/optimizer/spin_crossing.rs:735:9
+    |
+735 |     let mut previous_x = x.clone();
+    |         ^^^^^^^^^^^^^^
+    |
+    = note: consider using `_previous_x` instead
+
+warning: variable `previous_geff` is assigned to, but never used
+   --> src/optimizer/spin_crossing.rs:736:9
+    |
+736 |     let mut previous_geff = vec![0.0; x.len()];
+    |         ^^^^^^^^^^^^^^^^^
+    |
+    = note: consider using `_previous_geff` instead
+
+warning: value assigned to `previous_x` is never read
+   --> src/optimizer/spin_crossing.rs:909:9
+    |
+909 |         previous_x = x;
+    |         ^^^^^^^^^^
+    |
+    = help: maybe it is overwritten before being read?
+
+warning: value assigned to `previous_geff` is never read
+   --> src/optimizer/spin_crossing.rs:910:9
+    |
+910 |         previous_geff = geff;
+    |         ^^^^^^^^^^^^^
+    |
+    = help: maybe it is overwritten before being read?
+
+warning: field `local_optimizer` is never read
+   --> src/conformer/mod.rs:313:9
+    |
+299 | pub struct ConformerOutcome {
+    |            ---------------- field in this struct
+...
+313 |     pub local_optimizer: LocalOptimizer,
+    |         ^^^^^^^^^^^^^^^
+    |
+    = note: `ConformerOutcome` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `wrap` is never used
+   --> src/conformer/constraints.rs:317:8
+    |
+317 | pub fn wrap(angle: f64) -> f64 {
+    |        ^^^^
+
+warning: field `from_conformer` is never read
+   --> src/conformer/tstrail.rs:106:9
+    |
+ 97 | pub struct TransitionStateGuess {
+    |            -------------------- field in this struct
+...
+106 |     pub from_conformer: usize,
+    |         ^^^^^^^^^^^^^^
+    |
+    = note: `TransitionStateGuess` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: field `atoms` is never read
+   --> src/conformer/tstrail.rs:127:9
+    |
+114 | pub struct TrailOutcome {
+    |            ------------ field in this struct
+...
+127 |     pub atoms: Vec<String>,
+    |         ^^^^^
+    |
+    = note: `TrailOutcome` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: function `centroid_excluding` is never used
+   --> src/molecule_builder/builder_ui.rs:213:4
+    |
+213 | fn centroid_excluding(pos: &[Vec3], exclude: usize) -> Option<Vec3> {
+    |    ^^^^^^^^^^^^^^^^^^
+
+warning: function `host` is never used
+    --> src/molecule_builder/builder_ui.rs:4634:8
+     |
+4634 |     fn host() -> (Molecule, ZMatrixBuilderState) {
+     |        ^^^^
+
+warning: function `find_nearest_atom_screen_space` is never used
+ --> src/picking/screen.rs:7:8
+  |
+7 | pub fn find_nearest_atom_screen_space(
+  |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `find_nearest_atom_screen_space_egui` is never used
+  --> src/picking/screen.rs:47:8
+   |
+47 | pub fn find_nearest_atom_screen_space_egui(
+   |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: variants `FiniteDifference` and `None` are never constructed
+  --> src/qchem_interfaces/capabilities.rs:28:5
+   |
+22 | pub enum HessianKind {
+   |          ----------- variants in this enum
+...
+28 |     FiniteDifference,
+   |     ^^^^^^^^^^^^^^^^
+29 |     /// No Hessian by any route.
+30 |     None,
+   |     ^^^^
+   |
+   = note: `HessianKind` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: method `normalised_rr` is never used
+  --> src/vibronic/mod.rs:86:12
+   |
+75 | impl FrankCondonAnalysis {
+   | ------------------------ method in this implementation
+...
+86 |     pub fn normalised_rr(&self) -> Vec<(f64, f64)> {
+   |            ^^^^^^^^^^^^^
+
+warning: `Beavyr` (bin "Beavyr" test) generated 20 warnings (run `cargo fix --bin "Beavyr" -p Beavyr --tests` to apply 3 suggestions)
+    Finished `test` profile [optimized + debuginfo] target(s) in 30.85s
+     Running unittests src/main.rs (target/debug/deps/Beavyr-fcbe648bfdb40df9)
+
+running 51 tests
+test cli::tests::a_bare_dash_is_treated_as_a_path ... ok
+test cli::tests::a_gaussian_log_is_found_even_when_its_banner_is_far_into_the_file ... ok
+test cli::tests::a_gaussian_log_is_read_for_its_frequencies ... ok
+test cli::tests::a_real_gaussian_log_is_recognised ... ok
+test cli::tests::a_real_orca_excited_state_output_is_recognised ... ok
+test cli::tests::an_orca_input_file_is_not_claimed ... ok
+test cli::tests::an_output_with_an_absorption_spectrum_goes_to_uv_vis ... ok
+test cli::tests::an_output_with_neither_is_reported_rather_than_guessed ... ok
+test cli::tests::an_unknown_extension_is_not_guessed_at ... ok
+test cli::tests::an_unknown_flag_is_kept_apart_from_the_filenames ... ok
+test cli::tests::arguments_split_into_paths_and_flags ... ok
+test cli::tests::each_plain_extension_maps_to_its_tool ... ok
+test cli::tests::every_loadable_kind_names_a_window_to_open ... ok
+test cli::tests::extensions_are_recognised_whatever_their_case ... ok
+test cli::tests::help_is_recognised_both_ways ... ok
+test cli::tests::method_names_and_excited_state_prose_do_not_claim_a_spectrum ... ok
+test cli::tests::real_spectrum_headings_remain_recognised_without_generic_method_markers ... ok
+test cli::tests::the_help_text_names_every_extension_that_is_accepted ... ok
+test cli::tests::the_molden_input_spelling_is_recognised ... ok
+test cli::tests::the_projects_own_example_files_are_recognised ... ok
+test conformer::constraints::tests::a_bare_site_gets_no_dihedrals ... ok
+test conformer::constraints::tests::a_constraint_claims_the_torsion_it_fixes ... ok
+test conformer::constraints::tests::a_constraint_describes_itself_in_chemists_units ... ok
+test conformer::constraints::tests::a_duplicated_constraint_is_reported ... ok
+test conformer::constraints::tests::every_level_is_labelled_and_described ... ok
+test conformer::constraints::tests::the_first_level_fixes_the_two_bond_lengths ... ok
+test conformer::constraints::tests::the_measurements_are_right ... ok
+test conformer::constraints::tests::the_second_level_adds_the_angle ... ok
+test conformer::constraints::tests::the_third_level_adds_one_dihedral_at_each_end ... ok
+test optimizer::conformer_search::local::tests::both_routes_are_offered_and_described ... ok
+test optimizer::conformer_search::local::tests::grad_rms_is_a_root_mean_square ... ok
+test optimizer::conformer_search::local::tests::the_cartesian_route_finds_the_minimum ... ok
+test optimizer::conformer_search::rings::tests::a_chain_has_no_rings_and_large_rings_are_ignored ... ok
+test optimizer::conformer_search::rings::tests::a_planar_ring_has_no_pucker ... ok
+test optimizer::conformer_search::rings::tests::an_alternating_ring_measures_as_a_chair ... ok
+test optimizer::conformer_search::rings::tests::applying_a_conformer_lands_in_its_basin ... ok
+test optimizer::conformer_search::rings::tests::branches_do_not_leak_through_the_ring ... ok
+test optimizer::conformer_search::rings::tests::finds_a_six_ring_and_a_five_ring ... ok
+test optimizer::conformer_search::rings::tests::fused_six_rings_are_found_separately ... ok
+test optimizer::conformer_search::rings::tests::substituents_follow_their_ring_atom ... ok
+test optimizer::conformer_search::rings::tests::the_expansion_and_its_inverse_agree ... ok
+test optimizer::conformer_search::rings::tests::the_returned_cycle_is_in_connected_order ... ok
+test optimizer::conformer_search::rings::tests::the_two_chairs_are_distinct ... ok
+test optimizer::conformer_search::rings::tests::the_two_chairs_hold_a_substituent_at_different_angles ... ok
+test optimizer::conformer_search::rings::tests::there_are_the_expected_numbers_of_canonical_conformers ... ok
+test optimizer::conformer_search::tests::fixed_axis_lengths_and_adjacent_angles_allow_torsional_sampling ... ok
+test optimizer::conformer_search::tests::fixed_cross_branch_coordinates_block_automatic_and_explicit_rotations ... ok
+test optimizer::conformer_search::tests::genetic_search_builds_a_reproducible_population ... ok
+test optimizer::conformer_search::tests::heavy_atom_rmsd_removes_translation_and_rotation ... ok
+test optimizer::conformer_search::tests::parallel_search_overlaps_initial_local_optimizations ... ok
+test optimizer::conformer_search::tests::torsion_builder_sets_the_requested_angle ... ok
+
+test result: ok. 51 passed; 0 failed; 0 ignored; 0 measured; 1353 filtered out; finished in 0.09s
+

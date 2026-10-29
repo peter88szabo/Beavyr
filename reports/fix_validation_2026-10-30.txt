@@ -1,0 +1,118 @@
+VALIDATION OF THE THREE APPROVED FIXES — 30 OCTOBER 2026
+
+This addendum updates issues A, B, and C in test_report_2026-10-29.txt.
+The earlier report and its original failure evidence remain as historical
+records. The user authorized fixes 2 and 3, then fix 1, and requested a deeper
+assessment of constrained rotation before implementation.
+
+1. Constrained conformer search
+==============================
+The fix examines the actual rotating branch and stationary branch of each
+torsion. Atoms on the rotation axis are unchanged. A constraint entirely on
+one side, including its axis atoms, survives that rigid rotation.
+
+Consequently, fixing the axis bond's length or an adjacent bond angle does
+not remove the torsion. Constraints involving off-axis atoms on both sides
+still exclude the conflicting rotation. This includes fixed dihedrals and
+cross-branch distances/angles; simply permitting every bond constraint would
+have been incorrect. Automatic rotations, explicit rotations, and explicit
+cis/trans sampling receive the same check. Existing conservative ring-pucker
+constraint handling was preserved.
+
+The public central-bond helper now distinguishes a directly fixed dihedral
+from bond lengths and angles; full branch classification stays in the actual
+search topology implementation.
+
+Verification:
+- New tests rotate a chain in both directions while checking that held bond
+  lengths and both adjacent angles remain unchanged.
+- Cross-branch bond/angle and forward/reversed dihedral constraints prevent
+  conflicting automatic, explicit, and cis/trans rotations.
+- The previously failing ignored constrained butane search now passes:
+  two conformers in 11.53 seconds; the existing held-coordinate check passes.
+- Constraint, conformer-search, and CLI focused tests: 51 passed.
+
+Implementation: src/optimizer/conformer_search/topology.rs and
+src/conformer/constraints.rs. Regression tests also use the existing named
+src/optimizer/conformer_search/tests.rs. No mod.rs file was changed.
+
+2. ORCA output detection
+=======================
+Output routing now looks for structured spectrum headings or numbered
+excited-state records, rather than generic mentions of TD-DFT/TDDFT or
+excited states. ORCA state headings and their optional spin qualifiers,
+Psi4/PySCF numbered state records, and actual Behemoth spectrum headings
+remain recognized.
+
+Verification:
+- examples/TS_Gamma-3-6_ZZ-S_11.out now classifies as output with no data the
+  loader can use, instead of being misrouted to the UV-Vis reader from its
+  contributor credits. The existing loader therefore gives the companion
+  .hess explanation.
+- Prose, contributor method names, and statements that states were not
+  calculated no longer trigger the spectrum reader.
+- Existing real ORCA TD-DFT examples and Behemoth spectrum fixtures remain
+  recognized. Gaussian output detection remains covered by the CLI tests.
+
+Implementation and regressions: src/cli.rs.
+
+3. PySCF geometry convergence
+============================
+The generated script now calls geometric_solver.kernel, which returns the
+optimizer's actual convergence flag and geometry. It reports that flag
+independently of the later SCF calculation. The calculation wrapper parses
+the flag instead of unconditionally assigning true to optimization jobs.
+
+Unconverged geometry and trajectory remain available for inspection, with
+the existing summary warning that the result did not converge. The final XYZ
+comment also marks the geometry as unconverged. A missing or malformed
+geometry-convergence status causes an explicit error and cannot be silently
+promoted to convergence. Energy-only jobs require no geometry status.
+An externally supplied custom optimization script must emit the explicit
+BEAVYR_GEOMETRY_CONVERGED 0/1 record to satisfy this runner contract.
+
+Verification:
+- Marker parsing checks true, false, missing, malformed, and repeated status.
+- An isolated subprocess test exercises the real runner/configuration path
+  with controlled executable output, confirming that successful SCF does not
+  override false/missing/malformed geometry status. It covers optimization,
+  optimization plus frequencies, and an energy-only job.
+- Focused PySCF checks: 16 passed, one existing native test ignored in that
+  focused invocation; the native test was then run explicitly and passed.
+- Real generated PySCF optimization plus frequencies: PASS.
+- New real PySCF/geomeTRIC regression through Beavyr's runner: PASS.
+  One-step iteration-limited optimization: converged=false,
+  energy -74.965718020085 Hartree.
+  Full optimization: converged=true,
+  energy -74.965901186227 Hartree.
+  Both runs retained a trajectory and correctly labelled final geometry.
+
+The user's selected venv now contains geomeTRIC 1.1.1, unlike the environment
+at the time of the earlier report. No installation or environment editing
+was performed by this task. Actual native convergence checks therefore
+supersede the earlier dependency-blocked limitation for this environment.
+
+Implementation: src/qchem_interfaces/pyscf_run.rs and src/qchem_panel/run.rs.
+Runner regression tests: src/qchem_panel/pyscf_completion_tests.rs.
+
+Final verification and scope
+============================
+Final full-suite and build results are recorded in the adjacent
+fix_evidence_2026-10-30/ directory:
+- Full normal suite with real xTB enabled: 1,380 passed, 0 failed,
+  27 ignored; 7.53 seconds. The new native PySCF regression is deliberately
+  ignored in normal runs and passed when explicitly invoked separately.
+- Development executable build: PASS; 24.22 seconds. There are 48 existing
+  compiler warnings; no warning cleanup was included in these fixes.
+- git diff --check: PASS.
+
+The updated development binary is target/debug/Beavyr. The installed
+application and existing release package were not replaced or rebuilt.
+All commands remained within the updated
+12-core CPU limit; Cargo used four build jobs and tests ran serially.
+
+Only the three requested fixes, their regression tests, and this validation
+addendum were added. No dependency, installed application, shell setup, or
+mod.rs file was changed. No commit, tag, or release was created.
+Original source backups are under:
+  target/change-backups/release-fixes-20261030/

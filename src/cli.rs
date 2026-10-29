@@ -124,17 +124,33 @@ fn classify_output(head: &str) -> FileKind {
 /// reports that. This exists to route the file to the right parser, not to
 /// promise the parse will work.
 fn has_excited_states(head: &str) -> bool {
-    const MARKERS: [&str; 6] = [
-        "ABSORPTION SPECTRUM",
-        "TD-DFT",
-        "TDDFT",
-        "EXCITED STATES",
-        "CIS-EXCITED STATES",
-        // Psi4 and PySCF both write this line per root, in their own case.
-        "EXCITED STATE",
-    ];
-    let upper = head.to_ascii_uppercase();
-    MARKERS.iter().any(|m| upper.contains(m))
+    head.lines().any(|line| {
+        let line = line.trim().to_ascii_uppercase();
+        if line.starts_with("ABSORPTION SPECTRUM")
+            || line.starts_with("STDA ELECTRONIC-EXCITATION SPECTRUM")
+            || line.starts_with("STD-DFT ELECTRONIC-EXCITATION SPECTRUM")
+        {
+            return true;
+        }
+        // ORCA prints a whole-line heading, optionally with a spin qualifier.
+        // Merely mentioning TD-DFT in contributor credits is not a spectrum.
+        if let Some((method, qualifier)) = line.split_once("EXCITED STATES") {
+            let method = method.trim();
+            let qualifier = qualifier.trim();
+            if !method.is_empty()
+                && !method.contains(char::is_whitespace)
+                && (qualifier.is_empty()
+                    || (qualifier.starts_with('(') && qualifier.ends_with(')')))
+            {
+                return true;
+            }
+        }
+        // Psi4/PySCF records start with "Excited State" and a root number.
+        line.strip_prefix("EXCITED STATE")
+            .and_then(|rest| rest.split_whitespace().next())
+            .and_then(|root| root.trim_end_matches(':').parse::<usize>().ok())
+            .is_some_and(|root| root > 0)
+    })
 }
 
 /// Read as much of a file as [`classify`] needs to decide what it is.
@@ -598,6 +614,39 @@ mod tests {
         let path = root.join("examples/AbsorptionSpectrum/Exc_TPSSh-D4-def2-TZVP_SCMwater_16.out");
         assert!(path.exists());
         assert_eq!(classify(&path, &sniff(&path)), FileKind::TdDft);
+    }
+
+    #[test]
+    fn method_names_and_excited_state_prose_do_not_claim_a_spectrum() {
+        for text in [
+            "Contributors: TD-DFT gradients, TDDFT and CIS-EXCITED STATES methods\n",
+            "There are no thermally accessible electronically excited states\n",
+            "The EXCITED STATES of the system were not calculated\n",
+            "Excited State optimization is available\n",
+        ] {
+            assert_eq!(kind_of("job.out", text), FileKind::OutputWithNothingUsable);
+        }
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("examples/TS_Gamma-3-6_ZZ-S_11.out");
+        assert_eq!(classify(&path, &sniff(&path)), FileKind::OutputWithNothingUsable);
+    }
+
+    #[test]
+    fn real_spectrum_headings_remain_recognised_without_generic_method_markers() {
+        for heading in [
+            "TD-DFT/TDA EXCITED STATES",
+            "TD-DFT/TDA EXCITED STATES (TRIPLETS)",
+            "CIS-EXCITED STATES",
+        ] {
+            assert_eq!(kind_of("job.out", heading), FileKind::TdDft, "{heading}");
+        }
+        for text in [
+            include_str!("../tests/fixtures/behemoth_ch2o_stda.log"),
+            include_str!("../tests/fixtures/behemoth_ch2o_stddft.log"),
+            include_str!("../tests/fixtures/behemoth_ch2o_stda_tasi.log"),
+        ] {
+            assert_eq!(kind_of("job.log", text), FileKind::TdDft);
+        }
     }
 
 

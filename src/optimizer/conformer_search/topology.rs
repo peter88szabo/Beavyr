@@ -39,17 +39,23 @@ fn constraint_atoms(constraint: &ConstraintTarget) -> Vec<usize> {
     }
 }
 
-/// Whether a constraint holds the torsion about the bond `j-k`.
-///
-/// A held bond length pins the torsion about it in practice, an angle pins both of its bonds, and
-/// a dihedral is exactly the torsion about its central bond.
-fn constraint_claims_bond(constraint: &ConstraintTarget, j: usize, k: usize) -> bool {
-    let same = |p: usize, q: usize| (p == j && q == k) || (p == k && q == j);
-    match constraint.coordinate {
-        ConstraintCoordinate::Bond([a, b]) => same(a, b),
-        ConstraintCoordinate::Angle([a, b, c]) => same(a, b) || same(b, c),
-        ConstraintCoordinate::Dihedral([_, b, c, _]) => same(b, c),
+/// A rigid branch rotation preserves coordinates entirely on either side of
+/// its axis. Only constraints spanning both off-axis branches can oppose it.
+/// In particular, fixing the axis bond's length does not fix its torsion.
+fn constraint_blocks_rotation(constraint: &ConstraintTarget, torsion: &PreparedTorsion) -> bool {
+    let mut rotating = false;
+    let mut stationary = false;
+    for atom in constraint_atoms(constraint) {
+        if torsion.central_bond.contains(&atom) {
+            continue;
+        }
+        if torsion.moving_atoms.contains(&atom) {
+            rotating = true;
+        } else {
+            stationary = true;
+        }
     }
+    rotating && stationary
 }
 
 /// A ring the search can reshape, with everything needed to do it.
@@ -251,15 +257,6 @@ pub fn discover_torsions(
             {
                 continue;
             }
-            // A torsion the constraints already hold is not a degree of freedom: the search
-            // would twist it and the constrained optimiser would pull it straight back, wasting
-            // the whole generation.
-            if constraints
-                .iter()
-                .any(|c| constraint_claims_bond(c, left, right))
-            {
-                continue;
-            }
             let Some(a) = representative_neighbour(&graph, elements, left, right) else {
                 continue;
             };
@@ -277,6 +274,15 @@ pub fn discover_torsions(
             central_bonds.insert(key);
         }
     }
+
+    // Apply the same geometric check to automatic and explicitly supplied
+    // rotations, including cis/trans sampling. Cross-branch constraints must
+    // remain fixed, while axis lengths and adjacent angles remain compatible.
+    torsions.retain(|torsion| {
+        !constraints
+            .iter()
+            .any(|constraint| constraint_blocks_rotation(constraint, torsion))
+    });
 
     // Rings are degrees of freedom too, and ones no rotatable bond can reach. Appended after the
     // torsions so a genome reads torsions-then-rings.
