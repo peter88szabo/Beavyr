@@ -1,0 +1,7 @@
+2026-10-29T20:40:18.767408Z  INFO bevy_diagnostic::system_information_diagnostics_plugin::internal: SystemInfo { os: "Linux (Ubuntu 26.04)", kernel: "7.0.0-38-generic", cpu: "AMD Ryzen 9 7900 12-Core Processor", core_count: "12", memory: "30.0 GiB" }
+2026-10-29T20:40:18.793847Z  INFO bevy_render::renderer: AdapterInfo { name: "AMD Ryzen 9 7900 12-Core Processor (RADV RAPHAEL_MENDOCINO)", vendor: 4098, device: 5710, device_type: IntegratedGpu, device_pci_bus_id: "0000:0f:00.0", driver: "radv", driver_info: "Mesa 26.0.8-1ubuntu0.3", backend: Vulkan, subgroup_min_size: 32, subgroup_max_size: 64, transient_saves_memory: false }
+2026-10-29T20:40:18.861884Z  INFO bevy_pbr::cluster: GPU clustering is supported on this device.
+2026-10-29T20:40:18.861900Z  INFO bevy_render::batching::gpu_preprocessing: GPU preprocessing is fully supported on this device.
+2026-10-29T20:40:18.862077Z  INFO bevy_egui::render: Using bindless_mode_array_size 16 (Device maximum 8388606)
+2026-10-29T20:40:18.862177Z  INFO bevy_winit::system: Creating new window Beavyr 0.2.1 (65v0)
+beavyr: slurm-61672901.out: an output file with no frequencies and no excited states in it. An ORCA Freq job keeps its force constants in the companion .hess file, not in the .out -- load that instead.

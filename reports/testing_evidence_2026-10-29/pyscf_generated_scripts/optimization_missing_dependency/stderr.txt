@@ -1,0 +1,6 @@
+Traceback (most recent call last):
+  File "/tmp/beavyr-release-pyscf-generated/optimization_missing_dependency/run_pyscf.py", line 42, in <module>
+    from pyscf.geomopt.geometric_solver import optimize
+  File "/home/peter/Programs/MyProjects/.venv/lib/python3.14/site-packages/pyscf/geomopt/geometric_solver.py", line 24, in <module>
+    import geometric
+ModuleNotFoundError: No module named 'geometric'

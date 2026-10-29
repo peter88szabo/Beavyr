@@ -1,0 +1,221 @@
+[
+  {
+    "case": "structures",
+    "files": [
+      "examples/PBE0-D4-def2-TZVP_water/pbe0-d4-def2-TZVP_SCMwater.xyz",
+      "examples/TPSSh-D4-def2-TZVP_SCMwater.xyz",
+      "examples/ZZAllyl.xyz",
+      "examples/fluorescence_proten_hbdi.xyz",
+      "examples/flurescence_hbdi_oriignal_from_Janko.xyz",
+      "examples/formic_acid_optimized_geoemtry.xyz",
+      "examples/formic_acid_optimized_geoemtry_otherside.xyz",
+      "examples/formicacid.xyz",
+      "examples/h2o2.xyz",
+      "examples/imidazole-acetamid.xyz",
+      "examples/imidazole-formic-esther.xyz",
+      "examples/isopreneOH.xyz",
+      "examples/phenyl-OCH3.xyz",
+      "examples/phenyl-OCH3_radical.xyz",
+      "examples/phenyl_big.xyz",
+      "examples/propanal.xyz",
+      "examples/pyrrol_esther.xyz",
+      "examples/quinone.xyz",
+      "examples/water.xyz"
+    ],
+    "alive_after_14_seconds": true,
+    "exit_code": -15,
+    "own_window_screenshot": false,
+    "load_messages": [
+      "pbe0-d4-def2-TZVP_SCMwater.xyz: 43 atoms",
+      "TPSSh-D4-def2-TZVP_SCMwater.xyz: 43 atoms",
+      "ZZAllyl.xyz: 17 atoms",
+      "fluorescence_proten_hbdi.xyz: 27 atoms",
+      "flurescence_hbdi_oriignal_from_Janko.xyz: 27 atoms",
+      "formic_acid_optimized_geoemtry.xyz: 5 atoms",
+      "formic_acid_optimized_geoemtry_otherside.xyz: 5 atoms",
+      "formicacid.xyz: 5 atoms",
+      "h2o2.xyz: 4 atoms",
+      "imidazole-acetamid.xyz: 14 atoms",
+      "imidazole-formic-esther.xyz: 12 atoms",
+      "isopreneOH.xyz: 15 atoms",
+      "phenyl-OCH3.xyz: 16 atoms",
+      "phenyl-OCH3_radical.xyz: 15 atoms",
+      "phenyl_big.xyz: 17 atoms",
+      "propanal.xyz: 8 atoms",
+      "pyrrol_esther.xyz: 16 atoms",
+      "quinone.xyz: 12 atoms",
+      "water.xyz: 3 atoms"
+    ],
+    "reported_errors": [],
+    "log": "/tmp/beavyr-example-gui-tests-20261029/structures/application.log"
+  },
+  {
+    "case": "trajectory_moldyn_trajectory",
+    "files": [
+      "examples/moldyn_trajectory.xyz"
+    ],
+    "alive_after_14_seconds": true,
+    "exit_code": -15,
+    "own_window_screenshot": false,
+    "load_messages": [
+      "moldyn_trajectory.xyz: 163 frames, 27 atoms"
+    ],
+    "reported_errors": [],
+    "log": "/tmp/beavyr-example-gui-tests-20261029/trajectory_moldyn_trajectory/application.log"
+  },
+  {
+    "case": "trajectory_optimization_trajectory",
+    "files": [
+      "examples/optimization_trajectory.xyz"
+    ],
+    "alive_after_14_seconds": true,
+    "exit_code": -15,
+    "own_window_screenshot": false,
+    "load_messages": [
+      "optimization_trajectory.xyz: 10 frames, 12 atoms"
+    ],
+    "reported_errors": [],
+    "log": "/tmp/beavyr-example-gui-tests-20261029/trajectory_optimization_trajectory/application.log"
+  },
+  {
+    "case": "hessian_Exc_root_OnlyFreq_from_optimized",
+    "files": [
+      "examples/Exc_root_OnlyFreq_from_optimized.hess"
+    ],
+    "alive_after_14_seconds": true,
+    "exit_code": -15,
+    "own_window_screenshot": false,
+    "load_messages": [
+      "Loaded Exc_root_OnlyFreq_from_optimized.hess: 43 atoms, frequencies scaled by 1 as the file asks."
+    ],
+    "reported_errors": [],
+    "log": "/tmp/beavyr-example-gui-tests-20261029/hessian_Exc_root_OnlyFreq_from_optimized/application.log"
+  },
+  {
+    "case": "hessian_TS_Gamma-3-6_ZZ-S_11_Compound_1",
+    "files": [
+      "examples/TS_Gamma-3-6_ZZ-S_11_Compound_1.hess"
+    ],
+    "alive_after_14_seconds": true,
+    "exit_code": -15,
+    "own_window_screenshot": false,
+    "load_messages": [
+      "Loaded TS_Gamma-3-6_ZZ-S_11_Compound_1.hess: 19 atoms, frequencies scaled by 0.974 as the file asks."
+    ],
+    "reported_errors": [],
+    "log": "/tmp/beavyr-example-gui-tests-20261029/hessian_TS_Gamma-3-6_ZZ-S_11_Compound_1/application.log"
+  },
+  {
+    "case": "molden_0",
+    "files": [
+      "examples/Exc_TPSSh-D4-def2-TZVP_SCMwater_16.molden"
+    ],
+    "alive_after_14_seconds": true,
+    "exit_code": -15,
+    "own_window_screenshot": false,
+    "load_messages": [
+      "Exc_TPSSh-D4-def2-TZVP_SCMwater_16.molden: 43 atoms"
+    ],
+    "reported_errors": [],
+    "log": "/tmp/beavyr-example-gui-tests-20261029/molden_0/application.log"
+  },
+  {
+    "case": "molden_1",
+    "files": [
+      "examples/PBE0-D4-def2-TZVP_water/Exc_PBE0-D4-def2-TZVP_SCMwater.molden"
+    ],
+    "alive_after_14_seconds": true,
+    "exit_code": -15,
+    "own_window_screenshot": false,
+    "load_messages": [
+      "Exc_PBE0-D4-def2-TZVP_SCMwater.molden: 43 atoms"
+    ],
+    "reported_errors": [],
+    "log": "/tmp/beavyr-example-gui-tests-20261029/molden_1/application.log"
+  },
+  {
+    "case": "output_0",
+    "files": [
+      "examples/AbsorptionSpectrum/Exc_TPSSh-D4-def2-TZVP_SCMwater_16.out"
+    ],
+    "alive_after_14_seconds": true,
+    "exit_code": -15,
+    "own_window_screenshot": false,
+    "load_messages": [
+      "Exc_TPSSh-D4-def2-TZVP_SCMwater_16.out: excited states loaded"
+    ],
+    "reported_errors": [],
+    "log": "/tmp/beavyr-example-gui-tests-20261029/output_0/application.log"
+  },
+  {
+    "case": "output_1",
+    "files": [
+      "examples/PBE0-D4-def2-TZVP_water/Exc_PBE0-D4-def2-TZVP_SCMwater.out"
+    ],
+    "alive_after_14_seconds": true,
+    "exit_code": -15,
+    "own_window_screenshot": false,
+    "load_messages": [
+      "Exc_PBE0-D4-def2-TZVP_SCMwater.out: excited states loaded"
+    ],
+    "reported_errors": [],
+    "log": "/tmp/beavyr-example-gui-tests-20261029/output_1/application.log"
+  },
+  {
+    "case": "output_2",
+    "files": [
+      "examples/PBE0-D4-def2-TZVP_water/slurm-61672901.out"
+    ],
+    "alive_after_14_seconds": true,
+    "exit_code": -15,
+    "own_window_screenshot": false,
+    "load_messages": [],
+    "reported_errors": [
+      "beavyr: slurm-61672901.out: an output file with no frequencies and no excited states in it. An ORCA Freq job keeps its force constants in the companion .hess file, not in the .out -- load that instead."
+    ],
+    "log": "/tmp/beavyr-example-gui-tests-20261029/output_2/application.log"
+  },
+  {
+    "case": "output_3",
+    "files": [
+      "examples/TS_Gamma-3-6_ZZ-S_11.out"
+    ],
+    "alive_after_14_seconds": true,
+    "exit_code": -15,
+    "own_window_screenshot": false,
+    "load_messages": [],
+    "reported_errors": [
+      "beavyr: /home/peter/DevCode/Beavyr/examples/TS_Gamma-3-6_ZZ-S_11.out: no TD-DFT excited states found: expected a line ending in 'EXCITED STATES' (as ORCA writes above its root list)"
+    ],
+    "log": "/tmp/beavyr-example-gui-tests-20261029/output_3/application.log"
+  },
+  {
+    "case": "gaussian_log",
+    "files": [
+      "examples/c164-ts1-2-1001.log"
+    ],
+    "alive_after_14_seconds": true,
+    "exit_code": -15,
+    "own_window_screenshot": false,
+    "load_messages": [
+      "Loaded c164-ts1-2-1001.log: 19 atoms."
+    ],
+    "reported_errors": [],
+    "log": "/tmp/beavyr-example-gui-tests-20261029/gaussian_log/application.log"
+  },
+  {
+    "case": "hessian_with_gradient",
+    "files": [
+      "examples/Exc_root_OnlyFreq_from_optimized.hess",
+      "examples/Exc_root_OnlyFreq_from_optimized.engrad"
+    ],
+    "alive_after_14_seconds": true,
+    "exit_code": -15,
+    "own_window_screenshot": false,
+    "load_messages": [
+      "Loaded Exc_root_OnlyFreq_from_optimized.hess: 43 atoms, frequencies scaled by 1 as the file asks."
+    ],
+    "reported_errors": [],
+    "log": "/tmp/beavyr-example-gui-tests-20261029/hessian_with_gradient/application.log"
+  }
+]

@@ -1,0 +1,8 @@
+{
+  "fixed_bond_length_changes_angstrom": [
+    0.0,
+    0.0
+  ],
+  "dihedral_change_degrees": 60.0,
+  "conclusion": "These bond-length constraints allow a 60-degree torsion change; they do not make butane rigid."
+}

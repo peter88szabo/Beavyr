@@ -1,0 +1,7 @@
+2026-10-29T20:40:32.838569Z  INFO bevy_diagnostic::system_information_diagnostics_plugin::internal: SystemInfo { os: "Linux (Ubuntu 26.04)", kernel: "7.0.0-38-generic", cpu: "AMD Ryzen 9 7900 12-Core Processor", core_count: "12", memory: "30.0 GiB" }
+2026-10-29T20:40:32.864528Z  INFO bevy_render::renderer: AdapterInfo { name: "AMD Ryzen 9 7900 12-Core Processor (RADV RAPHAEL_MENDOCINO)", vendor: 4098, device: 5710, device_type: IntegratedGpu, device_pci_bus_id: "0000:0f:00.0", driver: "radv", driver_info: "Mesa 26.0.8-1ubuntu0.3", backend: Vulkan, subgroup_min_size: 32, subgroup_max_size: 64, transient_saves_memory: false }
+2026-10-29T20:40:32.927740Z  INFO bevy_pbr::cluster: GPU clustering is supported on this device.
+2026-10-29T20:40:32.927759Z  INFO bevy_render::batching::gpu_preprocessing: GPU preprocessing is fully supported on this device.
+2026-10-29T20:40:32.927944Z  INFO bevy_egui::render: Using bindless_mode_array_size 16 (Device maximum 8388606)
+2026-10-29T20:40:32.928046Z  INFO bevy_winit::system: Creating new window Beavyr 0.2.1 (65v0)
+beavyr: /home/peter/DevCode/Beavyr/examples/TS_Gamma-3-6_ZZ-S_11.out: no TD-DFT excited states found: expected a line ending in 'EXCITED STATES' (as ORCA writes above its root list)

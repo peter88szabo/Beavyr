@@ -1,0 +1,390 @@
+   Compiling Beavyr v0.2.1 (/home/peter/DevCode/Beavyr)
+warning: unused import: `PathBuf`
+  --> src/conformer/tstrail.rs:42:23
+   |
+42 | use std::path::{Path, PathBuf};
+   |                       ^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `crate::optimizer::traits::Objective`
+  --> src/conformer/mod.rs:44:5
+   |
+44 | use crate::optimizer::traits::Objective as _;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: value assigned to `energy` is never read
+   --> src/optimizer/minimum_redundant.rs:598:13
+    |
+598 |             energy = old_energy;
+    |             ^^^^^^^^^^^^^^^^^^^ this value is reassigned later and never used
+...
+602 |             energy = obj.energy_gradient(&x, &mut grad_x)?;
+    |             ---------------------------------------------- `energy` is overwritten here before the previous value is read
+    |
+    = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `gnorm`
+   --> src/optimizer/geom_opt.rs:357:13
+    |
+357 |         let gnorm = vec_norm(&grad_x);
+    |             ^^^^^ help: if this is intentional, prefix it with an underscore: `_gnorm`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: value assigned to `grad_x` is never read
+   --> src/optimizer/rda.rs:808:9
+    |
+808 |         grad_x = trial_grad_x;
+    |         ^^^^^^
+    |
+    = help: maybe it is overwritten before being read?
+
+warning: variable `previous_x` is assigned to, but never used
+   --> src/optimizer/spin_crossing.rs:735:9
+    |
+735 |     let mut previous_x = x.clone();
+    |         ^^^^^^^^^^^^^^
+    |
+    = note: consider using `_previous_x` instead
+
+warning: variable `previous_geff` is assigned to, but never used
+   --> src/optimizer/spin_crossing.rs:736:9
+    |
+736 |     let mut previous_geff = vec![0.0; x.len()];
+    |         ^^^^^^^^^^^^^^^^^
+    |
+    = note: consider using `_previous_geff` instead
+
+warning: value assigned to `previous_x` is never read
+   --> src/optimizer/spin_crossing.rs:909:9
+    |
+909 |         previous_x = x;
+    |         ^^^^^^^^^^
+    |
+    = help: maybe it is overwritten before being read?
+
+warning: value assigned to `previous_geff` is never read
+   --> src/optimizer/spin_crossing.rs:910:9
+    |
+910 |         previous_geff = geff;
+    |         ^^^^^^^^^^^^^
+    |
+    = help: maybe it is overwritten before being read?
+
+warning: field `local_optimizer` is never read
+   --> src/conformer/mod.rs:313:9
+    |
+299 | pub struct ConformerOutcome {
+    |            ---------------- field in this struct
+...
+313 |     pub local_optimizer: LocalOptimizer,
+    |         ^^^^^^^^^^^^^^^
+    |
+    = note: `ConformerOutcome` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: enum `ActiveSiteLevel` is never used
+  --> src/conformer/constraints.rs:39:10
+   |
+39 | pub enum ActiveSiteLevel {
+   |          ^^^^^^^^^^^^^^^
+
+warning: associated items `ALL`, `label`, and `description` are never used
+  --> src/conformer/constraints.rs:50:15
+   |
+49 | impl ActiveSiteLevel {
+   | -------------------- associated items in this implementation
+50 |     pub const ALL: [ActiveSiteLevel; 3] = [
+   |               ^^^
+...
+56 |     pub fn label(self) -> &'static str {
+   |            ^^^^^
+...
+64 |     pub fn description(self) -> &'static str {
+   |            ^^^^^^^^^^^
+
+warning: function `measure_bond` is never used
+   --> src/conformer/constraints.rs:140:8
+    |
+140 | pub fn measure_bond(coords_bohr: &[f64], a: usize, b: usize) -> f64 {
+    |        ^^^^^^^^^^^^
+
+warning: function `measure_angle` is never used
+   --> src/conformer/constraints.rs:148:8
+    |
+148 | pub fn measure_angle(coords_bohr: &[f64], a: usize, b: usize, c: usize) -> f64 {
+    |        ^^^^^^^^^^^^^
+
+warning: function `measure_dihedral` is never used
+   --> src/conformer/constraints.rs:165:8
+    |
+165 | pub fn measure_dihedral(coords_bohr: &[f64], a: usize, b: usize, c: usize, d: usize) -> f64 {
+    |        ^^^^^^^^^^^^^^^^
+
+warning: function `active_site` is never used
+   --> src/conformer/constraints.rs:202:8
+    |
+202 | pub fn active_site(
+    |        ^^^^^^^^^^^
+
+warning: function `substituent` is never used
+   --> src/conformer/constraints.rs:253:4
+    |
+253 | fn substituent(adjacency: &[Vec<usize>], atom: usize, avoid: &[usize]) -> Option<usize> {
+    |    ^^^^^^^^^^^
+
+warning: function `clashes_with_central_bond` is never used
+   --> src/conformer/constraints.rs:268:8
+    |
+268 | pub fn clashes_with_central_bond(constraint: &Constraint, j: usize, k: usize) -> bool {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `wrap` is never used
+   --> src/conformer/constraints.rs:321:8
+    |
+321 | pub fn wrap(angle: f64) -> f64 {
+    |        ^^^^
+
+warning: field `from_conformer` is never read
+   --> src/conformer/tstrail.rs:106:9
+    |
+ 97 | pub struct TransitionStateGuess {
+    |            -------------------- field in this struct
+...
+106 |     pub from_conformer: usize,
+    |         ^^^^^^^^^^^^^^
+    |
+    = note: `TransitionStateGuess` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: field `atoms` is never read
+   --> src/conformer/tstrail.rs:127:9
+    |
+114 | pub struct TrailOutcome {
+    |            ------------ field in this struct
+...
+127 |     pub atoms: Vec<String>,
+    |         ^^^^^
+    |
+    = note: `TrailOutcome` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: function `min_clearance` is never used
+   --> src/molecule_builder/attach.rs:160:8
+    |
+160 | pub fn min_clearance(coords: &[Vec3], group: &[usize], ignore: &[usize]) -> f32 {
+    |        ^^^^^^^^^^^^^
+
+warning: function `centroid_excluding` is never used
+   --> src/molecule_builder/builder_ui.rs:213:4
+    |
+213 | fn centroid_excluding(pos: &[Vec3], exclude: usize) -> Option<Vec3> {
+    |    ^^^^^^^^^^^^^^^^^^
+
+warning: function `add_atom_prompt` is never used
+    --> src/molecule_builder/builder_ui.rs:1846:8
+     |
+1846 | pub fn add_atom_prompt(picked: usize, needed: usize) -> &'static str {
+     |        ^^^^^^^^^^^^^^^
+
+warning: function `run_cleanup` is never used
+    --> src/molecule_builder/builder_ui.rs:2493:4
+     |
+2493 | fn run_cleanup(mol: &mut Molecule, settings: &mut MolSettings) -> Result<String, String> {
+     |    ^^^^^^^^^^^
+
+warning: method `depth` is never used
+   --> src/molecule_builder/history.rs:110:12
+    |
+ 46 | impl BuilderHistory {
+    | ------------------- method in this implementation
+...
+110 |     pub fn depth(&self) -> usize {
+    |            ^^^^^
+
+warning: field `before` is never read
+   --> src/molecule_builder/hydrogens.rs:392:5
+    |
+391 | struct Undo {
+    |        ---- field in this struct
+392 |     before: Molecule,
+    |     ^^^^^^
+    |
+    = note: `Undo` has a derived impl for the trait `Clone`, but this is intentionally ignored during dead code analysis
+
+warning: method `undo` is never used
+   --> src/molecule_builder/hydrogens.rs:448:8
+    |
+402 | impl HydrogenState {
+    | ------------------ method in this implementation
+...
+448 |     fn undo(&mut self, mol: &mut Molecule, settings: &mut MolSettings) -> bool {
+    |        ^^^^
+
+warning: variant `Selected` is never constructed
+  --> src/molecule_builder/cleanup.rs:23:5
+   |
+20 | pub enum Scope {
+   |          ----- variant in this enum
+...
+23 |     Selected,
+   |     ^^^^^^^^
+   |
+   = note: `Scope` has a derived impl for the trait `Clone`, but this is intentionally ignored during dead code analysis
+
+warning: field `removed_host_atoms` is never read
+   --> src/molecule_builder/peptide.rs:476:9
+    |
+470 | pub struct Build {
+    |            ----- field in this struct
+...
+476 |     pub removed_host_atoms: usize,
+    |         ^^^^^^^^^^^^^^^^^^
+    |
+    = note: `Build` has a derived impl for the trait `Clone`, but this is intentionally ignored during dead code analysis
+
+warning: function `find_nearest_atom_screen_space` is never used
+ --> src/picking/screen.rs:7:8
+  |
+7 | pub fn find_nearest_atom_screen_space(
+  |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `find_nearest_atom_screen_space_egui` is never used
+  --> src/picking/screen.rs:47:8
+   |
+47 | pub fn find_nearest_atom_screen_space_egui(
+   |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: variants `FiniteDifference` and `None` are never constructed
+  --> src/qchem_interfaces/capabilities.rs:28:5
+   |
+22 | pub enum HessianKind {
+   |          ----------- variants in this enum
+...
+28 |     FiniteDifference,
+   |     ^^^^^^^^^^^^^^^^
+29 |     /// No Hessian by any route.
+30 |     None,
+   |     ^^^^
+   |
+   = note: `HessianKind` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: method `is_available` is never used
+  --> src/qchem_interfaces/capabilities.rs:35:12
+   |
+33 | impl HessianKind {
+   | ---------------- method in this implementation
+34 |     /// Whether a Hessian can be had at all, however it is obtained.
+35 |     pub fn is_available(self) -> bool {
+   |            ^^^^^^^^^^^^
+
+warning: field `reduced_masses_amu` is never read
+  --> src/qchem_interfaces/gaussian_log.rs:34:9
+   |
+26 | pub struct GaussianFrequencies {
+   |            ------------------- field in this struct
+...
+34 |     pub reduced_masses_amu: Vec<f64>,
+   |         ^^^^^^^^^^^^^^^^^^
+   |
+   = note: `GaussianFrequencies` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: method `description` is never used
+   --> src/qchem_interfaces/job.rs:139:12
+    |
+ 70 | impl JobType {
+    | ------------ method in this implementation
+...
+139 |     pub fn description(self) -> &'static str {
+    |            ^^^^^^^^^^^
+
+warning: method `natoms` is never used
+  --> src/qchem_interfaces/orca_engrad.rs:61:12
+   |
+60 | impl OrcaGradient {
+   | ----------------- method in this implementation
+61 |     pub fn natoms(&self) -> usize {
+   |            ^^^^^^
+
+warning: method `has_level_of_theory` is never used
+   --> src/qchem_panel/mod.rs:130:12
+    |
+103 | impl QcPanelState {
+    | ----------------- method in this implementation
+...
+130 |     pub fn has_level_of_theory(&self) -> bool {
+    |            ^^^^^^^^^^^^^^^^^^^
+
+warning: constant `CM1_TO_AU` is never used
+  --> src/vibronic/mod.rs:31:11
+   |
+31 | pub const CM1_TO_AU: f64 = 1.0 / 219_474.631_363_20;
+   |           ^^^^^^^^^
+
+warning: constant `AMU_TO_AU` is never used
+  --> src/vibronic/mod.rs:33:11
+   |
+33 | pub const AMU_TO_AU: f64 = 1822.888_486_209;
+   |           ^^^^^^^^^
+
+warning: struct `ModeActivity` is never constructed
+  --> src/vibronic/mod.rs:38:12
+   |
+38 | pub struct ModeActivity {
+   |            ^^^^^^^^^^^^
+
+warning: struct `FrankCondonAnalysis` is never constructed
+  --> src/vibronic/mod.rs:61:12
+   |
+61 | pub struct FrankCondonAnalysis {
+   |            ^^^^^^^^^^^^^^^^^^^
+
+warning: methods `by_rr_intensity` and `normalised_rr` are never used
+  --> src/vibronic/mod.rs:78:12
+   |
+75 | impl FrankCondonAnalysis {
+   | ------------------------ methods in this implementation
+...
+78 |     pub fn by_rr_intensity(&self) -> Vec<&ModeActivity> {
+   |            ^^^^^^^^^^^^^^^
+...
+86 |     pub fn normalised_rr(&self) -> Vec<(f64, f64)> {
+   |            ^^^^^^^^^^^^^
+
+warning: function `franck_condon_activity` is never used
+   --> src/vibronic/mod.rs:117:8
+    |
+117 | pub fn franck_condon_activity(
+    |        ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `Duschinsky` is never constructed
+   --> src/vibronic/mod.rs:195:12
+    |
+195 | pub struct Duschinsky {
+    |            ^^^^^^^^^^
+
+warning: struct `ModeCorrespondence` is never constructed
+   --> src/vibronic/mod.rs:209:12
+    |
+209 | pub struct ModeCorrespondence {
+    |            ^^^^^^^^^^^^^^^^^^
+
+warning: methods `correspondence` and `mean_participation` are never used
+   --> src/vibronic/mod.rs:228:12
+    |
+226 | impl Duschinsky {
+    | --------------- methods in this implementation
+227 |     /// For each excited-state mode, the ground-state mode it most resembles.
+228 |     pub fn correspondence(&self) -> Vec<ModeCorrespondence> {
+    |            ^^^^^^^^^^^^^^
+...
+272 |     pub fn mean_participation(&self) -> f64 {
+    |            ^^^^^^^^^^^^^^^^^^
+
+warning: function `duschinsky` is never used
+   --> src/vibronic/mod.rs:292:8
+    |
+292 | pub fn duschinsky(
+    |        ^^^^^^^^^^
+
+warning: `Beavyr` (bin "Beavyr") generated 48 warnings (run `cargo fix --bin "Beavyr" -p Beavyr` to apply 2 suggestions)
+    Finished `dev` profile [optimized + debuginfo] target(s) in 10.97s

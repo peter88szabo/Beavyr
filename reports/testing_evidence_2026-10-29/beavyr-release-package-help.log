@@ -1,0 +1,19 @@
+Beavyr -- molecular viewer and quantum-chemistry front-end
+
+    beavyr                    open with an empty viewport
+    beavyr FILE...            open with these files loaded
+    beavyr --help             this message
+
+Files are recognised by their extension:
+
+    .xyz            a structure; several frames become a trajectory
+    .pdb/.cif       protein coordinates and residue annotations (also .mmcif/.ent)
+    .hess           an ORCA Hessian -- frequencies are analysed on opening
+    .molden         orbitals and basis set
+    .engrad         an ORCA gradient, for the reaction-path projection
+    .out, .log      looked inside: a Gaussian frequency job, or an
+                    excited-state calculation
+
+Several files may be given at once and each is loaded into its own tool. Where
+more than one carries a geometry, the last one named is the structure left on
+screen.

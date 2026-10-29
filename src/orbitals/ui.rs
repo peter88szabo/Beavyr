@@ -119,12 +119,20 @@ pub fn orbital_panel(
     settings: &mut MolSettings,
     ev_changed: &mut MessageWriter<MoleculeChanged>,
 ) -> bool {
+    if windowed {
+        // Keep the height chosen by dragging the floating window's edge.
+        ui.set_min_height(ui.available_height());
+    }
     ui.scope(|ui| {
         crate::ui_style::modern(ui);
         panel_body(ui, windowed, state, mol, settings, ev_changed)
     })
     .inner
 }
+
+#[cfg(test)]
+#[path = "ui_resize_tests.rs"]
+mod resize_tests;
 
 fn panel_body(
     ui: &mut egui::Ui,
@@ -353,7 +361,7 @@ fn panel_body(
             let row_height = (ui.text_style_height(&egui::TextStyle::Monospace) + 4.0)
                 .max(ui.spacing().interact_size.y);
             let list_height = if windowed {
-                ui.available_height().min(180.0).max(row_height)
+                ui.available_height().max(row_height)
             } else {
                 180.0
             };

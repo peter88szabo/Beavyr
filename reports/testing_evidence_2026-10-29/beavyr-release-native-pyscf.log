@@ -1,0 +1,18 @@
+bash: cannot set terminal process group (1): Inappropriate ioctl for device
+bash: no job control in this shell
+{
+  "scope": "Native PySCF environment and numerical derivatives; not the Beavyr runner",
+  "interpreter": "/home/peter/Programs/MyProjects/.venv/bin/python",
+  "pyscf_version": "2.14.0",
+  "method": "RHF/STO-3G water, charge 0, multiplicity 1",
+  "energy_hartree": -74.96256480084762,
+  "gradient_components": 9,
+  "hessian_shape": [
+    9,
+    9
+  ],
+  "gradient_finite_difference_error": 2.8109243821461405e-09,
+  "hessian_finite_difference_error": 1.9941709474696756e-08,
+  "geometric_available": false,
+  "result": "PASS"
+}

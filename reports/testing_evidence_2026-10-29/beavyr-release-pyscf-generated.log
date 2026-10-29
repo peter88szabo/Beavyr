@@ -1,0 +1,31 @@
+bash: cannot set terminal process group (1): Inappropriate ioctl for device
+bash: no job control in this shell
+{
+  "scope": "Current production PySCF script generator compiled in a temporary adapter; full app dispatch excluded",
+  "checks": [
+    {
+      "job": "energy",
+      "result": "PASS",
+      "energy_hartree": -74.962564800846
+    },
+    {
+      "job": "gradient",
+      "result": "PASS",
+      "energy_hartree": -74.962564800846
+    },
+    {
+      "job": "hessian",
+      "result": "PASS",
+      "energy_hartree": -74.962564800846
+    },
+    {
+      "job": "dft_gradient",
+      "result": "PASS",
+      "energy_hartree": -75.311753760939
+    },
+    {
+      "job": "optimization_missing_dependency",
+      "result": "Expected failure: missing geometric; no final geometry"
+    }
+  ]
+}

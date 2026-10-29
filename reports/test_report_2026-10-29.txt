@@ -1,0 +1,217 @@
+BEAVYR TEST REPORT — 29 OCTOBER 2026
+
+Assessment
+==========
+The exercised Linux calculations, persistence tests, and example-file GUI
+startup checks largely passed. A general release should wait for review of
+the unresolved scientific behavior described below. Passing the normal suite
+does not override the separately reproduced ignored-test failure.
+
+Base revision tested: 17f003923bff33de6140d41b51b4e84f2e6f400a.
+The final normal suite and development build also include the specifically
+requested Surface Tools vertical-resize change, which is uncommitted.
+
+Resource limit: at most 12 CPU cores, per the user's updated instruction.
+Cargo compilation used four jobs; tests ran serially. CPU affinity limited
+every application, calculation, and test process to at most 12 cores.
+No software dependencies were installed. No commits, tags, or releases were
+created. Existing installed programs and shell configuration were not changed.
+
+Results
+=======
+1. Full normal test suite with the real xTB path enabled
+   Before the Surface Tools change: 1,373 passed, 0 failed, 26 ignored.
+   After the change: 1,374 passed, 0 failed, 26 ignored (6.35 seconds).
+   The extra passing test exercises actual pointer dragging of Surface Tools.
+   These counts are suite counts; additional ignored tests below were run
+   separately and must not be added as though they were all unique tests.
+
+2. ORCA
+   - User's unchanged testrun.inp through Beavyr with four MPI processes: PASS.
+     Final energy: -344.328444404238 Hartree.
+   - Generated water HF/STO-3G optimization plus frequencies: PASS.
+     Checked convergence, decreasing trajectory energy, Hessian dimensions,
+     masses, and the presence of IR data using Beavyr's readers.
+   - Generated B2PLYP/def2-SVP gradient: PASS, including auxiliary basis and
+     the existing gradient reader.
+
+3. xTB and conformer/transition-state pipelines
+   - Ferrocene derivative, charge 0 and multiplicity 1: PASS for GFN2 energy
+     and 99 finite gradient components; no force-field fallback was used.
+     Energy: -58.269323138303 Hartree. This is an evaluation, not proof of
+     successful conformer sampling or geometry optimization for this molecule.
+   - Real optimization and readable trajectory: PASS in the normal suite.
+   - Real Hessian analysis, including a larger asymmetric example without
+     xtbhess.xyz: PASS in the normal suite.
+   - Real frequency background-task pipeline: PASS in the normal suite.
+   - Invalid-charge failure preserving available iteration history: PASS.
+   - Butane DREIDING search followed by GFN2 refinement: PASS.
+     Two conformers; 36 xTB calls. Relative gap changed from about 0.77 to
+     0.60 kcal/mol; population normalization and energy ordering passed.
+   - Butane engine comparison completed for DREIDING, GFN-FF, GFN1-xTB,
+     and GFN2-xTB. Each produced two conformers. Approximate gaps were
+     0.77, 0.45, 0.37, and 0.60 kcal/mol, respectively.
+     TASI was unavailable because no Behemoth executable was configured.
+     This comparison test prints individual engine errors and can itself
+     return PASS despite an unavailable engine; TASI was not validated.
+   - Real xTB transition-state-guess pipeline: PASS. One pathway, 52 xTB
+     calls, finite ordered output, and the active distance shortened to
+     about 2.82 Angstrom. This verifies the pipeline, not a certified TS.
+
+4. Psi4
+   - micromamba activation and native H2 HF/STO-3G energy: PASS.
+   - Generated water energy/gradient through the executable route: PASS.
+     Energy: -75.312890659926 Hartree; nine finite gradient components
+     parsed by Beavyr. The test uses B3LYP/STO-3G.
+
+5. PySCF
+   - User's venv activation resolves to the expected interpreter: PASS.
+   - Native RHF/STO-3G water energy, gradient, and Hessian: PASS.
+     Energy: -74.96256480084762 Hartree.
+     Independent central-difference checks gave gradient error about
+     2.81e-9 Hartree/bohr and Hessian-column error about 1.99e-8
+     Hartree/bohr squared. Symmetry and zero net gradient also passed.
+   - Current production script generator, compiled unchanged in a temporary
+     adapter: HF energy, HF gradient, HF Hessian, and B3LYP gradient PASS.
+     Generated energies, derivative arrays, matrix ordering, and saved XYZ
+     coordinates agreed with direct PySCF calculations at the same settings.
+     This adapter tests the real generator and Python scripts, not the full
+     Beavyr dispatch or the adapter's minimal configuration types.
+   - Generated optimization correctly failed for the missing geometric
+     package and produced no final geometry. Successful native optimization
+     and its convergence reporting could not be tested in this environment.
+
+6. Larger peptide workflow
+   Explicit ignored benchmark: PASS in 12.03 seconds.
+   Sequence: ACDEFGHIKLMNPQRSTVWY; 168 heavy atoms, 159 restored H,
+   327 total atoms. Heavy-atom positions survived hydrogen restoration;
+   hydrogen bonding, parameterization, bond-length bounds, and retained
+   stereochemistry passed.
+   Cleanup: 400 cycles; 572.091262 -> 273.648593 kcal/mol; not converged.
+   Optimization: 1000 cycles; 273.643361 -> 265.221029 kcal/mol;
+   not converged. A fresh continuation reported convergence after one
+   cycle at 265.222178 kcal/mol under the benchmark's criteria.
+   Each optimizer initializes its own workspace, so adjacent stages have
+   slightly different reported starting/ending energies.
+   This test does not establish a global minimum or biological fold.
+
+7. Persistence, exports, cancellation, and UI regressions
+   - Project tests: 7 passed, covering portable embedded data, frequency
+     restoration without source files, corrupted/future-file rejection,
+     safe save failure, reversible loading, peptide metadata, and workspace.
+   - XYZ/Z-matrix export round trips: 2 passed.
+   - Normal-suite regressions passed for cancellation during optimization
+     and Hessian calculations, discarding cancelled results, DREIDING
+     nonconvergence, energy/gradient work, dummy removal, and copyable error
+     popups. Automated headless UI tests are not manual GUI verification.
+
+8. Linux package and actual GUI example loading
+   - Debian package extracted into /tmp, without installation.
+   - Packaged executable --help: PASS. No linked library was missing.
+   - Package and release executable shared ELF build ID:
+     88265c819c0cbdbdce9821ce59b5b3d719aace73.
+   - 13 separate GUI runs using fresh temporary config/cache/data directories.
+     Each initialized its Vulkan renderer and remained alive for 14 seconds
+     before the test deliberately terminated its own process with SIGTERM.
+     Exit code -15 in the evidence records that deliberate termination.
+   - All 21 XYZ files under examples/ loaded: 19 static structures and
+     trajectories of 163 frames/27 atoms and 10 frames/12 atoms.
+   - Both ORCA Hessians loaded: 43 and 19 atoms. File scaling factors of
+     1 and 0.974 were reported, respectively.
+   - Both Molden files loaded: 43 atoms each, including the 15 MB file.
+   - Both actual TD-DFT spectrum outputs loaded their excited states.
+   - Gaussian c164-ts1-2-1001.log loaded: 19 atoms.
+   - Paired Hessian plus gradient loaded: 43 atoms; gradient norm reported
+     as 5.683e-3 Hartree/bohr.
+   - slurm-61672901.out was rejected with an appropriate explanation that
+     it contains no loadable frequencies or excited states.
+   - TS_Gamma-3-6_ZZ-S_11.out reached the wrong reader; see issue C below.
+   - PNG images, shell scripts, and ORCA input files were not imported as
+     molecular data. No calculation or job script in examples/ was executed.
+   - Wayland windows were not accessible through the available X11 screenshot
+     tools, so no screenshot or visual appearance approval is claimed.
+     These are renderer startup and real loader checks, not mouse interaction,
+     trajectory playback, image-export, or visual correctness tests.
+
+Unresolved issues
+=================
+A. Previously identified: PySCF may falsely report geometry convergence.
+   src/qchem_interfaces/pyscf_run.rs:187 calls geometric_solver.optimize,
+   which returns geometry without the optimizer's convergence flag. The
+   wrapper at src/qchem_panel/run.rs:788 marks trajectory-producing jobs
+   as converged when they return. A later successful SCF calculation does
+   not prove geometry optimization convergence. This was established from
+   installed source/API behavior; no real unconverged optimization was run
+   because geometric is missing. No fix was authorized or made here.
+
+B. Newly reproduced: constrained conformer search can falsely report Rigid.
+   The explicitly run ignored test
+   conformer::tests::a_constrained_search_holds_its_coordinates FAILED
+   immediately at src/conformer/mod.rs:1366 with:
+       a constrained butane is searchable: Rigid
+   src/optimizer/conformer_search/topology.rs:46-51 treats a fixed bond
+   length as holding its torsion; lines 257-260 exclude that degree of
+   freedom. Butane's remaining methyl rotations are excluded separately.
+   An independent rotation of the test's carbon geometry changed its
+   dihedral by 60 degrees while changing both constrained bond lengths
+   by exactly zero. The fixed lengths do not make this molecule rigid.
+   This supports a functional error rather than merely a stale expectation.
+   No fix was made.
+
+C. Newly reproduced: ORCA output routed to the TD-DFT reader from credits.
+   examples/TS_Gamma-3-6_ZZ-S_11.out is a normally terminated ORCA output
+   without the excited-state table that the reader requires. Mentions of
+   TD-DFT in its contributor credits match the broad marker search in
+   src/cli.rs:126-140. Opening it reports "no TD-DFT excited states found"
+   instead of explaining that ORCA force constants need the companion
+   .hess file. The companion Hessian loaded successfully in a separate run.
+   This is a routing/diagnostic problem, not a crash or corrupted result.
+   No fix was made.
+
+D. Environment limitation: geometric is absent from the selected PySCF venv.
+   That blocks PySCF geometry optimization. It is separate from issue A.
+   No package was installed. Behemoth and other unconfigured backends also
+   remain unvalidated. macOS and Windows were not tested.
+
+Requested Surface Tools change
+==============================
+Only the specifically requested runtime UI behavior was changed:
+   src/orbitals/ui.rs reserves the floating window's chosen height and
+   lets its orbital list use the available vertical space rather than
+   stopping at 180 pixels. Docked layout retains its previous list height.
+   No shared window behavior or chemistry implementation was changed.
+   src/orbitals/ui_resize_tests.rs contains the interactive regression test;
+   its declaration is in ui.rs. No implementation was added to mod.rs.
+
+Before the fix, a 140-pixel vertical pointer drag left the real window's
+height unchanged. After the fix, the same test passed for growing and
+shrinking vertically while keeping width unchanged.
+Final normal suite: 1,374 passed. Development build: PASS, 10.97 seconds;
+48 warnings remain. The existing release package was not rebuilt or installed
+after this change. Its earlier GUI runs therefore validate the pre-change
+package; the resize fix is validated by the current-source headless test.
+
+Reversible backup of the original ui.rs:
+   target/change-backups/surface-height-20261029/ui.rs
+
+Evidence and reproduction
+=========================
+The sibling testing_evidence_2026-10-29/ directory preserves the test logs,
+per-example application logs, GUI results JSON, and temporary test helpers.
+The helpers contain this workstation's paths and are test adapters, not
+production implementation. The normal/ignored distinction is preserved.
+
+Representative commands (run from the repository; each constrained to the
+user's processor limit by a taskset prefix):
+
+  BEAVYR_XTB_PATH=<xtb executable> cargo test --offline --locked -j4 -- --test-threads=1
+  cargo test --offline --locked -j4 -- a_constrained_search_holds_its_coordinates --ignored --nocapture --test-threads=1
+  cargo test --offline --locked -j4 -- peptide_twenty_residue_hydrogen_and_dreiding_benchmark --ignored --nocapture --test-threads=1
+  cargo test --offline --locked -j4 -- a_search_driven_by_xtb --ignored --nocapture --test-threads=1
+  cargo test --offline --locked -j4 -- surface_window_keeps_a_user_selected_height_after_vertical_resizing --nocapture --test-threads=1
+
+The whole ignored suite was deliberately not run blindly: it includes
+developer timing experiments and analyses requiring absent external datasets.
+Remaining interactive checks include actual trajectory playback/closing,
+vibration looping, surface rendering appearance, image export, and the complete
+user-driven activation/error/copy workflow on a fresh installed package.
