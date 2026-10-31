@@ -286,14 +286,14 @@ pub fn format_thermo(
         thermo.gelec,
     );
     print_uhfg(&mut out, 
-        "Trans",
+        "Translational",
         thermo.utrans,
         thermo.htrans,
         thermo.ftrans,
         thermo.gtrans,
     );
-    print_uhfg(&mut out, "Rot", thermo.urot, thermo.hrot, thermo.frot, thermo.grot);
-    print_uhfg(&mut out, "Vib", thermo.uvib, thermo.hvib, thermo.fvib, thermo.gvib);
+    print_uhfg(&mut out, "Rotational", thermo.urot, thermo.hrot, thermo.frot, thermo.grot);
+    print_uhfg(&mut out, "Vibrational", thermo.uvib, thermo.hvib, thermo.fvib, thermo.gvib);
     print_uhfg(&mut out, 
         "Thermal",
         thermo.utherm,
@@ -315,6 +315,13 @@ pub fn format_thermo(
         thermo.htot * AU_TO_KCAL,
         thermo.ftot * AU_TO_KCAL,
         thermo.gtot * AU_TO_KCAL,
+    );
+    print_uhfg(&mut out,
+        "Total(kJ/mol)",
+        thermo.utot * AU_TO_KJ,
+        thermo.htot * AU_TO_KJ,
+        thermo.ftot * AU_TO_KJ,
+        thermo.gtot * AU_TO_KJ,
     );
 
     writeln!(out).unwrap();
@@ -343,9 +350,9 @@ pub fn format_thermo(
         "", "S", "Cv", "Cp"
     ).unwrap();
     print_scc(&mut out, "Electronic", thermo.selec, thermo.cvelec, thermo.cpelec);
-    print_scc(&mut out, "Trans", thermo.strans, thermo.cvtrans, thermo.cptrans);
-    print_scc(&mut out, "Rot", thermo.srot, thermo.cvrot, thermo.cprot);
-    print_scc(&mut out, "Vib", thermo.svib, thermo.cvvib, thermo.cpvib);
+    print_scc(&mut out, "Translational", thermo.strans, thermo.cvtrans, thermo.cptrans);
+    print_scc(&mut out, "Rotational", thermo.srot, thermo.cvrot, thermo.cprot);
+    print_scc(&mut out, "Vibrational", thermo.svib, thermo.cvvib, thermo.cpvib);
     print_scc(&mut out, "Thermal", thermo.stherm, thermo.cvtherm, thermo.cptherm);
     writeln!(out, "{:-<SCC_W$}", "").unwrap();
     print_scc(&mut out, "Total", thermo.stot, thermo.cvtot, thermo.cptot);

@@ -11,6 +11,12 @@
 //! how to show those things and a second copy would drift from the first. What
 //! stays here is the run summary: the iterations, and the energies at the end.
 
+mod program_selection;
+mod input_generation;
+pub mod scan_controls;
+mod mecp_controls;
+mod geometry_search_controls;
+pub mod scan_results;
 pub mod run;
 pub mod summary;
 pub mod ui;
@@ -101,28 +107,6 @@ impl Default for QcPanelState {
 }
 
 impl QcPanelState {
-    /// Switches program, resetting everything that does not carry across.
-    ///
-    /// The method, functional and basis all reset, because the catalogues do
-    /// not translate between codes: ORCA's `M062X` is an input error to
-    /// Behemoth and Behemoth's `m06-2x` is one to ORCA. The charge, the
-    /// multiplicity and the resources stay, because they describe the molecule
-    /// and the machine rather than the program.
-    ///
-    /// The job stays too where the new program can do it, and falls back to an
-    /// optimisation where it cannot -- which every backend can do.
-    pub fn set_program(&mut self, program: QcProgram) {
-        if program == self.program {
-            return;
-        }
-        self.program = program;
-        self.method = crate::qchem_interfaces::job::default_method(program);
-        crate::qchem_interfaces::method::adopt_program_defaults(&mut self.config, program);
-        if !crate::qchem_interfaces::job::supports(program, self.job) {
-            self.job = JobType::Optimize;
-        }
-    }
-
     /// Whether the level-of-theory rows apply at all.
     ///
     /// False for DREIDING, whose parameters follow from the perceived atom
@@ -160,27 +144,6 @@ impl QcPanelState {
         self.job.is_excited_state()
     }
 
-    /// Whether this program is genuinely driven by an input file.
-    ///
-    /// Four are: ORCA by its `.inp`, Psi4 by an input file that is itself
-    /// Python, and PySCF by a Python script -- which is simply how PySCF is
-    /// used. Each of those is a file a chemist would recognise, write by hand
-    /// and run outside Beavyr.
-    ///
-    /// Three are not. xTB and Behemoth take everything on their command lines,
-    /// and DREIDING runs in this process. Sparrow belongs with them: it is
-    /// driven by settings, through its own command line or through SCINE's
-    /// bindings, and the Python script Beavyr generates for it is this
-    /// program's scaffolding rather than Sparrow's input format. Offering that
-    /// scaffolding as "the input" would invite editing something that is not a
-    /// thing Sparrow has.
-    pub fn has_input_file(&self) -> bool {
-        matches!(
-            self.program,
-            QcProgram::Orca | QcProgram::Psi4 | QcProgram::Psi4Py | QcProgram::PySCF
-        )
-    }
-
     /// The name the input is written under, for the save dialog's suggestion.
     pub fn input_file_name(&self) -> &'static str {
         match self.program {
@@ -189,65 +152,6 @@ impl QcPanelState {
             QcProgram::Psi4Py => "run_psi4.py",
             QcProgram::PySCF => "run_pyscf.py",
             _ => "input.txt",
-        }
-    }
-
-    /// The input the current settings would write.
-    ///
-    /// One function for three callers: the preview the editor starts from, the
-    /// Save button, and the run itself. They cannot disagree about what would
-    /// have been sent, which is the point -- an editor showing something other
-    /// than what runs would be worse than no editor.
-    pub fn generated_input(&self, atoms: &[String], positions_angstrom: &[f64]) -> String {
-        use crate::qchem_interfaces::{orca_run, psi4_run, pyscf_run};
-
-        let method = self.method.unwrap_or(QcMethod::Dft);
-        match self.program {
-            QcProgram::Orca => orca_run::panel_input_text(
-                self.job,
-                method,
-                self.charge,
-                self.multiplicity,
-                &self.config,
-                self.excited,
-                &self.config.orca_extra,
-                &orca_run::xyz_body(atoms, positions_angstrom),
-            ),
-            QcProgram::Psi4 => psi4_run::input_text(
-                self.job,
-                method,
-                self.charge,
-                self.multiplicity,
-                &self.config,
-                self.excited,
-                self.wavefunction,
-                atoms,
-                positions_angstrom,
-            ),
-            QcProgram::Psi4Py => psi4_run::script_text(
-                self.job,
-                method,
-                self.charge,
-                self.multiplicity,
-                &self.config,
-                self.excited,
-                self.wavefunction,
-                atoms,
-                positions_angstrom,
-            ),
-            QcProgram::PySCF => pyscf_run::script_text(
-                self.job,
-                self.charge,
-                self.multiplicity,
-                &self.config,
-                self.excited,
-                self.wavefunction,
-                atoms,
-                positions_angstrom,
-            ),
-            // Everything else is driven by settings rather than a file, so
-            // there is nothing to show. See `has_input_file`.
-            _ => String::new(),
         }
     }
 

@@ -266,6 +266,7 @@ fn main() {
                     molecule_builder::cleanup::poll,
                     molecule_builder::cleanup::draw,
                     qchem_panel::run::poll_qc_run,
+                    qchem_panel::scan_controls::collect_picks,
                     uvvis::run::poll_spectrum_run,
                     conformer::poll_conformer_search,
                     ts_generation::poll_generation,

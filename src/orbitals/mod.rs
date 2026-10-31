@@ -36,18 +36,9 @@ const GRID_PADDING: f32 = 3.0;
 /// Upper bound on grid points, to keep the worst case bounded.
 const MAX_GRID_POINTS: usize = 2_000_000;
 
-/// Grid spacing in Angstrom for each surface-resolution setting.
-///
-/// Higher setting means finer sampling and a smoother surface, at a cost that
-/// grows with the cube of the refinement.  Index 0 is unused so the slider can
-/// read 1..=6 like the atom-resolution controls.
-const RESOLUTION_SPACING: [f32; 9] = [0.0, 0.40, 0.30, 0.25, 0.20, 0.15, 0.12, 0.09, 0.07];
-
-/// Lowest and highest selectable surface resolution.
-pub const MIN_RESOLUTION: u32 = 1;
-pub const MAX_RESOLUTION: u32 = 8;
-/// Matches the 0.20 A spacing the viewer used before the control existed.
-const DEFAULT_RESOLUTION: u32 = 6;
+mod surface_resolution;
+pub use surface_resolution::{MIN_RESOLUTION, MAX_RESOLUTION};
+use surface_resolution::DEFAULT_RESOLUTION;
 
 /// Plane spacing for the wireframe net is `MESH_SPACING_BASE / density`, so a
 /// higher slider value means a denser net -- the direction people expect.
@@ -210,12 +201,6 @@ impl OrbitalState {
     pub fn mesh_plane_spacing(&self) -> f32 {
         let density = self.mesh_density.clamp(MIN_MESH_DENSITY, MAX_MESH_DENSITY);
         MESH_SPACING_BASE / density as f32
-    }
-
-    /// Grid spacing in Angstrom for the current resolution setting.
-    pub fn grid_spacing(&self) -> f32 {
-        let index = self.resolution.clamp(MIN_RESOLUTION, MAX_RESOLUTION) as usize;
-        RESOLUTION_SPACING[index]
     }
 
     /// The grid that would be used for `data` at the current resolution.

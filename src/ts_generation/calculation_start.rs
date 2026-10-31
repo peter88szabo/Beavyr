@@ -64,6 +64,7 @@ impl TsGeneration {
         self.product = Some(product.clone());
         self.parameters = prepared_parameters;
         let algorithm = self.parameters.algorithm;
+        let relax_endpoints = self.parameters.relax_endpoints;
         let method = format!(
             "{} / {}",
             self.program.label(),
@@ -80,7 +81,7 @@ impl TsGeneration {
                 run_dir.join("energy"),
                 control.clone(),
             );
-            let result = generate(
+            let result = super::endpoint_relaxation::generate(
                 &mut objective,
                 &reactant,
                 &product,
@@ -88,6 +89,8 @@ impl TsGeneration {
                 algorithm,
                 method,
                 &run_dir,
+                relax_endpoints,
+                &control,
             );
             if control.cancelled.load(std::sync::atomic::Ordering::Relaxed) {
                 return Err(format!(

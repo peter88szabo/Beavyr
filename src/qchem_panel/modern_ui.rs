@@ -11,6 +11,9 @@ use std::path::PathBuf;
 mod input_editor;
 pub(crate) use input_editor::{show as input_editor_window, project_input_state, restore_project_input_state};
 
+#[path = "spectrum_controls.rs"]
+mod spectrum_controls;
+
 const ACCENT: egui::Color32 = egui::Color32::from_rgb(104, 174, 255);
 const WARNING: egui::Color32 = egui::Color32::from_rgb(230, 170, 90);
 const ERROR: egui::Color32 = egui::Color32::from_rgb(230, 120, 90);
@@ -24,6 +27,8 @@ struct Presentation {
     method_search: String,
     functional_search: String,
     basis_search: String,
+    generator_path: String,
+    generator_error: Option<String>,
     binary_check: Option<(QcProgram, String, Result<PathBuf, String>)>,
 }
 
@@ -35,6 +40,8 @@ impl Default for Presentation {
             method_search: String::new(),
             functional_search: String::new(),
             basis_search: String::new(),
+            generator_path: crate::qchem_panel::run::spectrum_job::generator_path(),
+            generator_error: None,
             binary_check: None,
         }
     }
@@ -110,7 +117,7 @@ pub(super) fn show(
             .min_width(352.0)
             .min_height(540.0)
             .default_pos([
-                (viewport.right() - WIDTH - 16.0).max(viewport.left()),
+                viewport.left() + 16.0,
                 viewport.top() + 16.0,
             ])
             .show(ctx, |ui| close = contents(ui, panel, task, opt_panel, mol))
@@ -272,12 +279,16 @@ fn electronic_state_row(
 fn job_choices(ui: &mut egui::Ui, panel: &mut QcPanelState, running: bool) {
     card(ui).show(ui, |ui| {
         ui.set_min_width((ui.available_width() - 1.0).max(0.0));
+        if panel.program == QcProgram::StdaXtb {
+            ui.strong("UV-Vis / excited states");
+            return;
+        }
         ui.horizontal(|ui| {
             ui.strong("What to calculate");
             ui.add_enabled_ui(!running, |ui| {
                 ui.menu_button("More…", |ui| {
                     for job in JobType::ALL {
-                        let reason = job::unsupported_reason(panel.program, job);
+                        let reason = job::correlated::unsupported_job(panel.program, panel.method, job);
                         let response = ui.add_enabled(
                             reason.is_none(),
                             egui::Button::new(job.label()).selected(panel.job == job),
@@ -303,7 +314,7 @@ fn job_choices(ui: &mut egui::Ui, panel: &mut QcPanelState, running: bool) {
                 (JobType::OptimizeThenFrequencies, "Opt+Freq"),
             ]
             {
-                let reason = job::unsupported_reason(panel.program, job);
+                let reason = job::correlated::unsupported_job(panel.program, panel.method, job);
                 let response = ui.add_enabled(
                     !running && reason.is_none(),
                     egui::Button::new(label).selected(panel.job == job),
@@ -316,7 +327,7 @@ fn job_choices(ui: &mut egui::Ui, panel: &mut QcPanelState, running: bool) {
                 }
             }
         });
-        if panel.needs_excited_state_options() {
+        if panel.needs_excited_state_options() && !spectrum_controls::active(panel) {
             excited_state_row(ui, panel, running);
         }
     });
@@ -527,6 +538,10 @@ fn theory_card(
 ) {
     card(ui).show(ui, |ui| {
         ui.set_min_width((ui.available_width() - 1.0).max(0.0));
+        if spectrum_controls::active(panel) {
+            spectrum_controls::settings(ui, panel, running);
+            return;
+        }
         ui.strong("Method and basis");
         let methods = job::methods_for(panel.program);
         if methods.is_empty() {
@@ -562,6 +577,15 @@ fn theory_card(
                 adopt_method_defaults(panel, method);
                 state.basis_search.clear();
             }
+        }
+
+        if panel.method.is_some_and(job::correlated::needs_active_space) {
+            ui.horizontal(|ui| {
+                ui.label("Active electrons");
+                ui.add_enabled(!running, egui::DragValue::new(&mut panel.config.active_space.electrons).range(0..=1000));
+                ui.label("Orbitals");
+                ui.add_enabled(!running, egui::DragValue::new(&mut panel.config.active_space.orbitals).range(0..=1000));
+            });
         }
 
         if panel.needs_functional() {
@@ -675,6 +699,7 @@ fn configuration(
         .open(Some(state.configure))
         .show(ui, |ui| {
             program_path_row(ui, panel, opt_panel, running);
+            if panel.program == QcProgram::StdaXtb { spectrum_controls::generator_row(ui, state, running); }
             if panel.program.python_module().is_some() {
                 python_environment_row(ui, panel.program, running);
             } else if !panel.program.needs_binary_path() {
@@ -738,6 +763,8 @@ fn optional_settings(ui: &mut egui::Ui, panel: &mut QcPanelState, running: bool)
 fn start_label(job: JobType) -> &'static str {
     match job {
         JobType::SinglePoint => "Calculate energy",
+        JobType::Scan => "Run scan",
+        JobType::Mecp => "Find crossing point",
         JobType::Gradient => "Calculate gradient",
         JobType::Hessian => "Calculate Hessian",
         JobType::Optimize => "Start optimization",
@@ -759,8 +786,30 @@ fn blocking_reason(panel: &QcPanelState, mol: &Molecule, code: &CodeStatus) -> O
     if !code.ready {
         return Some(code.detail.clone());
     }
-    if let Some(reason) = job::unsupported_reason(panel.program, panel.job) {
+    if let Some(reason) = job::correlated::unsupported_job(panel.program, panel.method, panel.job) {
         return Some(reason.into());
+    }
+    if job::search::active(panel.job) {
+        if let Some(error) = job::search::method_problem(panel.program, panel.method, panel.job, &panel.config.search) { return Some(error.into()); }
+        if job::search::local(panel.program, panel.job, &panel.config.search) || (panel.program == QcProgram::Behemoth && panel.job == JobType::TransitionState) {
+            if let Err(error) = job::search::validate(&panel.config.search, panel.job, &mol.atoms) { return Some(error); }
+        }
+    }
+    if panel.job == JobType::Mecp {
+        if let Err(error) = job::mecp::validate(panel.program, panel.method, &panel.config.mecp, mol, panel.charge, panel.multiplicity) { return Some(error); }
+    }
+    if panel.job == JobType::Scan {
+        if let Some(reason) = job::scan::driver_problem(panel.program, panel.method, &panel.config.scan) { return Some(reason.into()); }
+        if let Some(reason) = job::scan::method_problem(panel.program, panel.method, panel.config.scan.mode) { return Some(reason.into()); }
+        if let Err(error) = panel.config.scan.prepare(&mol.atoms) { return Some(error); }
+    }
+    if spectrum_controls::active(panel) {
+        if let Err(error) = crate::qchem_panel::run::spectrum_job::validate(panel.program, panel.excited, &panel.config, panel.multiplicity, &mol.atoms) { return Some(error); }
+        if panel.program == QcProgram::StdaXtb {
+            let path = crate::qchem_panel::run::spectrum_job::generator_path();
+            if let Err(error) = resolve_program_executable(QcProgram::StdaXtb, &path) { return Some(format!("Set xtb4stda path in Configure: {error}")); }
+        }
+        return None;
     }
     if !job::methods_for(panel.program).is_empty()
         && !panel
@@ -768,6 +817,12 @@ fn blocking_reason(panel: &QcPanelState, mol: &Molecule, code: &CodeStatus) -> O
             .is_some_and(|method| job::methods_for(panel.program).contains(&method))
     {
         return Some("Choose a method supported by this code".into());
+    }
+    if !(panel.has_input_file() && panel.advanced) {
+        if let Some(method) = panel.method {
+            if let Err(error) = job::correlated::validate_active_space(method, &panel.config.active_space,
+                &mol.atoms, panel.charge, panel.multiplicity) { return Some(error); }
+        }
     }
     if panel.has_input_file() && panel.advanced && panel.advanced_text.trim().is_empty() {
         return Some("The custom input is empty".into());
@@ -785,7 +840,9 @@ fn footer(
 ) {
     ui.separator();
     input_editor::entry(ui, panel, mol, task.is_running());
-    let summary = if panel.has_input_file() && panel.advanced {
+    let summary = if spectrum_controls::active(panel) {
+        if panel.program == QcProgram::StdaXtb { "sTDA-xTB (Grimme)".to_owned() } else { panel.excited.spectrum_method.label().to_owned() }
+    } else if panel.has_input_file() && panel.advanced {
         "Custom input is used exactly as written".to_owned()
     } else {
         panel.summary_line()
@@ -860,7 +917,7 @@ fn footer(
             start_run(ui.ctx(), panel, task, opt_panel, mol);
         }
     }
-    if task.last.is_some() {
+    if task.last.as_ref().is_some_and(|result| result.job != JobType::Scan) {
         if ui
             .button(if panel.summary_open {
                 "Hide results"
@@ -886,6 +943,7 @@ fn contents(
     ui.scope(|ui| {
         style(ui);
         close = header(ui, &mut state, panel, task.is_running());
+        if panel.program == QcProgram::StdaXtb { panel.job = JobType::TdDft; }
         let code = code_status(&mut state, panel, opt_panel);
         if let Some(module) = panel.program.python_module() {
             crate::qchem_interfaces::python_env::notify_missing(
@@ -919,7 +977,7 @@ fn contents(
         let remaining = ui.available_rect_before_wrap();
         let footer_height = 112.0
             + if panel.has_input_file() { 38.0 } else { 0.0 }
-            + if task.last.is_some() { 38.0 } else { 0.0 };
+            + if task.last.as_ref().is_some_and(|result| result.job != JobType::Scan) { 38.0 } else { 0.0 };
         let body_bottom = (remaining.bottom() - footer_height - 8.0).max(remaining.top() + 70.0);
         let body_rect =
             egui::Rect::from_min_max(remaining.min, egui::pos2(remaining.right(), body_bottom));
@@ -945,7 +1003,13 @@ fn contents(
                 }
                 job_choices(ui, panel, task.is_running());
                 theory_card(ui, &mut state, panel, task.is_running());
-                optional_settings(ui, panel, task.is_running());
+                if panel.job == JobType::Scan {
+                    super::super::scan_controls::settings(ui, panel, mol, task);
+                }
+                if panel.job == JobType::Mecp { super::super::mecp_controls::settings(ui, panel, task); }
+                if job::search::active(panel.job) { super::super::geometry_search_controls::settings(ui, panel, task); }
+                super::super::scan_results::reopen_button(ui, task);
+                if !spectrum_controls::active(panel) && !matches!(panel.job, JobType::Scan | JobType::Mecp) { optional_settings(ui, panel, task.is_running()); }
                 if panel.show_warnings {
                     if let Ok((_, warnings)) =
                         validate_electronic_state(mol, panel.charge, panel.multiplicity)

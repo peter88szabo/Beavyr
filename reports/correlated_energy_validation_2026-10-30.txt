@@ -1,0 +1,77 @@
+Correlated energy methods and compact UI validation — 2026-10-30
+
+Scope
+- Added CCSD(T), CASSCF and NEVPT2 to PySCF and Behemoth in the Quantum Chemistry panel.
+- Added CASSCF and NEVPT2 to ORCA. ORCA and Psi4 already offered CCSD(T).
+- Newly added methods are energy-only, as requested. Choosing one selects Energy;
+  geometry and excited-state jobs are disabled for that selection.
+- CASSCF/NEVPT2 require explicit active-electron and active-orbital settings.
+  Validation checks spin parity, capacity, total electron count and paired inactive electrons.
+- PySCF runs its coupled-cluster/multireference APIs; Behemoth receives a native input
+  through the selected executable; ORCA receives a CASSCF block with SC_NEVPT2 when selected.
+- NEVPT2 results use the corrected total energy. Failed/nonconverged PySCF or Behemoth
+  correlated calculations do not silently fall back to a reference energy.
+- Existing saved MethodConfig data loads with empty active-space settings.
+- Compact Surface sliders retain editable values; Style and Lobe colours share one row.
+- UV-Vis was removed from the QC quick buttons and remains in More….
+
+Automated validation
+- Full suite: 1,400 passed, 0 failed, 31 ignored; execution 7.04 seconds.
+  Log: /tmp/beavyr-correlated-full-tests.log
+- Focused correlated checks, including the three normally ignored native tests:
+  14 passed, 0 failed; execution 2.50 seconds.
+  Log: /tmp/beavyr-correlated-tests.log
+- UI regression selects CASSCF, verifies Energy is selected, active-space fields
+  are shown, and clicking Optimize/Freq does not change the selected job.
+- Parser regression rejects missing correlated energies, NaN and unconverged CASSCF;
+  tests distinguish the NEVPT2 total from its reference and correction.
+- Earlier compact-controls checks: both Surface resizing and the Behemoth More-menu
+  spectrum selection tests passed (/tmp/beavyr-compact-controls-tests.log).
+- git diff --check passed.
+- Final cargo build succeeded in 30.55 seconds; 49 compiler warnings remain.
+  Log: /tmp/beavyr-correlated-build.log
+  Built executable: target/debug/Beavyr
+
+Native calculations
+Neutral singlet water, active space CAS(4,3) for CASSCF/NEVPT2.
+PySCF/Behemoth used STO-3G, two threads. ORCA used def2-SVP, one process.
+Each used the user's installed executable/interpreter through an explicit test setting.
+No executable paths were hard-coded into application logic and no environments were changed.
+
+Backend       Method       Total energy / Eh
+PySCF         CCSD(T)      -74.988588593269
+PySCF         CASSCF       -74.956534271610
+PySCF         NEVPT2       -74.980929224980
+Behemoth      CCSD(T)      -74.988503600833
+Behemoth      CASSCF       -74.958074633200
+Behemoth      NEVPT2       -74.980257907700
+ORCA          CCSD(T)      -76.167256451745
+ORCA          CASSCF       -75.971279438292
+ORCA          NEVPT2       -76.151745387189
+
+All nine calculations completed. PySCF and Behemoth orbital export was checked.
+ORCA's NEVPT2 Total Energy (E0+dE) agrees with FINAL SINGLE POINT ENERGY,
+which the existing result reader uses.
+These are integration smoke tests, not cross-backend numerical equivalence tests:
+bases differ for ORCA, and frozen-core/orbital-selection defaults differ across programs.
+Psi4 CCSD(T) catalogue and generated-input support was checked; no new native Psi4
+calculation was part of this validation. Open-shell correlated cases were not run here.
+
+An initial ORCA smoke test using STO-3G encountered the existing automatic STO-3G/C
+auxiliary-basis spelling limitation. The test was changed to def2-SVP. No unrelated
+basis-generator changes were made. The test's energy sanity range was then widened
+for the larger basis. The final test run passed.
+
+References used for generated inputs/APIs
+https://pyscf.org/user/cc.html
+https://pyscf.org/user/mcscf.html
+https://pyscf.org/user/mrpt.html
+https://www.faccts.de/docs/orca/6.1/manual/contents/modelchemistries/CASSCF.html
+https://www.faccts.de/docs/orca/6.1/manual/contents/modelchemistries/NEVPT2.html
+Behemoth installed executable help and local input/runner source.
+
+Reversibility
+No commits, tags or pushes. Prior work was preserved.
+Pre-change source snapshot: target/change-backups/correlated-energy-methods-20261030/src
+Compact Surface snapshot: target/change-backups/surface-compact-controls-20261030
+QC quick-button snapshot: target/change-backups/qchem-remove-spectrum-quick-button-20261030

@@ -1,0 +1,45 @@
+Spectrum and UI changes — validation, 2026-10-30
+
+Implemented requested scope:
+- Recent Structures: Delete per saved snapshot; original source files untouched.
+- Quantum Chemistry first-open position: left; remembered positions preserved.
+- Standalone sTDA-xTB (Grimme): user-selected stda and xtb4stda executable paths,
+  persisted separately; spectrum-only job; no geometry operations offered or run.
+- Behemoth spectrum methods: GFN1 orbitals, TASI, hybrid DFT sTDA/sTD-DFT.
+- Measurement empty-angle/dihedral messages removed.
+- Trajectory Playback/Trajectory file headings removed; drawn pause icon.
+- Surface Tools: Show surface, stacked Isovalue/Opacity/Surface resolution,
+  Style, Lobe colours. Resolution maximum 10; default height 660 -> 726.
+  Existing resolution levels and grid-point budget preserved.
+
+Validation:
+- Full suite: 1393 passed, 0 failed, 28 ignored, 7.49 seconds.
+- Development build: passed, 28.61 seconds; 48 existing warnings.
+- git diff --check: passed.
+- New process tests: two standalone stages in order, paths with spaces, charge
+  files, requested energy window, error propagation, cancellation before stage 2.
+- New persistence, parser, capability, legacy settings and UI tests passed.
+- Real Behemoth general-calculator integration: TASI, DFT sTDA, DFT sTD-DFT
+  each produced 5 formaldehyde roots. GFN1 returned an unstable A-prime response
+  matrix error; correctly propagated as a failed calculation, not a spectrum.
+- Standalone Grimme binaries were not available locally; real scientific output
+  from those executables has NOT been verified. Adapter validated with controlled
+  subprocesses against the documented standalone command and output formats.
+- No manual visual review or macOS/Windows execution was performed.
+
+Logs:
+/tmp/beavyr-spectrum-tests.log
+/tmp/beavyr-native-spectrum.log
+/tmp/beavyr-spectrum-build.log
+
+Source references:
+https://github.com/grimme-lab/xtb4stda
+https://www.chemie.uni-bonn.de/grimme/de/software/stda/stda_manual.pdf
+https://raw.githubusercontent.com/grimme-lab/xtb4stda/master/src/main.f
+https://raw.githubusercontent.com/Theoretical-Chemistry-Group-UCLouvain/std2/master/stda.f
+
+All new implementations are in named files. Relevant existing code was moved
+out of mod.rs files; only module declarations/reexports were added there.
+Backups: target/change-backups/spectrum-history-20261030/
+No commits, installation, dependency changes, or global environment changes.
+Built executable: target/debug/Beavyr. Installed/release binary unchanged.

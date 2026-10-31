@@ -170,6 +170,7 @@ fn run_with_options(
 
     check_cancelled(Some(cancel)).map_err(|e| e.to_string())?;
     Ok(QcRunOutput {
+        scan: None,
         // A force field has no orbitals.
         molden_path: None,
         job,

@@ -182,10 +182,139 @@ serialization through `serde`/`ron`; egui persistence stores the window layout.
 ### Quantum Chemistry
 
 Open the atom-shaped launcher beside the Molecule Editor launcher. The modern
-calculator opens floating; **Dock** attaches it to the right edge and **Float**
+calculator first opens floating on the left; **Dock** attaches it to the right edge and **Float**
 detaches it again. The **Quantum chemistry code** selector stays at the top,
-with all eight existing backends and **Configure…** beside it. Its status tells
+with **Configure…** beside it. Its status tells
 you whether the executable or Python environment is available.
+
+For **sTDA-xTB (Grimme)**, enter both the standalone **stda** executable path
+and the **xtb4stda** executable path in **Configure…**. Both paths are remembered;
+Behemoth is not used for this backend. It offers only **UV-Vis / excited states**,
+with a closed-shell singlet reference and an energy window in eV. The installed
+programs and their parameter files must be configured for your environment.
+Beavyr follows the [xtb4stda workflow](https://github.com/grimme-lab/xtb4stda)
+and [sTDA manual, section 7.2](https://www.chemie.uni-bonn.de/grimme/de/software/stda/stda_manual.pdf):
+run xtb4stda on the geometry, then run stda on the resulting `wfn.xtb`.
+
+For **Behemoth**, choose **More… → UV-Vis / excited states** and select **sTDA-xTB (GFN1 orbitals)**,
+**sTDA (TASI)**, or **sTDA / sTD-DFT (DFT reference)**. The DFT route offers
+hybrid functionals and a basis; Tamm-Dancoff selects sTDA, and switching it off
+selects sTD-DFT. Completed spectra open in the UV-Vis panel. Calculation failures
+use the existing error popup with its Copy button.
+
+**CCSD(T)** is available for ORCA, Psi4, PySCF and Behemoth. **CASSCF** and
+**NEVPT2** are available for ORCA, PySCF and Behemoth, with explicit **Active
+electrons** and **Orbitals** settings. The newly added methods support **Energy**
+calculations and rigid scans: choosing one selects Energy unless Scan is active,
+and disables geometry and spectrum jobs. Existing ORCA and Psi4 CCSD(T) job choices are unchanged. NEVPT2 reports
+the corrected total energy; each backend retains its own frozen-core and
+orbital-selection defaults.
+
+Choose **More… → Scan** for a one-dimensional bond, angle, or dihedral scan.
+**Scan settings** contains rigid/relaxed selection, ordered atom numbers (starting
+at 1), viewport atom picking, start/end values, and the number of points including
+both endpoints. Bond distances use Å; angles and dihedrals use degrees. Rigid scans
+can move the connected fragment or only the last selected atom. A ring cannot be
+split into a moving fragment; choose atom-only movement or a relaxed scan instead.
+Relaxed scans allow additional fixed bonds, angles and dihedrals, a maximum step
+limit, and a choice of primitive or Pulay redundant internal coordinates with
+the Beavyr and Behemoth drivers. Rigid bond scans can move the first atom,
+second atom, or both symmetrically; connected fragments follow that selection
+when fragment movement is enabled. The same choices apply to rigid ORCA scans.
+
+The Beavyr and Behemoth drivers can stop at an unconverged point.
+
+ORCA offers **ORCA built-in** and **Beavyr** drivers. The built-in route uses
+ORCA's relaxed `%geom Scan` or a multiple-XYZ energy scan for rigid geometries.
+Behemoth also offers a **Behemoth built-in** driver, invoking its existing
+`--scan` CLI with the same coordinate, atoms, start, end, points and mode settings.
+Its native frontend supports HF/DFT/MP2/RI-MP2, rigid and relaxed bond/angle/dihedral
+scans, fragment movement, extra fixed coordinates, maximum optimization steps,
+and stopping at unconverged points. Rebuild Behemoth with the companion scan
+CLI/input extension before using these new controls. They map to
+`--scan-max-cycles`, `--scan-move-fragment`, `--scan-bond-motion`,
+`--opt-coord`, `--scan-stop-on-failure`, and `--scan-constraints`; equivalent
+`@scan` keys are `max_cycles`, `move_fragment`, `bond_motion`, `coordinates`,
+`stop_on_failure`, and `constraints`. A constraint list uses
+`bond:1,2:0.96;angle:2,1,3:104.5`.
+Other backends use Beavyr's scan driver and the selected program for energies
+and gradients. DREIDING retains its element/topology limitations; sTDA-xTB is
+spectrum-only. Methods currently restricted to energies can be used in rigid
+scans, but not relaxed scans. Scan inputs are generated from these settings;
+the ordinary single-job input editor is not used. Dummy atoms are removed and
+real atom numbers are remapped; a scan cannot refer to a dummy atom.
+
+Completed scans automatically open separate **Scan Results** and **Scan Plot**
+windows. **Show Plot** reopens a closed plot; **Open scan results** reopens the
+results table. Energies are relative to the **First point** by default. Select
+**Last point** to change the reference, and toggle **kcal/mol** (default) or
+**kJ/mol**. Hover over a plotted point to see its coordinate and relative energy.
+**Reverse order** reverses the numerical table, plot direction, clipboard/export
+data, and loaded trajectory together; first/last reference follows that order.
+The original calculated energies and geometries are retained.
+
+**Copy data** copies the table as CSV, with absolute Hartree energies as well as
+the selected relative energies, units, and reference point. **Save CSV…** and
+**Save XYZ…** export the displayed order. Select a point to display its geometry
+without resetting the camera, or choose **Load as Trajectory** to load the
+displayed order and open the Trajectory panel. Convergence is
+reported per point. Files `scan.xyz`, `scan.csv`, and `scan_results.ron` are also
+saved in the calculation directory in the original calculation order.
+Cancellation preserves files already written and does not apply a result to the
+viewer. Only one scan coordinate is swept at a time.
+
+Choose **More… → Transition-state optimization** for a saddle search.
+ORCA offers its native OptTS driver or **Beavyr**; PySCF and xTB use Beavyr's
+existing Behemoth-derived optimizer. Psi4 retains its native driver and also
+offers Beavyr. Behemoth invokes its own internal TS optimizer; its current
+CLI supports GFN1-xTB for this job.
+
+Beavyr exposes Cartesian, primitive internal and Pulay redundant internal
+coordinates, reaction-mode references, additional coordinates and advanced
+trust-radius/Hessian controls. Defaults follow Behemoth's CLI: primitive
+internal coordinates, calculated initial Hessian, internal mode tracking,
+100 steps and no periodic Hessian rebuild. Both native ORCA and Beavyr offer
+**Recalculate Hessian every N steps**; zero retains the initial Hessian without
+periodic rebuilds. ORCA starts at its previous interval of five steps.
+A local TS is reported successful only after convergence and a final
+calculated Hessian with exactly one negative mode. Disabling the final
+Hessian leaves the stationary structure unverified.
+
+For **Optimize** and **Opt+Freq**, choose **Beavyr** to use the existing minimum
+optimizers with PySCF, ORCA, Psi4 or xTB. The PySCF route needs PySCF energy
+and gradient support, but does not require geomeTRIC. Cartesian BFGS,
+steepest descent and both two-point gradient methods are available; internal
+coordinates offer BFGS and steepest descent. The default is primitive
+internal BFGS. Native optimizers remain selectable; Behemoth keeps its own.
+Failed optimization skips follow-up frequencies and is reported explicitly.
+Search trajectories, energies and summaries are saveable; requested orbital
+export runs at the final converged geometry.
+
+Choose **More… → MECP / Spin crossing** for a minimum-energy crossing search
+between two spin multiplicities. Set **State A multiplicity**, **State B
+multiplicity**, and the common charge, HF/DFT method, and basis. Both states
+are evaluated independently at the same geometry. This workflow supports
+ORCA, Behemoth, PySCF, and Psi4; spin-independent force fields are excluded.
+
+For ORCA, select **ORCA built-in** or **Beavyr MECP**. The native driver uses
+`%mecp SurfCrossOpt true` and `Mult` for State B; the coordinate block specifies
+State A. It uses ORCA's optimization criteria and checks the final energy gap
+against **Final gap limit (Eh)**. The Beavyr driver exposes Cartesian,
+primitive internal, and Pulay redundant internal coordinates, a step limit,
+and an energy-gap tolerance. Both drivers report nonconvergence explicitly.
+The default Beavyr search uses Cartesian BFGS in the original SpinCross
+Angstrom convention: the initial inverse Hessian is diagonal with **0.7**
+on every diagonal and zero off-diagonal entries. The initial previous
+effective gradient is zero. Backend geometries and gradients are converted
+at the optimizer boundary; the experimental initialization is unchanged.
+
+MECP completion opens the calculation summary and loads the trajectory into
+the Trajectory panel. The summary shows both state energies, their difference,
+and the two multiplicities, with a **Copy MECP results** button. CSV, XYZ,
+and summary files can be saved; trajectory energy plots use the mean of the
+two state energies. A converged crossing is not a substitute for checking
+curvature along the crossing seam; an adapted MECP frequency calculation is
+not included in this job.
 
 For PySCF, Psi4 (Python), and Sparrow (Python), open **Configure** and enter an
 **Environment activation** command, then click **Save & Check**. Settings are
@@ -396,8 +525,14 @@ workflow. Detailed RDA option explanations are in a section that starts collapse
    tolerances, coordinate mode and step limits in a section that starts collapsed.
    Poor Man's NEB exposes image
    count, constrained relaxation limits and additional connectivity.
-4. Generate, then use **Show TS guess** or **Show path in Trajectory** to inspect
-   the result. Calculations run in the background and can be cancelled.
+   Enable **Relax End-point Geoms** to optimize both endpoints with the same
+   backend and level of theory before the search. This is off by default;
+   unconverged endpoint optimizations stop the run with an error.
+4. Generate, then use **Show TS guess** or **Show path in Trajectory** in the
+   separate **TS Generation Results** window, which opens automatically when
+   either method finishes. **Open TS results** in the setup panel reopens it.
+   Calculations run in the background and can be cancelled, including during
+   endpoint relaxation.
 
 **Save TS guess XYZ** writes one structure in Å. **Save NEB trajectory XYZ**
 writes the complete multi-frame XYZ path, including both endpoints and all

@@ -1,0 +1,47 @@
+TS results window and optional endpoint relaxation — 2026-10-30
+
+Requested changes
+- RDA and Poor Man's NEB completion opens a separate, centered, resizable
+  TS Generation Results window, independently of the setup panel.
+- Existing guess/path display, trajectory, export and energy-plot actions moved
+  to that window. Open TS results in the setup panel reopens a closed window.
+- Closing the window persists until reopened or a new run completes.
+- Explicit geometry loads retain structure-history, bond-refresh and vibration-stop
+  handling. Loading a multi-frame path opens the Trajectory panel.
+- Relax End-point Geoms is available for both algorithms and defaults to off.
+- When enabled, Cartesian BFGS minimizes A and B using the same EnergyGradient
+  instance (selected backend, method, basis, charge, multiplicity and resources)
+  as the subsequent TS calculation. Existing optimizer convergence thresholds
+  and its 100-cycle default are used. No backend change or fallback is introduced.
+- Failed/unconverged endpoint optimizations stop before TS generation. The existing
+  error popup reports the reason. Backend cancellation remains active throughout.
+- Status identifies relaxation of A, relaxation of B, and TS generation.
+- Captured endpoints stay available; relaxed endpoints are used in the generated path.
+
+Validation
+33 focused tests passed, 0 failed, 1 ignored; execution 0.27 seconds.
+Log: /tmp/beavyr-ts-results-tests.log
+Final cargo build passed in 26.63 seconds; 49 compiler warnings remain.
+Build log: /tmp/beavyr-ts-results-build.log
+Executable: target/debug/Beavyr
+This build also includes the requested level-7 surface default, wider
+Thermochemistry window, Total(kJ/mol) row and expanded component names.
+Tests include:
+- Both methods open a result window once; a later run reopens it.
+- Independent window displays a guess, loads its trajectory, closes and reopens.
+- A two-well analytic potential verifies relaxed endpoint distances and the known
+  saddle for both RDA and Poor Man's NEB; disabling relaxation retains supplied distances.
+- Nonconvergent endpoint minimization and cancellation prevent TS generation.
+- Existing TS generation, dummy removal, trajectory and thermochemistry checks.
+The ignored installed-Behemoth integration test was not run in this update.
+No new external quantum-chemistry calculation was run for endpoint relaxation.
+Initial test-fixture failures (Drop initialization and egui texture cleanup) were
+corrected before the final passing test run. git diff --check passed.
+
+Reversibility
+No commits. Earlier changes preserved.
+Backups:
+target/change-backups/ts-results-window-20261030
+target/change-backups/ts-endpoint-relaxation-20261030
+Implementation lives in named files; mod.rs only adds declarations/reexports
+and removes the completion function moved to completion.rs.

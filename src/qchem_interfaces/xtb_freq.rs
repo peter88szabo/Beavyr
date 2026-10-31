@@ -422,6 +422,7 @@ pub(crate) fn run_hess_cancellable(
     // Both of these are told what to do by a file, written before the process
     // starts rather than by flags on its command line.
     match program {
+        QcProgram::StdaXtb => return Err("sTDA-xTB calculates spectra only.".into()),
         QcProgram::Orca => {
             let (_, symbols, coords) = parse_xyz_angstrom(input_xyz);
             let flat: Vec<f64> = coords.into_iter().flatten().collect();
@@ -506,6 +507,7 @@ pub(crate) fn run_hess_cancellable(
     let stderr = fs::File::create(workdir.join("xtb.stderr"))
         .map_err(|e| format!("Failed to create xtb.stderr: {e}"))?;
     let mut cmd = match program {
+        QcProgram::StdaXtb => return Err("sTDA-xTB calculates spectra only.".into()),
         // Unreachable: the DREIDING branch returned at the top of this function, before any
         // command was built.
         QcProgram::Dreiding => unreachable!("DREIDING runs in process"),
@@ -1950,7 +1952,7 @@ fn frequency_panel_body(
                 egui::ComboBox::from_id_salt("freq_program")
                     .selected_text(freq_panel.program.label())
                     .show_ui(ui, |ui| {
-                        for program in QcProgram::ALL {
+                        for program in QcProgram::ALL.into_iter().filter(|p| *p != QcProgram::StdaXtb) {
                             ui.selectable_value(&mut freq_panel.program, program, program.label());
                         }
                     });
@@ -2150,6 +2152,40 @@ fn frequency_panel_body(
     };
 
     ui.add_space(8.0);
+    ui.horizontal(|ui| {
+        let label = if freq_panel.thermo_window_open {
+            "Hide Thermochemistry"
+        } else {
+            "Show Thermochemistry"
+        };
+        if ui.button(label).clicked() {
+            freq_panel.thermo_window_open = !freq_panel.thermo_window_open;
+        }
+        let label = if freq_panel.spectrum_window_open {
+            "Hide IR Spectrum"
+        } else {
+            "Show IR Spectrum"
+        };
+        let has_ir = result.has_ir_intensities();
+        if !has_ir {
+            // Nothing to draw, and a window left open from a previous result
+            // would keep showing that one's axes.
+            freq_panel.spectrum_window_open = false;
+        }
+        let button = ui.add_enabled(has_ir, egui::Button::new(label));
+        if button
+            .on_disabled_hover_text(
+                "No IR intensities in this data. A Hessian gives frequencies but not \
+                 intensities -- those need dipole derivatives, which are computed \
+                 separately and are not part of every Hessian file.",
+            )
+            .clicked()
+        {
+            freq_panel.spectrum_window_open = !freq_panel.spectrum_window_open;
+        }
+    });
+
+    ui.add_space(8.0);
     ui.label(egui::RichText::new("Normal modes").size(18.0).strong());
     let eckart_label = match result.eckart_used {
         EckartMode::Off => "no projection",
@@ -2197,8 +2233,7 @@ fn frequency_panel_body(
     }
 
     egui::ScrollArea::both()
-        // Enough rows to scan a spectrum without scrolling for every one, while
-        // leaving the thermochemistry and spectrum buttons below it in view.
+        // Keep the mode list scrollable independently of the result buttons above it.
         .max_height(340.0)
         .show(ui, |ui| {
             egui::Grid::new("xtb_freq_mode_list")
@@ -2369,39 +2404,6 @@ fn frequency_panel_body(
         );
     }
 
-    ui.horizontal(|ui| {
-        let label = if freq_panel.thermo_window_open {
-            "Hide Thermochemistry"
-        } else {
-            "Show Thermochemistry"
-        };
-        if ui.button(label).clicked() {
-            freq_panel.thermo_window_open = !freq_panel.thermo_window_open;
-        }
-        let label = if freq_panel.spectrum_window_open {
-            "Hide IR Spectrum"
-        } else {
-            "Show IR Spectrum"
-        };
-        let has_ir = result.has_ir_intensities();
-        if !has_ir {
-            // Nothing to draw, and a window left open from a previous result
-            // would keep showing that one's axes.
-            freq_panel.spectrum_window_open = false;
-        }
-        let button = ui.add_enabled(has_ir, egui::Button::new(label));
-        if button
-            .on_disabled_hover_text(
-                "No IR intensities in this data. A Hessian gives frequencies but not \
-                 intensities -- those need dipole derivatives, which are computed \
-                 separately and are not part of every Hessian file.",
-            )
-            .clicked()
-        {
-            freq_panel.spectrum_window_open = !freq_panel.spectrum_window_open;
-        }
-    });
-
     let ctx = ui.ctx().clone();
     thermochemistry_window(&ctx, &mut freq_panel.thermo_window_open, result);
     ir_spectrum_window(&ctx, freq_panel, result);
@@ -2478,7 +2480,7 @@ fn thermochemistry_window(ctx: &egui::Context, open: &mut bool, result: &Frequen
         .frame(crate::ui_style::window_frame(ctx))
         .open(open)
         .resizable(true)
-        .default_size([620.0, 560.0])
+        .default_size([744.0, 560.0])
         .show(ctx, |ui| {
             crate::ui_style::modern(ui);
             let mut text = thermofuncs::format_thermo(

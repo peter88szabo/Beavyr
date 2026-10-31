@@ -18,6 +18,7 @@ pub struct RunControl {
     pub cancelled: AtomicBool,
     pub evaluations: AtomicUsize,
     pub latest_energy: Mutex<Option<f64>>,
+    pub stage: Mutex<Option<&'static str>>,
     child: Mutex<Option<Child>>,
 }
 

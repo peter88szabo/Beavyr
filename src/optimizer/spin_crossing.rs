@@ -24,6 +24,12 @@ use crate::optimizer::traits::Objective;
 
 const HARTREE_TO_KJMOL: f64 = 2625.499638;
 const BOHR_TO_ANGSTROM: f64 = 0.529_177_210_903; // CODATA 2018
+                                                 // SpinCross_2022_12_09a.f90: experimentally tuned in Angstrom coordinates.
+const INITIAL_INVERSE_HESSIAN: f64 = 0.7;
+
+#[cfg(test)]
+#[path = "spin_crossing_tests.rs"]
+mod tests;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SpinCrossingMethod {
@@ -53,11 +59,13 @@ pub struct SpinCrossingOptions {
     pub multiplicities: Option<(usize, usize)>,
     pub max_cycles: usize,
     pub energy_tol: f64,
+    /// Cartesian convergence thresholds use Angstrom and Hartree/Angstrom, as in SpinCross.
     pub max_step: f64,
     pub rms_step: f64,
     pub max_gradient: f64,
     pub rms_gradient: f64,
     pub step_max_component: f64,
+    /// Cartesian inverse Hessian in Angstrom squared / Hartree.
     pub initial_inverse_hessian: f64,
     pub max_step_internal: f64,
     pub best_fit_iters: usize,
@@ -82,7 +90,7 @@ impl Default for SpinCrossingOptions {
             max_gradient: 7.0e-4,
             rms_gradient: 5.0e-4,
             step_max_component: 0.1,
-            initial_inverse_hessian: 0.7,
+            initial_inverse_hessian: INITIAL_INVERSE_HESSIAN,
             max_step_internal: 0.2,
             best_fit_iters: 5,
             g_cutoff: 1.0e-7,
@@ -249,10 +257,16 @@ fn print_threshold_guide(
 
 fn print_header(opts: &SpinCrossingOptions) {
     println!(" Energy Gap:      {} Eh", sci2(opts.energy_tol));
-    println!(" Max. Eff. Gradient: {} Eh/bohr", sci2(opts.max_gradient));
-    println!(" RMS Eff. Gradient:  {} Eh/bohr", sci2(opts.rms_gradient));
-    println!(" Max Step:        {} bohr", sci2(opts.max_step));
-    println!(" RMS Step:        {} bohr", sci2(opts.rms_step));
+    println!(
+        " Max. Eff. Gradient: {} Eh/Angstrom",
+        sci2(opts.max_gradient)
+    );
+    println!(
+        " RMS Eff. Gradient:  {} Eh/Angstrom",
+        sci2(opts.rms_gradient)
+    );
+    println!(" Max Step:        {} Angstrom", sci2(opts.max_step));
+    println!(" RMS Step:        {} Angstrom", sci2(opts.rms_step));
     println!();
     let header_line = format!(
         "{:<5} {:>18} {:>18} {:>18} {:>11} {:>11} {:>11} {:>11}",
@@ -597,7 +611,7 @@ fn build_state(
 
 fn opt_coordinate(state: &Option<InternalState>, x: &[f64]) -> Vec<f64> {
     match state {
-        None => x.to_vec(),
+        None => x.iter().map(|v| v * BOHR_TO_ANGSTROM).collect(),
         Some(InternalState::Simple(s)) => s.q.clone(),
         Some(InternalState::Pulay(s)) => s.q.clone(),
     }
@@ -633,10 +647,10 @@ fn limit_internal_step(dq: &mut [f64], max_step_internal: f64) {
 
 fn converged(gap: f64, step: &[f64], geff: &[f64], opts: &SpinCrossingOptions) -> bool {
     gap.abs() <= opts.energy_tol
-        && max_abs(step) <= opts.max_step
-        && rms(step) <= opts.rms_step
-        && max_abs(geff) <= opts.max_gradient
-        && rms(geff) <= opts.rms_gradient
+        && max_abs(step) * BOHR_TO_ANGSTROM <= opts.max_step
+        && rms(step) * BOHR_TO_ANGSTROM <= opts.rms_step
+        && max_abs(geff) / BOHR_TO_ANGSTROM <= opts.max_gradient
+        && rms(geff) / BOHR_TO_ANGSTROM <= opts.rms_gradient
 }
 
 fn write_frame(
@@ -787,7 +801,8 @@ pub fn optimize_spin_crossing<A: Objective, B: Objective>(
         let geff_opt = if let Some(s) = &current_state {
             internal_gradient(s, &geff)?
         } else {
-            geff.clone()
+            // Keep the original Cartesian optimizer in Angstrom; backend gradients are Eh/bohr.
+            geff.iter().map(|g| g / BOHR_TO_ANGSTROM).collect()
         };
 
         let mut opt_step = if cycle == 1 {
@@ -833,7 +848,7 @@ pub fn optimize_spin_crossing<A: Objective, B: Objective>(
             step_limit(&mut opt_step, opts.step_max_component);
             x.iter()
                 .zip(opt_step.iter())
-                .map(|(xi, si)| xi + si)
+                .map(|(xi, si)| xi + si / BOHR_TO_ANGSTROM)
                 .collect::<Vec<_>>()
         };
         let step: Vec<f64> = trial_x.iter().zip(x.iter()).map(|(a, b)| a - b).collect();
@@ -845,10 +860,10 @@ pub fn optimize_spin_crossing<A: Objective, B: Objective>(
                 ea,
                 eb,
                 (ea - eb) * HARTREE_TO_KJMOL,
-                sci2(max_abs(&step)),
-                sci2(rms(&step)),
-                sci2(max_abs(&geff)),
-                sci2(rms(&geff))
+                sci2(max_abs(&step) * BOHR_TO_ANGSTROM),
+                sci2(rms(&step) * BOHR_TO_ANGSTROM),
+                sci2(max_abs(&geff) / BOHR_TO_ANGSTROM),
+                sci2(rms(&geff) / BOHR_TO_ANGSTROM)
             );
         }
         if let Some(writer) = traj.as_mut() {
@@ -885,25 +900,28 @@ pub fn optimize_spin_crossing<A: Objective, B: Objective>(
                 opts.fac_parallel,
                 opts.fac_perpendicular,
             )?;
-            if opts.verbosity > 0 {
-                print_optimization_status(true, "Spin-crossing convergence reached.");
+            // Convergence must hold at the returned geometry, not only before its final step.
+            if converged(final_ea - final_eb, &step, &final_geff, &opts) {
+                if opts.verbosity > 0 {
+                    print_optimization_status(true, "Spin-crossing convergence reached.");
+                }
+                return Ok(SpinCrossingResult {
+                    x: trial_x,
+                    energy_a: final_ea,
+                    energy_b: final_eb,
+                    gradient_a: final_ga,
+                    gradient_b: final_gb,
+                    effective_gradient: final_geff,
+                    converged: true,
+                    cycles: cycle,
+                    method: opts.method,
+                    coordinates: actual_mode,
+                    multiplicities: opts.multiplicities,
+                    trajectory_file: opts.trajectory_file,
+                    points,
+                    message: "Spin-crossing convergence reached.".to_string(),
+                });
             }
-            return Ok(SpinCrossingResult {
-                x: trial_x,
-                energy_a: final_ea,
-                energy_b: final_eb,
-                gradient_a: final_ga,
-                gradient_b: final_gb,
-                effective_gradient: final_geff,
-                converged: true,
-                cycles: cycle,
-                method: opts.method,
-                coordinates: actual_mode,
-                multiplicities: opts.multiplicities,
-                trajectory_file: opts.trajectory_file,
-                points,
-                message: "Spin-crossing convergence reached.".to_string(),
-            });
         }
 
         previous_x = x;

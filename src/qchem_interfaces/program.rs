@@ -31,6 +31,8 @@
 pub enum QcProgram {
     /// Grimme's xTB, driven through its own command line.
     Xtb,
+    /// Standalone Grimme xtb4stda + stda, spectra only.
+    StdaXtb,
     /// Behemoth, the user's own Rust quantum-chemistry code, driven through
     /// `behemoth --xyz … --method xtb …`.
     Behemoth,
@@ -72,8 +74,9 @@ impl QcProgram {
     ///
     /// The three that were here first keep their positions, so an existing habit still lands on
     /// the same entry.
-    pub const ALL: [QcProgram; 8] = [
+    pub const ALL: [QcProgram; 9] = [
         QcProgram::Xtb,
+        QcProgram::StdaXtb,
         QcProgram::Behemoth,
         QcProgram::Dreiding,
         QcProgram::Orca,
@@ -86,6 +89,7 @@ impl QcProgram {
     pub fn label(self) -> &'static str {
         match self {
             QcProgram::Xtb => "xTB",
+            QcProgram::StdaXtb => "sTDA-xTB (Grimme)",
             QcProgram::Behemoth => "Behemoth",
             QcProgram::Dreiding => "DREIDING",
             QcProgram::Orca => "ORCA",
@@ -128,6 +132,7 @@ impl QcProgram {
     pub fn binary_hint(self) -> &'static str {
         match self {
             QcProgram::Xtb => "xtb",
+            QcProgram::StdaXtb => "stda",
             QcProgram::Behemoth => "behemoth",
             QcProgram::Orca => "orca",
             QcProgram::Psi4 => "psi4",
@@ -146,6 +151,7 @@ impl QcProgram {
     pub fn config_file(self) -> &'static str {
         match self {
             QcProgram::Xtb => "xtb_path.txt",
+            QcProgram::StdaXtb => "stda_path.txt",
             QcProgram::Behemoth => "behemoth_path.txt",
             QcProgram::Orca => "orca_path.txt",
             QcProgram::Psi4 => "psi4_path.txt",
@@ -170,7 +176,7 @@ mod tests {
 
     #[test]
     fn every_program_is_listed_once_and_described() {
-        assert_eq!(QcProgram::ALL.len(), 8);
+        assert_eq!(QcProgram::ALL.len(), 9);
         for program in QcProgram::ALL {
             assert_eq!(
                 QcProgram::ALL.iter().filter(|&&p| p == program).count(),

@@ -3,17 +3,15 @@
 use std::sync::atomic::Ordering;
 
 use crate::ui_style::ResponseExt;
-use bevy::prelude::Vec3;
 use bevy_egui::egui;
 
-use crate::forcefield::dreiding::objective::BOHR_TO_ANGSTROM;
 use crate::molecule::Molecule;
 use crate::optimizer::rda::{RdaConditionalCoordinates, RdaDistanceMode};
 use crate::qchem_interfaces::{method_ui, program::QcProgram};
 use crate::trajectory::{TrajectoryFrame, TrajectoryState};
 
 use super::parameters::{Algorithm, Parameters, ReactionKind};
-use super::{backend, show_frames, Endpoint, TsGeneration};
+use super::{show_frames, Endpoint, TsGeneration};
 
 fn endpoint_row(
     ui: &mut egui::Ui,
@@ -222,6 +220,8 @@ fn count_row(ui: &mut egui::Ui, label: &str, value: &mut usize, min: usize) {
 }
 
 fn algorithm_controls(ui: &mut egui::Ui, parameters: &mut Parameters) {
+    ui.checkbox(&mut parameters.relax_endpoints, "Relax End-point Geoms")
+        .on_hover_text("Optimize both endpoints with the selected energy model before generating the TS guess.");
     let neb = parameters.algorithm == Algorithm::PoorMansNeb;
     if neb {
         ui.separator();
@@ -273,40 +273,6 @@ fn algorithm_controls(ui: &mut egui::Ui, parameters: &mut Parameters) {
                 text_row(ui, "Extra dihedrals", &mut parameters.extra_dihedrals, "1 2 3 4");
             }
         });
-}
-
-fn save(
-    ui: &mut egui::Ui,
-    label: &str,
-    name: &str,
-    text: &str,
-    extension: &str,
-    message: &mut Option<String>,
-    is_error: &mut bool,
-) {
-    if !ui.button(label).clicked_once() {
-        return;
-    }
-    let dialog = crate::recent_dir::save(name).add_filter(extension, &[extension]);
-    if let Some(mut path) = crate::recent_dir::save_file(dialog) {
-        if !path
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .is_some_and(|ext| ext.eq_ignore_ascii_case(extension))
-        {
-            path.set_extension(extension);
-        }
-        match backend::save_text(&path, text) {
-            Ok(()) => {
-                *message = Some(format!("Saved {}", path.display()));
-                *is_error = false;
-            }
-            Err(error) => {
-                *message = Some(error.to_string());
-                *is_error = true;
-            }
-        }
-    }
 }
 
 /// Returns true only when the user explicitly changes the displayed structure.
@@ -401,7 +367,7 @@ fn panel_body(
                         // A force field is refused, with the reason on hover
                         // rather than by being absent -- a missing entry reads as
                         // an oversight where a disabled one reads as a decision.
-                        for program in QcProgram::ALL {
+                        for program in QcProgram::ALL.into_iter().filter(|p| *p != QcProgram::StdaXtb) {
                             match crate::qchem_interfaces::gradient::unsupported_reason(program) {
                                 None => {
                                     ui.selectable_value(
@@ -468,6 +434,11 @@ fn panel_body(
 
     ui.separator();
     if running {
+        if let Ok(stage) = state.control.stage.lock() {
+            if let Some(stage) = *stage {
+                ui.label(stage);
+            }
+        }
         ui.horizontal_wrapped(|ui| {
             ui.spinner();
             let evaluations = state.control.evaluations.load(Ordering::Relaxed);
@@ -539,120 +510,6 @@ fn panel_body(
             ui.label(message);
         }
     }
-    if let Some(output) = &state.output {
-        crate::ui_style::group(ui, "Generated result", |ui| {
-            ui.strong(format!(
-                "{} result · {}",
-                output.algorithm.label(),
-                output.method
-            ));
-            ui.label(format!("TS guess energy: {:.9} Eh", output.energy_hartree));
-            ui.label(&output.guess.message);
-            ui.small("This is a TS guess. Optimize the saddle point and check its imaginary mode before treating it as a confirmed transition state.");
-            ui.horizontal_wrapped(|ui| {
-                if ui.button("Show TS guess").clicked_once() {
-                    let positions = output
-                        .guess
-                        .q
-                        .as_chunks::<3>()
-                        .0
-                        .iter()
-                        .map(|q| {
-                            Vec3::new(
-                                (q[0] * BOHR_TO_ANGSTROM) as f32,
-                                (q[1] * BOHR_TO_ANGSTROM) as f32,
-                                (q[2] * BOHR_TO_ANGSTROM) as f32,
-                            )
-                        })
-                        .collect();
-                    displayed = show_frames(
-                        vec![TrajectoryFrame {
-                            atoms: output.guess.atoms.clone(),
-                            pos: positions,
-                        }],
-                        mol,
-                        traj,
-                    );
-                }
-                save(
-                    ui,
-                    "Save TS guess XYZ…",
-                    &format!("{}_ts_guess.xyz", output.algorithm.file_stem()),
-                    &output.guess_xyz,
-                    "xyz",
-                    &mut state.message,
-                    &mut state.is_error,
-                );
-            });
-            ui.horizontal_wrapped(|ui| {
-                if ui.button("Show path in Trajectory").clicked_once() {
-                    displayed = show_frames(output.frames.clone(), mol, traj);
-                }
-                save(
-                    ui,
-                    if output.algorithm == Algorithm::PoorMansNeb {
-                        "Save NEB trajectory XYZ…"
-                    } else {
-                        "Save reaction path XYZ…"
-                    },
-                    &format!("{}_path.xyz", output.algorithm.file_stem()),
-                    &output.path_xyz,
-                    "xyz",
-                    &mut state.message,
-                    &mut state.is_error,
-                );
-            });
-            ui.label(format!(
-                "{} XYZ frames, including both endpoints.",
-                output.frames.len()
-            ));
-            ui.horizontal_wrapped(|ui| {
-                if let Some(profile) = &output.profile_dat {
-                    if ui.button("Plot NEB energy").clicked_once() {
-                        state.energy_plot_open = true;
-                    }
-                    save(
-                        ui,
-                        "Save NEB energy profile…",
-                        "poormans_neb_profile.dat",
-                        profile,
-                        "dat",
-                        &mut state.message,
-                        &mut state.is_error,
-                    );
-                } else {
-                    save(
-                        ui,
-                        "Save RDA search XYZ…",
-                        "rda_search.xyz",
-                        &output.search_xyz,
-                        "xyz",
-                        &mut state.message,
-                        &mut state.is_error,
-                    );
-                }
-            });
-            egui::CollapsingHeader::new("Search points / relaxed images").show(ui, |ui| {
-                egui::ScrollArea::vertical()
-                    .max_height(230.0)
-                    .show(ui, |ui| {
-                        egui::Grid::new("ts_result_points")
-                            .striped(true)
-                            .show(ui, |ui| {
-                                ui.strong("Point");
-                                ui.strong("Energy (Eh)");
-                                ui.strong("Steps");
-                                ui.end_row();
-                                for point in &output.guess.points {
-                                    ui.label(&point.label).on_hover_text(&point.message);
-                                    ui.monospace(format!("{:.8}", point.energy));
-                                    ui.label(point.nsteps.to_string());
-                                    ui.end_row();
-                                }
-                            });
-                    });
-            });
-        });
-    }
+    super::results_window::reopen_button(ui, state);
     displayed
 }

@@ -51,6 +51,11 @@ pub fn summary_window(
             header(ui, output, duration);
             ui.separator();
 
+            if output.job == crate::qchem_interfaces::job::JobType::Mecp {
+                ui.label(&output.log);
+                if ui.button("Copy MECP results").clicked() { ui.ctx().copy_text(output.log.clone()); }
+                ui.label("Trajectory energies are the mean of State A and State B.");
+            }
             match output.job.summary_kind() {
                 SummaryKind::GeometryCycles => {
                     geometry_cycles(ui, output);

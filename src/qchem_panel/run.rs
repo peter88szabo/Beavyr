@@ -24,6 +24,23 @@ use crate::qchem_interfaces::xtb_optimize::{
     create_xtb_run_dir, discard_xtb_run_dir, xtb_scratch_dir,
 };
 
+#[path = "geometry_search_job.rs"]
+pub(crate) mod geometry_search_job;
+
+#[path = "calculation_objective.rs"]
+mod calculation_objective;
+#[path = "mecp_job.rs"]
+pub(crate) mod mecp_job;
+
+#[path = "scan_job.rs"]
+pub(crate) mod scan_job;
+
+#[path = "correlated_job.rs"]
+mod correlated_job;
+
+#[path = "spectrum_job.rs"]
+pub(crate) mod spectrum_job;
+
 #[path = "dreiding_job.rs"]
 mod dreiding_job;
 use dreiding_job::run as run_dreiding;
@@ -49,6 +66,7 @@ const POLL_INTERVAL: Duration = Duration::from_millis(50);
 /// empty: "no trajectory" and "a trajectory with no frames" are different, and
 /// only the second is worth complaining about.
 pub struct QcRunOutput {
+    pub scan: Option<Arc<crate::qchem_panel::scan_results::ScanReport>>,
     pub job: JobType,
     pub program: QcProgram,
     /// The program's own output, kept because a successful run's scratch
@@ -205,6 +223,19 @@ fn run_cancellable(
     cancel: &AtomicBool,
     child_slot: &Mutex<Option<Child>>,
 ) -> Result<QcRunOutput, String> {
+    if crate::qchem_interfaces::job::search::local(program, job, &config.search) || (program == QcProgram::Behemoth && job == JobType::TransitionState) {
+        let output = geometry_search_job::run(program, method, job, binary, workdir, atoms, positions_angstrom, charge, multiplicity, config, cancel, child_slot)?;
+        return if wavefunction && output.converged == Some(true) {
+            geometry_search_job::write_orbitals(output, method, binary, workdir, charge, multiplicity, config, cancel, child_slot)
+        } else { Ok(output) };
+    }
+    if job == JobType::Mecp {
+        return mecp_job::run(program, method, binary, workdir, atoms, positions_angstrom, charge, multiplicity, config, cancel, child_slot);
+    }
+    if job == JobType::Scan {
+        return scan_job::run(program, method, binary, workdir, atoms, positions_angstrom,
+            charge, multiplicity, config, cancel, child_slot);
+    }
     let (real_atoms, real_positions) = crate::calculation_geometry::real_coordinates(atoms, positions_angstrom)?;
     let atoms = real_atoms.as_slice();
     let positions_angstrom = real_positions.as_slice();
@@ -216,6 +247,32 @@ fn run_cancellable(
         return Err(format!("Set the {} executable path first.", program.label()));
     }
     fs::create_dir_all(workdir).map_err(|e| format!("Failed to create the run directory: {e}"))?;
+
+    if program == QcProgram::StdaXtb || (program == QcProgram::Behemoth && job.is_excited_state()) {
+        return spectrum_job::run(program, job, binary, workdir, atoms, positions_angstrom,
+            charge, multiplicity, config, excited, cancel, child_slot);
+    }
+
+    if let Some(selected) = method {
+        if crate::qchem_interfaces::job::correlated::energy_only(program, selected) {
+            if hand_written.is_none() {
+                if let Some(reason) = crate::qchem_interfaces::job::correlated::unsupported_job(program, method, job) {
+                    return Err(reason.into());
+                }
+                crate::qchem_interfaces::job::correlated::validate_active_space(selected, &config.active_space, atoms, charge, multiplicity)?;
+            }
+            if program == QcProgram::PySCF {
+                let generated = crate::qchem_interfaces::pyscf_run::panel_script_text(job, selected,
+                    charge, multiplicity, config, excited, wavefunction, atoms, positions_angstrom);
+                return run_pyscf(job, workdir, atoms, positions_angstrom, charge, multiplicity,
+                    config, excited, wavefunction, hand_written.or(Some(&generated)), cancel, child_slot);
+            }
+            if program == QcProgram::Behemoth {
+                return correlated_job::run_behemoth(selected, binary, workdir, atoms, positions_angstrom,
+                    charge, multiplicity, config, wavefunction, cancel, child_slot);
+            }
+        }
+    }
 
     // DREIDING first, and before the method check: a force field has no level of
     // theory to choose, so `method` is rightly `None` for it and demanding one
@@ -388,6 +445,7 @@ fn run_cancellable(
     }
 
     Ok(QcRunOutput {
+        scan: None,
         job,
         program,
         energetics: orca_run::parse_energetics(&log),
@@ -487,6 +545,7 @@ fn run_sparrow(
     }
 
     Ok(QcRunOutput {
+        scan: None,
         molden_path,
         job,
         program: QcProgram::SparrowPy,
@@ -789,6 +848,7 @@ fn run_pyscf(
     }
 
     Ok(QcRunOutput {
+        scan: None,
         molden_path,
         job,
         program: QcProgram::PySCF,
@@ -1008,6 +1068,7 @@ fn run_xtb_family(
     };
 
     Ok(QcRunOutput {
+        scan: None,
         molden_path: None,
         job,
         program,
@@ -1230,6 +1291,7 @@ fn run_psi4(
     }
 
     Ok(QcRunOutput {
+        scan: None,
         molden_path,
         job,
         program,
@@ -1466,6 +1528,13 @@ pub fn poll_qc_run(
     match result {
         Ok(output) => {
             let job = output.job;
+            if job == JobType::Scan {
+                panel.summary_open = false;
+                task.last_is_error = output.scan.as_ref().is_some_and(|s| !s.complete);
+                task.last_message = output.scan.as_ref().map(|s| s.message.clone());
+                task.last = Some(output);
+                return;
+            }
             let elapsed = task
                 .last_duration
                 .map(|d| {
@@ -1476,7 +1545,8 @@ pub fn poll_qc_run(
                 })
                 .unwrap_or_default();
             task.last_message = Some(format!("{}{elapsed}.", job.label()));
-            task.last_is_error = false;
+            task.last_is_error = matches!(job, JobType::Mecp | JobType::TransitionState | JobType::Optimize | JobType::OptimizeThenFrequencies) && output.converged == Some(false);
+            if task.last_is_error { task.last_message = Some(output.log.clone()); }
 
             // Everything the optimizer panel's summary and energy plot read,
             // so a run started here gets the same two windows as one started
@@ -1635,7 +1705,9 @@ pub fn poll_qc_run(
                 // Whichever program ran: the dispatcher identifies it from the
                 // output itself, so this one branch serves all of them.
                 let label = std::path::PathBuf::from(format!("{} run", output.program.label()));
-                match crate::uvvis::detect_and_parse(&output.log, &label) {
+                match if output.program == QcProgram::StdaXtb {
+                    spectrum_job::parse_stda(&output.log, &label)
+                } else { crate::uvvis::detect_and_parse(&output.log, &label) } {
                     Ok(result) => {
                         uvvis.expanded_root = None;
                         uvvis.load_error = None;

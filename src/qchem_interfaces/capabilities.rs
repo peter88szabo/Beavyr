@@ -91,6 +91,7 @@ pub struct Capabilities {
 /// What `program` can do.
 pub fn capabilities(program: QcProgram) -> Capabilities {
     match program {
+        QcProgram::StdaXtb => Capabilities { launch: Launch::Binary, own_optimiser: false, hessian: HessianKind::None, ir_intensities: false },
         // Grimme's xTB: its own optimiser, its own Hessian, and a
         // `vibspectrum` file carrying real intensities.
         QcProgram::Xtb => Capabilities {
@@ -252,7 +253,7 @@ mod tests {
         assert!(!capabilities(QcProgram::SparrowPy).own_optimiser);
         // And it is the only one, today.
         for program in QcProgram::ALL {
-            if program != QcProgram::SparrowPy {
+            if !matches!(program, QcProgram::SparrowPy | QcProgram::StdaXtb) {
                 assert!(capabilities(program).own_optimiser, "{program:?}");
             }
         }
@@ -278,12 +279,9 @@ mod tests {
     /// Every backend in this stage can produce a Hessian by some route, so the
     /// frequency panel never has to refuse one outright.
     #[test]
-    fn every_backend_can_produce_a_hessian() {
+    fn spectrum_only_backend_has_no_hessian() {
         for program in QcProgram::ALL {
-            assert!(
-                capabilities(program).hessian.is_available(),
-                "{program:?} has no Hessian route"
-            );
+            assert_eq!(capabilities(program).hessian.is_available(), program != QcProgram::StdaXtb, "{program:?}");
         }
     }
 }

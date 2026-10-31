@@ -131,6 +131,25 @@ fn label_rect(output: &egui::FullOutput, label: &str) -> Option<egui::Rect> {
 }
 
 #[test]
+fn correlated_method_selection_switches_to_energy_and_shows_active_space() {
+    let mut fixture = Fixture::new();
+    fixture.panel.set_program(QcProgram::PySCF);
+    fixture.panel.method = Some(QcMethod::Hf);
+    fixture.panel.job = JobType::Optimize;
+    fixture.click("HF");
+    fixture.click("CASSCF");
+    assert_eq!(fixture.panel.method, Some(QcMethod::Casscf));
+    assert_eq!(fixture.panel.job, JobType::SinglePoint);
+    let output = fixture.frame(vec![], 900.0);
+    assert!(label_rect(&output, "Active electrons").is_some());
+    assert!(label_rect(&output, "Orbitals").is_some());
+    fixture.click("Optimize");
+    assert_eq!(fixture.panel.job, JobType::SinglePoint);
+    fixture.click("Freq/Hessian");
+    assert_eq!(fixture.panel.job, JobType::SinglePoint);
+}
+
+#[test]
 fn prominent_code_chooser_uses_existing_program_defaults_without_changing_geometry() {
     let mut fixture = Fixture::new();
     fixture.panel.job = JobType::TdDft;
@@ -177,7 +196,7 @@ fn unsupported_jobs_remain_disabled_in_the_modern_picker() {
     let mut fixture = Fixture::new();
     fixture.panel.set_program(QcProgram::Dreiding);
     fixture.click("More…");
-    fixture.click("TD-DFT");
+    fixture.click("UV-Vis / excited states");
     assert_eq!(fixture.panel.job, JobType::Optimize);
     assert!(!fixture.task.is_running());
 }
@@ -218,7 +237,7 @@ fn code_chooser_and_action_stay_visible_with_long_input_at_laptop_height() {
             if !docked {
                 let rect = fixture.ctx.memory(|m| m.area_rect(egui::Id::new("quantum_chemistry_window_v2"))).unwrap();
                 assert!(rect.width() < 440.0, "Panel expanded beyond its narrower width: {rect:?}");
-                assert!(rect.left() > 800.0, "Panel should open on the right: {rect:?}");
+                assert!(rect.left() < 100.0, "Panel should open on the left: {rect:?}");
             }
             for label in [
                 "ORCA",
@@ -366,4 +385,65 @@ fn changing_code_requires_explicit_input_sync_without_losing_the_old_draft() {
             .panel
             .generated_input(&fixture.mol.atoms, &[0.0, 0.0, 0.0])
     );
+}
+
+#[test]
+fn standalone_spectrum_selection_exposes_no_geometry_actions() {
+    let mut fixture = Fixture::new();
+    fixture.panel.set_program(QcProgram::StdaXtb);
+    fixture.frame(vec![], 900.0);
+    let output = fixture.frame(vec![], 900.0);
+    assert_eq!(fixture.panel.job, JobType::TdDft);
+    assert!(label_rect(&output, "sTDA-xTB (Grimme)").is_some());
+    assert!(label_rect(&output, "Energy window (eV)").is_some());
+    for absent in ["Optimize", "Freq/Hessian", "Opt+Freq", "Energy", "States", "More…"] {
+        assert!(label_rect(&output, absent).is_none(), "Unexpected control {absent}");
+    }
+    fixture.click("Configure…");
+    let output = fixture.frame(vec![], 900.0);
+    assert!(label_rect(&output, "xtb4stda path").is_some());
+    assert!(label_rect(&output, "sTDA-xTB (Grimme) path").is_some());
+}
+
+#[test]
+fn behemoth_spectrum_choice_shows_reference_specific_controls() {
+    let mut fixture = Fixture::new();
+    fixture.panel.set_program(QcProgram::Behemoth);
+    fixture.click("More…");
+    fixture.click("UV-Vis / excited states");
+    assert_eq!(fixture.panel.job, JobType::TdDft);
+    fixture.frame(vec![], 900.0);
+    let output = fixture.frame(vec![], 900.0);
+    assert!(label_rect(&output, "sTDA-xTB (GFN1 orbitals)").is_some());
+    assert!(label_rect(&output, "Energy window (eV)").is_some());
+    assert!(label_rect(&output, "Basis").is_none());
+    fixture.panel.excited.spectrum_method = crate::uvvis::excited_state::ExcitedStateMethod::StdaDft;
+    fixture.frame(vec![], 900.0);
+    let output = fixture.frame(vec![], 900.0);
+    assert!(label_rect(&output, "Basis").is_some());
+    assert!(label_rect(&output, "Tamm-Dancoff (sTDA)").is_some());
+}
+
+#[test]
+fn scan_is_selectable_from_more_and_reveals_controls() {
+    let mut fixture=Fixture::new();fixture.click("More…");fixture.click("Scan");
+    assert_eq!(fixture.panel.job,JobType::Scan);
+    fixture.frame(vec![],1100.);let output=fixture.frame(vec![],1100.);
+    assert!(label_rect(&output,"Scan settings").is_some());
+    assert!(!fixture.panel.has_input_file());
+}
+
+#[test]
+fn mecp_is_selectable_and_orca_driver_is_choosable() {
+    let mut f = Fixture::new();
+    f.panel.set_program(QcProgram::Orca);
+    f.click("More…"); f.click("MECP / Spin crossing");
+    assert_eq!(f.panel.job, JobType::Mecp);
+    f.frame(vec![], 1400.); let output = f.frame(vec![], 1400.);
+    assert!(label_rect(&output, "State A multiplicity").is_some());
+    assert!(label_rect(&output, "State B multiplicity").is_some());
+    assert!(label_rect(&output, "ORCA built-in").is_some());
+    f.click("ORCA built-in");
+    assert_eq!(f.panel.config.mecp.driver, crate::qchem_interfaces::job::mecp::Driver::Orca);
+    assert!(!f.panel.has_input_file());
 }

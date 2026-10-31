@@ -17,6 +17,7 @@ use super::program::QcProgram;
 /// legible without opening the section.
 pub fn method_summary(program: QcProgram, config: &MethodConfig) -> String {
     match program {
+        QcProgram::StdaXtb => "sTDA-xTB".to_owned(),
         QcProgram::Xtb => config.xtb.label().to_string(),
         QcProgram::Dreiding => "DREIDING force field".to_string(),
         // For ORCA and PySCF the functional *is* the method: there is no
@@ -102,6 +103,7 @@ pub fn method_config_ui(
         .default_open(true)
         .show(ui, |ui| {
             match program {
+                QcProgram::StdaXtb => { ui.label("sTDA-xTB spectra only"); },
                 QcProgram::Dreiding => {
                     ui.label(
                         "A generic force field with no level of theory to set: its parameters \

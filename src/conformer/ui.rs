@@ -884,13 +884,6 @@ fn save_trajectory(ctx: &egui::Context, outcome: &ConformerOutcome) {
     }
 }
 
-/// Announces a structure change after the panel replaced the geometry.
-pub fn announce(loaded: bool, ev_changed: &mut MessageWriter<MoleculeChanged>) {
-    if loaded {
-        ev_changed.write(MoleculeChanged::parse_xyz(true));
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

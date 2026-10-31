@@ -182,6 +182,64 @@ fn run_model(algorithm: Algorithm, directory: &Path) -> GenerationOutput {
 }
 
 #[test]
+fn optional_endpoint_relaxation_feeds_both_searches_and_preserves_captures() {
+    assert!(!Parameters::default().relax_endpoints);
+    for algorithm in [Algorithm::Rda, Algorithm::PoorMansNeb] {
+        for enabled in [false, true] {
+            let scratch = Scratch::new();
+            let (mut reactant, mut product) = endpoints();
+            reactant.positions[1].x = 1.8 * BOHR_TO_ANGSTROM as f32;
+            product.positions[1].x = 4.2 * BOHR_TO_ANGSTROM as f32;
+            let originals = (reactant.positions.clone(), product.positions.clone());
+            let mut parameters = Parameters { algorithm, ..Default::default() };
+            parameters.options.align = false;
+            parameters.options.conditional_coordinates = RdaConditionalCoordinates::Cartesian;
+            parameters.options.poormans_neb_images = 5;
+            let output = super::endpoint_relaxation::generate(
+                &mut DoubleWell, &reactant, &product, parameters.rda_options(2).unwrap(),
+                algorithm, "analytic double well".into(), &scratch.0, enabled, &RunControl::default(),
+            ).unwrap();
+            let distance = |frame: &TrajectoryFrame| frame.pos[0].distance(frame.pos[1]) as f64 / BOHR_TO_ANGSTROM;
+            let expected = if enabled { (2.0, 4.0) } else { (1.8, 4.2) };
+            assert!((distance(output.frames.first().unwrap()) - expected.0).abs() < 1e-4);
+            assert!((distance(output.frames.last().unwrap()) - expected.1).abs() < 1e-4);
+            assert!((output.energy_hartree - 1.0).abs() < 1e-4);
+            assert_eq!(reactant.positions, originals.0);
+            assert_eq!(product.positions, originals.1);
+        }
+    }
+}
+
+#[test]
+fn failed_endpoint_relaxation_and_cancellation_prevent_ts_generation() {
+    struct NoMinimum { calls: usize }
+    impl Objective for NoMinimum {
+        fn energy(&mut self, x: &[f64]) -> Result<f64> { Ok(x[0]) }
+        fn gradient(&mut self, _x: &[f64], grad: &mut [f64]) -> Result<()> {
+            self.calls += 1;
+            grad.fill(0.0);
+            grad[0] = 1.0;
+            Ok(())
+        }
+    }
+    let scratch = Scratch::new();
+    let (reactant, product) = endpoints();
+    let mut objective = NoMinimum { calls: 0 };
+    let control = RunControl::default();
+    let run = |objective: &mut NoMinimum| super::endpoint_relaxation::generate(
+        objective, &reactant, &product, Parameters::default().rda_options(2).unwrap(),
+        Algorithm::Rda, "unbounded test potential".into(), &scratch.0, true, &control,
+    );
+    let error = run(&mut objective).err().expect("no stationary point exists");
+    assert!(error.to_string().contains("Reactant endpoint relaxation did not converge"));
+    assert!(!scratch.0.join("rda_chain.xyz").exists());
+    control.cancel();
+    let calls = objective.calls;
+    assert!(run(&mut objective).err().unwrap().to_string().contains("cancelled"));
+    assert_eq!(objective.calls, calls, "cancelled jobs must do no additional calculations");
+}
+
+#[test]
 fn rda_generates_and_exports_the_known_saddle_in_angstrom() {
     let scratch = Scratch::new();
     let output = run_model(Algorithm::Rda, &scratch.0);

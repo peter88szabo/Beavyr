@@ -1,0 +1,251 @@
+Scan, MECP, TS and minimum-search implementation and validation — 2026-10-31
+
+Scope
+-----
+Quantum Chemistry -> More... now offers Scan and MECP / Spin crossing.
+Changes remain uncommitted. No installation or desktop launcher was changed.
+No implementation was added to mod.rs; new implementations use named files.
+All calculation tests used isolated directories/configuration under /tmp.
+CPU affinity was restricted to CPUs 0–11, Cargo to four build jobs, and the
+chemistry integration tests to one calculation core per backend.
+
+Scans
+-----
+One bond, angle or dihedral can be swept rigidly or with constrained relaxation.
+Controls include atom picking/indices, both endpoints, point count, maximum
+steps per point, extra fixed coordinates, fragment movement and stop on failure.
+Dummy atoms are removed with correct remapping of real-atom indices; references
+to dummy atoms are rejected before running.
+
+ORCA supports its built-in driver or Beavyr's optimizer. Behemoth supports its
+native driver or Beavyr's optimizer. Other backends use Beavyr's driver.
+The Behemoth CLI/input was extended with max_cycles, move_fragment,
+stop_on_failure, constraints, bond_motion and coordinates. Native Behemoth
+scans use its existing HF/DFT/MP2/RI-MP2 gradient-capable frontend.
+
+Rigid bond scans can move the first atom, second atom, or both symmetrically.
+When fragment movement is enabled, the corresponding attached groups move.
+Relaxed Beavyr/Behemoth scans can select primitive or Pulay redundant internal
+coordinates. ORCA's native relaxed scan retains its own optimization controls.
+
+Results automatically open independent Scan Results and Scan Plot windows.
+The plot can be reopened, and hovering a point shows its coordinate and energy.
+Relative energies default to kcal/mol and can be changed to kJ/mol. The first
+or last displayed point can be the reference. Reverse order affects the plot,
+numerical table, clipboard CSV, saved CSV/XYZ and loaded trajectory together.
+The original calculated absolute energies and geometries remain unchanged.
+Load as Trajectory keeps its original label, loads the displayed point order,
+opens the Trajectory panel, and starts stopped in Once mode.
+Saved scan.xyz/scan.csv/scan_results.ron in the run directory retain original
+calculation order. Failed/nonconverged points and partial results are reported.
+
+MECP
+----
+State A and State B multiplicities are independently specified, with a common
+charge, HF/DFT method, basis and geometry. Both states are validated against
+the electron count. Identical multiplicities are rejected. Supported backends
+are ORCA, Behemoth, PySCF and Psi4. DREIDING and other unverified spin-surface
+models are excluded from this workflow.
+
+ORCA offers ORCA built-in or Beavyr MECP. The native input uses Opt and
+%mecp SurfCrossOpt true / Mult, with State A in the xyz coordinate block.
+The exact user-selected executable is invoked with its input filename.
+No MPI discovery, environment setup, executable substitution or fixed user
+executable path was added to production code.
+Native success requires normal termination, explicit optimization convergence,
+and an acceptable final absolute state-energy gap. The final gap limit is a
+post-run check; ORCA uses its own optimization convergence criteria.
+
+The Beavyr MECP driver uses Cartesian BFGS by default, with primitive internal
+and Pulay redundant internal alternatives. It saves both surface energies,
+their difference and the geometries, supports cancellation, and rechecks
+convergence at the actual returned geometry. The summary provides Copy MECP
+results and saved CSV/XYZ/text files. Trajectory energies are the mean of the
+two state energies. A crossing optimization does not perform the adapted
+frequency calculation needed to establish curvature along the crossing seam.
+
+Original Fortran comparison
+--------------------------
+Read-only source:
+/home/peter/Dropbox/Research_Leuven/SpinCross_code/SpinCross_2022_12_09a.f90
+Also inspected its optimizer helper module, ORCA interface, instructions,
+CH3O+ inputs, and archived BFGS results. Originals were not modified or run
+in place; a copy was compiled with gfortran and run under:
+/tmp/beavyr-spincross-fortran-reference-20261031
+
+Preserved original initialization:
+  previous effective gradient = zero
+  inverse Hessian = zero off-diagonal, 0.7 on every diagonal
+  initial inverse-Hessian copies are identical
+  perpendicular-gradient factor = 140; parallel-gradient factor = 1
+
+The original Cartesian optimizer works in Angstrom and Hartree/Angstrom.
+Beavyr's backend contract is bohr and Hartree/bohr. Cartesian optimizer
+coordinates and gradients are explicitly converted so the empirical 0.7
+retains its original meaning. The original numerical step/gradient thresholds
+also retain their Angstrom convention. The comparison uses the modern CODATA
+conversion instead of the original rounded 0.529177.
+
+Compiled isolated Fortran routines supplied reference values for the projected
+effective gradient and BFGS inverse-Hessian update. Rust regression tests match
+these to 1e-13. A separate test checks the actual first Cartesian step implied
+by a diagonal 0.7 matrix, including unit conversion.
+
+Two reference-code defects were not reproduced: a duplicate convergence check
+uses signed DE instead of abs(DE), and the original trajectory writes X_3 with
+energies evaluated at X_2. Beavyr tests the absolute gap and pairs every saved
+geometry with its own evaluated energies. The original Broyden selector calls
+DFP; this new panel uses BFGS and does not expose that mislabeled branch.
+
+The copied original CH3O+ B3LYP/6-31G test (charge +1, multiplicities 1 and 3)
+converged in 16 steps using ORCA 6.1.1. Its last evaluated energies were
+-114.53063497 and -114.53063171 Eh. The archived ORCA 5 run also used 16 steps;
+small energy differences are expected from backend version/numerics.
+
+Validation evidence
+-------------------
+32 scan tests passed, including all six opt-in installed-backend test groups.
+Log: /tmp/beavyr-scan-native-tests.log
+Coverage includes ORCA native vs Beavyr rigid/relaxed bond, angle and dihedral
+scans; fixed coordinates; Behemoth native controls; MP2/RI-MP2; PySCF/Psi4/xTB;
+DREIDING dummy removal; cancellation; nonconvergence; UI table/plot order,
+clipboard data and trajectory order; primitive/Pulay relaxation; bond motion.
+ORCA native/Beavyr energies agreed to approximately 2e-9 Eh for rigid bonds,
+7e-9 Eh for constrained relaxed bonds, and 2.5e-8 Eh for relaxed dihedrals.
+
+176 Behemoth CLI regression tests passed (including 8 scan-focused tests).
+Logs: /tmp/behemoth-scan-full-tests.log, /tmp/behemoth-scan-tests.log
+The companion release executable was rebuilt successfully.
+Build log: /tmp/behemoth-scan-build.log
+
+MECP integration tests compare distinct singlet/triplet surfaces using ORCA,
+Behemoth, PySCF and Psi4; exercise normal convergence and step-limit failure;
+and check both driver selection and multiplicity controls through egui.
+ORCA native CH2 HF/STO-3G crossed at a gap of -3.536e-7 Eh; its one-step run
+correctly reported nonconvergence. Beavyr's Cartesian search converged in
+6 steps on the same starting structure, with a gap of -9.514e-6 Eh.
+Log: /tmp/beavyr-mecp-all-tests.log
+
+Relevant fixes required for these workflows
+------------------------------------------
+Behemoth gradient parsing now accepts modern indexed AO gradient tables and
+keeps HF/DFT/MP2/RI-MP2 energies paired with the selected method's gradient.
+The Psi4 single-point script's stray indentation was removed after it failed
+the installed-backend scan test. Shared scan/MECP evaluations are in a named
+calculation_objective.rs module, with per-state/per-evaluation directories.
+The Behemoth constrained optimizer handles a fully constrained geometry as
+an energy/gradient evaluation instead of failing on zero free coordinates.
+
+Limits
+------
+Scans sweep one coordinate at a time. Native Behemoth support is limited to
+the methods its AO scan frontend supports. Energy-only correlated methods
+can be used for rigid scans, not gradient-based relaxation or MECP.
+Sparrow scan execution was not validated against an installed Sparrow runtime.
+UI interactions were tested through egui; no claim of manual visual inspection
+or testing every possible molecular system is made.
+
+Reversibility
+-------------
+Pre-scan Beavyr sources and README:
+target/change-backups/qchem-scans-20261030/
+Original modified Behemoth sources and previous release executable:
+target/change-backups/behemoth-scan-extension-20261031/
+Behemoth staging and checked-update manifest:
+/tmp/behemoth-scan-extension-20261031/
+All unrelated pre-existing working-tree changes were retained. No commits.
+
+ORCA native MECP reference
+-------------------------
+ORCA 6.1 manual, Minimum Energy Crossing Points:
+https://www.faccts.de/docs/orca/6.1/manual/contents/structurereactivity/mecp.html
+
+TS and minimum searches
+----------------------
+The existing Behemoth-derived optimizer algorithms were reused, not duplicated.
+The TS algorithm matches Behemoth apart from the local linear-algebra adapter;
+its only source changes here add serialization for calculator settings.
+New named geometry_search modules provide settings, validation, controls,
+backend connections, minimum dispatch, native Behemoth parsing and tests.
+
+ORCA TS: native OptTS or Beavyr. Native Calc_Hess is enabled initially;
+Recalc_Hess uses the selected interval, with zero omitting periodic rebuilds.
+Beavyr TS: Cartesian, primitive internal and Pulay redundant internal modes;
+exact/model initial Hessian where supported; internal/Cartesian tracking;
+bond, angle, dihedral, transfer, weighted and Cartesian-direction references;
+additional connectivity, trust controls and adaptive Hessian settings.
+Defaults match Behemoth CLI: primitive internal, exact initial Hessian,
+internal tracking, 100 cycles, periodic recalculation disabled, Eckart projection.
+Only a converged structure with a calculated final Hessian and one negative
+mode is accepted as a verified local TS. A stationary minimum is rejected.
+
+PySCF and xTB TS use Beavyr. Native Psi4 is retained with Beavyr as an option.
+Behemoth TS invokes its own --opt-ts driver (currently GFN1-xTB only).
+Its CLI and @opt input now expose ts_max_cycles / --ts-max-cycles, and stdout
+reports the final negative-mode count. All its existing TS CLI controls are
+passed explicitly; no personal executable paths are embedded in application
+code. Two new CLI/input tests validate the step limit and reject zero.
+
+Minimum searches expose native/Beavyr choices for ORCA, PySCF, Psi4 and xTB.
+Behemoth retains its own native minimum optimizer. The local default is
+primitive internal BFGS; Pulay and Cartesian choices use the existing modules.
+BFGS and steepest descent are available in internal coordinates; Cartesian
+also supports the two Barzilai-Borwein/two-point gradient choices.
+PySCF local optimization uses energy/gradient evaluations and does not import
+geomeTRIC. Follow-up frequencies run only after convergence. Orbital export,
+when requested, runs at the final converged geometry. Nonconvergence is shown
+as an error rather than silently accepted. Dummy references are remapped and
+references to dummy atoms are rejected before geometry cleanup.
+
+TS/minimum numerical evidence
+-----------------------------
+Water HF/STO-3G optimizations converged with both PySCF and ORCA in all three
+coordinate systems. Energies agree around -74.965901192 Eh. GFN2-xTB water
+also converged in all three systems, around -5.070544448 Eh.
+Planar-ammonia inversion tests used Cartesian coordinates. PySCF HF/STO-3G
+converged in 2 steps, -55.437665301877 Eh, with one negative final mode.
+GFN1-xTB converged in 2 steps, -4.823680970161 Eh, and native Behemoth in
+2 steps, -4.823680976100 Eh; both have one negative final mode.
+The installed GFN2-xTB calculation on this geometry reported zero negative
+projected modes; Beavyr correctly classified it as an unverified saddle.
+This is recorded as a rejection case, not claimed as a successful TS.
+An exploratory symmetric H3 GFN2 fixture also returned zero negative modes;
+it was unsuitable as a successful-TS fixture and was not retained in tests.
+Direct xTB finite-displacement files remain under /tmp/beavyr-xtb-planar-check.
+No xTB algorithm or executable was modified to force agreement.
+
+Analytic tests cover saddle verification, rejection of minima, step limits,
+all three TS coordinate systems, all four Cartesian minimum algorithms,
+cancellation, native convergence parsing, dummy references and UI controls.
+The installed-backend suite also exercises PySCF Opt+Freq and final orbital
+export. Logs: /tmp/beavyr-geometry-search-native-tests.log.
+
+Additional MECP evidence
+------------------------
+All 13 MECP tests passed, including installed backends and the original
+CH3O+ reference. Beavyr matched the original's 16 steps, with final energies
+-114.530634330747 and -114.530633161914 Eh (gap -1.1688e-6 Eh).
+Log: /tmp/beavyr-mecp-all-tests.log.
+
+ORCA TS reference
+-----------------
+https://www.faccts.de/docs/orca/6.1/manual/contents/structurereactivity/optimizations_TS.html
+
+Final regression counts
+-----------------------
+Beavyr full suite: 1441 passed, 0 failed, 43 optional tests ignored.
+Log: /tmp/beavyr-scan-full-tests.log.
+TS/minimum installed-backend suite: all 10 tests passed, none ignored.
+Log: /tmp/beavyr-geometry-search-native-tests.log.
+Behemoth regression suite: 176 passed; the two subsequently added TS
+CLI/input tests also passed (178 tested in total).
+Log: /tmp/behemoth-ts-controls-tests.log.
+The earlier scan and MECP installed-backend suites passed 32 and 13 tests,
+respectively. Those are separate from optional tests skipped in the full run.
+No manual GUI visual inspection was performed; control rendering was tested
+through egui. Compiler warnings remain in existing code and are not treated
+as a claim that the project is warning-free.
+
+Final builds succeeded: Beavyr debug executable and Behemoth release executable.
+Logs: /tmp/beavyr-scan-build.log and /tmp/behemoth-scan-build.log.
+No commits, tags, installed Beavyr replacement or desktop changes were made.

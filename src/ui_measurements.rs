@@ -201,9 +201,7 @@ fn panel_body(
         }
 
         ui.separator();
-        if measurements.angles.is_empty() {
-            ui.weak("No angles yet. Activate picking, then click three atoms (A-B-C).");
-        } else {
+        if !measurements.angles.is_empty() {
             egui::ScrollArea::vertical()
                 .id_salt("angle_list_scroll")
                 .max_height(220.0)
@@ -316,9 +314,7 @@ fn panel_body(
         }
 
         ui.separator();
-        if measurements.dihedrals.is_empty() {
-            ui.weak("No dihedrals yet. Activate picking, then click four atoms (A-B-C-D).");
-        } else {
+        if !measurements.dihedrals.is_empty() {
             egui::ScrollArea::vertical()
                 .id_salt("dihedral_list_scroll")
                 .max_height(220.0)

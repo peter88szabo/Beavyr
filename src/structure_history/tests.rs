@@ -251,3 +251,39 @@ fn standalone_xyz_loading_replaces_old_playback_in_the_real_loader() {
     assert!(!traj.overlay_enabled);
     assert!(traj.frames.is_empty());
 }
+
+#[test]
+fn deleting_one_snapshot_persists_without_changing_other_entries_or_original_files() {
+    let scratch = Scratch::new();
+    let original = scratch.0.join("original.xyz");
+    fs::write(&original, "original input file").unwrap();
+    let mut history = scratch.history();
+    remember(&mut history, 1.0, "first");
+    remember(&mut history, 2.0, "second");
+    let removed = history.entries[0].clone();
+    history.delete_entry(&removed);
+    assert!(!history.is_error);
+    assert!(!removed.path.exists());
+    let fresh = scratch.history();
+    assert_eq!(fresh.entries.len(), 1);
+    assert_eq!(fresh.entries[0].name, "first");
+    assert_eq!(fs::read_to_string(original).unwrap(), "original input file");
+    // Another viewer may already have removed the same snapshot.
+    history.delete_entry(&removed);
+    assert!(!history.is_error);
+    assert_eq!(history.entries.len(), 1);
+}
+
+#[test]
+fn failed_deletion_keeps_the_entry_and_reports_the_error() {
+    let scratch = Scratch::new();
+    let mut history = scratch.history();
+    remember(&mut history, 1.0, "kept");
+    let entry = history.entries[0].clone();
+    fs::remove_file(&entry.path).unwrap();
+    fs::create_dir(&entry.path).unwrap();
+    history.delete_entry(&entry);
+    assert!(history.is_error);
+    assert_eq!(history.entries.len(), 1);
+    assert!(history.message.as_deref().unwrap().contains("Could not remove"));
+}

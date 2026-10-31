@@ -445,6 +445,14 @@ pub fn basis_label(cli: &str) -> &str {
 #[derive(Debug, Clone, PartialEq)]
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct MethodConfig {
+    #[serde(default)]
+    pub scan: super::job::scan::Options,
+    #[serde(default)]
+    pub mecp: super::job::mecp::Options,
+    #[serde(default)]
+    pub search: super::job::search::Options,
+    #[serde(default)]
+    pub active_space: super::job::correlated::ActiveSpace,
     pub xtb: XtbMethod,
     pub behemoth: BehemothMethod,
     pub functional: String,
@@ -472,6 +480,10 @@ pub struct MethodConfig {
 impl Default for MethodConfig {
     fn default() -> Self {
         MethodConfig {
+            scan: Default::default(),
+            mecp: Default::default(),
+            search: Default::default(),
+            active_space: Default::default(),
             xtb: XtbMethod::default(),
             behemoth: BehemothMethod::default(),
             functional: DEFAULT_FUNCTIONAL.to_string(),
@@ -516,7 +528,7 @@ pub fn defaults_for(program: QcProgram) -> (String, String) {
             String::new(),
         ),
         // xTB and DREIDING take neither; Behemoth keeps the originals.
-        QcProgram::Xtb | QcProgram::Dreiding | QcProgram::Behemoth => {
+        QcProgram::Xtb | QcProgram::StdaXtb | QcProgram::Dreiding | QcProgram::Behemoth => {
             (DEFAULT_FUNCTIONAL.to_string(), DEFAULT_BASIS.to_string())
         }
     }
@@ -577,7 +589,7 @@ pub fn visible_fields(program: QcProgram, config: &MethodConfig) -> VisibleField
         // DREIDING has no level of theory to choose. Its parameters come from the atom types,
         // which are perceived rather than selected, and it is single-threaded because a force
         // field evaluation is already far below the cost of spawning threads for it.
-        QcProgram::Dreiding => hidden,
+        QcProgram::Dreiding | QcProgram::StdaXtb => hidden,
         // ORCA takes a functional, a basis, a per-core memory figure and a
         // thread count. The dispersion dropdown is deliberately not shown: its
         // entries carry Behemoth's spellings, which ORCA does not share, and a

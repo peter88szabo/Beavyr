@@ -28,6 +28,7 @@ pub const STANDARD_TS_MAX_GRADIENT: f64 = 3.0e-4;
 pub const STANDARD_TS_RMS_GRADIENT: f64 = 1.0e-4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub enum TransitionStateCoordinateMode {
     Cartesian,
     Internal,
@@ -35,18 +36,21 @@ pub enum TransitionStateCoordinateMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub enum TransitionStateInitialHessian {
     Exact,
     Model,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub enum TransitionStateModeTracking {
     Internal,
     Cartesian,
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub enum TransitionStateReactionMode {
     Lowest,
     Direction(Vec<f64>),
@@ -58,6 +62,7 @@ pub enum TransitionStateReactionMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub enum InternalReferenceKind {
     Bond,
     Angle,
@@ -65,6 +70,7 @@ pub enum InternalReferenceKind {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[derive(serde::Serialize, serde::Deserialize)]
 pub struct WeightedInternalReference {
     pub kind: InternalReferenceKind,
     pub atoms: Vec<usize>,
@@ -98,6 +104,8 @@ impl WeightedInternalReference {
 }
 
 #[derive(Debug, Clone)]
+#[derive(serde::Serialize, serde::Deserialize, PartialEq)]
+#[serde(default)]
 pub struct TransitionStateOptions {
     pub coordinate_mode: TransitionStateCoordinateMode,
     pub max_cycles: usize,

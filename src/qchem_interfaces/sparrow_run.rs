@@ -66,7 +66,7 @@ pub fn run_command(run_dir: &Path) -> Command {
 /// anything that needs one.
 fn properties_for(job: JobType) -> &'static str {
     match job {
-        JobType::SinglePoint => "[su.Property.Energy]",
+        JobType::SinglePoint | JobType::Scan | JobType::Mecp => "[su.Property.Energy]",
         JobType::Gradient => "[su.Property.Energy, su.Property.Gradients]",
         // Beavyr does the frequency analysis; what it needs from Sparrow is
         // the matrix.

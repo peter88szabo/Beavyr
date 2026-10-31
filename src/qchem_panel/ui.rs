@@ -96,7 +96,7 @@ fn charge_and_multiplicity(ui: &mut egui::Ui, panel: &mut QcPanelState, running:
             !running,
             egui::DragValue::new(&mut panel.charge).speed(1.0).range(-10..=10),
         );
-        ui.label("Multiplicity");
+        ui.label(if panel.job == JobType::Mecp { "State A multiplicity" } else { "Multiplicity" });
         ui.add_enabled(
             !running,
             egui::DragValue::new(&mut panel.multiplicity)
@@ -113,6 +113,7 @@ fn charge_and_multiplicity(ui: &mut egui::Ui, panel: &mut QcPanelState, running:
 /// method has no fitting set for. Either way the basis is switched to something
 /// the new method can use rather than left to fail at run time.
 fn adopt_method_defaults(panel: &mut QcPanelState, method: QcMethod) {
+    if job::correlated::energy_only(panel.program, method) && panel.job != JobType::Scan { panel.job = JobType::SinglePoint; }
     let is_f12_basis = panel.config.basis.to_ascii_uppercase().contains("-F12");
     if method.is_f12() && !is_f12_basis {
         panel.config.basis = orca_run::DEFAULT_F12_BASIS.to_string();
@@ -196,11 +197,24 @@ fn start_run(
         .unwrap_or_default();
     match resolve_program_executable(program, &entered) {
         Ok(binary) => {
+            let remapped_search = if panel.job == JobType::TransitionState && (crate::qchem_interfaces::job::search::local(program, panel.job, &panel.config.search) || program == QcProgram::Behemoth) {
+                match crate::qchem_interfaces::job::search::remap_dummies(&panel.config.search, &mol.atoms) {
+                    Ok(options) => Some(options), Err(error) => { task.last_message = Some(error); task.last_is_error = true; return; }
+                }
+            } else { None };
+            let remapped_scan = if panel.job == JobType::Scan {
+                match panel.config.scan.remap_dummies(&mol.atoms) {
+                    Ok(options) => Some(options),
+                    Err(error) => { task.last_message = Some(error); task.last_is_error = true; return; }
+                }
+            } else { None };
             if let Err(error) = crate::calculation_geometry::prepare_display(ctx, mol) {
                 task.last_message = Some(error);
                 task.last_is_error = true;
                 return;
             }
+            if let Some(options) = remapped_search { panel.config.search = options; }
+            if let Some(options) = remapped_scan { panel.config.scan = options; }
             let positions: Vec<f64> = mol
                 .pos
                 .iter()

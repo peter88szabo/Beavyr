@@ -160,3 +160,54 @@ fn loading_results_as_a_trajectory_works_from_the_separate_window() {
     assert!(fixture.open_trajectory);
     assert_eq!(fixture.mol.atoms, ["C", "H"]);
 }
+
+#[test]
+fn selecting_conformers_preserves_zoom_pan_and_orientation_while_refreshing_geometry() {
+    use crate::camera::OrbitCamera;
+    use bevy::ecs::system::RunSystemOnce;
+
+    let mut fixture = Fixture::new();
+    for (index, radius) in [1.5, 80.0].into_iter().enumerate() {
+        fixture.frame(vec![], false);
+        let (output, _, _) = fixture.frame(vec![], false);
+        let loaded = fixture.click(text_position(&output, "View"), false);
+        assert!(loaded);
+        assert_eq!(fixture.run.previewing, Some(index));
+
+        let camera = OrbitCamera {
+            radius,
+            target: Vec3::new(2.0, -3.0, 4.0),
+            orientation: Quat::from_rotation_y(0.4) * Quat::from_rotation_x(-0.3),
+            ..Default::default()
+        };
+        let mut world = World::new();
+        world.init_resource::<Messages<MoleculeChanged>>();
+        world.insert_resource(fixture.mol.clone());
+        world.insert_resource(MolSettings {
+            geometry_dirty: false,
+            bond_topology_dirty: false,
+            ..Default::default()
+        });
+        world.insert_resource(camera.clone());
+        let actions = ResultActions {
+            loaded,
+            open_trajectory: fixture.open_trajectory,
+        };
+        world
+            .run_system_once(move |mut writer: MessageWriter<MoleculeChanged>| {
+                actions.announce(&mut writer);
+            })
+            .unwrap();
+        world
+            .run_system_once(crate::scene::react_to_molecule_changed_mark_dirty)
+            .unwrap();
+
+        let after = world.resource::<OrbitCamera>();
+        assert_eq!(after.radius, camera.radius, "conformer selection changed zoom");
+        assert_eq!(after.target, camera.target, "conformer selection changed pan");
+        assert_eq!(after.orientation, camera.orientation);
+        let settings = world.resource::<MolSettings>();
+        assert!(settings.geometry_dirty);
+        assert!(settings.bond_topology_dirty);
+    }
+}

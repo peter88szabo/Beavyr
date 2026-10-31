@@ -165,6 +165,7 @@ pub fn method_keyword<'a>(method: QcMethod, functional: &'a str) -> &'a str {
         QcMethod::RiMp2 => "RI-MP2",
         QcMethod::Mp2F12 => "MP2-F12",
         QcMethod::CcsdT => "CCSD(T)",
+        QcMethod::Casscf | QcMethod::Nevpt2 => "CASSCF",
         QcMethod::DlpnoCcsdT => "DLPNO-CCSD(T)",
         QcMethod::CcsdTF12 => "CCSD(T)-F12",
         // Not ORCA methods; the panel never offers them for this program.
@@ -226,7 +227,7 @@ pub fn basis_keywords(method: QcMethod, functional: &str, basis: &str) -> Vec<St
 /// obvious guess.
 pub fn job_keywords(job: JobType) -> &'static str {
     match job {
-        JobType::SinglePoint | JobType::TdDft => "",
+        JobType::SinglePoint | JobType::Scan | JobType::Mecp | JobType::TdDft => "",
         // `EnGrad` writes the energy and the Cartesian gradient to `.engrad`,
         // which Beavyr already has a reader for.
         JobType::Gradient => "EnGrad",
@@ -340,7 +341,16 @@ pub fn panel_input_text(
     }
     text.push('\n');
 
-    text.push_str(&job_blocks(job, excited));
+    if job == JobType::TransitionState {
+        text.push_str("%geom\n  Calc_Hess true\n");
+        if config.search.orca_recalc_hessian > 0 {
+            text.push_str(&format!("  Recalc_Hess {}\n", config.search.orca_recalc_hessian));
+        }
+        text.push_str("  MaxIter 100\nend\n");
+    } else {
+        text.push_str(&job_blocks(job, excited));
+    }
+    text.push_str(&super::job::correlated::orca_active_space_block(method, multiplicity, &config.active_space));
 
     text.push_str(&format!("* xyz {charge} {multiplicity}\n"));
     text.push_str(xyz_body);
@@ -1092,7 +1102,7 @@ mod tests {
     /// error, which is the obvious guess and the reason this is tested.
     #[test]
     fn a_tddft_job_is_requested_by_its_block_not_a_keyword() {
-        let excited = ExcitedStateOptions { states: 12, tda: true };
+        let excited = ExcitedStateOptions { states: 12, tda: true, ..Default::default() };
         let text = panel_input_text(
             JobType::TdDft,
             QcMethod::Dft,
@@ -1119,7 +1129,7 @@ mod tests {
             0,
             1,
             &method(),
-            ExcitedStateOptions { states: 5, tda: false },
+            ExcitedStateOptions { states: 5, tda: false, ..Default::default() },
             "",
             &water_body(),
         );

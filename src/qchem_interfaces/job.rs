@@ -5,13 +5,25 @@
 //! answers depend on the program, and neither is uniform -- ORCA optimises a
 //! transition state and follows a reaction coordinate, xTB does neither; PySCF
 //! does real TD-DFT, Behemoth has only Grimme's simplified methods.
+//! Beavyr now supplies TS/minimum drivers where supported gradients are available.
 //!
 //! Everything here was established by running the programs, not from their
 //! manuals. Where a program cannot do something the panel says so and disables
 //! it, rather than hiding it: someone choosing between codes is entitled to see
 //! that ORCA does an IRC and xTB does not.
 
+#[path = "geometry_search.rs"]
+pub mod search;
+
+#[path = "mecp.rs"]
+pub mod mecp;
+
 use super::program::QcProgram;
+
+#[path = "correlated_methods.rs"]
+pub mod correlated;
+#[path = "scan.rs"]
+pub mod scan;
 
 /// Which iteration history a finished run's summary lists.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,6 +44,8 @@ pub enum SummaryKind {
 /// to open when a run finishes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResultTarget {
+    /// Independent scan plot, point table and geometry results.
+    Scan,
     /// The trajectory player, and the energy-versus-step plot with it.
     Trajectory,
     /// The Vibrations panel: modes, thermochemistry, infrared spectrum.
@@ -46,6 +60,8 @@ pub enum ResultTarget {
 pub enum JobType {
     /// One energy at the structure as it stands.
     SinglePoint,
+    Scan,
+    Mecp,
     /// One energy and the Cartesian gradient, written to a file you can keep.
     Gradient,
     /// The force-constant matrix at the structure as it stands, written to a
@@ -68,8 +84,10 @@ pub enum JobType {
 }
 
 impl JobType {
-    pub const ALL: [JobType; 9] = [
+    pub const ALL: [JobType; 11] = [
         JobType::SinglePoint,
+        JobType::Scan,
+        JobType::Mecp,
         JobType::Gradient,
         JobType::Hessian,
         JobType::Optimize,
@@ -83,6 +101,8 @@ impl JobType {
     pub fn label(self) -> &'static str {
         match self {
             JobType::SinglePoint => "Single-point energy",
+            JobType::Scan => "Scan",
+            JobType::Mecp => "MECP / Spin crossing",
             JobType::Gradient => "Gradient",
             JobType::Hessian => "Hessian (save the matrix)",
             JobType::Optimize => "Optimization",
@@ -90,7 +110,7 @@ impl JobType {
             JobType::OptimizeThenFrequencies => "Optimization + Frequencies",
             JobType::TransitionState => "Transition-state optimization",
             JobType::Irc => "IRC",
-            JobType::TdDft => "TD-DFT",
+            JobType::TdDft => "UV-Vis / excited states",
         }
     }
 
@@ -103,7 +123,8 @@ impl JobType {
             // These three hand you a number or a file rather than something to
             // plot, so nothing opens; the summary offers the file to save.
             JobType::SinglePoint | JobType::Gradient | JobType::Hessian => &[],
-            JobType::Optimize | JobType::TransitionState | JobType::Irc => {
+            JobType::Scan => &[ResultTarget::Scan],
+            JobType::Optimize | JobType::TransitionState | JobType::Irc | JobType::Mecp => {
                 &[ResultTarget::Trajectory]
             }
             JobType::Frequencies => &[ResultTarget::Vibrations],
@@ -124,13 +145,15 @@ impl JobType {
     pub fn summary_kind(self) -> SummaryKind {
         match self {
             JobType::SinglePoint
+            | JobType::Scan
             | JobType::Gradient
             | JobType::Hessian
             | JobType::TdDft => SummaryKind::ScfOnly,
             JobType::Optimize
             | JobType::OptimizeThenFrequencies
             | JobType::TransitionState
-            | JobType::Irc => SummaryKind::GeometryCycles,
+            | JobType::Irc
+            | JobType::Mecp => SummaryKind::GeometryCycles,
             JobType::Frequencies => SummaryKind::ScfOnly,
         }
     }
@@ -138,6 +161,8 @@ impl JobType {
     /// One line under the selector, saying what the job is for.
     pub fn description(self) -> &'static str {
         match self {
+            JobType::Mecp => "Find a minimum-energy crossing between two spin states.",
+            JobType::Scan => "Scan a bond, angle or dihedral with optional relaxation.",
             JobType::SinglePoint => {
                 "One energy at the structure as it stands, with the self-consistent field \
                  history behind it."
@@ -210,6 +235,8 @@ pub enum QcMethod {
     RiMp2,
     Mp2F12,
     CcsdT,
+    Casscf,
+    Nevpt2,
     DlpnoCcsdT,
     CcsdTF12,
 }
@@ -228,6 +255,8 @@ impl QcMethod {
             QcMethod::RiMp2 => "RI-MP2",
             QcMethod::Mp2F12 => "MP2-F12",
             QcMethod::CcsdT => "CCSD(T)",
+            QcMethod::Casscf => "CASSCF",
+            QcMethod::Nevpt2 => "NEVPT2",
             QcMethod::DlpnoCcsdT => "DLPNO-CCSD(T)",
             QcMethod::CcsdTF12 => "CCSD(T)-F12",
         }
@@ -305,8 +334,11 @@ pub fn methods_for(program: QcProgram) -> &'static [QcMethod] {
             QcMethod::Dft,
             QcMethod::Mp2,
             QcMethod::RiMp2,
+            QcMethod::CcsdT,
+            QcMethod::Casscf,
+            QcMethod::Nevpt2,
         ],
-        QcProgram::Dreiding => &[],
+        QcProgram::Dreiding | QcProgram::StdaXtb => &[],
         QcProgram::Orca => &[
             QcMethod::Hf,
             QcMethod::Dft,
@@ -316,8 +348,10 @@ pub fn methods_for(program: QcProgram) -> &'static [QcMethod] {
             QcMethod::CcsdT,
             QcMethod::DlpnoCcsdT,
             QcMethod::CcsdTF12,
+            QcMethod::Casscf,
+            QcMethod::Nevpt2,
         ],
-        QcProgram::PySCF => &[QcMethod::Hf, QcMethod::Dft, QcMethod::Mp2],
+        QcProgram::PySCF => &[QcMethod::Hf, QcMethod::Dft, QcMethod::Mp2, QcMethod::CcsdT, QcMethod::Casscf, QcMethod::Nevpt2],
         // Both Psi4 routes are the same engine, so the same list.
         QcProgram::SparrowPy => &[QcMethod::Semiempirical],
         QcProgram::Psi4 | QcProgram::Psi4Py => &[
@@ -340,8 +374,13 @@ pub fn default_method(program: QcProgram) -> Option<QcMethod> {
 /// and the alternative rather than just refusing.
 pub fn unsupported_reason(program: QcProgram, job: JobType) -> Option<&'static str> {
     match (program, job) {
+        (program, JobType::TransitionState) if search::ts_supported(program) => None,
+        (program, JobType::Mecp) => mecp::program_problem(program),
+        (QcProgram::StdaXtb, JobType::TdDft) => None,
+        (QcProgram::StdaXtb, _) => Some("sTDA-xTB calculates spectra only. Choose xTB, ORCA or another backend for geometry calculations."),
         // Every backend gives an energy, a gradient, a Hessian, and optimises.
         (_, JobType::SinglePoint)
+        | (_, JobType::Scan)
         | (_, JobType::Gradient)
         | (_, JobType::Hessian)
         | (_, JobType::Optimize)
@@ -365,8 +404,8 @@ pub fn unsupported_reason(program: QcProgram, job: JobType) -> Option<&'static s
              gradient and a Hessian, and nothing else. Use ORCA or Psi4 for this.",
         ),
         (_, JobType::TransitionState) => Some(
-            "Only ORCA and Psi4 have a transition-state optimizer. For the others, use the TS \
-             Generation tool to make a guess, then optimize it with ORCA or Psi4.",
+            "This backend does not support transition-state searches. Choose ORCA, Psi4, PySCF, \
+             xTB or Behemoth for this job.",
         ),
         (_, JobType::Irc) => Some(
             "Only ORCA and Psi4 can follow an intrinsic reaction coordinate.",
@@ -377,10 +416,7 @@ pub fn unsupported_reason(program: QcProgram, job: JobType) -> Option<&'static s
         | (QcProgram::PySCF, JobType::TdDft)
         | (QcProgram::Psi4, JobType::TdDft)
         | (QcProgram::Psi4Py, JobType::TdDft) => None,
-        (QcProgram::Behemoth, JobType::TdDft) => Some(
-            "Behemoth has Grimme's simplified methods (sTDA and sTD-DFT), not full TD-DFT. \
-             Run those from the UV-Vis panel, or choose ORCA or PySCF here for real TD-DFT.",
-        ),
+        (QcProgram::Behemoth, JobType::TdDft) => None,
         (_, JobType::TdDft) => Some(
             "This program has no excited-state module. Use ORCA, Psi4 or PySCF for TD-DFT.",
         ),
@@ -403,11 +439,20 @@ pub struct ExcitedStateOptions {
     /// On by default, which is both programs' own default and the cheaper,
     /// more robust choice; turning it off gives the full linear response.
     pub tda: bool,
+    #[serde(default = "default_spectrum_method")]
+    pub spectrum_method: crate::uvvis::excited_state::ExcitedStateMethod,
+    #[serde(default = "default_energy_window")]
+    pub energy_window_ev: u32,
 }
+fn default_spectrum_method() -> crate::uvvis::excited_state::ExcitedStateMethod {
+    crate::uvvis::excited_state::ExcitedStateMethod::StdaXtbGfn1
+}
+fn default_energy_window() -> u32 { 10 }
+
 
 impl Default for ExcitedStateOptions {
     fn default() -> Self {
-        ExcitedStateOptions { states: 10, tda: true }
+        ExcitedStateOptions { states: 10, tda: true, spectrum_method: default_spectrum_method(), energy_window_ev: default_energy_window() }
     }
 }
 
@@ -430,12 +475,11 @@ mod tests {
                 JobType::Frequencies,
                 JobType::OptimizeThenFrequencies,
             ] {
-                assert!(supports(program, job), "{program:?} / {job:?}");
+                assert_eq!(supports(program, job), program != QcProgram::StdaXtb, "{program:?} / {job:?}");
             }
         }
 
-        // ORCA alone does saddle points and reaction paths. Verified by running
-        // `! OptTS` and `! IRC` on water.
+        // TS searches additionally use Beavyr or the native Behemoth optimizer.
         for job in [JobType::TransitionState, JobType::Irc] {
             for program in [QcProgram::Orca, QcProgram::Psi4, QcProgram::Psi4Py] {
                 assert!(supports(program, job), "{program:?} / {job:?}");
@@ -447,18 +491,19 @@ mod tests {
                 QcProgram::PySCF,
                 QcProgram::SparrowPy,
             ] {
-                assert!(!supports(program, job), "{program:?} / {job:?}");
+                assert_eq!(supports(program, job), job == JobType::TransitionState && search::ts_supported(program), "{program:?} / {job:?}");
             }
         }
 
-        // Real TD-DFT: everything but the semi-empirical codes.
+        // Excited states include the explicitly labelled simplified methods.
+        assert!(supports(QcProgram::Behemoth, JobType::TdDft));
+        assert!(supports(QcProgram::StdaXtb, JobType::TdDft));
         assert!(supports(QcProgram::Orca, JobType::TdDft));
         assert!(supports(QcProgram::PySCF, JobType::TdDft));
         assert!(supports(QcProgram::Psi4, JobType::TdDft));
         assert!(supports(QcProgram::Psi4Py, JobType::TdDft));
         for program in [
             QcProgram::Xtb,
-            QcProgram::Behemoth,
             QcProgram::Dreiding,
             QcProgram::SparrowPy,
         ] {
@@ -466,17 +511,12 @@ mod tests {
         }
     }
 
-    /// Behemoth's refusal must name what it does have, and must not call it
-    /// TD-DFT. The simplified methods are a different model, and labelling them
-    /// as the more impressive thing they resemble is exactly the mistake this
-    /// message exists to prevent.
     #[test]
-    fn behemoth_is_told_apart_from_real_tddft() {
-        let reason = unsupported_reason(QcProgram::Behemoth, JobType::TdDft)
-            .expect("Behemoth has no full TD-DFT");
-        assert!(reason.contains("sTDA"), "{reason}");
-        assert!(reason.contains("simplified"), "{reason}");
-        assert!(reason.contains("UV-Vis"), "it should say where to find them: {reason}");
+    fn standalone_stda_offers_spectra_only() {
+        for job in JobType::ALL {
+            assert_eq!(supports(QcProgram::StdaXtb, job), job == JobType::TdDft);
+        }
+        assert_eq!(JobType::TdDft.label(), "UV-Vis / excited states");
     }
 
     /// Every refusal says what to do instead, rather than only refusing.
@@ -503,7 +543,7 @@ mod tests {
         assert_eq!(default_method(QcProgram::Dreiding), None);
         // And every other program offers at least one.
         for program in QcProgram::ALL {
-            if program != QcProgram::Dreiding {
+            if !matches!(program, QcProgram::Dreiding | QcProgram::StdaXtb) {
                 assert!(default_method(program).is_some(), "{program:?}");
             }
         }
@@ -623,9 +663,9 @@ mod tests {
     /// Every backend can do a single point. It is the cheapest thing any of
     /// them does, so a refusal would be a bug.
     #[test]
-    fn every_backend_does_a_single_point() {
+    fn single_points_exclude_the_spectrum_only_backend() {
         for program in QcProgram::ALL {
-            assert!(supports(program, JobType::SinglePoint), "{program:?}");
+            assert_eq!(supports(program, JobType::SinglePoint), program != QcProgram::StdaXtb, "{program:?}");
         }
     }
 

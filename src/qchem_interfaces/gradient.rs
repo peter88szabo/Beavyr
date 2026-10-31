@@ -39,6 +39,7 @@ const GEOMETRY_FILE: &str = "geometry.xyz";
 /// drive gradients are quantum-chemical by intent.
 pub fn unsupported_reason(program: QcProgram) -> Option<&'static str> {
     match program {
+        QcProgram::StdaXtb => Some("sTDA-xTB calculates spectra only; no gradients are available."),
         QcProgram::Dreiding => Some(
             "DREIDING is a generic force field. A reaction path on one is not worth the run; \
              choose a quantum-chemistry program.",
@@ -191,7 +192,7 @@ pub fn prepare(
             )
             .map_err(|e| format!("Could not write the Sparrow script: {e}"))?;
         }
-        QcProgram::Dreiding => unreachable!("refused above"),
+        QcProgram::Dreiding | QcProgram::StdaXtb => unreachable!("refused above"),
     }
     Ok(())
 }
@@ -265,7 +266,7 @@ pub fn command(
         ),
         QcProgram::PySCF => super::pyscf_run::run_command(workdir),
         QcProgram::SparrowPy => super::sparrow_run::run_command(workdir),
-        QcProgram::Dreiding => unreachable!("refused above"),
+        QcProgram::Dreiding | QcProgram::StdaXtb => unreachable!("refused above"),
     })
 }
 
@@ -279,7 +280,7 @@ pub(crate) fn gradient_path(program: QcProgram, workdir: &Path) -> PathBuf {
         // xTB writes a Turbomole gradient beside its input; Behemoth prints to
         // standard output and writes no file.
         QcProgram::Xtb => workdir.join("gradient"),
-        QcProgram::Behemoth | QcProgram::Dreiding => workdir.join("gradient"),
+        QcProgram::Behemoth | QcProgram::Dreiding | QcProgram::StdaXtb => workdir.join("gradient"),
     }
 }
 
@@ -353,7 +354,7 @@ pub fn read(
                 super::hessian_file::parse_turbomole_gradient(&text, natoms)?,
             )
         }
-        QcProgram::Dreiding => return Err(unsupported_reason(program).unwrap().to_string()),
+        QcProgram::Dreiding | QcProgram::StdaXtb => return Err(unsupported_reason(program).unwrap().to_string()),
     };
 
     // A gradient of the wrong length, or one with a non-finite value in it,
@@ -398,10 +399,10 @@ mod tests {
 
     /// Every program but the force field can provide a surface to walk on.
     #[test]
-    fn only_the_force_field_is_refused() {
+    fn force_field_and_spectrum_only_backend_are_refused() {
         for program in QcProgram::ALL {
             let refused = unsupported_reason(program).is_some();
-            assert_eq!(refused, program == QcProgram::Dreiding, "{program:?}");
+            assert_eq!(refused, matches!(program, QcProgram::Dreiding | QcProgram::StdaXtb), "{program:?}");
         }
         let reason = unsupported_reason(QcProgram::Dreiding).unwrap();
         assert!(reason.contains("force field"), "{reason}");

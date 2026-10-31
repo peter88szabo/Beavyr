@@ -46,6 +46,27 @@ pub(crate) fn play_button(ui: &mut egui::Ui, direction: i32) -> egui::Response {
     response
 }
 
+pub(crate) fn pause_button(ui: &mut egui::Ui) -> egui::Response {
+    let response = ui
+        .add(egui::Button::new("").min_size(egui::vec2(36.0, 30.0)))
+        .on_hover_text("Pause");
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), "Pause")
+    });
+    if ui.is_rect_visible(response.rect) {
+        let center = response.rect.center();
+        let color = ui.style().interact(&response).fg_stroke.color;
+        for x in [-4.0, 4.0] {
+            ui.painter().rect_filled(
+                egui::Rect::from_center_size(center + egui::vec2(x, 0.0), egui::vec2(4.0, 14.0)),
+                0.0,
+                color,
+            );
+        }
+    }
+    response
+}
+
 pub(crate) fn mode_row(ui: &mut egui::Ui, traj: &mut TrajectoryState) {
     ui.scope(|ui| {
         ui.spacing_mut().button_padding.x = 6.0;

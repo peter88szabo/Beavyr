@@ -248,49 +248,49 @@ fn panel_body(
 
     let mut surface_changed = false;
     crate::ui_style::group(ui, "", |ui| {
-        // Useful isovalues span very different magnitudes for an orbital, a total
-        // density and a spin density, so the slider bounds follow the quantity.
-        let (isovalue_low, isovalue_high) = state.quantity.isovalue_range();
         surface_changed |= ui
-            .add(
-                egui::Slider::new(&mut state.isovalue, isovalue_low..=isovalue_high)
-                    .logarithmic(true)
-                    .text("Isovalue"),
-            )
-            .on_hover_text(if showing_orbital {
-                "Lower encloses more of the orbital; higher shrinks to the core."
-            } else {
-                "Lower encloses more of the distribution; higher shrinks to the densest region."
-            })
+            .checkbox(&mut state.show_surface, "Show surface")
             .changed();
-
-        ui.horizontal_wrapped(|ui| {
+        ui.scope(|ui| {
+            let style = ui.style_mut();
+            style.spacing.slider_width = 80.0;
+            style.spacing.interact_size.y = 24.0;
+            style.spacing.button_padding = egui::vec2(6.0, 3.0);
+            style.drag_value_text_style = egui::TextStyle::Small;
+            // Useful isovalues span very different magnitudes for an orbital, a total
+            // density and a spin density, so the slider bounds follow the quantity.
+            let (isovalue_low, isovalue_high) = state.quantity.isovalue_range();
             surface_changed |= ui
-                .checkbox(&mut state.show_surface, "Show surface")
+                .add(
+                    egui::Slider::new(&mut state.isovalue, isovalue_low..=isovalue_high)
+                        .logarithmic(true)
+                        .text("Isovalue"),
+                )
+                .on_hover_text(if showing_orbital {
+                    "Lower encloses more of the orbital; higher shrinks to the core."
+                } else {
+                    "Lower encloses more of the distribution; higher shrinks to the densest region."
+                })
                 .changed();
+
             surface_changed |= ui
                 .add(egui::Slider::new(&mut state.opacity, 0.1..=1.0).text("Opacity"))
                 .changed();
-        });
-        if state.field_peak().is_some_and(|peak| state.isovalue > peak) {
-            ui.colored_label(
-                egui::Color32::from_rgb(220, 160, 60),
-                "Isovalue exceeds the peak; nothing will be drawn.",
+            // Resolution changes the sampling density, so unlike the controls above it
+            // forces a resample rather than a remesh.
+            ui.add(
+                egui::Slider::new(
+                    &mut state.resolution,
+                    crate::orbitals::MIN_RESOLUTION..=crate::orbitals::MAX_RESOLUTION,
+                )
+                .text("Surface resolution"),
             );
-        }
-        ui.separator();
-        ui.add_space(4.0);
-        // Resolution changes the sampling density, so unlike the controls above it
-        // forces a resample rather than a remesh.
-        ui.add(
-            egui::Slider::new(
-                &mut state.resolution,
-                crate::orbitals::MIN_RESOLUTION..=crate::orbitals::MAX_RESOLUTION,
-            )
-            .text("Surface resolution"),
-        );
+        });
         ui.add_space(6.0);
-        ui.horizontal_wrapped(|ui| {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 6.0;
+            ui.spacing_mut().button_padding = egui::vec2(6.0, 4.0);
+            ui.spacing_mut().interact_size.y = 24.0;
             ui.label("Style:");
             let selected = ui.visuals().selection.bg_fill;
             let dim = ui.visuals().widgets.inactive.bg_fill;
@@ -303,8 +303,19 @@ fn panel_body(
                     surface_changed = true;
                 }
             }
+            ui.add_space(10.0);
+            ui.label("Lobe:");
+            let mut positive = to_egui(state.positive_color);
+            if ui.color_edit_button_srgba(&mut positive).changed() {
+                state.positive_color = from_egui(positive);
+                surface_changed = true;
+            }
+            let mut negative = to_egui(state.negative_color);
+            if ui.color_edit_button_srgba(&mut negative).changed() {
+                state.negative_color = from_egui(negative);
+                surface_changed = true;
+            }
         });
-
         // Mesh controls only exist while the mesh style is active.
         if matches!(state.style, SurfaceStyle::Mesh) {
             surface_changed |= ui
@@ -328,19 +339,12 @@ fn panel_body(
             ui.add(egui::Slider::new(&mut state.mesh_width, 0.5..=8.0).text("Mesh line width"));
         }
 
-        ui.horizontal_wrapped(|ui| {
-            ui.label("Lobe colours:");
-            let mut positive = to_egui(state.positive_color);
-            if ui.color_edit_button_srgba(&mut positive).changed() {
-                state.positive_color = from_egui(positive);
-                surface_changed = true;
-            }
-            let mut negative = to_egui(state.negative_color);
-            if ui.color_edit_button_srgba(&mut negative).changed() {
-                state.negative_color = from_egui(negative);
-                surface_changed = true;
-            }
-        });
+        if state.field_peak().is_some_and(|peak| state.isovalue > peak) {
+            ui.colored_label(
+                egui::Color32::from_rgb(220, 160, 60),
+                "Isovalue exceeds the peak; nothing will be drawn.",
+            );
+        }
     });
     ui.add_space(2.0);
     // The orbital list is only meaningful when plotting one orbital.

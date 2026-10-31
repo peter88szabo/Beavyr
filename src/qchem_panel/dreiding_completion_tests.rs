@@ -100,6 +100,7 @@ fn cancelling_a_completed_dreiding_worker_prevents_result_application() {
     use crate::trajectory::TrajectoryState;
     let pool = AsyncComputeTaskPool::get_or_init(bevy::tasks::TaskPool::default);
     let output = QcRunOutput {
+        scan: None,
         job: JobType::Optimize,
         program: QcProgram::Dreiding,
         log: "completed before Cancel".into(),

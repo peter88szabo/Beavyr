@@ -121,6 +121,7 @@ pub fn method_name<'a>(method: QcMethod, functional: &'a str) -> &'a str {
         QcMethod::RiMp2 => "mp2",
         QcMethod::Mp2F12 => "mp2-f12",
         QcMethod::CcsdT => "ccsd(t)",
+        QcMethod::Casscf | QcMethod::Nevpt2 => unreachable!("not offered for Psi4"),
         QcMethod::DlpnoCcsdT => "ccsd(t)",
         QcMethod::CcsdTF12 => "ccsd(t)-f12",
         QcMethod::Gfn1
@@ -224,8 +225,8 @@ def write_xyz(path, molecule, comment):
     }
 
     match job {
-        JobType::SinglePoint => text.push_str(
-            "energy, wfn = psi4.energy(METHOD, return_wfn=True)\n             write_xyz(\"final.xyz\", mol, \"Psi4 geometry\")\n",
+        JobType::SinglePoint | JobType::Scan | JobType::Mecp => text.push_str(
+            "energy, wfn = psi4.energy(METHOD, return_wfn=True)\nwrite_xyz(\"final.xyz\", mol, \"Psi4 geometry\")\n",
         ),
         JobType::Gradient => text.push_str(
             r#"grad, wfn = psi4.gradient(METHOD, return_wfn=True)

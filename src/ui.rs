@@ -792,7 +792,7 @@ pub fn ui_panel(
                 Tab::Trajectory.default_size(),
                 "Trajectory",
                 |ui| {
-                    crate::ui_style::group(ui, "Trajectory file", |ui| {
+                    crate::ui_style::group(ui, "", |ui| {
                         if ui
                             .add(crate::ui_style::primary("Open trajectory XYZ…"))
                             .clicked_once()
@@ -850,7 +850,7 @@ pub fn ui_panel(
                         ui.weak("No trajectory loaded.");
                     } else {
                         let total = traj.frames.len();
-                        crate::ui_style::group(ui, "Playback", |ui| {
+                        crate::ui_style::group(ui, "", |ui| {
                             ui.label(format!("Frame {}/{}", traj.current_frame + 1, total));
 
                             let mut frame_display = (traj.current_frame + 1) as i32;
@@ -890,7 +890,7 @@ pub fn ui_panel(
                                     traj.direction = -1;
                                     traj.playing = true;
                                 }
-                                if ui.button("Pause").clicked_once() {
+                                if crate::trajectory::controls::pause_button(ui).clicked_once() {
                                     traj.playing = false;
                                 }
                                 if trajectory::controls::play_button(ui, 1).clicked_once() {
@@ -1975,7 +1975,7 @@ pub fn ui_panel(
         xtb_freq_panel_state.selected_mode = None;
         structure_history.replaced(previous, &mol, &traj, "Conformer");
     }
-    crate::conformer::ui::announce(actions.loaded, &mut ev_changed);
+    actions.announce(&mut ev_changed);
 
     // The calculator opens from the launcher beside the editor. Its modern
     // form can float or dock; finished results use their own summary window.
@@ -2045,6 +2045,38 @@ pub fn ui_panel(
         } else {
             qc_panel.summary_open = false;
         }
+    }
+
+    let previous = if crate::ts_generation::results_window::is_open(ctx, &ts_generation) {
+        structure_history.before(&mol, &traj)
+    } else { None };
+    let (ts_results_rect, ts_result_displayed) = crate::ts_generation::results_window::window(
+        ctx, &mut ts_generation, &mut mol, &mut traj,
+    );
+    if let Some(rect) = ts_results_rect {
+        window_rects.push(rect);
+    }
+    if ts_result_displayed {
+        structure_history.replaced(previous, &mol, &traj, "TS tool structure");
+        xtb_freq_panel_state.selected_mode = None;
+        mol.recompute_bonds(settings.bond_thresh_scale, settings.hbond_cutoff);
+        ev_changed.write(MoleculeChanged::parse_xyz(true));
+        if traj.frames.len() > 1 {
+            ui_layout.open[Tab::Trajectory.index()] = true;
+        }
+    }
+
+    let previous = if crate::qchem_panel::scan_results::is_open(ctx, &qc_task) {
+        structure_history.before(&mol, &traj)
+    } else { None };
+    let (scan_rects, scan_actions) = crate::qchem_panel::scan_results::window(ctx, &qc_task, &mut mol, &mut traj);
+    window_rects.extend(scan_rects);
+    if scan_actions.loaded {
+        structure_history.replaced(previous, &mol, &traj, "Scan point");
+        xtb_freq_panel_state.selected_mode = None;
+        mol.recompute_bonds(settings.bond_thresh_scale, settings.hbond_cutoff);
+        ev_changed.write(MoleculeChanged::parse_xyz(false));
+        if scan_actions.trajectory { ui_layout.open[Tab::Trajectory.index()] = true; }
     }
 
     if let Some(rect) = crate::ts_generation::help::window(ctx, &mut ts_generation.help_open) {

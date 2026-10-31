@@ -29,6 +29,10 @@ use super::job::JobType;
 use super::method::MethodConfig;
 use super::pyscf_method;
 
+#[path = "pyscf_correlated.rs"]
+mod correlated;
+pub use correlated::panel_script_text;
+
 /// The script Beavyr writes into the run directory.
 pub const SCRIPT_FILE: &str = "run_pyscf.py";
 /// The optimisation path, already in Beavyr's own trajectory format.

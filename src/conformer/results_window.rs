@@ -9,6 +9,16 @@ pub(crate) struct ResultActions {
     pub open_trajectory: bool,
 }
 
+impl ResultActions {
+    /// Refresh a preview without resetting the user's zoom, pan or orientation.
+    /// Loading the complete trajectory retains its existing initial camera fit.
+    pub(crate) fn announce(&self, ev_changed: &mut MessageWriter<MoleculeChanged>) {
+        if self.loaded {
+            ev_changed.write(MoleculeChanged::parse_xyz(self.open_trajectory));
+        }
+    }
+}
+
 #[derive(Clone, Default)]
 struct WindowState {
     open: bool,

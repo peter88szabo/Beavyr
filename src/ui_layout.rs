@@ -114,7 +114,7 @@ impl Tab {
             Tab::Trajectory => [400.0, 620.0],
             Tab::Compare => [385.0, 540.0],
             Tab::Measure => [400.0, 640.0],
-            Tab::Surface => [415.0, 660.0],
+            Tab::Surface => [415.0, 726.0],
             Tab::Diagnostics => [400.0, 520.0],
             Tab::Appearance => [415.0, 640.0],
             Tab::Export => [370.0, 520.0],

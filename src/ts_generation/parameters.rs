@@ -78,6 +78,7 @@ impl ReactionKind {
 #[derive(Clone)]
 pub struct Parameters {
     pub algorithm: Algorithm,
+    pub relax_endpoints: bool,
     pub reaction: ReactionKind,
     pub indices: String,
     pub active_atoms: String,
@@ -97,6 +98,7 @@ impl Default for Parameters {
     fn default() -> Self {
         Self {
             algorithm: Algorithm::Rda,
+            relax_endpoints: false,
             reaction: ReactionKind::Bond,
             indices: "1 2".into(),
             active_atoms: String::new(),
