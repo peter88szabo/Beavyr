@@ -26,6 +26,33 @@ fn world() -> World {
 }
 
 #[test]
+fn saved_views_notes_and_frame_energies_survive_project_round_trip() {
+    use crate::saved_views::{AtomLabel, Library, View};
+    let mut world = world();
+    let atoms = vec!["H".to_string()];
+    let labels = vec![AtomLabel { atom: 0, text: "Probe".into() }];
+    let camera = OrbitCamera::default();
+    world.insert_resource(Library {
+        views: vec![View { name: "Front".into(), camera, atoms: atoms.clone(),
+            labels: labels.clone(), note: "Selected orientation".into() }],
+        atoms, labels, note: "Dataset notes".into(), show_labels: true,
+    });
+    world.resource_mut::<TrajectoryState>().frames =
+        crate::trajectory::parse_multi_xyz("1\nE=-0.5 Eh\nH 1 2 3\n").unwrap();
+    let snapshot = Snapshot::capture(&world, Workspace::capture(&egui::Context::default())).unwrap();
+    let loaded: Snapshot = ron::from_str(&ron::ser::to_string(&snapshot).unwrap()).unwrap();
+    let orbitals = loaded.validate().unwrap();
+    world.insert_resource(Library::default());
+    world.resource_mut::<TrajectoryState>().frames.clear();
+    loaded.apply(&mut world, orbitals);
+    let library = world.resource::<Library>();
+    assert_eq!(library.note, "Dataset notes");
+    assert_eq!(library.views[0].name, "Front");
+    assert_eq!(library.views[0].labels[0].text, "Probe");
+    assert_eq!(world.resource::<TrajectoryState>().frames[0].metadata.energy_hartree, Some(-0.5));
+}
+
+#[test]
 fn portable_project_restores_embedded_data_settings_and_camera() {
     let mut world = world();
     let text = include_str!("../../tests/fixtures/behemoth_ch2o_canonicalMO.molden");

@@ -370,11 +370,11 @@ mod tests {
         let original = mol.pos.clone();
         let mut traj = TrajectoryState::default();
         traj.frames = vec![
-            TrajectoryFrame {
+            TrajectoryFrame { metadata: Default::default(),
                 atoms: mol.atoms.clone(),
                 pos: reference,
             },
-            TrajectoryFrame {
+            TrajectoryFrame { metadata: Default::default(),
                 atoms: mol.atoms.clone(),
                 pos: original.clone(),
             },

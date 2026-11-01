@@ -818,7 +818,7 @@ fn load_as_trajectory(
     traj.frames = outcome
         .conformers
         .iter()
-        .map(|conformer| TrajectoryFrame {
+        .map(|conformer| TrajectoryFrame { metadata: crate::trajectory_data::Metadata::energy(conformer.relative_energy_kcal / 627.5094740631, true, format!("Conformer relative_energy_kcal={:.10}", conformer.relative_energy_kcal)),
             atoms: outcome.atoms.clone(),
             pos: conformer
                 .positions_angstrom

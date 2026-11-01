@@ -1,0 +1,162 @@
+   Compiling Beavyr v0.2.1 (/home/peter/DevCode/Beavyr)
+warning: unused import: `PathBuf`
+  --> src/conformer/tstrail.rs:42:23
+   |
+42 | use std::path::{Path, PathBuf};
+   |                       ^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `crate::optimizer::traits::Objective`
+  --> src/conformer/mod.rs:44:5
+   |
+44 | use crate::optimizer::traits::Objective as _;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: value assigned to `energy` is never read
+   --> src/optimizer/minimum_redundant.rs:598:13
+    |
+598 |             energy = old_energy;
+    |             ^^^^^^^^^^^^^^^^^^^ this value is reassigned later and never used
+...
+602 |             energy = obj.energy_gradient(&x, &mut grad_x)?;
+    |             ---------------------------------------------- `energy` is overwritten here before the previous value is read
+    |
+    = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `gnorm`
+   --> src/optimizer/geom_opt.rs:357:13
+    |
+357 |         let gnorm = vec_norm(&grad_x);
+    |             ^^^^^ help: if this is intentional, prefix it with an underscore: `_gnorm`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: value assigned to `grad_x` is never read
+   --> src/optimizer/rda.rs:808:9
+    |
+808 |         grad_x = trial_grad_x;
+    |         ^^^^^^
+    |
+    = help: maybe it is overwritten before being read?
+
+warning: variable `previous_x` is assigned to, but never used
+   --> src/optimizer/spin_crossing.rs:749:9
+    |
+749 |     let mut previous_x = x.clone();
+    |         ^^^^^^^^^^^^^^
+    |
+    = note: consider using `_previous_x` instead
+
+warning: variable `previous_geff` is assigned to, but never used
+   --> src/optimizer/spin_crossing.rs:750:9
+    |
+750 |     let mut previous_geff = vec![0.0; x.len()];
+    |         ^^^^^^^^^^^^^^^^^
+    |
+    = note: consider using `_previous_geff` instead
+
+warning: value assigned to `previous_x` is never read
+   --> src/optimizer/spin_crossing.rs:927:9
+    |
+927 |         previous_x = x;
+    |         ^^^^^^^^^^
+    |
+    = help: maybe it is overwritten before being read?
+
+warning: value assigned to `previous_geff` is never read
+   --> src/optimizer/spin_crossing.rs:928:9
+    |
+928 |         previous_geff = geff;
+    |         ^^^^^^^^^^^^^
+    |
+    = help: maybe it is overwritten before being read?
+
+warning: field `local_optimizer` is never read
+   --> src/conformer/mod.rs:313:9
+    |
+299 | pub struct ConformerOutcome {
+    |            ---------------- field in this struct
+...
+313 |     pub local_optimizer: LocalOptimizer,
+    |         ^^^^^^^^^^^^^^^
+    |
+    = note: `ConformerOutcome` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `wrap` is never used
+   --> src/conformer/constraints.rs:317:8
+    |
+317 | pub fn wrap(angle: f64) -> f64 {
+    |        ^^^^
+
+warning: field `from_conformer` is never read
+   --> src/conformer/tstrail.rs:106:9
+    |
+ 97 | pub struct TransitionStateGuess {
+    |            -------------------- field in this struct
+...
+106 |     pub from_conformer: usize,
+    |         ^^^^^^^^^^^^^^
+    |
+    = note: `TransitionStateGuess` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: field `atoms` is never read
+   --> src/conformer/tstrail.rs:127:9
+    |
+114 | pub struct TrailOutcome {
+    |            ------------ field in this struct
+...
+127 |     pub atoms: Vec<String>,
+    |         ^^^^^
+    |
+    = note: `TrailOutcome` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: function `centroid_excluding` is never used
+   --> src/molecule_builder/builder_ui.rs:213:4
+    |
+213 | fn centroid_excluding(pos: &[Vec3], exclude: usize) -> Option<Vec3> {
+    |    ^^^^^^^^^^^^^^^^^^
+
+warning: function `host` is never used
+    --> src/molecule_builder/builder_ui.rs:4634:8
+     |
+4634 |     fn host() -> (Molecule, ZMatrixBuilderState) {
+     |        ^^^^
+
+warning: function `find_nearest_atom_screen_space` is never used
+ --> src/picking/screen.rs:7:8
+  |
+7 | pub fn find_nearest_atom_screen_space(
+  |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `find_nearest_atom_screen_space_egui` is never used
+  --> src/picking/screen.rs:47:8
+   |
+47 | pub fn find_nearest_atom_screen_space_egui(
+   |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: variant `FiniteDifference` is never constructed
+  --> src/qchem_interfaces/capabilities.rs:28:5
+   |
+22 | pub enum HessianKind {
+   |          ----------- variant in this enum
+...
+28 |     FiniteDifference,
+   |     ^^^^^^^^^^^^^^^^
+   |
+   = note: `HessianKind` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: `Beavyr` (bin "Beavyr" test) generated 18 warnings (run `cargo fix --bin "Beavyr" -p Beavyr --tests` to apply 2 suggestions)
+    Finished `test` profile [optimized + debuginfo] target(s) in 58.49s
+     Running unittests src/main.rs (target/debug/deps/Beavyr-8f8ed93c7f145504)
+
+running 1 test
+test animation_export::render_tests::offscreen_rotation_exports_gif_without_changing_editor ... 2026-11-01T22:04:42.800197Z  INFO bevy_render::renderer: AdapterInfo { name: "AMD Ryzen 9 7900 12-Core Processor (RADV RAPHAEL_MENDOCINO)", vendor: 4098, device: 5710, device_type: IntegratedGpu, device_pci_bus_id: "0000:0f:00.0", driver: "radv", driver_info: "Mesa 26.0.8-1ubuntu0.3", backend: Vulkan, subgroup_min_size: 32, subgroup_max_size: 64, transient_saves_memory: false }
+2026-11-01T22:04:42.894296Z  INFO bevy_pbr::cluster: GPU clustering is supported on this device.
+2026-11-01T22:04:42.894365Z  INFO bevy_render::batching::gpu_preprocessing: GPU preprocessing is fully supported on this device.
+2026-11-01T22:04:42.906799Z  WARN bevy_light: Point lights and/or spot lights are present, but no entity has `ShadowLodOrigin`, and no camera that renders to the window has been found. Consider using the `ShadowLodOrigin` component to set a LOD origin.
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1594 filtered out; finished in 1.23s
+

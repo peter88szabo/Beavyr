@@ -112,7 +112,7 @@ fn trajectory_loading_and_playback_do_not_fill_the_history() {
     let mut current = molecule(1.0);
     let previous = history.before(&current, &traj);
     traj.frames = (0..100)
-        .map(|i| TrajectoryFrame {
+        .map(|i| TrajectoryFrame { metadata: Default::default(),
             atoms: current.atoms.clone(),
             pos: molecule(i as f32).pos,
         })
@@ -224,7 +224,7 @@ fn standalone_xyz_loading_replaces_old_playback_in_the_real_loader() {
     let old = molecule(1.0);
     let mut traj = TrajectoryState {
         frames: vec![
-            TrajectoryFrame {
+            TrajectoryFrame { metadata: Default::default(),
                 atoms: old.atoms.clone(),
                 pos: old.pos.clone()
             };

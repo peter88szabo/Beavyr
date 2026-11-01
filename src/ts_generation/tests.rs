@@ -302,7 +302,7 @@ fn showing_a_guess_stops_old_playback_and_keeps_reactive_bonds_dynamic() {
     };
     let (endpoint, _) = endpoints();
     assert!(show_frames(
-        vec![TrajectoryFrame {
+        vec![TrajectoryFrame { metadata: Default::default(),
             atoms: endpoint.atoms,
             pos: endpoint.positions
         }],
@@ -646,7 +646,7 @@ fn captured_endpoints_stay_independent_while_the_viewer_is_edited() {
     let mut traj = TrajectoryState::default();
     for stored in [&a, &b] {
         assert!(show_frames(
-            vec![TrajectoryFrame {
+            vec![TrajectoryFrame { metadata: Default::default(),
                 atoms: stored.atoms.clone(),
                 pos: stored.positions.clone(),
             }],

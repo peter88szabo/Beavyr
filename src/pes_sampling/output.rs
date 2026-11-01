@@ -24,20 +24,19 @@ pub struct SamplingOutput {
     pub partner_sizes: Vec<usize>,
 }
 impl SamplingOutput {
+    pub fn sample_comment(&self, i: usize) -> String {
+        let s = &self.samples[i];
+        let mut text = format!("PES_sample={} seed={} phases=uniform_0_2pi", i+1, self.seed);
+        if let Some(d) = s.distance {
+            text.push_str(&format!(" COM_distance_A={d:.10} distance_index={} sample_at_distance={} partner_A_atoms={}", s.distance_index.unwrap_or(0), s.sample_at_distance.unwrap_or(0), self.partner_sizes.first().copied().unwrap_or(0)));
+        }
+        text
+    }
+
     pub fn write_xyz(&self, mut writer: impl Write) -> Result<(), String> {
         for (i, s) in self.samples.iter().enumerate() {
             writeln!(writer, "{}", self.atoms.len()).map_err(|e| e.to_string())?;
-            write!(
-                writer,
-                "PES_sample={} seed={} phases=uniform_0_2pi",
-                i + 1,
-                self.seed
-            )
-            .map_err(|e| e.to_string())?;
-            if let Some(d) = s.distance {
-                write!(writer," COM_distance_A={d:.10} distance_index={} sample_at_distance={} partner_A_atoms={}",s.distance_index.unwrap(),s.sample_at_distance.unwrap(),self.partner_sizes[0]).map_err(|e|e.to_string())?;
-            }
-            writeln!(writer).map_err(|e| e.to_string())?;
+            writeln!(writer, "{}", self.sample_comment(i)).map_err(|e| e.to_string())?;
             for (a, p) in self.atoms.iter().zip(s.coordinates.chunks_exact(3)) {
                 writeln!(
                     writer,
@@ -81,7 +80,8 @@ impl SamplingOutput {
         let frames = self
             .samples
             .iter()
-            .map(|s| TrajectoryFrame {
+            .enumerate()
+            .map(|(i,s)| TrajectoryFrame { metadata: crate::trajectory_data::Metadata::comment(self.sample_comment(i)),
                 atoms: self.atoms.clone(),
                 pos: s
                     .coordinates

@@ -452,6 +452,7 @@ pub(crate) fn window(
                     let mut save_error = None;
                     if let Some(out) = &state.output {
                         ui.horizontal(|ui| {
+                            crate::dataset_inspector::button(ui, true);
                             if ui.button("Save XYZ…").clicked_once() {
                                 if let Some(path) = rfd::FileDialog::new()
                                     .add_filter("XYZ trajectory", &["xyz"])

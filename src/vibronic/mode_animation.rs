@@ -115,7 +115,7 @@ pub fn controls(ui: &mut egui::Ui, a: &mut Animation, ground: &StateModes, excit
                 60,
             );
             a.pending = Some((
-                TrajectoryFrame {
+                TrajectoryFrame { metadata: Default::default(),
                     atoms: state.atoms.clone(),
                     pos,
                 },

@@ -987,7 +987,7 @@ pub(crate) fn energy_history_window(
                 ui.available_width().max(200.0),
                 ui.available_height().max(120.0),
             );
-            let (rect, response) = ui.allocate_exact_size(desired_size, egui::Sense::hover());
+            let (rect, response) = ui.allocate_exact_size(desired_size, egui::Sense::click());
             let painter = ui.painter_at(rect);
             let plot_color = ui.visuals().text_color();
             let grid_color = plot_color.gamma_multiply(0.25);
@@ -1078,6 +1078,9 @@ pub(crate) fn energy_history_window(
                     const HOVER_RADIUS: f32 = 14.0;
                     if dist <= HOVER_RADIUS {
                         let point = history[idx];
+                        if response.clicked_once() {
+                            crate::trajectory_analysis::energy_point_clicked(ctx, history.iter().map(|p|p.energy_hartree).collect(), idx);
+                        }
                         let highlight_color = ui.visuals().strong_text_color();
                         painter.circle_stroke(
                             points[idx],

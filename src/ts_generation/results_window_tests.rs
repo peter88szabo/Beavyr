@@ -27,7 +27,7 @@ fn output(algorithm: Algorithm) -> GenerationOutput {
         profile_dat: None,
         frames: [1.0, 2.0]
             .into_iter()
-            .map(|x| TrajectoryFrame {
+            .map(|x| TrajectoryFrame { metadata: Default::default(),
                 atoms: atoms.clone(),
                 pos: vec![Vec3::ZERO, Vec3::X * x],
             })

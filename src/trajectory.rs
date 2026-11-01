@@ -32,6 +32,8 @@ pub enum PlaybackMode {
 #[derive(Clone)]
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct TrajectoryFrame {
+    #[serde(default)]
+    pub metadata: crate::trajectory_data::Metadata,
     pub atoms: Vec<String>,
     pub pos: Vec<Vec3>,
 }
@@ -172,10 +174,11 @@ pub fn parse_multi_xyz(text: &str) -> Result<Vec<TrajectoryFrame>, String> {
             expected_count = Some(count);
         }
 
+        let mut comment = String::new();
         // Optional comment line: consume one line unless it looks like a coordinate line.
         if let Some((_, next)) = lines.peek() {
             if next.trim().is_empty() || !looks_like_coord(next) {
-                let _ = lines.next();
+                comment = lines.next().unwrap().1.to_string();
             }
         }
 
@@ -230,7 +233,7 @@ pub fn parse_multi_xyz(text: &str) -> Result<Vec<TrajectoryFrame>, String> {
             frame_pos.push(Vec3::new(x, y, z));
         }
 
-        frames.push(TrajectoryFrame {
+        frames.push(TrajectoryFrame { metadata: crate::trajectory_data::Metadata::comment(comment),
             atoms: frame_atoms,
             pos: frame_pos,
         });
@@ -708,7 +711,7 @@ mod default_tests {
     #[test]
     fn default_playback_stops_at_the_end_in_both_directions() {
         let mut traj = TrajectoryState::default();
-        traj.frames = vec![TrajectoryFrame { atoms: vec!["H".into()], pos: vec![Vec3::ZERO] }; 2];
+        traj.frames = vec![TrajectoryFrame { metadata: Default::default(), atoms: vec!["H".into()], pos: vec![Vec3::ZERO] }; 2];
         assert_eq!(traj.mode, PlaybackMode::Once);
         traj.current_frame = 1;
         traj.playing = true;

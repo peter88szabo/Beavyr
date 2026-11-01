@@ -122,7 +122,7 @@ fn results_body(
                     })
                     .collect();
                 displayed = show_frames(
-                    vec![TrajectoryFrame {
+                    vec![TrajectoryFrame { metadata: Default::default(),
                         atoms: output.guess.atoms.clone(),
                         pos: positions,
                     }],

@@ -1250,7 +1250,7 @@ pub fn animate_mode(
             let pos = (0..natoms)
                 .map(|i| coords_angstrom[i] + displacement[i] * scale)
                 .collect();
-            TrajectoryFrame {
+            TrajectoryFrame { metadata: Default::default(),
                 atoms: atoms.to_vec(),
                 pos,
             }
@@ -1272,7 +1272,7 @@ pub fn stop_mode_animation(
     coords_angstrom: &[Vec3],
 ) {
     traj.playing = false;
-    traj.frames = vec![TrajectoryFrame {
+    traj.frames = vec![TrajectoryFrame { metadata: Default::default(),
         atoms: atoms.to_vec(),
         pos: coords_angstrom.to_vec(),
     }];
@@ -2878,8 +2878,8 @@ mod tests {
         let mut panel = XtbFreqPanelState::default();
         let mut traj = TrajectoryState::default();
         traj.frames = vec![
-            TrajectoryFrame { atoms: vec!["C".into()], pos: vec![Vec3::ZERO] },
-            TrajectoryFrame { atoms: vec!["C".into()], pos: vec![Vec3::X] },
+            TrajectoryFrame { metadata: Default::default(), atoms: vec!["C".into()], pos: vec![Vec3::ZERO] },
+            TrajectoryFrame { metadata: Default::default(), atoms: vec!["C".into()], pos: vec![Vec3::X] },
         ];
         traj.playing = true;
         // No mode was ever animated from this panel.

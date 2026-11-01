@@ -159,11 +159,11 @@ fn spectrum_cancellation_returns_no_partial_result() {
 fn animation_closure_restores_equilibrium_and_leaves_other_trajectories() {
     use crate::trajectory::{TrajectoryFrame, TrajectoryState};
     use bevy::prelude::Vec3;
-    let eq = TrajectoryFrame {
+    let eq = TrajectoryFrame { metadata: Default::default(),
         atoms: vec!["H".into()],
         pos: vec![Vec3::ZERO],
     };
-    let displaced = TrajectoryFrame {
+    let displaced = TrajectoryFrame { metadata: Default::default(),
         atoms: eq.atoms.clone(),
         pos: vec![Vec3::X],
     };

@@ -2,7 +2,7 @@
 mod input;
 pub mod calculation;
 mod output;
-mod overlap;
+pub(crate) mod overlap;
 mod sampling;
 mod state;
 pub mod ui;

@@ -1,0 +1,140 @@
+Beavyr viewer features — 2026-11-01
+=================================
+
+Scope
+-----
+Implemented the requested animation export first, trajectory plots, dataset
+inspection/filtering, saved views/annotations, and side-by-side comparison last.
+The request to "import as GIF/MP4" was treated as exporting a Beavyr animation
+to those formats, as explained during implementation.
+
+1. Animation export
+-------------------
+Open Export animation from Structure or Trajectory. Export a selected trajectory
+range/stride (including vibrational animations), or rotate the current molecule.
+Choose dimensions, frame rate and GIF looping. Capturing uses a private scene,
+camera and render layer; it does not move the editor molecule or camera.
+
+GIF is streamed one frame at a time with per-frame median-cut palettes and LZW
+compression. The direct weezl dependency was already present transitively in
+Cargo.lock. No external GIF program or network dependency download was needed.
+Fractional centisecond frame rates distribute delays to preserve total duration.
+
+MP4 streams raw RGBA frames to the user-selected FFmpeg executable (or ffmpeg
+on PATH), with H.264/libx264 and yuv420p. It needs even dimensions. FFmpeg runs
+directly, without a shell, and is restricted to four encoding threads. Missing
+FFmpeg and process errors appear through the copyable error popup. FFmpeg is
+not installed or configured by this change.
+
+Output is written to an exclusive temporary sibling file and moved into place
+only after successful completion. Cancellation kills FFmpeg if running and
+removes incomplete output. Existing destinations survive encoding failures.
+
+Rendering scope: atoms/bonds and background, with the current element colours,
+representation and material settings. UI, orbital surfaces, hydrogen-bond and
+measurement overlays and custom labels are not included. Line representations
+use thin cylinders. GIF uses 256 colours per frame and centisecond timing.
+The FFmpeg path is remembered for the current session, not saved globally.
+
+2. Trajectory analysis and clicking energy points
+------------------------------------------------
+Trajectory analysis opens a resizable window for energy, distance, angle,
+dihedral or aligned RMSD versus frame, or a histogram. CSV can be copied/saved.
+Atom indices are 1-based. Energies support kcal/mol (default), kJ/mol or Eh and
+first/minimum/last available energy references.
+
+Clicking a point selects the corresponding frame and stops playback without
+resetting the camera. Missing energies keep their original frame indices.
+Explicit energy units and supported xTB comments are parsed; arbitrary numeric
+comments are not assumed to be energies. Scan and conformer output retain
+absolute/relative energy metadata. Mixing absolute and relative energies in
+one analysis is rejected. Older projects can omit the new frame metadata.
+
+The existing QC energy-history plot also selects a trajectory frame when its
+energy sequence matches the currently loaded path. A stale/unrelated energy
+history cannot silently select a frame from another trajectory.
+
+3. Dataset inspection
+---------------------
+Inspect dataset is available in Trajectory and PES Sampling results. Analyse
+overlaps with the existing Pebble thresholds (H-H 0.4 A, H-other 0.5 A,
+other-other 0.8 A), and duplicates with adjustable aligned RMSD. Atom identities
+and their order must match; symmetry/permutation matching is not performed.
+A deterministic farthest-point selection can retain a diverse subset.
+
+Edit selection, undo it, preview frames, load the selection as a trajectory,
+copy its CSV manifest, or save selected.xyz plus selection.csv to a new folder.
+The original XYZ coordinate text is retained where available, including raw
+PES sampling output; provenance and selection reasons are exported. Source
+files are unchanged. Analysis/selection runs in a cancellable background task.
+
+Testing exposed a rank-one alignment issue for rotated diatomics in the reused
+Kabsch helper. A separate molecular_alignment wrapper now handles atoms and
+linear geometries analytically for these new features. The existing RMSD
+implementation and scientific optimization algorithms were not modified.
+
+4. Saved views and annotations
+------------------------------
+Saved views / notes in Structure stores camera orientations, notes and custom
+atom labels. These travel in the existing .beavyr project format, with defaults
+for older projects. Labels follow matching ordered atom lists across frames;
+they do not establish chemical identity between unrelated same-formula files.
+
+5. Side-by-side molecular views
+------------------------------
+Open Side by side in the RMSD panel. Each pane can capture the editor molecule,
+load XYZ/PDB/mmCIF or use the current trajectory. Independent cameras allow
+rotation, pan, zoom and fit; rotation/zoom can be synchronized. Align B to A
+uses matching atom order, reports RMSD and supports undo. Alignment and camera
+changes apply only to the private comparison scenes. Closing releases their
+render targets/entities. The window can resize horizontally and vertically.
+
+Validation
+----------
+All compilation, tests and application checks used taskset -c 0-3 and Cargo
+-j 4; the test harness used --test-threads=1.
+
+Full automated suite: 1,550 passed, 0 failed, 44 ignored (before adding the
+separately invoked GPU test). Includes cancellation/destination preservation,
+GIF format/LZW/colour/timing, missing FFmpeg, invalid MP4 dimensions, frame
+selection with missing energies, units, dataset precision/provenance, duplicate
+and overlap filtering, proper linear alignment, and project round-trip of
+saved views, labels, notes and frame energies.
+
+The tiny encoder fixture was also decoded independently with Pillow: correct
+dimensions, frame count, timing, looping and pixel colours.
+
+A separate GUI process started successfully using the AMD Vulkan renderer and
+loaded examples/moldyn_trajectory.xyz (163 frames, 27 atoms). It exited cleanly
+before interactive window checks finished. This is startup/import evidence,
+not a complete manual validation of every new control.
+
+FFmpeg was not found on PATH. A real MP4 encode has therefore not been verified
+on this machine; its argument, validation and error-handling paths are tested.
+No claim is made that Windows/macOS rendering or FFmpeg encoding was tested.
+
+The separately invoked off-screen GPU test passed: the real production capture
+and encoding pipeline exported four rotation frames at 160 x 120. It asserted
+that editor coordinates and camera radius were unchanged. Independent Pillow
+decoding confirmed four 50 ms frames, nonempty rendered molecules in every
+frame (142-186 distinct colours), and different successive orientations. The
+four-frame contact sheet was also visually inspected. This opt-in GPU test is
+ignored in ordinary runs, bringing the default ignored count to 45.
+
+GPU diagnostic: the windowless test emitted Bevy's ShadowLodOrigin warning
+because it has no window camera; capture completed successfully.
+
+Evidence files are in reports/testing_evidence_2026-11-01/viewer_features/:
+unit-tests.log, gpu-capture.log, build.log, gui-startup.log, gif-decode.json,
+rotation.gif and rotation-frames.png. The normal build passes with 42 existing
+warnings; no new feature-module warnings were reported. git diff --check passes.
+
+Reversibility and scope control
+-------------------------------
+No commit was made. Pre-edit backups are under
+target/change-backups/viewer-features-2026-11-01/.
+New implementation is in named files, not mod.rs. Existing calculation/export
+work was preserved. No ORCA, MPI environment or Python-launch settings were
+changed. Source changes outside the new modules principally add UI buttons,
+plugin declarations, project persistence and frame metadata at construction
+sites. README describes access paths and optional FFmpeg configuration.

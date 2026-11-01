@@ -201,7 +201,7 @@ fn load(
     traj: &mut crate::trajectory::TrajectoryState,
 ) -> bool {
     let frames = indices
-        .map(|i| crate::trajectory::TrajectoryFrame {
+        .map(|i| crate::trajectory::TrajectoryFrame { metadata: crate::trajectory_data::Metadata::energy(report.points[i].energy, false, format!("Scan point {} E = {:.14} Eh", i+1, report.points[i].energy)),
             atoms: report.atoms.clone(),
             pos: report.points[i]
                 .coordinates

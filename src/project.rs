@@ -231,6 +231,8 @@ impl Orbitals {
 #[derive(Clone, Serialize, Deserialize)]
 struct Snapshot {
     #[serde(default)]
+    saved_views: crate::saved_views::Library,
+    #[serde(default)]
     topology: Option<crate::molecule_builder::topology::Topology>,
     version: u32,
     application: String,
@@ -257,6 +259,7 @@ impl Snapshot {
         let orbitals = world.resource::<OrbitalState>();
         let spectrum = world.resource::<UvVisState>();
         Ok(Self {
+            saved_views: world.get_resource::<crate::saved_views::Library>().cloned().unwrap_or_default(),
             version: VERSION,
             application: env!("CARGO_PKG_VERSION").into(),
             topology: mol.topology.clone(),
@@ -288,6 +291,7 @@ impl Snapshot {
                 VERSION
             );
         }
+        self.saved_views.validate().map_err(anyhow::Error::msg)?;
         validate_geometry(&self.atoms, &self.positions)?;
         if self.topology.as_ref().is_some_and(|t| !t.valid_for(&self.atoms)) { bail!("Invalid saved residue topology"); }
         for frame in &self.trajectory.frames {
@@ -376,6 +380,7 @@ impl Snapshot {
         });
         world.insert_resource(self.settings);
         world.insert_resource(self.camera);
+        world.insert_resource(self.saved_views);
         world.insert_resource(self.trajectory);
         world.insert_resource(self.calculation);
         world.insert_resource(self.optimization);

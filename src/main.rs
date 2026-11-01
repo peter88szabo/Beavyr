@@ -2,6 +2,8 @@
 use bevy::prelude::*;
 use bevy_egui::{EguiGlobalSettings, EguiPlugin, EguiPrimaryContextPass};
 
+mod animation_export;
+mod isolated_scene;
 mod bond_order;
 mod calculation_geometry;
 mod camera;
@@ -34,6 +36,13 @@ mod scene;
 mod settings;
 mod spectrum;
 mod trajectory;
+mod trajectory_data;
+mod trajectory_analysis;
+mod dataset_filter;
+mod dataset_inspector;
+mod saved_views;
+mod comparison_view;
+mod molecular_alignment;
 mod structure_history;
 mod ts_generation;
 mod ui;
@@ -207,6 +216,11 @@ fn main() {
             Startup,
             (setup, cli::load_command_line_files, center_camera_on_startup).chain(),
         )
+        .add_plugins(animation_export::Plugin)
+        .add_plugins(trajectory_analysis::Plugin)
+        .add_plugins(dataset_inspector::Plugin)
+        .add_plugins(saved_views::Plugin)
+        .add_plugins(comparison_view::Plugin)
         // egui pass
         .add_systems(EguiPrimaryContextPass, ui::ui_panel)
         .add_systems(

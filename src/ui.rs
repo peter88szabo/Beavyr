@@ -418,6 +418,8 @@ pub fn ui_panel(
 
                     ui.horizontal_wrapped(|ui| {
                         crate::project::menu(ui, &mut project);
+                        crate::animation_export::button(ui);
+                        crate::saved_views::button(ui);
                         if ui.add(crate::ui_style::primary("Open structure…")).clicked_once() {
                             let dlg = crate::recent_dir::open().add_filter("Structures", &["xyz", "pdb", "ent", "cif", "mmcif"]);
                             if let Some(path) = crate::recent_dir::pick_file(dlg) {
@@ -952,6 +954,9 @@ pub fn ui_panel(
                             });
 
                             trajectory::controls::mode_row(ui, &mut traj);
+                            crate::animation_export::button(ui);
+                            crate::trajectory_analysis::button(ui);
+                            crate::dataset_inspector::button(ui, false);
                         });
                         crate::ui_style::group(ui, "Frame overlays", |ui| {
                             ui.horizontal_wrapped(|ui| {
@@ -1040,6 +1045,7 @@ pub fn ui_panel(
                 Tab::Compare.default_size(),
                 "Structure Comparison (RMSD)",
                 |ui| {
+                    crate::comparison_view::button(ui);
                     rmsd_panel(ui, &mut rmsd_state, &mut traj, &mut mol);
                 },
             );

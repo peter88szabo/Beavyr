@@ -90,7 +90,7 @@ fn endpoint_row(
             {
                 if let Some(endpoint) = endpoint.as_ref() {
                     displayed = show_frames(
-                        vec![TrajectoryFrame {
+                        vec![TrajectoryFrame { metadata: Default::default(),
                             atoms: endpoint.atoms.clone(),
                             pos: endpoint.positions.clone(),
                         }],

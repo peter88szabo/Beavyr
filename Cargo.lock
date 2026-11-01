@@ -16,6 +16,7 @@ dependencies = [
  "rfd",
  "ron",
  "serde",
+ "weezl",
 ]
 
 [[package]]

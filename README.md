@@ -428,6 +428,52 @@ solid overlay and a transparent "ghost" overlay, each with its own stride, so
 a 100-frame optimisation can be shown as every tenth frame ghosted behind the
 final geometry.
 
+### Animation export and trajectory analysis
+
+**Export animation…**, in the Structure and Trajectory panels, saves the loaded
+trajectory/vibration or a turntable rotation of the current molecule. Choose
+GIF or MP4, image dimensions, frame rate and frame range/stride. GIF export is
+built in; its LZW encoder uses the small `weezl` dependency (also already used
+indirectly by the image stack). MP4 requires an FFmpeg executable with the
+`libx264` encoder: use FFmpeg from PATH or select its executable in the export
+window. No shell activation or FFmpeg installation is performed by Beavyr.
+MP4 dimensions must be even. Export can be cancelled and incomplete output is
+discarded. The main molecule and camera are not changed during capture.
+
+Exports render molecular atoms/bonds and the chosen background. They do not
+include UI panels, orbital surfaces, measurement overlays or custom labels.
+Line bonds are approximated with thin cylinders. GIF is limited to 256 colours
+per frame and centisecond timing; MP4 supports smoother colour gradients.
+
+**Trajectory analysis…** in Trajectory plots energy, distance, angle, dihedral or aligned
+RMSD, and can show distributions or copy/save CSV. Atom indices are 1-based.
+Click a plotted point to display that frame without resetting the camera.
+Missing energies leave gaps instead of shifting frame indices. Energies are
+read from explicit XYZ comment fields/units or retained calculation results;
+unlabelled numbers are not guessed to be energies. Relative energies can use
+the first, minimum or last available value as reference. An existing QC energy
+plot also selects a frame when its energy sequence matches the loaded path.
+
+### Dataset inspection, saved views and comparison
+
+**Inspect dataset…**, in Trajectory and PES Sampling results, opens a separate resizable
+window. It detects short contacts using the Pebble H–H/H–other/other–other
+cutoffs and aligned-RMSD duplicates, with editable thresholds. Atom identity
+and order must match for RMSD comparisons; atom permutations are not searched.
+Selection is editable/undoable, and a diverse subset can be selected by greedy
+farthest-point sampling. Load a selection as a trajectory or save it to a new
+folder containing `selected.xyz` and `selection.csv`. Original XYZ coordinate
+text is retained when available; the manifest records source frames and
+exclusion reasons. Filtering does not modify the source file.
+
+**Saved views / notes…** in Structure stores named camera orientations, notes and atom
+labels. Save a `.beavyr` project to keep these between sessions. Labels follow
+the ordered atoms of matching frames. **Side by side…** in the RMSD panel opens
+two independent molecular views: capture the current molecule, load a file or
+use the current trajectory in either pane. Rotate, zoom, pan, fit or align B to
+A, optionally synchronizing rotation/zoom. Alignment can be undone and never
+modifies the molecule in the main editor.
+
 ### Vibrations
 
 Animate any normal mode at a chosen amplitude and frame rate — the fastest way

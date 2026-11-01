@@ -1,0 +1,20 @@
+{
+  "size": [
+    160,
+    120
+  ],
+  "frames": 4,
+  "durations_ms": [
+    50,
+    50,
+    50,
+    50
+  ],
+  "distinct_colors": [
+    186,
+    142,
+    171,
+    175
+  ],
+  "frame_1_differs_from_frame_2": true
+}
