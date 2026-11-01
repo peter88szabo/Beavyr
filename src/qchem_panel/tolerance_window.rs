@@ -183,7 +183,7 @@ impl Editor {
 pub(super) fn button(ui: &mut egui::Ui, panel: &QcPanelState, running: bool) {
     if let Some(target) = target(panel) {
         if ui
-            .add_enabled(!running, egui::Button::new("Tolerances…"))
+            .add_enabled(!running, egui::Button::new("Tolerances"))
             .clicked_once()
         {
             ui.ctx()

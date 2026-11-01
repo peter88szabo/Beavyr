@@ -757,20 +757,29 @@ fn resources_row(ui: &mut egui::Ui, panel: &mut QcPanelState, running: bool) {
 }
 
 fn optional_settings(ui: &mut egui::Ui, panel: &mut QcPanelState, running: bool) {
-    egui::CollapsingHeader::new("Advanced options")
-        .id_salt("modern_qc_advanced")
-        .show(ui, |ui| {
-            wavefunction_row(ui, panel, running);
-            if panel.program == QcProgram::Orca {
-                ui.label("Extra keywords");
-                ui.add_enabled(
-                    !running,
-                    egui::TextEdit::singleline(&mut panel.config.orca_extra)
-                        .desired_width(f32::INFINITY)
-                        .hint_text("e.g. TightSCF CPCM(water)"),
-                );
+    let orbitals = !spectrum_controls::active(panel)
+        && !matches!(panel.job, JobType::Scan | JobType::Mecp);
+    ui.horizontal(|ui| {
+        tolerance_window::button(ui, panel, running);
+        if orbitals {
+            if ui.add_enabled(!running,
+                egui::Button::new("Write orbitals").selected(panel.wavefunction))
+                .on_hover_text("Write a Molden file, load it into Surface Tools, and offer it to save.")
+                .clicked_once()
+            {
+                panel.wavefunction = !panel.wavefunction;
             }
-        });
+        }
+    });
+    if panel.program == QcProgram::Orca {
+        ui.label("Extra keywords");
+        ui.add_enabled(
+            !running,
+            egui::TextEdit::singleline(&mut panel.config.orca_extra)
+                .desired_width(f32::INFINITY)
+                .hint_text("e.g. TightSCF CPCM(water)"),
+        );
+    }
 }
 
 fn start_label(job: JobType) -> &'static str {
@@ -1021,9 +1030,8 @@ fn contents(
                 }
                 if panel.job == JobType::Mecp { super::super::mecp_controls::settings(ui, panel, task); }
                 if job::search::active(panel.job) { super::super::geometry_search_controls::settings(ui, panel, task); }
-                tolerance_window::button(ui, panel, task.is_running());
+                optional_settings(ui, panel, task.is_running());
                 super::super::scan_results::reopen_button(ui, task);
-                if !spectrum_controls::active(panel) && !matches!(panel.job, JobType::Scan | JobType::Mecp) { optional_settings(ui, panel, task.is_running()); }
                 if panel.show_warnings {
                     if let Ok((_, warnings)) =
                         validate_electronic_state(mol, panel.charge, panel.multiplicity)

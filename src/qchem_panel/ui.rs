@@ -150,31 +150,6 @@ fn excited_state_row(ui: &mut egui::Ui, panel: &mut QcPanelState, running: bool)
     );
 }
 
-/// The toggle that also writes the orbitals.
-///
-/// Every program can produce a Molden file, but each by its own route: ORCA
-/// through a converter run afterwards, the others from inside the generated
-/// script. What they have in common is that none does it unasked, which is why
-/// this is a toggle rather than something always on -- for ORCA it is a second
-/// process, and for the correlated methods the file is large.
-fn wavefunction_row(ui: &mut egui::Ui, panel: &mut QcPanelState, running: bool) {
-    ui.horizontal(|ui| {
-        ui.add_enabled(
-            !running,
-            egui::Checkbox::new(&mut panel.wavefunction, "Write orbitals (Molden)"),
-        );
-    });
-    if panel.wavefunction {
-        ui.label(
-            egui::RichText::new(
-                "Loaded into Surface Tools when the run finishes, and offered to save.",
-            )
-            .small()
-            .weak(),
-        );
-    }
-}
-
 /// Both presentations launch through the same calculation path.
 fn start_run(
     ctx: &egui::Context,
