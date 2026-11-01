@@ -1,0 +1,106 @@
+Vibronic analysis implementation and validation — 2026-11-01
+
+Scope
+Added UV-Vis > Vibronic analysis, opening an independent window resizable in
+both dimensions. It can open before any TD-DFT output is loaded, retain results
+when closed, and reopen from the same button. All implementation is in named
+files under src/vibronic; mod.rs contains declarations/reexports only.
+
+Implemented calculations
+- Franck–Condon mode activities from a ground-state Hessian and an excited-state
+  gradient evaluated at that same geometry: projected gradients, dimensionless
+  displacements, Huang–Rhys factors and reorganisation energies.
+- Relative resonance-Raman mode intensities in Behemoth's short-time approximation.
+- Zero-temperature absorption band from independent displaced harmonic oscillators,
+  using the ground-state frequencies. Vertical energy, grid spacing and maximum
+  quanta per mode are configurable. A loaded UV-Vis root can supply the energy
+  through an explicit selection. The gradient must belong to that chosen state.
+- Duschinsky rotation J and dimensionless displacement K from two Hessians, with
+  mass-weighted alignment, mode correspondences, overlaps and participation ratios.
+- Interactive plots for Raman activities, Huang–Rhys factors and the absorption
+  band, plus a J-squared heat map with numerical hover readouts.
+- Copy data / Save data export provenance, mode tables, the complete signed J
+  matrix and K, and absorption-bin probabilities where available.
+
+Inputs and safeguards
+ORCA .hess retains its geometry and isotope masses. A geometry-free Turbomole
+$hessian requires a matching single-frame XYZ in Angstrom. Gradient inputs accept
+ORCA .engrad and single-cycle Turbomole $grad, including Fortran D exponents.
+Gradient coordinates must match the Hessian after rigid mass-weighted alignment;
+the gradient is rotated into that frame as well. Atom order and, for two Hessians,
+isotope masses must agree. Dummy atoms are rejected for existing Hessians: removing
+rows/atoms would invalidate the supplied Hessian correspondence.
+
+Translations/rotations are projected out. Imaginary modes are excluded with an
+explicit warning; the positive-frequency cutoff defaults to zero. Large residual
+gradient components are reported. Invalid files/errors appear in the existing
+copyable error popup. The calculation runs off the UI thread and preserves the
+previous result if a new analysis fails.
+
+Band generation refuses oversized grids/work estimates and rejects a quantum
+cutoff retaining less than 99.9% of the joint population, instead of silently
+renormalising a substantially truncated progression. If the band fails, the
+valid mode activities remain available and the reason appears in a popup.
+
+Source and numerical correction
+The core routines and analytical tests were adapted from:
+/home/peter/DevCode/Behemoth/src/normalmode/vibronic/
+  franck_condon.rs, duschinsky.rs, band_shape.rs, tests.rs, band_shape_tests.rs
+Behemoth itself was not edited during this task.
+
+The imported Duschinsky alignment originally used power iteration starting with
+quaternion (1,0,0,0). For an exact half-turn this seed can be orthogonal to the
+largest eigenvector. Beavyr's existing symmetric eigensolver now solves all four
+quaternion eigenvectors; the largest eigenvalue supplies the rotation. An exact
+180-degree rotation plus translation is covered by a regression test checking
+both aligned coordinates and gradient components. The J/K equations are unchanged.
+Additional validation guards protect invalid indices, masses and nonfinite data.
+
+Existing FeAcac3 exploratory/ignored tests and their old helper implementation
+were preserved in test-only legacy.rs; production uses the imported implementation.
+No dependencies were added, and no changes were committed.
+
+Model limits
+Raman values are relative activities, not absolute cross-sections or a
+laser-frequency-dependent resonance model. The absorption band has no hot bands,
+Herzberg–Teller term, Duschinsky mixing or excited-state frequency changes.
+Duschinsky analysis is a separate diagnostic, not an assertion that those effects
+have been included in the plotted absorption band. Inputs are supplied by the
+user; this window does not launch new excited-state gradient/Hessian calculations.
+
+Validation commands (all limited to CPU IDs 0–3)
+  cargo check --offline --locked -j 4
+  cargo test --offline --locked -j 4 vibronic:: -- --test-threads=1
+  env XDG_CONFIG_HOME=/tmp/beavyr-vibronic-test-config OMP_NUM_THREADS=1 \
+      OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 \
+      cargo test --offline --locked -j 4 -- --test-threads=1
+Each command above is invoked with taskset -c 0-3.
+
+Validation status
+Initial compile check: passed.
+Initial focused tests: 26 passed, 0 failed, 8 ignored.
+Full regression suite: 1493 passed, 0 failed, 43 ignored (16.83 s test execution).
+Application build: passed (1 min 26 s), with 38 existing warnings and no warnings
+from the new vibronic files.
+Final focused rerun after UI helper extraction: test result: ok. 28 passed; 0 failed; 8 ignored; 0 measured; 1500 filtered out; finished in 0.18s
+Whitespace validation: git diff --check passed.
+Build command: taskset -c 0-3 cargo build --offline --locked -j 4.
+
+Coverage includes independent closed-form FC/Raman checks, Poisson band
+probabilities/moments/normalisation, Duschinsky identity/orthogonality/rigid-motion
+invariance, displaced geometries, invalid inputs and allocation guards; headless
+window opening and mouse-driven horizontal/vertical resizing; real supplied ORCA
+Hessian/gradient inputs; an H2 Hessian with XYZ units and cutoff-tail checks.
+The real example gradient is an input/plumbing test, not a claim that the example
+is a physically prepared ground-to-excited Franck–Condon pair.
+
+No manual desktop visual inspection or new external quantum-chemistry run has
+been performed for this feature. Existing ignored tests needing unavailable
+external backends/data remain ignored.
+
+Reversibility
+Original edited files were copied before changes to:
+  target/change-backups/vibronic-2026-11-01/src/
+New files are confined to src/vibronic and this report. Existing integration
+changes are confined to src/main.rs, src/ui.rs, src/uvvis/ui.rs and the vibronic
+module declarations. No other application behaviour was intentionally changed.

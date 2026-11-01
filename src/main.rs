@@ -165,6 +165,7 @@ fn main() {
         .init_resource::<conformer::ConformerRun>()
         .init_resource::<ts_generation::TsGeneration>()
         .init_resource::<pes_sampling::PesSampling>()
+        .init_resource::<vibronic::VibronicState>()
         .init_resource::<structure_history::StructureHistory>()
         .init_resource::<measurements::Measurements>()
         .init_resource::<DiagnosticsCache>()

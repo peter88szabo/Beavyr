@@ -315,6 +315,9 @@ fn panel_body(
                 state.spectrum_window_open = false;
             }
         });
+        if ui.button("Vibronic analysis").clicked_once() {
+            crate::vibronic::ui::open(ui.ctx());
+        }
         ui.small("Existing ORCA TD-DFT output, including full TD-DFT, is supported.");
     });
     crate::ui_style::card(ui).show(ui, |ui| {

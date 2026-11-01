@@ -172,6 +172,7 @@ pub fn ui_panel(
             ResMut<crate::qchem_panel::run::QcRunTask>,
             ResMut<crate::project::ProjectState>,
             ResMut<crate::pes_sampling::PesSampling>,
+            ResMut<crate::vibronic::VibronicState>,
         ),
     ),
 ) {
@@ -194,7 +195,7 @@ pub fn ui_panel(
         mut uvvis_task,
         startup_report,
         mut conformer_run,
-        (mut ts_generation, mut structure_history, mut qc_panel, mut qc_task, mut project, mut pes_sampling),
+        (mut ts_generation, mut structure_history, mut qc_panel, mut qc_task, mut project, mut pes_sampling, mut vibronic),
     ) = builder_resources;
     crate::project::restore_ui(ctx, &mut project);
     if !*style_initialized {
@@ -2050,6 +2051,9 @@ pub fn ui_panel(
     }
 
     if let Some(rect) = crate::qchem_panel::ui::tolerance_window(ctx, &mut qc_panel, qc_task.is_running()) {
+        window_rects.push(rect);
+    }
+    if let Some(rect) = crate::vibronic::ui::window(ctx, &mut vibronic, &uvvis_state) {
         window_rects.push(rect);
     }
     if let Some(rect) = crate::pes_sampling::ui::window(ctx, &mut pes_sampling, &mol) {
