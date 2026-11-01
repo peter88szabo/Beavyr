@@ -279,7 +279,7 @@ fn section_impl<R>(
 
 /// The always-visible vertical rail of tool icons. Each button toggles that
 /// tool's window, and stays highlighted while the window is open.
-pub fn icon_rail(ui: &mut egui::Ui, open: &mut [bool; Tab::COUNT]) {
+pub fn icon_rail(ui: &mut egui::Ui, open: &mut [bool; Tab::COUNT], pes_open: &mut bool) {
     ui.vertical_centered(|ui| {
         ui.add_space(6.0);
         for (index, tab) in Tab::ALL.iter().enumerate() {
@@ -298,6 +298,10 @@ pub fn icon_rail(ui: &mut egui::Ui, open: &mut [bool; Tab::COUNT]) {
                 open[index] = !is_open;
             }
             ui.add_space(3.0);
+            if *tab == Tab::Conformers {
+                if ui.add(IconButton::new(Icon::PesSampling).label("PES Sampling").selected(*pes_open)).on_hover_text("PES Sampling").clicked_once() { *pes_open = !*pes_open; }
+                ui.add_space(3.0);
+            }
         }
     });
 }
@@ -324,7 +328,7 @@ mod tests {
                     egui::Panel::left("test_tool_rail")
                         .exact_size(50.0)
                         .show(ui, |ui| {
-                            icon_rail(ui, &mut open);
+                            icon_rail(ui, &mut open, &mut false);
                         });
                     if open[Tab::Structure.index()] {
                         egui::Window::new("New tool window")

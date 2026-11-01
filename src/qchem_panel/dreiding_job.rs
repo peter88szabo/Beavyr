@@ -35,7 +35,7 @@ pub(super) fn run(
     }
 }
 
-fn run_with_options(
+pub(super) fn run_with_options(
     job: JobType,
     workdir: &Path,
     atoms: &[String],
@@ -162,6 +162,9 @@ fn run_with_options(
         text.push_str("$end\n");
         let path = workdir.join("hessian.txt");
         fs::write(&path, text).map_err(|e| format!("Failed to write the Hessian: {e}"))?;
+        // Keep the matching geometry for sampling after the viewer has changed.
+        fs::write(workdir.join("hessian_geometry.xyz"), &geometry)
+            .map_err(|e| format!("Failed to save the Hessian geometry: {e}"))?;
         saveable.push(("Hessian ($hessian)", path.clone()));
         Some(path)
     } else {

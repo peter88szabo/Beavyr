@@ -219,6 +219,12 @@ def write_xyz(path, molecule, comment):
 "#
     ));
 
+    if job.produces_trajectory() {
+        if let Some(t) = config.optimization.get(super::program::QcProgram::Psi4) {
+            text.push_str(&format!("psi4.set_options({{'max_energy_g_convergence': {:.12e}, 'max_force_g_convergence': {:.12e}, 'rms_force_g_convergence': {:.12e}, 'max_disp_g_convergence': {:.12e}, 'rms_disp_g_convergence': {:.12e}}})\n",
+                t.energy, t.max_gradient, t.rms_gradient, t.max_step, t.rms_step));
+        }
+    }
     // A composite brings its own basis, so the option set above is overridden.
     if psi4_method::is_composite(&config.functional) && method == QcMethod::Dft {
         text.push_str("# A composite defines its own basis; whatever was set is not used.\n");

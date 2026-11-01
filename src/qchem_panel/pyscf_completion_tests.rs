@@ -39,8 +39,8 @@ fn real_pyscf_preserves_actual_optimization_convergence() {
             script.clone()
         } else {
             let input = script.replace(
-                "kernel(mf, callback=record)",
-                "kernel(mf, callback=record, maxsteps=1)",
+                "kernel(mf, callback=record, **geometry_tolerances)",
+                "kernel(mf, callback=record, maxsteps=1, **geometry_tolerances)",
             );
             assert_ne!(input, script, "the test must limit the real optimizer");
             input

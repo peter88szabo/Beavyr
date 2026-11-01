@@ -22,6 +22,7 @@ use crate::qchem_interfaces::xtb_optimize::{
 
 #[path = "modern_ui.rs"]
 mod modern_ui;
+pub(crate) use modern_ui::tolerance_window::window as tolerance_window;
 #[path = "dreiding_warning.rs"]
 mod dreiding_warning;
 pub(crate) use dreiding_warning::dreiding_warning_window;

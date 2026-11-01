@@ -23,12 +23,16 @@ pub(super) fn run(
     } else {
         JobType::SinglePoint
     };
+    let mut config = config.clone();
+    config.optimization.set(QcProgram::Orca,
+        (options.mode == Mode::Relaxed && options.tolerances != crate::qchem_interfaces::method::tolerances::Criteria::defaults(QcProgram::Orca))
+            .then(|| options.tolerances.clone()));
     let base = orca_run::panel_input_text(
         job,
         method,
         charge,
         multiplicity,
-        config,
+        &config,
         Default::default(),
         &config.orca_extra,
         &orca_run::xyz_body(&report.atoms, start),

@@ -1652,9 +1652,11 @@ pub(crate) fn run_optimize_cancellable(
             let mut cmd = Command::new(binary);
             cmd.current_dir(workdir)
                 .arg("input.xyz")
-                .arg("--opt")
-                .arg("--chrg")
-                .arg(charge.to_string());
+                .arg("--opt");
+            if let Some(level) = &method.optimization.xtb_level {
+                cmd.arg(level);
+            }
+            cmd.arg("--chrg").arg(charge.to_string());
             if uhf > 0 {
                 cmd.arg("--uhf").arg(uhf.to_string());
             }

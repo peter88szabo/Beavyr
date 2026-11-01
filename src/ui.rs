@@ -171,6 +171,7 @@ pub fn ui_panel(
             ResMut<crate::qchem_panel::QcPanelState>,
             ResMut<crate::qchem_panel::run::QcRunTask>,
             ResMut<crate::project::ProjectState>,
+            ResMut<crate::pes_sampling::PesSampling>,
         ),
     ),
 ) {
@@ -193,7 +194,7 @@ pub fn ui_panel(
         mut uvvis_task,
         startup_report,
         mut conformer_run,
-        (mut ts_generation, mut structure_history, mut qc_panel, mut qc_task, mut project),
+        (mut ts_generation, mut structure_history, mut qc_panel, mut qc_task, mut project, mut pes_sampling),
     ) = builder_resources;
     crate::project::restore_ui(ctx, &mut project);
     if !*style_initialized {
@@ -1806,7 +1807,7 @@ pub fn ui_panel(
                 .exact_size(crate::ui_layout::TOOL_RAIL_WIDTH)
                 .resizable(false)
                 .show(&mut viewport_ui, |ui| {
-                    icon_rail(ui, &mut open_windows);
+                    icon_rail(ui, &mut open_windows, &mut pes_sampling.open);
                 });
             // The windows themselves are drawn straight onto the context,
             // which is what lets them float. The `Ui` handed to
@@ -2040,11 +2041,30 @@ pub fn ui_panel(
                 duration,
                 &mut xtb_panel_state,
                 &xtb_task,
+                &mut pes_sampling,
             );
             qc_panel.summary_open = open;
         } else {
             qc_panel.summary_open = false;
         }
+    }
+
+    if let Some(rect) = crate::qchem_panel::ui::tolerance_window(ctx, &mut qc_panel, qc_task.is_running()) {
+        window_rects.push(rect);
+    }
+    if let Some(rect) = crate::pes_sampling::ui::window(ctx, &mut pes_sampling, &mol) {
+        window_rects.push(rect);
+    }
+    crate::pes_sampling::ui::poll(ctx, &mut pes_sampling);
+    let previous = if pes_sampling.load_requested {
+        structure_history.before(&mol, &traj)
+    } else { None };
+    if crate::pes_sampling::ui::load_if_requested(&mut pes_sampling, &mut mol, &mut traj) {
+        structure_history.replaced(previous, &mol, &traj, "PES samples");
+        xtb_freq_panel_state.selected_mode = None;
+        mol.recompute_bonds(settings.bond_thresh_scale, settings.hbond_cutoff);
+        ev_changed.write(MoleculeChanged::parse_xyz(true));
+        ui_layout.open[Tab::Trajectory.index()] = true;
     }
 
     let previous = if crate::ts_generation::results_window::is_open(ctx, &ts_generation) {

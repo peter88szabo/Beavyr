@@ -279,6 +279,15 @@ fn run_cancellable(
     // would refuse the only backend that needs nothing chosen. It also runs in
     // this process, so none of the machinery below applies.
     if program == QcProgram::Dreiding {
+        if let Some(t) = config.optimization.get(program) {
+            let mut options = crate::qchem_interfaces::dreiding_run::optimization_options();
+            options.energy_tol = t.energy;
+            options.max_step = t.max_step;
+            options.rms_step = t.rms_step;
+            options.max_gradient = t.max_gradient;
+            options.rms_gradient = t.rms_gradient;
+            return dreiding_job::run_with_options(job, workdir, atoms, positions_angstrom, options, cancel);
+        }
         return run_dreiding(job, workdir, atoms, positions_angstrom, cancel);
     }
     // xTB and Behemoth take their level of theory from the settings, not from
@@ -720,13 +729,20 @@ fn optimise_with_beavyr(
         child_slot,
         frames: Vec::new(),
     };
-    let options = CartesianMinimumOptions {
+    let mut options = CartesianMinimumOptions {
         method: CartesianMinimumMethod::Bfgs,
         max_cycles: 300,
         // Quiet: this runs behind a panel, not in a terminal.
         verbosity: 0,
         ..CartesianMinimumOptions::default()
     };
+    if let Some(t) = config.optimization.get(QcProgram::SparrowPy) {
+        options.energy_tol = t.energy;
+        options.max_step = t.max_step;
+        options.rms_step = t.rms_step;
+        options.max_gradient = t.max_gradient;
+        options.rms_gradient = t.rms_gradient;
+    }
     let result = minimize_cartesian(start_bohr, &mut objective, options)
         .map_err(|e| format!("Beavyr's optimizer stopped: {e}"))?;
 

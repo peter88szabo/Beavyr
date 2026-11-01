@@ -135,6 +135,7 @@ pub struct Options {
     pub relaxation_coordinates: RelaxationCoordinates,
     pub constraints: Vec<FixedCoordinate>,
     pub max_cycles: usize,
+    pub tolerances: crate::qchem_interfaces::method::tolerances::Criteria,
     pub stop_on_failure: bool,
     #[serde(skip)]
     pub picking: bool,
@@ -156,6 +157,7 @@ impl Default for Options {
             relaxation_coordinates: Default::default(),
             constraints: vec![],
             max_cycles: 100,
+            tolerances: crate::qchem_interfaces::method::tolerances::Criteria::defaults(QcProgram::Orca),
             stop_on_failure: true,
             picking: false,
             picked: vec![],
@@ -201,6 +203,7 @@ impl Options {
             .collect()
     }
     pub fn prepare(&self, symbols: &[String]) -> Result<Prepared, String> {
+        self.tolerances.validate()?;
         if !(2..=10000).contains(&self.points) {
             return Err("Choose 2–10000 scan points, including both endpoints.".into());
         }

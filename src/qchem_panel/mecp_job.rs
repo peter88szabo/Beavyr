@@ -104,6 +104,10 @@ pub(super) fn run(
         multiplicities: Some((multiplicity_a as usize, config.mecp.multiplicity_b as usize)),
         max_cycles: config.mecp.max_cycles,
         energy_tol: config.mecp.gap_tolerance,
+        max_step: config.mecp.max_step,
+        rms_step: config.mecp.rms_step,
+        max_gradient: config.mecp.max_gradient,
+        rms_gradient: config.mecp.rms_gradient,
         trajectory_file: Some(
             dir.join("mecp_iterations.xyz")
                 .to_string_lossy()

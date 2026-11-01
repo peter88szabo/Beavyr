@@ -196,11 +196,6 @@ pub(super) fn settings(ui: &mut egui::Ui, panel: &mut QcPanelState, task: &QcRun
                     ui.checkbox(&mut t.final_hessian, "Calculate final Hessian");
                     number(ui, "Hessian difference step (bohr)", &mut t.hessian_step);
                     for (l, v) in [
-                        ("Energy tolerance (Eh)", &mut t.energy_tol),
-                        ("Maximum step (bohr)", &mut t.max_step),
-                        ("RMS step (bohr)", &mut t.rms_step),
-                        ("Maximum gradient (Eh/bohr)", &mut t.max_gradient),
-                        ("RMS gradient (Eh/bohr)", &mut t.rms_gradient),
                         ("Maximum internal step", &mut t.max_step_internal),
                         (
                             "Minimum gradient improvement",
@@ -295,15 +290,6 @@ fn minimum(ui: &mut egui::Ui, m: &mut Minimum) {
         });
     count(ui, "Max steps", &mut m.max_cycles);
     egui::CollapsingHeader::new("Advanced minimum settings").show(ui, |ui| {
-        for (l, v) in [
-            ("Energy tolerance (Eh)", &mut m.energy_tol),
-            ("Maximum step (bohr)", &mut m.max_step),
-            ("RMS step (bohr)", &mut m.rms_step),
-            ("Maximum gradient (Eh/bohr)", &mut m.max_gradient),
-            ("RMS gradient (Eh/bohr)", &mut m.rms_gradient),
-        ] {
-            number(ui, l, v);
-        }
         if m.coordinates != Coordinates::Cartesian {
             number(ui, "Maximum internal step", &mut m.max_step_internal);
             count(ui, "Coordinate fitting iterations", &mut m.best_fit_iters);

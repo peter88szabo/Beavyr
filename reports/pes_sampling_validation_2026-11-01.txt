@@ -1,0 +1,160 @@
+PES Sampling — implementation and validation — 2026-11-01
+
+Scope
+-----
+New independent PES Sampling module and left-toolbar button, immediately after
+Conformer Search. No implementation was added to mod.rs. No dependencies,
+external environments, installed Beavyr copy or launchers were changed.
+Pebble and Smite were inspected read-only; neither source tree was modified.
+No commits were made.
+
+Source strategy
+---------------
+Pebble supplies the overall unimolecular and fixed-distance bimolecular
+Monte Carlo workflows. Smite supplies the mature implementation conventions:
+/home/peter/Dropbox/Research_Leuven/Smite/src/sampling/polyvibration.py
+/home/peter/Dropbox/Research_Leuven/Smite/src/sampling/diatom.py
+/home/peter/Dropbox/Research_Leuven/Smite/src/sampling/morse_diatom.py
+/home/peter/Dropbox/Research_Leuven/Smite/src/sampling/thermal.py
+/home/peter/Dropbox/Research_Leuven/Smite/src/utils/euler.py
+
+Every real vibrational mode receives an independent phase uniform on [0,2*pi).
+For harmonic modes: Q = sqrt(2E)/omega * cos(phi). Cartesian displacements
+use the un-mass-weighted, mass-orthonormal mode matrix. This gives the QCT
+coordinate distribution at the selected amplitude; it is not uniform in Q.
+The unbounded Smite thermal option draws a new quantum number for every mode
+and sample using floor[-kBT log(1-u)/omega], including zero-point energy.
+Euler rotations use uniform phi/chi and uniform cos(theta) in [-1,1].
+
+User controls
+-------------
+- Unimolecular sample count.
+- Bimolecular first/last COM distance in Angstrom, number of distance points,
+  and independent Monte Carlo samples per distance. Endpoints are included;
+  one distance point means the first distance. Descending scans also work.
+- ORCA Hessian with embedded equilibrium geometry and isotope masses, or a
+  bare Turbomole-style $hessian in Eh/bohr^2 with matching equilibrium XYZ.
+- Diatomic elements, equilibrium distance (Angstrom), frequency (cm^-1).
+  Optional J=0 Morse oscillator adds dissociation energy De (eV); beta follows
+  from the small-amplitude frequency and reduced mass. Atomic partners and
+  rigid partner geometries are also supported.
+- Global/common per-mode excitation limits, with optional individual mode
+  overrides: ZPE, maximum quantum number, maximum energy in kcal/mol, or Tmax.
+  Global energy means the same energy limit per mode, not a total-system cap.
+- Three selectable temperature rules:
+  1. Boltzmann-tail cutoff: minimal N with 1-exp[-(N+1)omega/(kBT)] >= p.
+     Retained population p defaults to 99.9% and is editable. The resulting
+     upper-state amplitude is sampled with a uniform phase.
+  2. ZPE + kB*Tmax: continuous energy ceiling; quantum numbers need not be
+     integral when the user specifies an energy rather than a quantum state.
+  3. Smite thermal sampling without a hard harmonic cutoff. For Morse,
+     canonical populations use only its physically bound states.
+- Repeatable seed; atom-pair overlap filter enabled by default, using Pebble's
+  cutoffs: H-H 0.4 Å, H-other 0.5 Å, other-other 0.8 Å. Checks all pairs,
+  including pairs between collision partners; cutoffs remain editable.
+  Filtering changes the accepted distribution and reports rejected attempts.
+
+Geometry and output behavior
+----------------------------
+Each sampled partner is re-centered about its mass-weighted COM. Bimolecular
+partners receive independent rotations and are translated along z to the exact
+requested COM separation; the total COM stays at the origin. Rotation after
+sampling rotates both equilibrium geometry and mode displacement together,
+which is equivalent to rotating the normal-mode basis before sampling.
+
+Translations/rotations are projected out before mode sampling. Imaginary modes
+are excluded as in Smite and are listed in a copyable popup and results notice.
+The source Hessian's raw harmonic frequencies are used. Bare matrices must
+match the supplied equilibrium geometry and atom order. Dummy atoms in XYZ
+inputs are discarded; Hessians themselves must describe real atoms only.
+
+Generation runs in the background with progress and cancellation. Failed or
+cancelled runs retain previous completed results. On success, all samples load
+automatically into Beavyr and open the Trajectory panel, stopped at frame one
+in Once mode. Save XYZ exports the complete sampled coordinates in double
+precision; Load as Trajectory reloads the retained dataset. XYZ comments
+include seed, phase distribution, sample number and, for bimolecular data,
+COM distance, distance index, within-distance index and partner atom boundary.
+Saving uses a temporary file and rename so a failed write does not truncate
+an existing export. No quantum-chemistry calculations or MD propagation are
+performed; the exported frames are sampled configurations, not dynamical time
+steps. No PES energy labels are fabricated.
+
+Compatibility and limits
+------------------------
+The existing 15-tab project layout representation is unchanged; the new tool
+has its own open state. Old project layout deserialization is tested.
+Project replacement is blocked during an active sampling run, consistent with
+other running calculations. Sampling settings/results are not additional
+project fields: save the sampled XYZ explicitly. Automatic preview is limited
+to five million atom-frames. An impossible overlap filter stops after 1000
+attempts per requested sample rather than hanging or silently omitting points.
+Harmonic configurations with nonpositive diatomic bond lengths are rejected
+with an actionable error; Morse states at/above dissociation are refused.
+
+Validation
+----------
+Twelve PES-specific tests cover:
+- Uniform phase statistics (100,000 samples), amplitude bound and harmonic
+  Q/P energy conservation; <Q^2>/A^2 = 1/2 rather than the uniform-Q value 1/3.
+- Exact Boltzmann cutoff coverage and minimal N; ZPE+kBT; unbounded thermal
+  mean population and samples above the 99.9% threshold.
+- Isotropic orientation moments (50,000 rotations) and length preservation.
+- Bimolecular sample count/order, descending distances, exact COM spacing,
+  independent partner orientations, global COM and repeatable seed.
+- Diatomic mass normalization, isotope frequency shift and linear projection.
+- Morse turning-point bounds and rejection of unbound states.
+- Per-mode limits overriding global values.
+- The real examples/TS_Gamma-3-6_ZZ-S_11_Compound_1.hess: 19 atoms, 50 sampled
+  positive modes, one excluded imaginary mode and 20 generated configurations.
+- Cancellation, invalid coordinates, zero sample count and impossible filters.
+- Automatic trajectory-load behavior, stopped Once playback and XYZ round-trip.
+- UI control rendering and backward-compatible project layout parsing.
+
+Direct original-Smite comparison
+-------------------------------
+Smite was imported with PYTHONDONTWRITEBYTECODE=1 and its random.uniform draws
+were patched to fixed values. No source edits were needed. Rust regression
+checks agree to 1e-12 or better for harmonic coordinates/momentum, Morse
+coordinate, Euler rotation and thermal quantum number.
+Reference script: /tmp/beavyr-pes-smite-reference.py
+Reference output: /tmp/beavyr-pes-smite-reference.json
+Examples: harmonic q_A,x = 1.513340908211463 bohr;
+Morse r = 2.03083079335721 bohr; thermal quantum number = 6.
+
+Logs
+----
+Focused run: /tmp/beavyr-pes-tests.log (12 PES tests plus 2 unrelated names
+matched by the broad pes_ filter; all 14 passed).
+Full regression: /tmp/beavyr-pes-full-tests.log.
+Application build: /tmp/beavyr-pes-build.log.
+CPU affinity limited to 0-11, Cargo -j4, math-library threads 1.
+UI tests use egui; no manual GUI visual inspection is claimed.
+
+Reversibility
+-------------
+Pre-change copies of main.rs, ui.rs, ui_layout.rs, ui_icons.rs, project.rs and
+README.md are under target/change-backups/pes-sampling-20261101/.
+New implementation: src/pes_sampling.rs and src/pes_sampling/ (input, sampling,
+state, output, ui and tests). No existing optimizer/scientific algorithms were
+changed. New source and changes remain uncommitted.
+
+Final status
+------------
+Full regression suite: 1453 passed, 0 failed, 43 optional tests ignored.
+Final cargo build succeeded. The 48 existing compiler warnings remain;
+this is not a warning-free-build claim. git diff --check passed.
+The executable is target/debug/Beavyr; the installed application was not replaced.
+
+Follow-up: overlap defaults and window resizing (2026-11-01)
+----------------------------------------------------------
+Pebble/src/atomic_overlap.py supplies the enabled-by-default pair cutoffs:
+H-H 0.4 Å, H-other 0.5 Å, other-other 0.8 Å. Distances strictly below the
+cutoff are rejected and redrawn, including pairs across collision partners.
+The PES window retains user-selected width and height; scrollbars allow
+smaller sizes without hiding access to controls.
+Focused PES test run: 21 passed, 0 failed. This includes threshold boundaries,
+pair order, unimolecular redraws, inter-partner rejection, the disable option,
+and an egui pointer-drag test confirming retained width and height increases.
+The full-suite counts above refer to the earlier initial implementation.
+Backups for these edits: target/change-backups/pes-overlap-20261101/.

@@ -15,6 +15,8 @@
 use crate::molecule::atomic_number;
 
 use super::program::QcProgram;
+#[path = "optimization_tolerances.rs"]
+pub mod tolerances;
 
 /// The lightest element that needs an effective core potential in the def2
 /// family: rubidium. Everything up to krypton, transition metals included, is
@@ -446,6 +448,8 @@ pub fn basis_label(cli: &str) -> &str {
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct MethodConfig {
     #[serde(default)]
+    pub optimization: tolerances::Settings,
+    #[serde(default)]
     pub scan: super::job::scan::Options,
     #[serde(default)]
     pub mecp: super::job::mecp::Options,
@@ -480,6 +484,7 @@ pub struct MethodConfig {
 impl Default for MethodConfig {
     fn default() -> Self {
         MethodConfig {
+            optimization: Default::default(),
             scan: Default::default(),
             mecp: Default::default(),
             search: Default::default(),

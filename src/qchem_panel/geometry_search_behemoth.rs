@@ -15,6 +15,14 @@ pub(super) fn command(
     let o = &config.search;
     let t = &o.ts;
     let mut c = Command::new(binary);
+    let defaults = crate::optimizer::transition_state::TransitionStateOptions::default();
+    if [t.energy_tol, t.max_step, t.rms_step, t.max_gradient, t.rms_gradient]
+        != [defaults.energy_tol, defaults.max_step, defaults.rms_step, defaults.max_gradient, defaults.rms_gradient] {
+        crate::qchem_interfaces::method::tolerances::Criteria {
+            energy:t.energy_tol, max_step:t.max_step, rms_step:t.rms_step,
+            max_gradient:t.max_gradient, rms_gradient:t.rms_gradient,
+        }.behemoth(&mut c);
+    }
     c.current_dir(dir)
         .args([
             "--xyz",

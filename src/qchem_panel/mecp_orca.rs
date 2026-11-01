@@ -8,12 +8,16 @@ fn input(
     multiplicity: i32,
     config: &MethodConfig,
 ) -> String {
+    // A crossing search has its own tolerances, independent of minimum jobs.
+    let mut config = config.clone();
+    config.optimization.set(crate::qchem_interfaces::program::QcProgram::Orca,
+        config.mecp.native_tolerances.clone());
     let base = orca_run::panel_input_text(
         JobType::Optimize,
         method,
         charge,
         multiplicity,
-        config,
+        &config,
         Default::default(),
         &config.orca_extra,
         &orca_run::xyz_body(atoms, coordinates),

@@ -35,6 +35,7 @@ pub fn summary_window(
     duration: Option<std::time::Duration>,
     opt_panel: &mut crate::qchem_interfaces::xtb_optimize::XtbPanelState,
     opt_task: &crate::qchem_interfaces::xtb_optimize::XtbOptimizationTask,
+    pes: &mut crate::pes_sampling::PesSampling,
 ) {
     // The close button is intercepted rather than obeyed. egui closes a window
     // the moment its X is clicked, and this one sits beside the Save buttons
@@ -49,6 +50,7 @@ pub fn summary_window(
         .show(ctx, |ui| {
             crate::ui_style::modern(ui);
             header(ui, output, duration);
+            crate::pes_sampling::calculation::results_button(ui, output, pes);
             ui.separator();
 
             if output.job == crate::qchem_interfaces::job::JobType::Mecp {

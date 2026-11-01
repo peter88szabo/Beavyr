@@ -39,15 +39,27 @@ pub struct Options {
     pub multiplicity_b: i32,
     pub max_cycles: usize,
     pub gap_tolerance: f64,
+    /// SpinCross convergence units: Angstrom and Hartree/Angstrom.
+    pub max_step: f64,
+    pub rms_step: f64,
+    pub max_gradient: f64,
+    pub rms_gradient: f64,
+    pub native_tolerances: Option<crate::qchem_interfaces::method::tolerances::Criteria>,
     pub coordinates: Coordinates,
 }
 impl Default for Options {
     fn default() -> Self {
+        let optimizer = crate::optimizer::spin_crossing::SpinCrossingOptions::default();
         Self {
             driver: Default::default(),
             multiplicity_b: 3,
             max_cycles: 100,
             gap_tolerance: 5e-5,
+            max_step: optimizer.max_step,
+            rms_step: optimizer.rms_step,
+            max_gradient: optimizer.max_gradient,
+            rms_gradient: optimizer.rms_gradient,
+            native_tolerances: None,
             coordinates: Default::default(),
         }
     }
@@ -91,6 +103,22 @@ pub fn validate(
     {
         return Err("MECP requires a positive step limit and energy-gap tolerance.".into());
     }
+    if [
+        options.max_step,
+        options.rms_step,
+        options.max_gradient,
+        options.rms_gradient,
+    ]
+    .iter()
+    .any(|v| !v.is_finite() || *v <= 0.)
+    {
+        return Err(
+            "MECP displacement and gradient tolerances must be positive and finite.".into(),
+        );
+    }
     debug_assert!(super::supports(program, JobType::Gradient));
+    if let Some(t) = &options.native_tolerances {
+        t.validate()?;
+    }
     Ok(())
 }

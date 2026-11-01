@@ -452,6 +452,8 @@ fn busy(world: &World) -> bool {
         || world
             .resource::<crate::ts_generation::TsGeneration>()
             .is_running()
+        || world.get_resource::<crate::pes_sampling::PesSampling>()
+            .is_some_and(|state| state.task.is_some())
 }
 
 /// Runs before scene refresh, outside the egui drawing pass.

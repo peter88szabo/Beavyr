@@ -128,6 +128,11 @@ pub fn input_text(
     }
     text.push('\n');
 
+    if matches!(job, JobType::Optimize | JobType::OptimizeThenFrequencies | JobType::TransitionState) {
+        if let Some(t) = method.optimization.get(super::program::QcProgram::Orca) {
+            text.push_str(&format!("%geom\n{}end\n", t.orca()));
+        }
+    }
     text.push_str(&format!("* xyz {charge} {multiplicity}\n"));
     text.push_str(xyz_body);
     if !xyz_body.ends_with('\n') {
@@ -351,6 +356,12 @@ pub fn panel_input_text(
         text.push_str(&job_blocks(job, excited));
     }
     text.push_str(&super::job::correlated::orca_active_space_block(method, multiplicity, &config.active_space));
+
+    if matches!(job, JobType::Optimize | JobType::OptimizeThenFrequencies | JobType::TransitionState) {
+        if let Some(t) = config.optimization.get(super::program::QcProgram::Orca) {
+            text.push_str(&format!("%geom\n{}end\n", t.orca()));
+        }
+    }
 
     text.push_str(&format!("* xyz {charge} {multiplicity}\n"));
     text.push_str(xyz_body);

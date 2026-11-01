@@ -1,0 +1,69 @@
+Optimization-tolerance editor and diatomic selector
+==================================================
+
+Scope: Quantum Chemistry panel. Separate Clean Up Geometry, Conformer Search,
+and TS Generation panels were not changed in this update.
+
+Tolerances opens an independently resizable window. Draft values are applied
+only by Save; Cancel or closing the window leaves settings intact. Reset
+defaults resets the draft. Changing calculation/driver discards an incompatible
+draft. Values are part of MethodConfig, so saved projects retain them and old
+projects receive defaults through serde(default).
+
+Controls and connections
+------------------------
+- Beavyr minimum/TS: energy, maximum/RMS displacement, maximum/RMS gradient.
+- Beavyr MECP: energy gap and maximum/RMS displacement and effective gradient;
+  Angstrom/Hartree-per-Angstrom conventions and inverse Hessian 0.7 preserved.
+- ORCA native minimum/TS: documented TolE/TolMaxD/TolRMSD/TolMaxG/TolRMSG.
+- ORCA native MECP: separate geometry thresholds and final energy-gap check.
+- PySCF/geomeTRIC: convergence_* controls; displacement converted to Angstrom.
+- Psi4: explicit *_g_convergence controls in atomic units; native defaults
+  retained until custom criteria enabled. Default QCHEM does not use all five
+  criteria; choosing custom values explicitly activates the supplied criteria.
+- Native xTB: convergence-level presets; Beavyr driver permits individual
+  numerical thresholds.
+- DREIDING/Sparrow minimum jobs: values passed to the actual in-process solver.
+- Relaxed scans: constraints retain their existing residual checks; adjustable
+  optimization stopping criteria reach Beavyr, ORCA and Behemoth drivers.
+- Behemoth CLI/input: five opt-* convergence flags and @opt underscore keys,
+  applied to its own minimum, TS, and constrained-scan optimizers. No change
+  to defaults when overrides are absent. Implementations remain in named files.
+
+Diatomic PES sampling now uses mutually exclusive Harmonic / Morse buttons.
+The existing Morse model and parameter calculations are unchanged.
+
+Validation
+----------
+Beavyr full regression suite: 1465 passed, 0 failed, 43 optional tests ignored.
+Includes draft/save/reset/cancel UI tests, serialization/default compatibility,
+backend keyword/unit checks, and PES selector/filter/resize checks.
+Log: /tmp/beavyr-tolerances-full-tests.log
+Final Beavyr build passed; 48 pre-existing warnings remain.
+Log: /tmp/beavyr-tolerances-build.log
+Behemoth CLI/input tests: 2 passed, 0 failed.
+Log: /tmp/behemoth-tolerances-tests.log
+Behemoth release executable rebuilt: target/release/behemoth.
+
+Live smoke tests (single-core ORCA, two-core Behemoth):
+- ORCA HF/STO-3G H2 minimum: custom thresholds printed, converged, normal exit.
+- Behemoth GFN1 water minimum: custom thresholds printed, converged, normal exit.
+- Initial Behemoth H2 setup at 0.85 Å stopped because its existing internal-
+  coordinate builder found no internal coordinates; no solver changes were
+  made for this unrelated behavior. Water was used for the convergence test.
+Files: /tmp/beavyr-native-tolerances-smoke/
+
+Native controls verified against primary documentation:
+https://www.faccts.de/docs/orca/6.1/manual/contents/structurereactivity/optimizations.html
+https://pyscf.org/user/geomopt.html
+https://psi4.github.io/psi4docs/master/optking.html
+https://optking.readthedocs.io/en/latest/convergence.html
+https://xtb-docs.readthedocs.io/en/latest/optimization.html
+
+Reversibility
+-------------
+Beavyr backup: target/change-backups/optimization-tolerances-20261101/
+PES selector backup: target/change-backups/pes-oscillator-selector-20261101/
+Behemoth original files: /tmp/behemoth-optimization-tolerances/backup/
+Behemoth prepared patch: /tmp/behemoth-optimization-tolerances/changes.patch
+Existing unrelated edits were preserved. Nothing committed or installed.

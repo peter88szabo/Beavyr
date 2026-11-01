@@ -23,6 +23,7 @@ mod numerics;
 mod optimizer;
 mod orbitals;
 mod picking;
+mod pes_sampling;
 mod project;
 mod qchem_interfaces;
 mod qchem_panel;
@@ -163,6 +164,7 @@ fn main() {
         // measurements
         .init_resource::<conformer::ConformerRun>()
         .init_resource::<ts_generation::TsGeneration>()
+        .init_resource::<pes_sampling::PesSampling>()
         .init_resource::<structure_history::StructureHistory>()
         .init_resource::<measurements::Measurements>()
         .init_resource::<DiagnosticsCache>()

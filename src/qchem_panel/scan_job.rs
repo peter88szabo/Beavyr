@@ -300,6 +300,11 @@ fn compute<O: Objective>(
                 constraints,
                 crate::optimizer::constrained::ConstrainedOptimizationOptions {
                     max_cycles: options.max_cycles,
+                    energy_tol: options.tolerances.energy,
+                    max_step: options.tolerances.max_step,
+                    rms_step: options.tolerances.rms_step,
+                    max_gradient: options.tolerances.max_gradient,
+                    rms_gradient: options.tolerances.rms_gradient,
                     coordinate_mode: options.relaxation_coordinates.optimizer_mode(),
                     verbosity: 0,
                     ..Default::default()

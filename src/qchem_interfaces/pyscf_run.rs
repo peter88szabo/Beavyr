@@ -172,6 +172,11 @@ def write_xyz(path, molecule, comment):
     ));
 
     if job.produces_trajectory() {
+        let tolerances = method.optimization.get(super::program::QcProgram::PySCF)
+            .map(|t| format!("{{'convergence_energy': {:.12e}, 'convergence_gmax': {:.12e}, 'convergence_grms': {:.12e}, 'convergence_dmax': {:.12e}, 'convergence_drms': {:.12e}}}",
+                t.energy, t.max_gradient, t.rms_gradient, t.max_step * 0.529177210903, t.rms_step * 0.529177210903))
+            .unwrap_or_else(|| "{}".into());
+        script.push_str(&format!("geometry_tolerances = {tolerances}\n"));
         script.push_str(
             r#"# The optimisation path, written straight into Beavyr's own trajectory
 # format so the trajectory player and the energy plot read it unchanged.
@@ -188,7 +193,7 @@ def record(envs):
 
 from pyscf.geomopt.geometric_solver import kernel
 mf = build(mol)
-geometry_converged, optimised = kernel(mf, callback=record)
+geometry_converged, optimised = kernel(mf, callback=record, **geometry_tolerances)
 print("BEAVYR_GEOMETRY_CONVERGED %d" % bool(geometry_converged))
 
 with open("trajectory.xyz", "w") as handle:

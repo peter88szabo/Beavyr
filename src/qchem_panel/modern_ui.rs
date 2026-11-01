@@ -13,6 +13,8 @@ pub(crate) use input_editor::{show as input_editor_window, project_input_state, 
 
 #[path = "spectrum_controls.rs"]
 mod spectrum_controls;
+#[path = "tolerance_window.rs"]
+pub(super) mod tolerance_window;
 
 const ACCENT: egui::Color32 = egui::Color32::from_rgb(104, 174, 255);
 const WARNING: egui::Color32 = egui::Color32::from_rgb(230, 170, 90);
@@ -287,11 +289,22 @@ fn job_choices(ui: &mut egui::Ui, panel: &mut QcPanelState, running: bool) {
             ui.strong("What to calculate");
             ui.add_enabled_ui(!running, |ui| {
                 ui.menu_button("More…", |ui| {
-                    for job in JobType::ALL {
+                    for (job, label) in [
+                        (JobType::SinglePoint, "Single-point energy"),
+                        (JobType::Gradient, "Gradient"),
+                        (JobType::Frequencies, "Freq/Hessian"),
+                        (JobType::OptimizeThenFrequencies, "Opt+Freq"),
+                        (JobType::TransitionState, "Transition-state optimization"),
+                        (JobType::Scan, "Scan"),
+                        (JobType::Optimize, "Optimization"),
+                        (JobType::Irc, "IRC"),
+                        (JobType::TdDft, "UV-Vis / excited states"),
+                        (JobType::Mecp, "MECP / Spin crossing"),
+                    ] {
                         let reason = job::correlated::unsupported_job(panel.program, panel.method, job);
                         let response = ui.add_enabled(
                             reason.is_none(),
-                            egui::Button::new(job.label()).selected(panel.job == job),
+                            egui::Button::new(label).selected(panel.job == job),
                         );
                         if let Some(reason) = reason {
                             response.clone().on_disabled_hover_text(reason);
@@ -1008,6 +1021,7 @@ fn contents(
                 }
                 if panel.job == JobType::Mecp { super::super::mecp_controls::settings(ui, panel, task); }
                 if job::search::active(panel.job) { super::super::geometry_search_controls::settings(ui, panel, task); }
+                tolerance_window::button(ui, panel, task.is_running());
                 super::super::scan_results::reopen_button(ui, task);
                 if !spectrum_controls::active(panel) && !matches!(panel.job, JobType::Scan | JobType::Mecp) { optional_settings(ui, panel, task.is_running()); }
                 if panel.show_warnings {

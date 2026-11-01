@@ -60,6 +60,9 @@ pub fn optimize_command(
 ) -> Command {
     let mut command = base_command(binary, run_dir, xyz_file, charge, multiplicity, method);
     command.arg("--opt");
+    if let Some(t) = method.optimization.get(super::program::QcProgram::Behemoth) {
+        t.behemoth(&mut command);
+    }
     command
 }
 

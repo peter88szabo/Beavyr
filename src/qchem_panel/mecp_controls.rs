@@ -22,15 +22,6 @@ pub(super) fn settings(ui: &mut egui::Ui, panel: &mut QcPanelState, task: &QcRun
                 ui.label("Max steps");
                 ui.add(egui::DragValue::new(&mut o.max_cycles).range(1..=10000));
             });
-            ui.horizontal(|ui| {
-                ui.label(if panel.program == QcProgram::Orca && o.driver == Driver::Orca { "Final gap limit (Eh)" } else { "Gap tolerance (Eh)" }).on_hover_text("ORCA built-in uses its own optimization convergence criteria; Beavyr also checks the final gap against this limit.");
-                ui.add(
-                    egui::DragValue::new(&mut o.gap_tolerance)
-                        .speed(1e-6)
-                        .range(1e-10..=1.)
-                        .max_decimals(10),
-                );
-            });
             if panel.program != QcProgram::Orca || o.driver == Driver::Beavyr {
             egui::ComboBox::from_id_salt("mecp_coordinates")
                 .selected_text(o.coordinates.label())

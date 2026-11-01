@@ -11,6 +11,7 @@ pub enum Icon {
     Optimize,
     TransitionState,
     Conformers,
+    PesSampling,
     Vibrations,
     Spectrum,
     Trajectory,
@@ -33,6 +34,7 @@ impl Icon {
             Self::Optimize => "Geometry optimization",
             Self::TransitionState => "Transition-state generation",
             Self::Conformers => "Conformer search",
+            Self::PesSampling => "PES sampling",
             Self::Vibrations => "Vibrations",
             Self::Spectrum => "UV-Vis spectrum",
             Self::Trajectory => "Trajectory",
@@ -139,6 +141,12 @@ impl Icon {
                 line([7., 6.], [5., 8.]);
                 path(&[[22., 6.], [17., 6.], [19., 4.]]);
                 line([17., 6.], [19., 8.]);
+            }
+            Self::PesSampling => {
+                path(&[[3.,18.],[7.,12.],[11.,15.],[16.,5.],[21.,9.]]);
+                for (x,y) in [(3.,18.),(7.,12.),(11.,15.),(16.,5.),(21.,9.)] {
+                    painter.circle_filled(point(x,y),1.7*scale,color);
+                }
             }
             Self::Conformers => {
                 for (x, y) in [(8., 9.), (16., 15.)] {

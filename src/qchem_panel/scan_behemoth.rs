@@ -28,6 +28,9 @@ pub(super) fn run(
     )
     .map_err(|e| e.to_string())?;
     let mut command = std::process::Command::new(binary);
+    if options.mode == Mode::Relaxed && options.tolerances != crate::qchem_interfaces::method::tolerances::Criteria::defaults(QcProgram::Orca) {
+        options.tolerances.behemoth(&mut command);
+    }
     command
         .current_dir(dir)
         .arg("--xyz")

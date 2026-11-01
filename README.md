@@ -181,6 +181,21 @@ serialization through `serde`/`ron`; egui persistence stores the window layout.
 
 ### Quantum Chemistry
 
+**Tolerances…** opens a separate, resizable editor for minimum optimization,
+Opt+Freq, transition-state optimization, MECP, and relaxed scans. **Save**
+applies the draft values to the calculation settings; **Cancel** leaves the
+previous values intact. **Reset defaults** resets the draft, then **Save**
+applies it. Settings are retained in saved projects. Native optimizers keep
+their own defaults until custom criteria are enabled; native xTB offers its
+convergence-level presets. Beavyr MECP uses Å and Eh/Å for displacement and
+gradient criteria, as in SpinCross. Other units are shown beside each field.
+
+Behemoth's native minimum, TS, and relaxed-scan optimizers accept the optional
+CLI flags `--opt-energy-tol`, `--opt-max-step`, `--opt-rms-step`,
+`--opt-max-gradient`, and `--opt-rms-gradient`. Corresponding underscore names
+are accepted in its `@opt` input section. These are convergence criteria,
+not step-size limits; unchanged settings preserve Behemoth's existing defaults.
+
 Open the atom-shaped launcher beside the Molecule Editor launcher. The modern
 calculator first opens floating on the left; **Dock** attaches it to the right edge and **Float**
 detaches it again. The **Quantum chemistry code** selector stays at the top,
@@ -571,6 +586,56 @@ Use **View** beside a result to inspect it,
 **Load as trajectory** to browse the set, or **Save as XYZ trajectory** to export it.
 
 ![Conformer Search showing search settings, relative energies, populations, and controls to display or export conformers](Images/Confsearch.png)
+
+### PES Sampling
+
+The **PES Sampling** button on the left toolbar generates a sampled XYZ
+trajectory. It follows Pebble's unimolecular/bimolecular workflows and Smite's
+normal-mode sampling conventions. Completed samples load automatically and
+open the **Trajectory** panel, stopped on the first frame. **Save XYZ…** exports
+all samples; **Load as Trajectory** reopens the retained result.
+
+For each molecule or collision partner, load an ORCA `.hess` containing its
+geometry and masses, or load the matching equilibrium XYZ followed by a bare
+`$hessian` matrix in Eh/bohr². Diatomics can instead use their two elements,
+equilibrium distance in Å and frequency in cm⁻¹. An optional Morse oscillator
+at J = 0 additionally needs De in eV. Atomic partners and rigid partners are
+also supported. Imaginary modes are excluded, with an explicit notice, as in
+Smite; translations and rotations are projected out. Hessian isotope masses
+are retained.
+
+Every mode uses an independent phase uniformly distributed over [0, 2π).
+With a specified energy ceiling, `Q = sqrt(2 Emax) / omega * cos(phase)`;
+Cartesian displacements use mass-normalized mode vectors. Choose ZPE,
+maximum quantum number, maximum energy **per mode**, or temperature. The
+common setting applies to every mode; **Mode settings → Set limits per mode**
+overrides individual modes. Temperature choices are:
+
+- **Boltzmann-tail cutoff:** the smallest maximum quantum number retaining
+  the selected canonical population (99.9% by default).
+- **ZPE + kB × Tmax:** a continuous energy ceiling above the zero-point energy.
+- **Smite thermal (no hard cutoff):** draw quantum numbers from the canonical
+  distribution at the specified temperature for each sample. Morse sampling
+  uses its physically bound states.
+
+For bimolecular sampling, set first/last **COM distances**, distance-point count
+and samples per distance. The distance grid includes both endpoints (one point
+uses the first distance). Both partners receive independent phases and
+isotropic rotations. Re-centering preserves the exact chosen COM distance,
+and the combined center of mass stays at the origin. XYZ comments record the
+distance, distance index, sample index, partner boundary and random seed.
+
+**Repeatable** fixes the seed for identical inputs/settings. The overlap filter
+is enabled by default for every sample, using Pebble's minimum distances:
+H–H 0.4 Å, H–other 0.5 Å, and other–other 0.8 Å. It checks all atom pairs,
+including pairs between collision partners. The cutoffs are editable, and the
+filter can be disabled. Rejected samples are redrawn, changing the accepted
+distribution. Generation runs in the background and
+can be cancelled. Previous results survive cancellation or failure. Preview
+is limited to five million atom-frames to bound memory use. This module
+exports geometry samples only; it does not assign quantum-chemistry PES
+energies or propagate molecular dynamics. Save the XYZ explicitly; sampling
+setup/results are not stored as additional project fields.
 
 ### Measurements
 
