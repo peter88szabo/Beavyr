@@ -1,0 +1,122 @@
+Beavyr: live calculation output and complete calculation export
+Date: 2026-11-01
+
+Scope
+-----
+Two additions to calculations submitted through the Quantum Chemistry panel:
+live output viewing and saving all calculation files together. No commits made.
+No changes to backend launch arguments, ORCA keywords, MPI configuration,
+scientific algorithms, or their convergence criteria.
+
+Live output
+-----------
+The Quantum Chemistry panel now provides a Live output button after a run starts.
+It opens an independent window resizable horizontally and vertically. Closing
+the setup panel does not close the output window, and closing the output window
+does not cancel the calculation.
+
+The viewer supports file selection, automatic selection of the latest nonempty
+native output, follow-scroll, case-insensitive search with highlighted matching
+lines, a matching-lines-only filter, and copying the displayed text. The copy
+button respects the filter. Native stdout, stderr, logs, scan/optimization
+summaries, and the Beavyr run record are available, including nested evaluation
+directories used by scans and Beavyr optimizers.
+
+Reads run in background tasks. The viewer displays at most the last 512 KiB of
+the selected file, and searches that displayed portion. The complete export
+copies the entire output, without this limit. The file chooser lists the latest
+200 logs; all run files remain included in exports. Updates depend on when the
+external program flushes output to disk. No backend buffering settings change.
+Internal DREIDING work supplies stage messages; the shared external evaluation
+adapter also records evaluation numbers, energies, and gradient norms.
+
+Save complete calculation
+-------------------------
+Available from the Quantum Chemistry panel, the live output window, calculation
+summary, and scan results. The current run must finish or cancel before export;
+results from a previous completed run remain separately exportable.
+
+The user selects a destination folder. Beavyr creates a uniquely named child
+folder and copies the run's entire directory tree in a background task, including
+native inputs, stdout/stderr, generated scripts, geometries, trajectories,
+Hessians, orbitals, and nested evaluation/scan files when produced. Existing
+exports are not overwritten. A progress window reports copied bytes and the
+finished destination, with a Copy folder path button. Export failures use the
+existing copyable error popup and report the partial-copy location.
+
+Each panel submission additionally writes beavyr_record/ containing:
+  settings.ron                 submitted settings and original coordinates
+  started.txt                  start timestamp, OS and architecture
+  initial.xyz                  submitted geometry with dummy atoms removed
+  custom_input.txt             exact custom input, when supplied
+  python_environment.ron       saved interpreter/activation settings, if relevant
+  run.log                     Beavyr progress and final status
+  status.txt                  completed, nonconverged, failed, cancelled, or
+                              incomplete-scan state and available final energy
+  summary.txt                 returned calculation output, on success
+  error.txt                   failure/cancellation details, when returned
+  trajectory.xyz/final.xyz    returned geometry frames, when available
+  scan.csv                    scan data, when available
+  artifacts.tsv               named result-file inventory
+  README.txt                  explanation of the record
+
+Listed result artifacts outside the run folder are retained inside the record.
+Every export also includes a RON inventory of copied paths and byte counts.
+The exporter rejects recursive destinations, symbolic links, and special files
+rather than silently producing an incomplete archive or following external paths.
+Copy failures leave a marked incomplete destination and keep sources untouched.
+
+Lifetime and limits
+-------------------
+Successful panel runs now retain their scratch directory, including energy-only
+runs that previously could be deleted. Failed and cancelled runs are also
+available through Live output and Save complete calculation. Scratch files are
+temporary: use the export for a permanent copy. Beavyr does not implement a new
+cross-session history browser or automatic project/restart loader in this change.
+Exports contain available calculation files, not executables, installed Python
+environments, or dependencies referenced outside the run folder. Native restart
+compatibility depends on the backend and the files that calculation produced.
+
+Implementation
+--------------
+New named modules: calculation_record.rs, calculation_export.rs, live_output.rs.
+Integration: calculator start/completion, progress messages, setup footer,
+calculation and scan results, and the main window rendering code. mod.rs contains
+only new module declarations. Existing unrelated working-tree changes preserved.
+Pre-change copies of edited existing files are under:
+  target/change-backups/live-output-export-2026-11-01/
+
+Validation
+----------
+Resource limit: CPU affinity 0-3, Cargo -j 4, tests serial.
+Final results:
+  cargo build --offline --locked -j 4
+    PASS: updated development executable built successfully (1m 27s).
+    42 existing compiler warnings remain; none name the new feature modules.
+  cargo test --offline --locked -j 4 qchem_panel:: -- --test-threads=1
+    PASS: 109 passed, 0 failed, 18 ignored (1.63s test execution).
+    The 18 opt-in tests were not run; this is not a new full external-backend
+    benchmark or a graphical desktop/file-dialog smoke test.
+  git diff --check
+    PASS.
+
+New coverage includes incremental/nested stdout and stderr, file truncation,
+UTF-8-safe bounded viewing versus byte-exact full export, path containment,
+binary and empty files/directories, repeated non-overwriting exports, symlink
+errors and marked partial copies, original settings/custom input, dummy-free
+geometry, trajectory/final frame retention, nonconvergence/failure/cancellation
+and incomplete-scan status, external Hessian/orbital artifacts, and actual
+DREIDING submissions through the panel lifecycle (successful energy-only run
+and unsupported ferrocene failure). A headless egui interaction test verifies
+that the independent output window renders and copies filtered search results.
+Existing calculator UI, cancellation, scan, ORCA-launch and PySCF-completion
+regression tests are included in the passing suite.
+
+Evidence files:
+  reports/testing_evidence_2026-11-01/live_output_build.log
+  reports/testing_evidence_2026-11-01/live_output_tests.log
+
+Earlier intermediate runs exposed two new-test setup mistakes: an isolated Fe
+atom was an invalid failure fixture (replaced with the existing unsupported
+ferrocene fixture), and the headless egui test needed explicit texture-delta
+cleanup. Both were corrected; the final suite above has no failures.

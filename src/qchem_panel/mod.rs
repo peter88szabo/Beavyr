@@ -11,6 +11,9 @@
 //! how to show those things and a second copy would drift from the first. What
 //! stays here is the run summary: the iterations, and the energies at the end.
 
+mod calculation_record;
+pub mod calculation_export;
+pub mod live_output;
 mod program_selection;
 mod input_generation;
 pub mod scan_controls;

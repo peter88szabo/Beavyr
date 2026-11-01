@@ -2,7 +2,7 @@
 //!
 //! The process handling is the shape every other backend in Beavyr uses: a task
 //! on the compute pool, a child process a cancel flag can kill, a scratch
-//! directory kept on failure and discarded on success. What differs is that one
+//! directory retained for inspection and complete export. What differs is that one
 //! task here covers every program and every job, so the branching is in what
 //! gets written before the run and what gets read after it.
 
@@ -21,7 +21,7 @@ use crate::qchem_interfaces::method::MethodConfig;
 use crate::qchem_interfaces::orca_run::{self, Energetics, ScfIteration};
 use crate::qchem_interfaces::program::QcProgram;
 use crate::qchem_interfaces::xtb_optimize::{
-    create_xtb_run_dir, discard_xtb_run_dir, xtb_scratch_dir,
+    create_xtb_run_dir, xtb_scratch_dir,
 };
 
 #[path = "geometry_search_job.rs"]
@@ -57,6 +57,10 @@ mod orca_launch_tests;
 #[path = "pyscf_completion_tests.rs"]
 mod pyscf_completion_tests;
 
+#[cfg(test)]
+#[path = "calculation_files_tests.rs"]
+mod calculation_files_tests;
+
 /// How often a cancelled run is checked for having died.
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
 
@@ -69,8 +73,7 @@ pub struct QcRunOutput {
     pub scan: Option<Arc<crate::qchem_panel::scan_results::ScanReport>>,
     pub job: JobType,
     pub program: QcProgram,
-    /// The program's own output, kept because a successful run's scratch
-    /// directory is discarded moments later and the summary reads from this.
+    /// The returned output, used by the results window.
     pub log: String,
     /// A multi-frame XYZ in Beavyr's own `cycle <n> E = <v> Eh` format.
     pub trajectory_text: Option<String>,
@@ -81,12 +84,9 @@ pub struct QcRunOutput {
     pub molden_path: Option<PathBuf>,
     /// Files this run produced that are worth keeping, as (what it is, where
     /// it is). The summary offers each one a Save button.
-    ///
-    /// The scratch directory is discarded when a run succeeds, so anything
-    /// listed here keeps it alive until the panel is done with it.
+
     pub saveable: Vec<(&'static str, PathBuf)>,
-    /// Whether the run directory survived, which it does when a Hessian still
-    /// has to be read out of it.
+    /// The retained directory. Panel submissions keep all native calculation files.
     pub kept_dir: Option<PathBuf>,
     pub energetics: Energetics,
     pub scf: Vec<ScfIteration>,
@@ -109,6 +109,8 @@ pub struct QcRunTask {
     pub last_duration: Option<Duration>,
     /// An unsupported DREIDING system needs an acknowledgement popup.
     pub dreiding_warning: Option<String>,
+    pub live_output: super::live_output::State,
+    pub export: super::calculation_export::State,
 }
 
 impl QcRunTask {
@@ -174,28 +176,58 @@ impl QcRunTask {
         let task_dir = run_dir.clone();
 
         let task = AsyncComputeTaskPool::get().spawn(async move {
-            run_cancellable(
+            let started = Instant::now();
+            let request = super::calculation_record::Request {
+                version: env!("CARGO_PKG_VERSION"),
                 program,
                 method,
                 job,
-                &binary,
-                &task_dir,
-                &atoms,
-                &positions_angstrom,
+                executable: &binary,
+                atoms: &atoms,
+                coordinates_angstrom: &positions_angstrom,
                 charge,
                 multiplicity,
-                &config,
+                config: &config,
                 excited,
-                wavefunction,
-                hand_written.as_deref(),
-                &task_cancel,
-                &task_child,
-            )
+                write_orbitals: wavefunction,
+                custom_input: hand_written.as_deref(),
+            };
+            let mut result = super::calculation_record::begin(&task_dir, &request).and_then(|()| {
+                run_cancellable(
+                    program,
+                    method,
+                    job,
+                    &binary,
+                    &task_dir,
+                    &atoms,
+                    &positions_angstrom,
+                    charge,
+                    multiplicity,
+                    &config,
+                    excited,
+                    wavefunction,
+                    hand_written.as_deref(),
+                    &task_cancel,
+                    &task_child,
+                )
+            });
+            if task_cancel.load(Ordering::SeqCst) {
+                result = Err("Cancelled.".into());
+            }
+            if let Err(error) = super::calculation_record::finish(&task_dir, &mut result, started.elapsed()) {
+                let original_error = result.as_ref().err()
+                    .map(|e| format!("\nCalculation error: {e}")).unwrap_or_default();
+                let message = format!("The calculation record could not be completed: {error}.{original_error}\nNative files remain in {}", task_dir.display());
+                let _ = fs::write(task_dir.join(super::calculation_record::RECORD).join("status.txt"), &message);
+                return Err(message);
+            }
+            result
         });
 
         self.task = Some(task);
         self.cancel = Some(cancel);
         self.child = Some(child_slot);
+        self.live_output.start(run_dir.clone());
         self.run_dir = Some(run_dir);
         self.started_at = Some(Instant::now());
         self.last_message = None;
@@ -1151,7 +1183,7 @@ fn beavyr_trajectory(text: &str, energies: &[f64]) -> String {
     out
 }
 
-fn last_frame_xyz(trajectory: &str) -> Option<String> {
+pub(super) fn last_frame_xyz(trajectory: &str) -> Option<String> {
     let lines: Vec<&str> = trajectory.lines().collect();
     let natoms: usize = lines.first()?.trim().parse().ok()?;
     // Frames are the count line, a comment, then one line per atom.
@@ -1530,6 +1562,7 @@ pub fn poll_qc_run(
         .as_ref()
         .is_some_and(|flag| flag.load(Ordering::SeqCst))
     {
+        if let Some(dir) = &task.run_dir { super::calculation_record::mark_cancelled(dir); }
         Err("Cancelled.".to_string())
     } else {
         result
@@ -1740,13 +1773,7 @@ pub fn poll_qc_run(
                 }
             }
 
-            // Discard the scratch directory unless something still has to be
-            // read out of it.
-            if output.kept_dir.is_none() {
-                if let Some(dir) = &run_dir {
-                    discard_xtb_run_dir(dir);
-                }
-            }
+            // Retain native inputs and outputs for live inspection and complete export.
 
             panel.summary_open = true;
             task.last = Some(output);

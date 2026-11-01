@@ -70,6 +70,8 @@ impl Evaluator<'_> {
         } else {
             None
         };
+        crate::qchem_panel::calculation_record::append(self.dir, &format!(
+            "{}: evaluation {} ({})", dir.display(), self.evaluations, job.label()));
         let output = run_cancellable(
             self.program,
             self.method,
@@ -115,6 +117,9 @@ impl Evaluator<'_> {
         } else {
             None
         };
+        crate::qchem_panel::calculation_record::append(self.dir, &format!(
+            "Evaluation {}: energy = {:.14} Hartree{}", self.evaluations, energy,
+            grad.as_ref().map(|g| format!(", gradient norm = {:.8} Hartree/bohr", g.iter().map(|v| v * v).sum::<f64>().sqrt())).unwrap_or_default()));
         self.cached = Some((x.to_vec(), energy, grad.clone()));
         Ok((energy, grad))
     }

@@ -42,6 +42,14 @@ pub(super) fn settings(ui: &mut egui::Ui, panel: &mut QcPanelState, task: &QcRun
                 || (program == QcProgram::Xtb && !ts)
             {
                 ui.horizontal_wrapped(|ui| {
+                    if program == QcProgram::Orca {
+                        ui.spacing_mut().button_padding = egui::vec2(6.0, 2.0);
+                        ui.spacing_mut().interact_size.y = 22.0;
+                        ui.style_mut().text_styles.insert(
+                            egui::TextStyle::Button,
+                            egui::FontId::proportional(12.0),
+                        );
+                    }
                     let native = match program {
                         QcProgram::Orca => "ORCA built-in",
                         QcProgram::Psi4 | QcProgram::Psi4Py => "Psi4 built-in",

@@ -147,6 +147,7 @@ struct WindowState {
     open: bool,
     plot_open: bool,
     report: Option<Arc<ScanReport>>,
+    calculation_dir: Option<std::path::PathBuf>,
     selected: usize,
     view: ScanView,
 }
@@ -166,6 +167,7 @@ impl WindowState {
                 .is_some_and(|old| Arc::ptr_eq(old, report))
             {
                 self.report = Some(report.clone());
+                self.calculation_dir = task.last.as_ref().and_then(|o| o.kept_dir.clone());
                 self.open = true;
                 self.plot_open = !report.points.is_empty();
                 self.selected = 0;
@@ -253,6 +255,7 @@ pub(crate) fn window(
                         report.program, report.method, report.driver
                     ));
                     ui.label(&report.message);
+                    super::calculation_export::button(ui, s.calculation_dir.as_deref(), true);
                     if !report.points.is_empty() {
                         s.view.controls(ui);
                         ui.horizontal_wrapped(|ui| {

@@ -762,13 +762,11 @@ fn optional_settings(ui: &mut egui::Ui, panel: &mut QcPanelState, running: bool)
     ui.horizontal(|ui| {
         tolerance_window::button(ui, panel, running);
         if orbitals {
-            if ui.add_enabled(!running,
-                egui::Button::new("Write orbitals").selected(panel.wavefunction))
-                .on_hover_text("Write a Molden file, load it into Surface Tools, and offer it to save.")
-                .clicked_once()
-            {
-                panel.wavefunction = !panel.wavefunction;
-            }
+            ui.add_enabled(
+                !running,
+                egui::Checkbox::new(&mut panel.wavefunction, "Write orbitals"),
+            )
+            .on_hover_text("Write a Molden file, load it into Surface Tools, and offer it to save.");
         }
     });
     if panel.program == QcProgram::Orca {
@@ -881,6 +879,12 @@ fn footer(
     )
     .on_hover_text(summary);
     let running = task.is_running();
+    ui.horizontal_wrapped(|ui| {
+        if ui.add_enabled(task.live_output.root.is_some(), egui::Button::new("Live output…")).clicked_once() {
+            task.live_output.open = true;
+        }
+        super::super::calculation_export::button(ui, task.live_output.root.as_deref(), !running);
+    });
     let reason = input_editor::program_mismatch(ui.ctx(), panel)
         .or_else(|| blocking_reason(panel, mol, code));
     let status = if running {
@@ -997,7 +1001,7 @@ fn contents(
             );
         }
         let remaining = ui.available_rect_before_wrap();
-        let footer_height = 112.0
+        let footer_height = 150.0
             + if panel.has_input_file() { 38.0 } else { 0.0 }
             + if task.last.as_ref().is_some_and(|result| result.job != JobType::Scan) { 38.0 } else { 0.0 };
         let body_bottom = (remaining.bottom() - footer_height - 8.0).max(remaining.top() + 70.0);

@@ -83,6 +83,7 @@ pub(super) fn run_with_options(
     let mut saveable: Vec<(&'static str, PathBuf)> = Vec::new();
 
     if matches!(job, JobType::SinglePoint | JobType::Gradient) {
+        crate::qchem_panel::calculation_record::append(workdir, "Evaluating DREIDING energy/gradient…");
         let molecule = dreiding_run::molecule_for_force_field(&input_xyz);
         let topology = DreidingTopology::build(&molecule)
             .map_err(|e| crate::forcefield::dreiding::diagnostics::message(&e))?;
@@ -116,6 +117,7 @@ pub(super) fn run_with_options(
     }
 
     if job.produces_trajectory() {
+        crate::qchem_panel::calculation_record::append(workdir, "Optimizing DREIDING geometry…");
         let molecule = dreiding_run::molecule_for_force_field(&input_xyz);
         let result =
             dreiding_run::optimize_with_options(workdir, &molecule, options, Some(cancel))?;
@@ -128,6 +130,7 @@ pub(super) fn run_with_options(
 
     // The Hessian, at whichever geometry we ended up with.
     let hessian_path = if job.produces_frequencies() || job == JobType::Hessian {
+        crate::qchem_panel::calculation_record::append(workdir, "Calculating DREIDING Hessian…");
         let geometry = trajectory_text
             .as_deref()
             .and_then(last_frame_xyz)

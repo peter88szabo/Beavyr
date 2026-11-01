@@ -2030,6 +2030,13 @@ pub fn ui_panel(
     if let Some(rect) = crate::runtime_warning::window(ctx) {
         window_rects.push(rect);
     }
+    let calculation_running = qc_task.is_running();
+    if let Some(rect) = crate::qchem_panel::live_output::window(ctx, &mut qc_task.live_output, calculation_running) {
+        window_rects.push(rect);
+    }
+    if let Some(rect) = crate::qchem_panel::calculation_export::window(ctx, &mut qc_task.export) {
+        window_rects.push(rect);
+    }
     if qc_panel.summary_open {
         if let Some(output) = &qc_task.last {
             let duration = qc_task.last_duration;

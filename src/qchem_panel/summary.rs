@@ -37,10 +37,7 @@ pub fn summary_window(
     opt_task: &crate::qchem_interfaces::xtb_optimize::XtbOptimizationTask,
     pes: &mut crate::pes_sampling::PesSampling,
 ) {
-    // The close button is intercepted rather than obeyed. egui closes a window
-    // the moment its X is clicked, and this one sits beside the Save buttons
-    // for files that go with the scratch directory -- so a mis-click after a
-    // long calculation loses the only view of what came back.
+    // Keep the existing close confirmation; calculation files remain available.
     let mut still_open = *open;
     egui::Window::new("Calculation summary")
         .frame(crate::ui_style::window_frame(ctx))
@@ -50,6 +47,7 @@ pub fn summary_window(
         .show(ctx, |ui| {
             crate::ui_style::modern(ui);
             header(ui, output, duration);
+            super::calculation_export::button(ui, output.kept_dir.as_deref(), true);
             crate::pes_sampling::calculation::results_button(ui, output, pes);
             ui.separator();
 
@@ -106,10 +104,7 @@ pub fn summary_window(
 
 /// "Do you really want to close it?"
 ///
-/// Says what closing actually costs, which is the point of asking: the numbers
-/// go, and any file not yet saved goes with the scratch directory. A prompt
-/// that only asked would be an obstacle; one that says what is at stake is a
-/// warning.
+/// Closing the window keeps the latest result and its retained calculation files.
 fn confirm_close_window(
     ctx: &egui::Context,
     open: &mut bool,
@@ -129,11 +124,11 @@ fn confirm_close_window(
         .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
         .show(ctx, |ui| {
             crate::ui_style::modern(ui);
-            ui.label("This is the only record of the run in Beavyr. Closing it discards it.");
+            ui.label("Close this results window? The latest results can be reopened from the Quantum Chemistry panel.");
             if unsaved > 0 {
                 ui.label(
                     egui::RichText::new(format!(
-                        "{unsaved} file{} from this run {} still only in the scratch directory.                          Save anything you want to keep first.",
+                        "{unsaved} file{} from this run {} in the temporary calculation directory. Use Save complete calculation for a permanent copy.",
                         if unsaved == 1 { "" } else { "s" },
                         if unsaved == 1 { "is" } else { "are" },
                     ))

@@ -7,6 +7,55 @@ inspected and used as a reference; no Behemoth files were changed. No commits,
 pushes, dependency additions, MPI changes or Python-environment changes were made.
 Compilation and test processes were restricted to CPU cores 0–3, Cargo -j4.
 
+
+Overview and location
+Open UV-Vis -> Vibronic analysis -> Vibronic spectra. The five additions are:
+1. Absorption from two harmonic surfaces, including thermal hot bands.
+2. Fluorescence from the emitting state's thermal population.
+3. Laser-dependent resonance Raman with fundamentals and second-order bands.
+4. Herzberg-Teller transition-dipole contributions and FC/HT interference.
+5. Mode animation, experimental overlays, explicit shifts, and data/figure export.
+The existing gradient-based activity analysis and Duschinsky diagnostics remain
+separate choices. The new spectral methods do not replace those quick analyses.
+
+How to run an analysis
+1. Select the ground- and excited-state Hessians. If a Hessian lacks geometry,
+   provide its matching XYZ file. Both states must use the same atom order and
+   masses. The full two-Hessian calculation requires stable minima.
+2. Choose Absorption, Fluorescence or Resonance Raman, and Beavyr or ORCA ESD.
+3. Enter E(excited minimum) - E(ground minimum), in eV, WITHOUT ZPE. The code
+   supplies the zero-point correction from the Hessians. A vertical excitation
+   energy at the ground geometry is not this minimum-to-minimum gap.
+4. Set temperature, spectral spacing and Lorentzian/Gaussian FWHM. For Raman,
+   use 0 K, enter laser wavelengths in nm (for example: 532, 500), choose the
+   final-state order, and set the separate Raman linewidth.
+5. For internal Condon Raman, provide a transition-dipole vector or obtain it
+   through the property-file/PySCF/Psi4 choices. For Herzberg-Teller, enable its
+   checkbox and provide derivatives through a property file or Python backend.
+   A manually entered constant vector alone is insufficient for this option.
+6. For PySCF/Psi4 collection, select the saved interpreter/activation settings,
+   HF or DFT reference, functional where applicable, basis, charge, multiplicity,
+   root, number of roots and TDA/full-response choice. These settings should be
+   consistent with the electronic state and model used for the supplied Hessians.
+   For ORCA, select its executable and electronic settings; ORCA collects its
+   own transition properties and performs native ESD calculations.
+7. Click Analyse. Cancel stops the job. Errors use the copyable warning window.
+8. Use Copy data or Save data for the original results and calculation metadata.
+   Load spectrum imports experimental two-column data; select its units first.
+   Copy displayed data / Save displayed data include the displayed shift and
+   normalisation. Save figure writes SVG. Animate mode selects a ground- or
+   excited-state mode; Stop or closing the analysis window restores equilibrium.
+
+Required information by method
+- Full absorption/fluorescence: both Hessians and geometries, minimum electronic
+  energy gap, temperature and spectral-grid/broadening settings.
+- Internal Raman: those inputs, laser wavelengths, final-state order, and an
+  electronic transition-dipole vector; temperature is restricted to 0 K.
+- Internal Herzberg-Teller: transition dipole plus its Cartesian derivatives,
+  or backend settings sufficient to calculate them. Property coordinates are
+  in bohr, dipoles in e*bohr, derivatives in e, with 3N derivative rows.
+- Experimental comparison: a separate two-column spectrum and its x-axis units.
+
 1. Full harmonic absorption
 Two-Hessian Gaussian time correlation with Duschinsky rotation, displacement,
 frequency changes and finite-temperature initial populations, followed by FFT.
@@ -59,7 +108,7 @@ Behemoth inspection
 - TDDFT and sTDDFT types/solvers: transition-dipole vectors already available.
 - src/utils/cli/excited_state_derivatives.rs: energy/nuclear-gradient driver,
   not a transition-dipole derivative exporter with tracked phases.
-No automatic Behemoth property driver was falsely exposed. Behemoth and other
+Automatic Behemoth property collection was not added. Behemoth and other
 programs can supply data through the validated property-file route.
 
 5. Results and visualization
@@ -151,9 +200,48 @@ https://pyscf.org/_modules/pyscf/tdscf/rhf.html
 Psi4 response implementation: locally installed scf_response.py, also
 https://github.com/psi4/psi4/blob/master/psi4/driver/procrouting/response/scf_response.py
 
+
+Implementation map
+All implementation files are under src/vibronic/ unless otherwise noted:
+- harmonic_model.rs: two-surface model, mode mapping and reversal.
+- gaussian_correlation.rs, complex_math.rs, thermal_spectrum.rs: Gaussian
+  correlation, complex linear algebra and Fourier spectrum assembly.
+- optical_spectrum.rs: absorption/emission axes and optical prefactors.
+- raman_spectrum.rs: resonant Raman amplitudes, tensors and line profiles.
+- transition_properties.rs: property parsing, projection and Gaussian moments.
+- property_job.rs, transition_driver.py: Python property jobs and state tracking.
+- orca_esd.rs, process.rs: native ORCA input/output and cancellable child jobs.
+- spectral_job.rs, spectral_controls.rs: job dispatch and calculation settings.
+- spectrum_view.rs, mode_animation.rs: plotting, overlays, exports and animation.
+- harmonic_tests.rs, extensions_tests.rs, transition_driver_tests.py: new tests.
+- Existing analysis.rs, state.rs and ui.rs connect the new features; src/ui.rs
+  applies animation requests to the viewer. mod.rs contains declarations only.
+- README.md documents entry points and supported workflows.
+
+Limits and remaining review
+- The surfaces and normal modes are harmonic; anharmonic effects are not added.
+- Internal optical spectra are relative, not absolute radiative rates/lifetimes.
+- Raman is resonant, single-intermediate-state and 0 K, with final total quantum
+  number at most two. Finite-temperature/multistate Raman is not implemented.
+- Automatic property collection is for PySCF/Psi4 HF/DFT references. Other
+  backends require supplied property data, except ORCA's native ESD route.
+- Near-degenerate states can fail the overlap criterion. Such failure is explicit;
+  it is not silently handled by changing roots or inventing derivatives.
+- Python property expansion uses the ground Hessian reference frame. Native
+  ORCA follows its own ESD conventions, so identical HT spectra across routes
+  are not claimed for arbitrary geometries and electronic settings.
+- Input linewidths, finite-difference steps and spectral grids still need suitable
+  choices for the molecule; successful execution is not proof of model accuracy.
+- Interactive visual review and validation on representative physical excited
+  states remain necessary before a release-readiness claim.
+
 Reversibility
 Existing-file backups are in
  target/change-backups/vibronic-extensions-2026-11-01/
 New implementations are named files under src/vibronic/. mod.rs only declares
 modules. src/ui.rs only adds the mode-animation application hook. README's
 previous vibronic section is backed up too. No unrelated fixes or commits.
+
+Report update: expanded usage instructions, required inputs, implementation map
+and limitations. Existing validation logs were checked; no new calculations or
+source-code changes were performed for this documentation-only update.

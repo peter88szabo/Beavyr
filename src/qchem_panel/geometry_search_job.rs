@@ -94,6 +94,7 @@ pub(super) fn run(
         facmin: 0.6,
     };
     let x = coordinates.iter().map(|x| x / BOHR_TO_ANGSTROM).collect();
+    crate::qchem_panel::calculation_record::append(dir, "Starting Beavyr geometry optimization…");
     let outcome = if program == QcProgram::Dreiding {
         use crate::forcefield::dreiding::{
             objective::{cancellation::CancellableObjective, DreidingObjective},
