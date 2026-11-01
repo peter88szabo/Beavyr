@@ -795,21 +795,44 @@ from its output files. That keeps the dependency list to five crates —
 `bevy`, `bevy_egui`, `rfd`, `ndarray`, `anyhow` — with no BLAS and no Python.
 
 
-## Implemented but not yet exposed
+## Vibronic analysis
 
-`src/vibronic/` is complete and tested but has no panel attached to it yet:
+Open **UV-Vis → Vibronic analysis → Vibronic spectra**. The window resizes
+horizontally and vertically. Select matching ground- and excited-state Hessians
+(with their geometries and identical atom order) and enter the electronic
+minimum-to-minimum gap in eV, without zero-point energy.
 
-* **Franck-Condon activity** — projects an excited-state gradient taken at the
-  ground-state geometry onto the ground-state normal modes, giving each mode's
-  displacement, Huang-Rhys factor and resonance-Raman intensity in the
-  short-time approximation. It needs no excited-state optimisation, which
-  matters when an excited-state minimum is hard to converge.
-* **Duschinsky rotation** — how the modes of one electronic state are built
-  from the modes of another, for asking which ground-state mode an
-  excited-state band descends from.
+- Absorption and fluorescence use both Hessians, Duschinsky mixing, frequency
+  changes and the initial state's thermal population. Internal spectra are
+  relative; they do not report absolute fluorescence lifetimes.
+- Resonance Raman accepts comma-separated laser wavelengths in nm and includes
+  fundamentals, or fundamentals plus overtones/combinations. It currently uses
+  one intermediate electronic state at 0 K. The intermediate-state linewidths
+  and the displayed Raman linewidth are separate settings.
+- Enable Herzberg–Teller for linear transition-dipole contributions, including
+  interference with Franck–Condon amplitudes. For internal calculations, import
+  a property file using **Save template**, or collect properties with PySCF or
+  Psi4. Both use the existing saved Python interpreter/activation settings.
+  The driver matches states by wavefunction overlap and aligns their phase
+  before central differences; ambiguous matches stop with a copyable error.
+- **ORCA ESD** invokes the user-configured ORCA executable directly. ORCA performs
+  its native absorption, fluorescence, Raman and optional Herzberg–Teller work.
+  Native ESD requires ORCA-format Hessians. Calculation directories are retained.
+- Results support ground/excited mode animation, two-column experimental data
+  overlays, explicit shifts, selectable axes, CSV copy/save and SVG figures.
+  Axis changes preserve sampled intensity values, without a density Jacobian.
+  Display transformations leave the original calculated data unchanged.
+
+The original gradient-based Franck–Condon/short-time Raman activity analysis and
+Duschinsky rotation diagnostics remain available as separate choices. The full
+spectral calculation requires stable harmonic minima; imaginary modes are rejected.
+Other backends can supply Hessians and property files. Automatic transition-dipole
+collection is currently available for HF/DFT references in PySCF and Psi4; native
+ORCA handles its own properties. Behemoth has not been modified for this feature.
+
+Validation and method details: `reports/vibronic_extensions_2026-11-01.txt`.
 
 ## Roadmap
 
 - Simulated NMR spectra
-- A UI for the vibronic analyses above
 - File associations, so double-clicking an `.xyz` opens Beavyr

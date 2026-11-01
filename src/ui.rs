@@ -2056,6 +2056,16 @@ pub fn ui_panel(
     if let Some(rect) = crate::vibronic::ui::window(ctx, &mut vibronic, &uvvis_state) {
         window_rects.push(rect);
     }
+    if vibronic.animation.needs_apply(vibronic.open) {
+        let previous = structure_history.before(&mol, &traj);
+        let is_open = vibronic.open;
+        if vibronic.animation.apply(is_open, &mut mol, &mut traj) {
+            structure_history.replaced(previous, &mol, &traj, "Vibronic mode animation");
+            xtb_freq_panel_state.selected_mode = None;
+            mol.recompute_bonds(settings.bond_thresh_scale, settings.hbond_cutoff);
+            ev_changed.write(MoleculeChanged::parse_xyz(false));
+        }
+    }
     if let Some(rect) = crate::pes_sampling::ui::window(ctx, &mut pes_sampling, &mol) {
         window_rects.push(rect);
     }

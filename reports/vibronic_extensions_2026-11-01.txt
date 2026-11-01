@@ -1,0 +1,159 @@
+Beavyr vibronic extensions — implementation and validation
+2026-11-01
+
+Scope
+Implemented the five requested additions in order in Beavyr. Behemoth was
+inspected and used as a reference; no Behemoth files were changed. No commits,
+pushes, dependency additions, MPI changes or Python-environment changes were made.
+Compilation and test processes were restricted to CPU cores 0–3, Cargo -j4.
+
+1. Full harmonic absorption
+Two-Hessian Gaussian time correlation with Duschinsky rotation, displacement,
+frequency changes and finite-temperature initial populations, followed by FFT.
+The user supplies the electronic minimum-to-minimum gap; ZPE is obtained from
+the Hessians. An optional photon-energy prefactor produces a relative optical
+spectrum. Stable minima with matching atoms, masses and mode counts are required.
+No truncated enumeration of intermediate vibrational states is used.
+
+2. Fluorescence
+Reverse the initial/final harmonic surfaces and displacements, populate the
+emitting state's modes, reverse the photon-energy axis, and optionally apply
+E^3. Linear dipoles are transformed into the reversed coordinate frame.
+Internal optical profiles are area-normalised; no absolute radiative lifetime
+is inferred from a broadened, finite spectral window.
+
+3. Resonance Raman
+Resonant Kramers–Heisenberg time integration of Gaussian polynomial moments.
+Selectable laser wavelengths, lifetime/disorder broadening, fundamentals and
+first overtones/combination bands. Final-state line broadening is independent
+of the intermediate-state damping. Tensor invariants supply orientationally
+averaged scattering factors; an optional scattered-photon frequency^4 factor
+is available. Nested quadrature checks integration error. The implementation
+uses one intermediate electronic state, the resonant term and a 0 K initial
+vibrational ground state; it is not a multistate or finite-temperature Raman
+implementation. Exported line strengths retain relative weights across lasers.
+
+4. Herzberg–Teller
+Linear transition dipoles are included inside the harmonic correlation and
+Raman tensor amplitudes. FC/HT interference is retained before squaring.
+Property-file import validates atom order, coordinates, units and finite data.
+A template contains NaN placeholders so unfilled derivatives cannot silently
+be accepted as zeros. Derivatives are projected as sum_i L_ik d(mu)/dx_i,
+following Behemoth's normal-mode projection convention.
+
+Automatic HF/DFT-reference collection uses PySCF or Psi4 in the user's saved
+Python environment. Central Cartesian finite differences use overlap-based
+state selection and phase alignment, adapted from Behemoth's biorthogonal
+occupied/virtual state-overlap construction. TDDFT tracking uses normalized
+X pseudo-CI amplitudes; it is not an exact many-electron TDDFT wavefunction.
+Weak or ambiguous matches are rejected, with tracking.csv and calculation logs
+retained. The derivative expansion is referenced to the ground Hessian geometry
+and Cartesian frame. This differs from some native ORCA expansion conventions.
+The finite-difference step is adjustable; difficult states still require step
+convergence checks and inspection of electronic-state character.
+
+Behemoth inspection
+- src/normalmode/vibronic/herzberg_teller.rs: supplied Cartesian derivative
+  projection and mode activities, but not a complete automatic derivative job.
+- src/hamiltonian/tddft/state_overlap.rs: cross-geometry state-overlap machinery.
+- TDDFT and sTDDFT types/solvers: transition-dipole vectors already available.
+- src/utils/cli/excited_state_derivatives.rs: energy/nuclear-gradient driver,
+  not a transition-dipole derivative exporter with tracked phases.
+No automatic Behemoth property driver was falsely exposed. Behemoth and other
+programs can supply data through the validated property-file route.
+
+5. Results and visualization
+Resizable UV-Vis analysis window; ground/excited normal-mode animation with
+looping vibration playback and equilibrium restoration when closed/stopped.
+A subsequently loaded unrelated trajectory is not overwritten on closure.
+Experimental two-column spectrum import (eV, cm^-1 or nm), explicit calculated
+energy shift, peak normalisation, numerical hover values, SVG export, and
+copy/save of displayed data. Raman defaults to a shift axis in cm^-1.
+Raw data and calculation metadata remain separately exportable. Axis conversion
+preserves sampled intensity values, not densities per unit energy/wavelength.
+
+ORCA integration
+Uses only the selected executable, an input file, and captured output. Native
+ESD(ABS), ESD(FLUOR), ESD(RR), DOHT, two Hessians, Cartesian modes and Duschinsky
+mixing. Both normal ORCA termination and successful ESD completion are checked.
+Actual testing established UNIT WN, Lorentzian HWHM=FWHM/2 and Gaussian
+sigma=FWHM/sqrt(8 ln 2). Pure Lorentzian broadening must select LORENTZ rather
+than VOIGT with zero Gaussian width. RRSLINEW=10 was verified to give ~10 cm^-1
+FWHM. Multiple lasers produce separate .spectrum.<rounded wavenumber> files;
+missing/colliding output files are detected rather than silently omitted.
+Cancellation terminates the child process tree and cancelled results are not
+applied. Successful and failed work directories are retained for inspection.
+
+Validation completed
+- cargo check --offline --locked -j4: passed.
+- Final cargo build --offline --locked -j4: passed (debug executable rebuilt).
+  Compiler warnings remain; the build is not claimed to be warning-free.
+- Full application suite, isolated XDG_CONFIG_HOME, serial tests:
+  1517 passed, 0 failed, 44 ignored, repeated successfully on the final source.
+  Ignored tests require optional resources.
+- Focused vibronic suite: 52 passed, 0 failed, 9 ignored.
+- Harmonic/native integration suite: 17 passed, including actual ORCA ABS,
+  FLUOR and RR runs. The final Raman check requested two lasers (532 and
+  500 nm), verified both spectrum files, and passed.
+- Pure numerical comparisons: complex LU/FFT, displaced oscillator 0 K and
+  thermal correlation, caustic continuity, full mixed unequal-frequency model
+  versus independent two-dimensional coordinate-space quadrature, absorption
+  and emission progression direction, Raman versus independent sum-over-states,
+  tensor rotation invariance, HT dark-state/hot-band analytic correlation,
+  FC/HT interference versus coordinate quadrature, and HT Raman versus an
+  independent two-intermediate-level expression.
+- Input/view tests: malformed experimental/property data, frame/atom mismatch,
+  derivative projection, explicit shifts without raw-data mutation, SVG escaping,
+  cancellation, animation stop/restoration and unrelated trajectory ownership.
+- Actual PySCF and Psi4: closed-shell water HF/STO-3G TDA, all 9 Cartesian
+  derivatives (19 electronic calculations per backend including reference).
+  After a single global phase alignment, relative derivative-vector difference
+  was 4.9617e-5 (~0.005%); maximum component difference 5.2419e-6.
+- Actual PySCF and Psi4: water full TDHF and open-shell OH UHF/TDA derivative
+  calculations also passed in both backends.
+- Native ORCA DOHT true: completed, including transition-dipole derivatives.
+  Native smoke tests reuse a small HF/STO-3G water Hessian for both surfaces;
+  they test invocation/output handling, not a physical excited-state spectrum.
+  Scientific numerical validation is provided by the independent oscillator,
+  coordinate-quadrature and sum-over-states comparisons described above.
+- Python state-tracking unit tests: 3 passed; root permutation, orbital/state
+  phase changes, ambiguous matches and singular overlaps are covered.
+- No manual interactive GUI inspection is claimed. Headless/window workflow and
+  animation-state tests passed; final visual judgement remains a user check.
+
+Reproducible tests
+  taskset -c 0-3 cargo test --offline --locked -j4 vibronic:: -- --test-threads=1
+  taskset -c 0-3 env BEAVYR_TEST_ORCA=/your/orca cargo test --offline --locked \
+    -j4 vibronic::harmonic_tests -- --include-ignored --test-threads=1
+  taskset -c 0-3 /your/scientific/python src/vibronic/transition_driver_tests.py
+Optional Python integration tests use BEAVYR_TEST_PYSCF_PYTHON and
+BEAVYR_TEST_PSI4_PYTHON pointing to the two environment interpreters.
+
+Logs
+/tmp/beavyr-vibronic-extensions-full-tests.log
+/tmp/beavyr-vibronic-extensions-tests.log
+/tmp/beavyr-vibronic-extensions-stage4-tests.log
+/tmp/beavyr-vibronic-extensions-build.log
+/tmp/beavyr-vibronic-property-tests.log and /tmp/beavyr-vibronic-psi4-retest.log
+/tmp/beavyr-vibronic-more-properties.log
+/tmp/beavyr-vibronic-native-ht/run.log
+
+References inspected
+Baiardi, Bloino and Barone (2013), DOI 10.1021/ct400450k and supporting material.
+Baiardi et al. (2014), DOI 10.1063/1.4895534.
+de Souza et al. (2018), DOI 10.1063/1.5010895.
+de Souza et al. (2019), DOI 10.1063/1.5099247.
+User-supplied PDFs: /home/peter/DevCode/Behemoth/Papers/excited_state_module.
+ORCA 6.1 ESD manual:
+https://www.faccts.de/docs/orca/6.1/manual/contents/spectroscopyproperties/esd.html
+PySCF transition properties:
+https://pyscf.org/_modules/pyscf/tdscf/rhf.html
+Psi4 response implementation: locally installed scf_response.py, also
+https://github.com/psi4/psi4/blob/master/psi4/driver/procrouting/response/scf_response.py
+
+Reversibility
+Existing-file backups are in
+ target/change-backups/vibronic-extensions-2026-11-01/
+New implementations are named files under src/vibronic/. mod.rs only declares
+modules. src/ui.rs only adds the mode-animation application hook. README's
+previous vibronic section is backed up too. No unrelated fixes or commits.

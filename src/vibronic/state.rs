@@ -4,10 +4,12 @@ use bevy::{prelude::Resource, tasks::Task};
 pub enum AnalysisKind {
     FranckCondon,
     Duschinsky,
+    Spectrum,
 }
 #[derive(Clone)]
 pub struct Settings {
     pub kind: AnalysisKind,
+    pub spectrum: super::spectral_job::Controls,
     pub ground: HessianSource,
     pub excited: HessianSource,
     pub gradient: String,
@@ -21,6 +23,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             kind: AnalysisKind::FranckCondon,
+            spectrum: Default::default(),
             ground: Default::default(),
             excited: Default::default(),
             gradient: String::new(),
@@ -40,5 +43,9 @@ pub struct VibronicState {
     pub result: Option<AnalysisResult>,
     pub error: Option<String>,
     pub plot: usize,
+    pub view: super::spectrum_view::View,
+    pub animation: super::mode_animation::Animation,
+    pub cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    pub progress: std::sync::Arc<std::sync::atomic::AtomicUsize>,
     pub heatmap: Option<bevy_egui::egui::TextureHandle>,
 }

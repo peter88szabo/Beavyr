@@ -34,8 +34,10 @@ pub fn poll(ctx: &egui::Context, state: &mut VibronicState) {
     if let Some(task) = &mut state.task {
         if let Some(result) = block_on(future::poll_once(task)) {
             state.task = None;
+            ctx.request_repaint();
             state.open = true;
             match result {
+                Ok(_) if state.cancel.load(std::sync::atomic::Ordering::Relaxed) => {}
                 Ok(result) => {
                     if !result.notices.is_empty() {
                         crate::runtime_warning::push(
@@ -50,10 +52,15 @@ pub fn poll(ctx: &egui::Context, state: &mut VibronicState) {
                         None
                     };
                     state.plot = 0;
+                    state.view.initialise(
+                        result.settings.spectrum.process == super::optical_spectrum::Process::Raman,
+                    );
                     state.result = Some(result);
                 }
                 Err(e) => {
-                    crate::runtime_warning::push(ctx, "Vibronic analysis", &e);
+                    if !e.starts_with("Cancelled.") {
+                        crate::runtime_warning::push(ctx, "Vibronic analysis", &e);
+                    }
                     state.error = Some(e);
                 }
             }
@@ -100,7 +107,15 @@ fn body(ui: &mut egui::Ui, state: &mut VibronicState, uvvis: &crate::uvvis::UvVi
     if state.task.is_some() {
         ui.horizontal(|ui| {
             ui.spinner();
-            ui.label("Analysing…");
+            ui.label(format!(
+                "Analysing… {}%",
+                state.progress.load(std::sync::atomic::Ordering::Relaxed)
+            ));
+            if ui.button("Cancel").clicked_once() {
+                state
+                    .cancel
+                    .store(true, std::sync::atomic::Ordering::Relaxed);
+            }
         });
     }
     if let Some(error) = &state.error {
@@ -118,14 +133,16 @@ fn controls(ui: &mut egui::Ui, state: &mut VibronicState, uvvis: &crate::uvvis::
                     ui.horizontal_wrapped(|ui| {
                         ui.selectable_value(&mut s.kind,AnalysisKind::FranckCondon,"Franck–Condon / resonance Raman");
                         ui.selectable_value(&mut s.kind,AnalysisKind::Duschinsky,"Duschinsky rotation");
+                        ui.selectable_value(&mut s.kind,AnalysisKind::Spectrum,"Vibronic spectra");
                     });
                     source(ui,"Ground-state Hessian",&mut s.ground);
-                    if s.kind==AnalysisKind::Duschinsky {source(ui,"Excited-state Hessian",&mut s.excited);}
+                    if matches!(s.kind,AnalysisKind::Duschinsky|AnalysisKind::Spectrum) {source(ui,"Excited-state Hessian",&mut s.excited);}
                     else {
                         file(ui,"Excited-state gradient",&mut s.gradient);
                         ui.small("Gradient at the ground-state geometry: ORCA .engrad or Turbomole $grad, in Hartree/bohr.");
                     }
-                    ui.horizontal(|ui| {ui.label("Minimum frequency");ui.add(egui::DragValue::new(&mut s.cutoff).range(0.0..=10000.).suffix(" cm⁻¹"));});
+                    if s.kind==AnalysisKind::Spectrum { super::spectral_controls::controls(ui,&mut s.spectrum,&s.ground); }
+                    if s.kind!=AnalysisKind::Spectrum {ui.horizontal(|ui| {ui.label("Minimum frequency");ui.add(egui::DragValue::new(&mut s.cutoff).range(0.0..=10000.).suffix(" cm⁻¹"));});}
                     if s.kind==AnalysisKind::FranckCondon {
                         ui.checkbox(&mut s.make_band,"Absorption band");
                         if s.make_band {
@@ -144,8 +161,10 @@ fn controls(ui: &mut egui::Ui, state: &mut VibronicState, uvvis: &crate::uvvis::
                         }
                     }
                     if ui.button("Analyse").clicked_once() {
-                        let settings=state.settings.clone();state.error=None;
-                        state.task=Some(AsyncComputeTaskPool::get().spawn(async move {analysis::run(settings)}));
+                        let settings=state.settings.clone();state.error=None;state.animation.stop=true;
+                        state.cancel=Default::default();state.progress=Default::default();
+                        let cancel=state.cancel.clone();let progress=state.progress.clone();
+                        state.task=Some(AsyncComputeTaskPool::get().spawn(async move {analysis::run_with_control(settings,&cancel,&progress)}));
                         ctx.request_repaint();
                     }
                 });
@@ -179,6 +198,16 @@ fn results(ui: &mut egui::Ui, state: &mut VibronicState) {
             ui.colored_label(ui.visuals().warn_fg_color, note);
         }
         match &result.data {
+            AnalysisData::Spectrum(output) => {
+                super::spectrum_view::results(ui, &mut state.view, &output.spectra);
+                super::mode_animation::controls(
+                    ui,
+                    &mut state.animation,
+                    &output.ground,
+                    &output.excited,
+                );
+                super::spectral_controls::results(ui, output);
+            }
             AnalysisData::FranckCondon { activity, band } => {
                 ui.label(format!(
                     "Reorganisation: {:.2} cm⁻¹ · unaccounted gradient: {:.2}%",

@@ -6,6 +6,7 @@ use super::{
 };
 use std::fmt::Write;
 pub enum AnalysisData {
+    Spectrum(super::spectral_job::Output),
     FranckCondon {
         activity: FranckCondonAnalysis,
         band: Option<VibronicBand>,
@@ -18,6 +19,25 @@ pub struct AnalysisResult {
     pub notices: Vec<String>,
 }
 pub fn run(settings: Settings) -> Result<AnalysisResult, String> {
+    run_with_control(
+        settings,
+        &std::sync::atomic::AtomicBool::new(false),
+        &std::sync::atomic::AtomicUsize::new(0),
+    )
+}
+pub fn run_with_control(
+    settings: Settings,
+    cancel: &std::sync::atomic::AtomicBool,
+    progress: &std::sync::atomic::AtomicUsize,
+) -> Result<AnalysisResult, String> {
+    if settings.kind == AnalysisKind::Spectrum {
+        let output = super::spectral_job::run(&settings, cancel, progress)?;
+        return Ok(AnalysisResult {
+            settings,
+            data: AnalysisData::Spectrum(output),
+            notices: vec![],
+        });
+    }
     if !settings.cutoff.is_finite() || settings.cutoff < 0. {
         return Err("Frequency cutoff must be finite and nonnegative".into());
     }
@@ -27,6 +47,7 @@ pub fn run(settings: Settings) -> Result<AnalysisResult, String> {
         notices.push(format!("Ground state has {} imaginary modes. These are excluded; the harmonic minimum approximation may be inappropriate.",a.imaginary));
     }
     let data = match settings.kind {
+        AnalysisKind::Spectrum => unreachable!(),
         AnalysisKind::FranckCondon => {
             let gradient = input::gradient(&settings.gradient, &a)?;
             let activity =
@@ -146,6 +167,16 @@ impl AnalysisResult {
             let _ = writeln!(out, "# Warning: {note}");
         }
         match &self.data {
+            AnalysisData::Spectrum(output) => {
+                let c = &self.settings.spectrum;
+                let _ = writeln!(out, "# Excited Hessian: {}\n# Excited XYZ: {}\n# Process: {}\n# Engine: {:?}\n# Electronic minimum gap_eV: {:.10}\n# Broadening FWHM_cm-1: Lorentzian={}, Gaussian={}\n# Grid spacing_cm-1: {}\n# Herzberg-Teller: {}\n# Property source: {:?}\n# Property file: {}\n# Central-difference step_bohr: {}\n# Charge: {}\n# Multiplicity: {}\n# Root: {} of {}\n# TDA: {}\n# Method: {:?}\n# Functional: {}\n# Basis: {}", clean(&self.settings.excited.path), clean(&self.settings.excited.xyz), c.process.label(),c.engine,c.gap_ev,c.grid.lorentz_fwhm_cm1,c.grid.gaussian_fwhm_cm1,c.grid.spacing_cm1,c.properties.ht,c.properties.source,clean(&c.properties.path),c.properties.step,c.charge,c.multiplicity,c.root,c.roots,c.tda,c.qc_method,clean(&c.method.functional),clean(&c.method.basis));
+                if c.process == super::optical_spectrum::Process::Raman {
+                    let _ = writeln!(out, "# Energy axis is Raman shift (eV), not incident photon energy.\n# Laser wavelengths_nm: {}\n# Raman order: {}\n# Raman linewidth_FWHM_cm-1: {}\n# Scattered-photon frequency fourth-power factor: {}",clean(&c.raman.lasers),c.raman.order,c.raman.line_fwhm,c.raman.photon_factor);
+                } else {
+                    let _ = writeln!(out, "# Optical photon-energy prefactor: {}\n# Relative spectrum; no absolute lifetime inferred",c.frequency_factor);
+                }
+                out.push_str(&output.csv());
+            }
             AnalysisData::FranckCondon { activity, band } => {
                 let _=writeln!(out,"# Excited gradient: {}\n# Model: displaced harmonic oscillators; Raman short-time approximation, relative intensities\n# Reorganisation (cm^-1): {:.10}\n# Unaccounted gradient fraction: {:.10}",clean(&self.settings.gradient),activity.reorganisation_cm1,activity.unaccounted_fraction);
                 out.push_str("mode,frequency_cm^-1,projected_gradient_au,dimensionless_displacement,huang_rhys,reorganisation_cm^-1,relative_resonance_raman\n");

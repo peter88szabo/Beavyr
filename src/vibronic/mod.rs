@@ -23,3 +23,29 @@ mod legacy;
 mod tests;
 #[cfg(test)]
 mod workflow_tests;
+
+mod complex_math;
+mod gaussian_correlation;
+mod harmonic_model;
+#[cfg(test)]
+mod harmonic_tests;
+mod thermal_spectrum;
+
+mod orca_esd;
+mod process;
+mod spectral_controls;
+mod spectral_job;
+
+mod optical_spectrum;
+
+mod raman_spectrum;
+
+mod transition_properties;
+
+mod property_job;
+
+mod mode_animation;
+mod spectrum_view;
+
+#[cfg(test)]
+mod extensions_tests;
