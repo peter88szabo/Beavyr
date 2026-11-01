@@ -1,0 +1,41 @@
+Compiler warning cleanup — 2026-11-02
+
+Baseline: cargo check reported 42 warnings in the normal application build.
+
+Changes:
+- Removed unused imports, unused optimizer bookkeeping, and an unused norm
+  calculation. Energy/gradient evaluations, convergence criteria, coordinates,
+  Hessian updates and the spin-crossing initial inverse Hessian are unchanged.
+- Compiled test-only fixtures and convenience wrappers only under cfg(test).
+  Production constrained optimization and spectral calculations retain their
+  existing entry points. No tests were deleted or disabled.
+- Removed uncalled picking wrappers, an unused centroid/wrapping helper, an
+  empty test module containing only an unused fixture, and an unconstructed
+  Hessian capability enum case. No Hessian calculation algorithm was removed.
+- Kept the hydrogen operation's local rollback for its direct tests; the
+  application's undo/redo still uses shared BuilderHistory. Its production
+  status tracking no longer clones an unused pre-addition molecule.
+- Preserved five metadata fields with narrow, documented dead_code expectations:
+  conformer optimizer provenance, pathway source-conformer index, pathway atom
+  ordering, parsed Gaussian reduced masses and peptide attachment accounting.
+  The latter two annotations apply only outside tests, which inspect those fields.
+  These are deliberate exceptions, not a blanket suppression of compiler warnings.
+
+Validation:
+- cargo check --offline --locked -j 4: passed without warnings.
+- cargo test --offline --locked -j 4 -- --test-threads=1:
+  1,550 passed, 0 failed, 45 ignored; compilation produced no warnings.
+- All commands use taskset -c 0-3. Ignored external-engine/GPU tests were not run
+  for this cleanup. No scientific model changes were introduced.
+- cargo build --offline --locked -j 4: passed without warnings, including
+  the requested heading removal; recorded in the accompanying build.log.
+- git diff --check passed.
+
+Evidence: reports/testing_evidence_2026-11-02/warning_cleanup/
+Reversible originals: target/change-backups/warning-cleanup-2026-11-02/
+No commits. Existing mod.rs edits are limited to removing an unused import and
+adding attributes to existing items; no implementation was added there.
+
+Additional requested UI change: removed the "Method and basis" heading from
+the Quantum Chemistry panel. The controls are unchanged. This one-line label
+removal follows the full test run and is included in the final build.

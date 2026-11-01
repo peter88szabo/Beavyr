@@ -555,7 +555,6 @@ fn theory_card(
             spectrum_controls::settings(ui, panel, running);
             return;
         }
-        ui.strong("Method and basis");
         let methods = job::methods_for(panel.program);
         if methods.is_empty() {
             ui.small("DREIDING force field · parameters follow the atom types");

@@ -595,7 +595,6 @@ pub fn minimize_internal<O: Objective>(
 
         if scale <= opts.min_line_search_scale && energy > old_energy {
             x = old_x;
-            energy = old_energy;
             state = old_state;
             hess_q = old_hess;
             grad_x = vec![0.0; x.len()];

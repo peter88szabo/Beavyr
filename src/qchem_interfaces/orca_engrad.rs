@@ -58,6 +58,7 @@ pub struct OrcaGradient {
 }
 
 impl OrcaGradient {
+    #[cfg(test)]
     pub fn natoms(&self) -> usize {
         self.atoms.len()
     }

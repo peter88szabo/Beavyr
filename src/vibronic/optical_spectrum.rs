@@ -28,6 +28,7 @@ impl Process {
         }
     }
 }
+#[cfg(test)]
 pub fn calculate(
     model: HarmonicModel,
     process: Process,

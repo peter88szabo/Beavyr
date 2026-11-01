@@ -84,6 +84,7 @@ pub enum JobType {
 }
 
 impl JobType {
+    #[cfg(test)]
     pub const ALL: [JobType; 11] = [
         JobType::SinglePoint,
         JobType::Scan,
@@ -159,6 +160,7 @@ impl JobType {
     }
 
     /// One line under the selector, saying what the job is for.
+    #[cfg(test)]
     pub fn description(self) -> &'static str {
         match self {
             JobType::Mecp => "Find a minimum-energy crossing between two spin states.",

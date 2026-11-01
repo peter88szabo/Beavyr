@@ -473,6 +473,7 @@ pub struct Build {
     pub picks: [usize; 3],
     pub charge: Option<i32>,
     pub clashes: usize,
+    #[cfg_attr(not(test), expect(dead_code, reason = "Retain attachment accounting, verified by peptide-edit tests"))]
     pub removed_host_atoms: usize,
     pub sequence: String,
     /// Original host index -> retained index. Used to preserve freezes/isolation.

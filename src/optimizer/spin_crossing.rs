@@ -746,8 +746,6 @@ pub fn optimize_spin_crossing<A: Objective, B: Objective>(
     let mut inv_hess = Array2::<f64>::eye(inv_dim) * opts.initial_inverse_hessian;
     let mut previous_coord = opt_coordinate(&state, &x);
     let mut previous_geff_opt = vec![0.0; inv_dim];
-    let mut previous_x = x.clone();
-    let mut previous_geff = vec![0.0; x.len()];
     let mut points = Vec::new();
 
     let mut traj = if let Some(path) = &opts.trajectory_file {
@@ -924,8 +922,6 @@ pub fn optimize_spin_crossing<A: Objective, B: Objective>(
             }
         }
 
-        previous_x = x;
-        previous_geff = geff;
         previous_coord = current_coord;
         previous_geff_opt = geff_opt;
         x = trial_x;

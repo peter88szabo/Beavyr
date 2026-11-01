@@ -114,6 +114,7 @@ impl QcPanelState {
     ///
     /// False for DREIDING, whose parameters follow from the perceived atom
     /// types rather than from anything the user picks.
+    #[cfg(test)]
     pub fn has_level_of_theory(&self) -> bool {
         self.method.is_some()
     }

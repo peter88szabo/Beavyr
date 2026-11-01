@@ -20,6 +20,8 @@ use crate::optimizer::{minimum_cartesian::minimize_cartesian, traits::Objective}
 pub enum Scope {
     #[default]
     Whole,
+    // Only the whole-molecule route is exposed by the UI; exercise selection in tests.
+    #[cfg(test)]
     Selected,
 }
 

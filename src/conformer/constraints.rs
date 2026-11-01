@@ -12,10 +12,10 @@
 //! Three levels of restriction are offered, because how much needs holding depends on how far the
 //! rest of the molecule can wander before the reacting part follows it:
 //!
-//! 1. [`ActiveSiteLevel::Bonds`] -- the two lengths `A-X` and `X-B`. The least that works.
-//! 2. [`ActiveSiteLevel::BondsAndAngle`] -- and the `A-X-B` angle. Needed once the geometry can
+//! 1. `ActiveSiteLevel::Bonds` -- the two lengths `A-X` and `X-B`. The least that works.
+//! 2. `ActiveSiteLevel::BondsAndAngle` -- and the `A-X-B` angle. Needed once the geometry can
 //!    bend at `X`, which it will for anything but a near-linear transfer.
-//! 3. [`ActiveSiteLevel::BondsAngleAndDihedrals`] -- and the dihedrals that orient the `A-X-B`
+//! 3. `ActiveSiteLevel::BondsAngleAndDihedrals` -- and the dihedrals that orient the `A-X-B`
 //!    unit against the rest of the molecule, so the reacting group cannot rotate away from the
 //!    face it is attacking.
 //!
@@ -29,13 +29,12 @@
 //! its active bond lengths are the ones worth holding, and asking a chemist to retype them to four
 //! decimal places would only introduce error.
 
-use std::f64::consts::PI;
-
 use crate::forcefield::dreiding::objective::BOHR_TO_ANGSTROM;
 use crate::optimizer::constrained::{ConstraintCoordinate, ConstraintTarget};
 
 /// How much of an `A-X-B` active site to hold fixed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg(test)]
 pub enum ActiveSiteLevel {
     /// The two bond lengths, `A-X` and `X-B`.
     #[default]
@@ -46,6 +45,7 @@ pub enum ActiveSiteLevel {
     BondsAngleAndDihedrals,
 }
 
+#[cfg(test)]
 impl ActiveSiteLevel {
     pub const ALL: [ActiveSiteLevel; 3] = [
         ActiveSiteLevel::Bonds,
@@ -137,6 +137,7 @@ impl Constraint {
 }
 
 /// Reads a bond length from a geometry, in bohr.
+#[cfg(test)]
 pub fn measure_bond(coords_bohr: &[f64], a: usize, b: usize) -> f64 {
     (0..3)
         .map(|k| (coords_bohr[3 * a + k] - coords_bohr[3 * b + k]).powi(2))
@@ -145,6 +146,7 @@ pub fn measure_bond(coords_bohr: &[f64], a: usize, b: usize) -> f64 {
 }
 
 /// Reads an angle from a geometry, in radians.
+#[cfg(test)]
 pub fn measure_angle(coords_bohr: &[f64], a: usize, b: usize, c: usize) -> f64 {
     let u: Vec<f64> = (0..3)
         .map(|k| coords_bohr[3 * a + k] - coords_bohr[3 * b + k])
@@ -162,6 +164,7 @@ pub fn measure_angle(coords_bohr: &[f64], a: usize, b: usize, c: usize) -> f64 {
 }
 
 /// Reads a dihedral from a geometry, in radians, signed.
+#[cfg(test)]
 pub fn measure_dihedral(coords_bohr: &[f64], a: usize, b: usize, c: usize, d: usize) -> f64 {
     let at = |i: usize| {
         [
@@ -195,10 +198,11 @@ pub fn measure_dihedral(coords_bohr: &[f64], a: usize, b: usize, c: usize, d: us
 
 /// Builds the constraints for one `A-X-B` active site at the requested level.
 ///
-/// `adjacency` is needed only for [`ActiveSiteLevel::BondsAngleAndDihedrals`], to find a
+/// `adjacency` is needed only for `ActiveSiteLevel::BondsAngleAndDihedrals`, to find a
 /// substituent on each of `A` and `B` to hang the orienting dihedrals from. A site whose ends
 /// carry nothing -- a bare atom or ion -- simply gets no dihedral, rather than an error: the
 /// orientation of a lone atom is not a thing to fix.
+#[cfg(test)]
 pub fn active_site(
     coords_bohr: &[f64],
     a: usize,
@@ -250,6 +254,7 @@ pub fn active_site(
 /// Heavy first because a dihedral to a hydrogen is a weaker handle on orientation -- a methyl's
 /// hydrogens spin freely, so pinning one of them pins the methyl's rotation as much as the site's
 /// orientation.
+#[cfg(test)]
 fn substituent(adjacency: &[Vec<usize>], atom: usize, avoid: &[usize]) -> Option<usize> {
     let candidates = adjacency.get(atom)?;
     candidates
@@ -263,6 +268,7 @@ fn substituent(adjacency: &[Vec<usize>], atom: usize, avoid: &[usize]) -> Option
 /// Bond lengths and adjacent angles do not fix that torsion. Constraints
 /// spanning other branches require the full rotating-atom partition, which
 /// the search topology checks separately.
+#[cfg(test)]
 pub fn clashes_with_central_bond(constraint: &Constraint, j: usize, k: usize) -> bool {
     let same_pair = |p: usize, q: usize| (p == j && q == k) || (p == k && q == j);
     match constraint.coordinate {
@@ -310,16 +316,6 @@ fn same_coordinate(left: &Constraint, right: &Constraint) -> bool {
         (Angle(a), Angle(b)) => a == b || a == [b[2], b[1], b[0]],
         (Dihedral(a), Dihedral(b)) => a == b || a == [b[3], b[2], b[1], b[0]],
         _ => false,
-    }
-}
-
-/// Radians, wrapped into (-π, π].
-pub fn wrap(angle: f64) -> f64 {
-    let wrapped = angle.rem_euclid(2.0 * PI);
-    if wrapped > PI {
-        wrapped - 2.0 * PI
-    } else {
-        wrapped
     }
 }
 

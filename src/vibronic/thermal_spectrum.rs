@@ -35,6 +35,7 @@ pub struct HarmonicSpectrum {
     pub integral: f64,
     pub notes: Vec<String>,
 }
+#[cfg(test)]
 pub fn calculate(
     model: HarmonicModel,
     grid: &SpectrumGrid,

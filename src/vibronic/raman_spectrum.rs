@@ -58,6 +58,7 @@ struct Channel {
     modes: Vec<usize>,
     energy: f64,
 }
+#[cfg(test)]
 pub fn calculate(
     model: HarmonicModel,
     grid: &SpectrumGrid,

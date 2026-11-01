@@ -41,7 +41,6 @@ use crate::forcefield::dreiding::objective::{
 };
 use crate::forcefield::dreiding::{BuildError, DreidingTopology};
 use crate::molecule::{covalent_radius_angstrom, Molecule};
-use crate::optimizer::traits::Objective as _;
 use crate::optimizer::conformer_search::{
     discover_torsions, genetic_conformer_search_parallel, ConformerSearchOptions,
     ConformerSearchResult, LocalOptimizer, PreparedTorsion, TorsionKind,
@@ -310,6 +309,7 @@ pub struct ConformerOutcome {
     /// How many structures were optimised at once.
     pub workers: usize,
     /// Which optimiser relaxed each candidate.
+    #[expect(dead_code, reason = "Retain optimizer provenance; the compact results UI omits it")]
     pub local_optimizer: LocalOptimizer,
     /// The generation that produced the lowest-energy conformer.
     ///

@@ -18,6 +18,7 @@ pub struct AnalysisResult {
     pub data: AnalysisData,
     pub notices: Vec<String>,
 }
+#[cfg(test)]
 pub fn run(settings: Settings) -> Result<AnalysisResult, String> {
     run_with_control(
         settings,

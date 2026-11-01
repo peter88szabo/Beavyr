@@ -157,6 +157,7 @@ pub fn attachment_partners(zmat: &[ZAtom], attach: usize) -> Vec<usize> {
 /// `ignore` names host atoms that are legitimately close -- the attachment atom
 /// and its reference partners -- so a correct placement is not penalised for
 /// being bonded.
+#[cfg(test)]
 pub fn min_clearance(coords: &[Vec3], group: &[usize], ignore: &[usize]) -> f32 {
     if coords.is_empty() || group.is_empty() {
         return 0.0;

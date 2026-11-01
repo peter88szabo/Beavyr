@@ -958,7 +958,7 @@ pub fn ui_panel(
                             crate::trajectory_analysis::button(ui);
                             crate::dataset_inspector::button(ui, false);
                         });
-                        crate::ui_style::group(ui, "Frame overlays", |ui| {
+                        crate::ui_style::collapsible_group(ui, "Frame overlays", false, |ui| {
                             ui.horizontal_wrapped(|ui| {
                                 let sel = ui.visuals().selection.bg_fill;
                                 let dim = ui.visuals().widgets.inactive.bg_fill;

@@ -107,6 +107,7 @@ impl BuilderHistory {
     }
 
     /// How many steps can be undone. For tests and for the panel's count.
+    #[cfg(test)]
     pub fn depth(&self) -> usize {
         self.past.len()
     }

@@ -31,6 +31,7 @@ pub struct GaussianFrequencies {
     /// translations and rotations Gaussian projected out.
     pub frequencies_cm1: Vec<f64>,
     pub ir_intensities_km_mol: Vec<f64>,
+    #[cfg_attr(not(test), expect(dead_code, reason = "Preserve parsed Gaussian masses; analysis currently recomputes them"))]
     pub reduced_masses_amu: Vec<f64>,
     /// `3N x nmodes`, columns in our own normalisation (`sum m|d|^2 = 1`).
     pub modes: Array2<f64>,

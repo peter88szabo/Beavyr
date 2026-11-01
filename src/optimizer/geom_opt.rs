@@ -354,7 +354,6 @@ pub fn geom_opt_internal_bfgs_with_internals<O: Objective>(
         gq = internal_gradient(&ic, &bpg.b, &bpg.inv_g, &grad_x);
 
         let energy_change = energy - e_old;
-        let gnorm = vec_norm(&grad_x);
         let grms = vec_rms(&grad_x);
 
         if opts.verbosity > 0 {

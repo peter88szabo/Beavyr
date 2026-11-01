@@ -22,16 +22,13 @@ use super::program::QcProgram;
 pub enum HessianKind {
     /// The program differentiates twice itself. Fast and exact.
     Analytic,
-    /// Beavyr builds the matrix from the program's gradients by central
-    /// differences: `6N` calculations for `N` atoms, so it is worth warning
-    /// about before a run rather than after it.
-    FiniteDifference,
     /// No Hessian by any route.
     None,
 }
 
 impl HessianKind {
     /// Whether a Hessian can be had at all, however it is obtained.
+    #[cfg(test)]
     pub fn is_available(self) -> bool {
         !matches!(self, HessianKind::None)
     }

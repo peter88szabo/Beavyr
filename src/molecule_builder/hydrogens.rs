@@ -387,8 +387,10 @@ pub(super) fn complete(mol: &mut Molecule) -> Result<Completion, String> {
     Ok(result)
 }
 
+// Shared BuilderHistory handles undo; keep only the geometry used to invalidate the report.
 #[derive(Clone)]
-struct Undo {
+struct LastAddition {
+    #[cfg(test)]
     before: Molecule,
     after: Molecule,
 }
@@ -396,23 +398,24 @@ struct Undo {
 #[derive(Clone, Default)]
 pub struct HydrogenState {
     report: Option<Result<String, String>>,
-    undo: Option<Undo>,
+    last_addition: Option<LastAddition>,
 }
 
 impl HydrogenState {
     pub(super) fn invalidate_if_changed(&mut self, mol: &Molecule) {
         if self
-            .undo
+            .last_addition
             .as_ref()
             .is_some_and(|u| u.after.atoms != mol.atoms || u.after.pos != mol.pos)
         {
-            self.undo = None;
+            self.last_addition = None;
             self.report = None;
         }
     }
 
     pub(super) fn add(&mut self, mol: &mut Molecule, settings: &mut MolSettings) -> bool {
         self.invalidate_if_changed(mol);
+        #[cfg(test)]
         let before = mol.clone();
         match complete(mol) {
             Ok(result) => {
@@ -432,7 +435,8 @@ impl HydrogenState {
                     return false;
                 }
                 refresh(mol, settings);
-                self.undo = Some(Undo {
+                self.last_addition = Some(LastAddition {
+                    #[cfg(test)]
                     before,
                     after: mol.clone(),
                 });
@@ -444,10 +448,11 @@ impl HydrogenState {
             }
         }
     }
-
+    // Direct operation tests retain their local rollback; the UI uses BuilderHistory.
+    #[cfg(test)]
     fn undo(&mut self, mol: &mut Molecule, settings: &mut MolSettings) -> bool {
         self.invalidate_if_changed(mol);
-        let Some(undo) = self.undo.take() else {
+        let Some(undo) = self.last_addition.take() else {
             return false;
         };
         *mol = undo.before;

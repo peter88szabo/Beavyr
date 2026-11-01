@@ -805,7 +805,6 @@ fn conditional_internal_optimize<O: Objective>(
         qs = compute_internals(&q, ic);
         bpg = trial_bpg;
         energy = trial_energy;
-        grad_x = trial_grad_x;
         grad_q = trial_grad_q;
         if d_e.abs() < energy_tol {
             return Ok((

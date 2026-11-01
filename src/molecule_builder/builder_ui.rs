@@ -210,25 +210,6 @@ fn calc_dihedral_deg(p1: Vec3, p2: Vec3, p3: Vec3, p4: Vec3) -> f64 {
     (v.dot(n)).atan2(v.dot(m)).to_degrees() as f64
 }
 
-fn centroid_excluding(pos: &[Vec3], exclude: usize) -> Option<Vec3> {
-    if pos.len() <= 1 {
-        return None;
-    }
-    let mut sum = Vec3::ZERO;
-    let mut count = 0;
-    for (idx, p) in pos.iter().enumerate() {
-        if idx == exclude {
-            continue;
-        }
-        sum += *p;
-        count += 1;
-    }
-    if count == 0 {
-        return None;
-    }
-    Some(sum / count as f32)
-}
-
 fn fragment_adjacency(symbols: &[String], coords: &[Vec3]) -> Vec<Vec<usize>> {
     let n = symbols.len();
     let mut adj = vec![Vec::new(); n];
@@ -1843,6 +1824,7 @@ pub fn collect_add_atom_pick(
 }
 
 /// What the tool is waiting for, given how many references it has and needs.
+#[cfg(test)]
 pub fn add_atom_prompt(picked: usize, needed: usize) -> &'static str {
     match (picked, needed) {
         (0, _) => "Pick the atom to bond the new atom to.",
@@ -2490,6 +2472,7 @@ pub fn draw_builder_highlights(
 }
 
 /// Relaxes `mol` in place, returning a one-line report or the reason it could not.
+#[cfg(test)]
 fn run_cleanup(mol: &mut Molecule, settings: &mut MolSettings) -> Result<String, String> {
     use crate::forcefield::dreiding::objective::{cleanup_options, relax_angstrom};
     use crate::forcefield::dreiding::DreidingTopology;
@@ -4624,42 +4607,6 @@ C   2.053   1.450   0.000
              suspiciously close to a wrongly-applied sp2 120-degree rule"
         );
     }
-}
-
-#[cfg(test)]
-mod add_atom_tests {
-    use super::*;
-    use crate::molecule_builder::zmat2xyz::xyz_to_zmat;
-
-    fn host() -> (Molecule, ZMatrixBuilderState) {
-        let xyz = "\
-C   0.000   0.000   0.000
-C   1.540   0.000   0.000
-";
-        let (_n, symbols, coords) = parse_xyz_angstrom(xyz);
-        let positions: Vec<Vec3> = coords
-            .into_iter()
-            .map(|v| Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32))
-            .collect();
-        let zmat = xyz_to_zmat(&symbols, &positions);
-        let mol = Molecule {
-            atoms: zmat.iter().map(|a| a.symbol.clone()).collect(),
-            pos: zmat2xyz::zmat_to_xyz(&zmat),
-            bonds: vec![],
-            hydrogen_bonds: vec![],
-            topology: None,
-        };
-        let mut state = ZMatrixBuilderState::default();
-        state.zmat = zmat;
-        state.new_symbol = "H".to_string();
-        (mol, state)
-    }
-
-    
-
-    
-
-    
 }
 
 #[cfg(test)]

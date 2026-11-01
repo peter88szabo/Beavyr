@@ -39,7 +39,7 @@
 //! * **No stereochemistry filter.** The paper discards pathways leading to the wrong stereoisomer
 //!   by checking dihedrals at the forming centres. Every pathway is kept here.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use anyhow::{anyhow, Result};
 
@@ -103,6 +103,7 @@ pub struct TransitionStateGuess {
     /// thing this method exists to produce.
     pub active_lengths: Vec<f64>,
     /// Which reactant conformer this pathway started from.
+    #[expect(dead_code, reason = "Retain the source-conformer mapping for pathway provenance")]
     pub from_conformer: usize,
     /// Whether the pathway went over the barrier and came down, or was still climbing when it
     /// stopped. A guess from a pathway that never crossed is a weaker starting point.
@@ -124,6 +125,7 @@ pub struct TrailOutcome {
     pub first_failure: Option<String>,
     /// xTB calls made.
     pub xtb_calls: usize,
+    #[expect(dead_code, reason = "Keep the atom ordering with the standalone pathway result")]
     pub atoms: Vec<String>,
 }
 
