@@ -878,6 +878,67 @@ ORCA handles its own properties. Behemoth has not been modified for this feature
 
 Validation and method details: `reports/vibronic_extensions_2026-11-01.txt`.
 
+## Recovery, comparison and trajectory properties
+
+**Project → Autosave / recovery…** controls periodic recovery snapshots (60 seconds
+by default, three generations per session). Recovery files are separate from manual
+projects. Inactive sessions can be restored without restarting interrupted jobs;
+Restore previous session undoes the restore. On Linux snapshots live in
+`$XDG_STATE_HOME/beavyr/recovery` or `~/.local/state/beavyr/recovery`.
+
+The side-by-side comparison window supports linked trajectory frames, manual or
+geometric atom mapping, and displacement colours after rigid alignment. Automatic
+mapping preserves elements, but equivalent atoms still require scientific review.
+It supports up to 1,000 atoms / 500 atoms of one element; manual mapping remains
+available for larger structures. Neither comparison camera changes the main view.
+
+Open **Surface Tools → Trajectory wavefunctions…** to compute one wavefunction per
+geometry. GFN2-xTB is the default; GFN1-xTB and the supported HF/DFT Quantum Chemistry
+setup routes are also available. Set charge/multiplicity, select the executable,
+choose a frame range and output folder. Each frame and an incremental manifest are
+stored on disk. Load `wavefunctions.beavyr-wfn` to reopen a series. Playback can wait
+for the matching surface, and follows the selected orbital index, not tracked orbital
+character. The xTB version tested exports no separate beta orbitals, so its Molden
+files cannot provide spin-density surfaces; a spin-resolved backend/file is required.
+
+**Surface Tools → Atomic polarizabilities…** provides the Stöhr CPA/TS analysis used
+in Behemoth: hA = sum of the AO density diagonal on atom A, alphaA = alphaFree hA/ZA.
+It is an atomic descriptor, not a molecular dipole-response polarizability. It uses
+full atomic Z consistently with Behemoth; valence-only/ECP calculations therefore
+have the same basis/core limitations. Halo volume is proportional to alphaA. Values
+can be shown in Å³ or bohr³. Atom/group sums can be plotted against frame, time,
+distance, angle or dihedral; time requires the interval per sampled frame. Plot points
+select frames without changing zoom. CSV copy/save includes the selected atoms.
+
+**Surface Tools → Reactivity / Fukui…** offers fixed-geometry N/N+1/N−1 calculations
+and a separately labelled HOMO/LUMO approximation. The finite-difference route uses
+the Quantum Chemistry setup (GFN1/GFN2-xTB or HF/DFT with ORCA, PySCF or Psi4), with
+reference charge and all three multiplicities specified explicitly. Atom-condensed
+values use Mulliken populations with analytic Gaussian AO overlaps. Available
+quantities are f+, f−, f0, the dual descriptor, local softness, local philicity, and
+global hardness, softness, chemical potential and electrophilicity. The convention
+is eta=(I−A)/2, S=1/(2 eta), mu=−(I+A)/2, omega=mu²/(2 eta); energies use eV.
+Nonpositive gaps disable reciprocal-gap descriptors. Local hardness is not assigned
+an arbitrary formulation. Fractional occupations are rejected by the single-HOMO/
+LUMO approximation; finite differences remain available. Degeneracies, basis/charge
+partition dependence and unbound electron-added states require interpretation.
+
+Reactivity displays support signed surfaces, signed halos, numerical labels,
+atom/group plots, global-descriptor plots, CSV copy/save, and reopenable analysis
+files. Analysis files retain paths to native wavefunctions: keep their calculation
+folders. Projects/recovery also retain completed polarizability and reactivity data,
+measurements and the last QC result; external native files remain at their paths.
+All these analysis windows resize in both directions.
+
+Animation export can include per-frame orbital/density surfaces, polarizability and
+reactivity displays, measurements recalculated at every frame, custom labels and
+frame/energy captions. A changing geometry requires a matching wavefunction for
+every surface frame. Exports use a private render scene and preserve the editor's
+geometry/camera. Solid surfaces retain opacity/colours; exported mesh surfaces use
+one-pixel lines. GIF export is native; MP4 requires a user-supplied FFmpeg executable.
+The `ab_glyph` dependency rasterizes egui's bundled font into exported frames without
+requiring a system font installation.
+
 ## Roadmap
 
 - Simulated NMR spectra

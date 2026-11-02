@@ -373,7 +373,7 @@ pub fn panel_input_text(
 }
 
 /// One self-consistent field iteration, for the run summary.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ScfIteration {
     pub iteration: u32,
     pub energy_hartree: f64,
@@ -440,7 +440,7 @@ pub fn parse_final_energy(output_text: &str) -> Option<f64> {
 /// Each is `None` when the job did not produce it: a Hartree-Fock single point
 /// has no correlation energy, and only a job that optimised has a final
 /// gradient worth quoting.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Energetics {
     /// ORCA's own `FINAL SINGLE POINT ENERGY`.
     ///

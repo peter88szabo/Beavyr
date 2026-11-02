@@ -22,6 +22,8 @@ use std::{
 #[path = "exporting/animation_encoder.rs"]
 mod encoder;
 use encoder::{Encoder, Format};
+#[path="animation_extras.rs"] mod extras;
+#[path="animation_annotations.rs"] mod annotations;
 #[cfg(test)]
 #[path = "exporting/animation_render_tests.rs"]
 mod render_tests;
@@ -53,6 +55,7 @@ struct State {
     rotation_frames: usize,
     repeat: bool,
     ffmpeg: String,
+    extras: extras::Options,
     request: Option<Request>,
     job: Option<Job>,
     message: Option<String>,
@@ -73,6 +76,7 @@ impl Default for State {
             rotation_frames: 120,
             repeat: true,
             ffmpeg: "ffmpeg".into(),
+            extras: extras::Options{measurements:true,labels:true,caption:true,..Default::default()},
             request: None,
             job: None,
             message: None,
@@ -81,6 +85,8 @@ impl Default for State {
     }
 }
 struct Request {
+    extras: extras::Extras,
+    source_indices: Vec<usize>,
     frames: Vec<TrajectoryFrame>,
     count: usize,
     rotation: bool,
@@ -104,6 +110,8 @@ struct Job {
     worker: Option<Task<Result<(), String>>>,
     index: usize,
     settle: u8,
+    preparing: Option<Task<Result<extras::Geometry,String>>>,
+    size: UVec2,
     finalizing: bool,
     cancel: bool,
 }
@@ -124,6 +132,12 @@ fn ui(
     builder: Res<crate::molecule_builder::builder_ui::ZMatrixBuilderState>,
     camera: Query<&Projection, With<crate::scene::MainCamera>>,
     mut regions: ResMut<crate::ui::UiPanelRegions>,
+    orbital: Res<crate::orbitals::OrbitalState>,
+    wave: Res<crate::trajectory_wavefunctions::State>,
+    polar: Res<crate::polarizability::State>,
+    reactivity: Res<crate::reactivity::State>,
+    measurements: Res<crate::measurements::Measurements>,
+    labels: Res<crate::saved_views::Library>,
 ) {
     let Ok(ctx) = contexts.ctx_mut() else {
         return;
@@ -204,6 +218,9 @@ fn ui(
                         ui.add(egui::DragValue::new(&mut state.rotation_frames).range(2..=10000));
                     });
                 }
+                ui.horizontal_wrapped(|ui|{ui.checkbox(&mut state.extras.surface,"Orbital / density surface");ui.checkbox(&mut state.extras.halos,"Polarizability halos / values");ui.checkbox(&mut state.extras.reactivity,"Reactivity display");});
+                ui.horizontal_wrapped(|ui|{ui.checkbox(&mut state.extras.measurements,"Measurements");ui.checkbox(&mut state.extras.labels,"Atom labels");ui.checkbox(&mut state.extras.caption,"Frame / energy caption");});
+                if state.extras.surface { ui.small("Surface settings follow Surface Tools. Mesh exports use one-pixel lines."); }
                 if state.format == Format::Mp4 {
                     ui.label("FFmpeg executable");
                     ui.horizontal(|ui| {
@@ -238,6 +255,8 @@ fn ui(
                                     .into(),
                             );
                         }
+                        let extras=extras::Extras::snapshot(state.extras.clone(),&orbital,&wave,&polar,&reactivity,&measurements,&labels,&frames,rotation)?;
+                        let source_indices=if rotation{vec![traj.current_frame]}else{(state.first-1..state.last).step_by(state.stride).collect()};
                         let projection = camera.single().map_err(|e| e.to_string())?.clone();
                         let Some(mut path) = rfd::FileDialog::new()
                             .add_filter("Animation", &[state.format.ext()])
@@ -248,6 +267,7 @@ fn ui(
                         };
                         path.set_extension(state.format.ext());
                         state.request = Some(Request {
+                            extras, source_indices,
                             count: if rotation {
                                 state.rotation_frames
                             } else {
@@ -338,6 +358,10 @@ fn draw(job: &mut Job, commands: &mut Commands, materials: &mut Assets<StandardM
             .insert(crate::isolated_scene::camera_transform(&orbit));
     }
     job.settle = 3;
+    if job.request.extras.needs_geometry() {
+        let extras=job.request.extras.clone();let frame=frame.clone();let hidden=job.request.hidden.clone();let cancel=job.cancel_flag.clone();
+        job.preparing=Some(AsyncComputeTaskPool::get().spawn(async move { if cancel.load(std::sync::atomic::Ordering::Relaxed){return Err("Export cancelled".into());}extras.geometry(&frame,&hidden) }));
+    }
 }
 fn tick(
     mut commands: Commands,
@@ -382,6 +406,8 @@ fn tick(
                     worker: None,
                     index: 0,
                     settle: 0,
+                    preparing: None,
+                    size: UVec2::new(state.width as u32,state.height as u32),
                     finalizing: false,
                     cancel: false,
                 };
@@ -402,6 +428,12 @@ fn tick(
             if let Ok(mut child) = child.lock() {
                 let _ = child.kill();
             }
+        }
+    }
+    if let Some(task)=&mut job.preparing {
+        if let Some(result)=block_on(future::poll_once(task)){
+            job.preparing=None;
+            match result{Ok(geometry)=>{if !job.cancel{for(mesh,material,transform)in geometry.meshes{job.scene.overlay_mesh(&mut commands,&mut meshes,&mut materials,mesh,material,transform);}job.settle=3;}},Err(e)=>error=Some(e)}
         }
     }
     if let Some(worker) = &mut job.worker {
@@ -429,7 +461,7 @@ fn tick(
     {
         error = Some("Timed out waiting for the graphics renderer to capture a frame.".into());
     }
-    if job.worker.is_none() && !job.cancel && !done && error.is_none() {
+    if job.worker.is_none() && job.preparing.is_none() && !job.cancel && !done && error.is_none() {
         if job.index == job.request.count {
             let encoder = job.encoder.clone();
             job.finalizing = true;
@@ -444,11 +476,13 @@ fn tick(
                     commands.entity(entity).try_despawn();
                 }
                 let encoder = job.encoder.clone();
+                let overlay=annotations::prepare(&job.request,job.index,job.size);let size=job.size;
                 job.worker = Some(AsyncComputeTaskPool::get().spawn(async move {
-                    let rgba = image
+                    let mut rgba = image
                         .try_into_dynamic()
                         .map_err(|e| e.to_string())?
                         .to_rgba8();
+                    annotations::paint(&overlay,rgba.as_mut(),size)?;
                     encoder
                         .lock()
                         .map_err(|e| e.to_string())?

@@ -174,6 +174,26 @@ impl Scene {
         settings: &MolSettings,
         hidden: &BTreeSet<usize>,
     ) {
+        self.molecule_with_colors(commands, materials, molecule, settings, hidden, None);
+    }
+    fn atom_material(&mut self, index: usize, symbol: &str, settings: &MolSettings, materials: &mut Assets<StandardMaterial>, colors: Option<&[Color]>) -> Handle<StandardMaterial> {
+        let base = self.material(symbol, settings, materials);
+        let Some(color) = colors.and_then(|c| c.get(index)).copied() else { return base; };
+        let key = format!("displacement-{index}");
+        if let Some(handle) = self.materials.get(&key) {
+            if let Some(mut material) = materials.get_mut(handle) { material.base_color = color; }
+            return handle.clone();
+        }
+        let mut material = materials.get(&base).cloned().unwrap_or_default();
+        material.base_color = color;
+        let handle = materials.add(material);
+        self.materials.insert(key, handle.clone());
+        handle
+    }
+    pub fn molecule_with_colors(
+        &mut self, commands: &mut Commands, materials: &mut Assets<StandardMaterial>,
+        molecule: &Molecule, settings: &MolSettings, hidden: &BTreeSet<usize>, colors: Option<&[Color]>,
+    ) {
         for e in self.geometry.drain(..) {
             commands.entity(e).despawn();
         }
@@ -194,7 +214,7 @@ impl Scene {
         if atoms {
             for (i, position) in molecule.pos.iter().enumerate() {
                 if visible(i) {
-                    let material = self.material(&molecule.atoms[i], settings, materials);
+                    let material = self.atom_material(i, &molecule.atoms[i], settings, materials, colors);
                     self.piece(
                         commands,
                         self.sphere.clone(),
@@ -278,6 +298,10 @@ impl Scene {
                 }
             }
         }
+    }
+    /// Additional geometry owned by this private scene and cleared with each frame.
+    pub fn overlay_mesh(&mut self, commands: &mut Commands, meshes: &mut Assets<Mesh>, materials: &mut Assets<StandardMaterial>, mesh: Mesh, material: StandardMaterial, transform: Transform) {
+        self.geometry.push(commands.spawn((Mesh3d(meshes.add(mesh)), MeshMaterial3d(materials.add(material)), transform, RenderLayers::layer(self.layer))).id());
     }
     pub fn dispose(self, commands: &mut Commands, images: &mut Assets<Image>) {
         for entity in self.entities.into_iter().chain(self.geometry) {

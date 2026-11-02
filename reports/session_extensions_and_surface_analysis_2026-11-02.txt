@@ -1,0 +1,187 @@
+Beavyr: recovery, comparison, trajectory surfaces and reactivity
+Date: 2026-11-02
+
+Scope and change control
+------------------------
+Implemented the authorized recovery/comparison/export work and the additional
+Surface Tools wavefunction, atomic-polarizability and reactivity workflows.
+The user separately approved correction of the shared p-orbital mapping and
+ORCA/xTB Molden normalization handling after native tests exposed those issues.
+No commits, installations, or edits to Behemoth/external program installations.
+Builds/tests use CPU affinity 0-3 and at most four Cargo jobs. Native validation
+calculations use one backend thread. Original tracked files are backed up in
+target/change-backups/session-extensions-2026-11-02/.
+Implementation lives in named files. orbitals/mod.rs only adds module declarations.
+
+Where to find the features
+-------------------------
+- Project -> Autosave / recovery...
+- Existing side-by-side comparison window -> Link frames / Atom mapping /
+  Displacement colours.
+- Surface Tools -> Trajectory wavefunctions...
+- Surface Tools -> Atomic polarizabilities...
+- Surface Tools -> Reactivity / Fukui...
+- Existing Export animation window -> surface/property/annotation checkboxes.
+
+Recovery
+--------
+Periodic snapshots default to 60 seconds, configurable from 10 to 3600 seconds.
+Three generations are retained per session. Manual projects are never overwritten
+by autosave. Live process locks exclude sessions still running in another Beavyr.
+Startup detects inactive recovery sessions; restore validates the snapshot first
+and keeps the preceding viewer state for Restore previous session.
+Interrupted jobs are never restarted. Measurements, completed QC output, frame
+energies, polarizability/reactivity results and wavefunction-series references
+are included. Native calculation files remain at their original disk locations.
+Older session directories remain available; rotation affects only the current
+session's own generations. Numeric data can survive missing external wavefunction
+files, but recalculating a surface still requires those files.
+
+Comparison
+----------
+The two private scenes support linked frame selection and playback, explicit
+atom correspondence and automatic element-preserving geometric assignment.
+Alignment/displacement colours use that correspondence. Their cameras and
+geometry do not replace the editor's molecule. Automatic assignment has limits
+of 1000 atoms / 500 of one element and cannot resolve chemical equivalence
+uniquely; the mapping remains reviewable/editable. Linked trajectories use their
+common frame count; a single geometry can be compared with a moving trajectory.
+
+Trajectory wavefunctions
+------------------------
+GFN2-xTB is the default. GFN1-xTB and HF/DFT via ORCA, PySCF or Psi4 are supported.
+Executable paths/Python activation use the existing user configuration. No
+hard-coded executable paths or environment changes were added to application
+code. Test-only paths were supplied through BEAVYR_TEST_XTB / BEAVYR_TEST_ORCA.
+Dummy atoms are removed before execution. Every frame gets a distinct directory,
+input/output files and a Molden file. An incremental portable manifest uses
+relative paths. Cancellation retains completed files and does not apply a late
+result. Loaded wavefunctions must match atom identities and geometry.
+Playback loads the current file and waits for its surface; memory does not retain
+a sampled field for every frame. Selected orbital index is preserved. Orbital
+character/state tracking across crossings is not implemented.
+The installed xTB exports alpha-only/fractionally occupied data even for the OH
+doublet tested. Separate spin density therefore requires a genuinely spin-resolved
+Molden export from another backend; beta coefficients are never fabricated.
+
+Atomic polarizability
+---------------------
+Ported the Stoehr CPA / TS formula and free-atom reference values from Behemoth:
+ h_A = sum_mu(on A) sum_i occupation_i * coefficient_mu,i^2
+ alpha_A = alpha_free,A * h_A / Z_A
+ C6_A = C6_free,A * (h_A / Z_A)^2
+Both spin sets are included when present. Full nuclear Z matches Behemoth's
+implementation, including its valence-only/ECP/basis limitations. Missing
+free-atom references cause a copyable error instead of silently producing zeros.
+This is a sum of atomic descriptors, not a molecular dipole-response tensor.
+Halo volume is proportional to alpha; radius is proportional to its cube root.
+Opacity/scale and optional numeric labels are adjustable. Values use Angstrom^3
+or bohr^3. Single atoms or deduplicated groups/ranges can be plotted against frame,
+time, distance, angle or dihedral. Time requires a user-specified interval per
+sampled frame and optional time origin. CSV copy/save includes atom contributions.
+Clicking a matching plot point selects its original frame without changing zoom.
+
+Reactivity / Fukui
+-----------------
+Finite differences use identical geometries/method/basis for N, N+1 and N-1
+single points. Reference charge and all three multiplicities are explicit.
+Supported calculation routes are GFN1/GFN2-xTB and HF/DFT via ORCA/PySCF/Psi4.
+Correlated energies with an SCF-only Molden density are rejected by this workflow.
+ f+ = rho(N+1) - rho(N)
+ f- = rho(N) - rho(N-1)
+ f0 = (f+ + f-)/2
+ dual = f+ - f-
+The frontier approximation instead uses |LUMO|^2 and |HOMO|^2 for the selected
+spin channel. Fractional occupations are rejected as ambiguous for this route.
+Frontiers are selected per frame; degeneracies and level crossings need review.
+Atom-condensed values use Mulliken populations with analytic Gaussian overlaps,
+not the density-diagonal CPA populations. Negative condensed values are retained.
+Global quantities use eV:
+ I = E(N-1)-E(N); A = E(N)-E(N+1)
+ mu = -(I+A)/2; eta = (I-A)/2
+ S = 1/(2 eta); omega = mu^2/(2 eta)
+Local softness is S*f and local philicity is omega*f. Nonpositive gaps disable
+reciprocal-gap quantities. Global hardness/softness/mu/omega can also be plotted.
+Signed surfaces, signed halos, optional labels, atom/group sums, geometric/time
+axes, frame selection, CSV export and saved analysis files are implemented.
+Analysis files retain native wavefunction paths; keep their calculation folders.
+No arbitrary local-hardness density was introduced: its nonunique formulation
+remains a separate user choice. Global hardness and local softness are available.
+Basis/population dependence and unbound N+1 states still require scientific
+interpretation; the module does not claim these descriptors predict a reaction
+mechanism uniquely.
+
+Shared Molden corrections (explicitly approved)
+-----------------------------------------------
+1. p functions use x,y,z order. They were incorrectly passed through the m=0,+1,-1
+   reordering used for higher angular momenta. The shared mapping is corrected.
+2. ORCA and the tested xTB export primitive-normalized contraction coefficients.
+   Applying primitive normalization again changes the radial functions. The
+   importer now distinguishes that convention. ORCA's higher spherical phases
+   are also converted to the internal convention. Anonymous candidate files are
+   changed only after contraction norms and molecular-orbital overlap norms
+   support the interpretation. Recognized xTB workflow exports carry provenance.
+Original native output files are retained. Corrections occur in the parsed model.
+An early conclusion that xTB was intrinsically unsuitable was disproven by the
+convention analysis; the final implementation supports its finite-difference route.
+Molden 5.9 source inspected, read-only, under the user's supplied Programs path:
+ rdmolf.f, renorm.f, rdbas.f, gaussian.f.
+Independent PySCF checks confirmed the convention analysis. Before correction,
+raw xTB/ORCA files interpreted under the wrong convention gave electron counts
+7.35682 vs 8 and 8.87554 vs 10. After conversion they recover the expected counts.
+Regression fixtures retain actual native ORCA and anonymous xTB exports.
+
+Animation export
+----------------
+The independent capture scene supports per-frame orbital/density surfaces,
+polarizability halos/values and reactivity surfaces/halos/values. Measurements are
+recalculated from each frame, with custom atom labels and frame/energy captions.
+A trajectory surface requires a matching per-frame wavefunction, rather than
+using a static surface on changed coordinates. Geometry is prepared one frame at
+a time; cancellation does not change the editor's geometry or camera.
+Solid surfaces preserve colours/opacity. Exported wireframe surfaces currently
+use one-pixel lines. Text uses egui's bundled font via ab_glyph; no system font
+installation is needed. GIF encoding is internal. MP4 continues to require FFmpeg.
+The graphics test exports a four-frame 480x360 GIF with surface, halos and labels;
+Pillow independently decoded all four distinct frames. The artifact is
+ target/animation-rich-render-test.gif
+No actual MP4 encoding was performed: FFmpeg is unavailable in this environment.
+
+Validation
+----------
+Final verification:
+- cargo build --offline --locked -j 4: PASS, no compiler warnings.
+- Full default suite: 1576 passed, 0 failed, 49 ignored. The ignored tests include
+  opt-in native-backend/GPU tests; selected relevant ones were run explicitly below.
+- Native ORCA and GFN2-xTB finite-difference Fukui tests: 2 passed, 0 failed.
+  All three charge states and the one-electron condensed Fukui sums are checked.
+- Native two-frame GFN2-xTB wavefunction/polarizability test: 1 passed, 0 failed.
+- Rich offscreen GPU GIF export: 1 passed, 0 failed. Independent Pillow decoding
+  confirms 480x360 pixels, four frames, and four distinct image contents.
+  The headless renderer emits a ShadowLodOrigin advisory; the test passes.
+- Compiled application startup: PASS. Loaded examples/moldyn_trajectory.xyz
+  (163 frames, 27 atoms), stayed running, and captured its rendered window.
+  The X11 screenshot was visually inspected. Temporary XDG settings/state kept
+  this test separate from the user's settings. Only the test process was stopped.
+- git diff --check: PASS.
+All commands used CPU affinity 0-3. No release-profile build was performed.
+Evidence files are in reports/testing_evidence_2026-11-02/session_extensions/.
+Coverage includes recovery/locks/rotation, atom mapping, frame plotting, cancellation,
+Molden conventions, exact Gaussian overlaps through g functions, descriptor sums,
+finite-difference/frontier consistency, independent PySCF spatial/population values,
+real ORCA and xTB three-state runs, and GPU GIF capture. Full interactive desktop
+acceptance testing of all controls is not claimed; that remains a user review step.
+
+References
+----------
+Behemoth local sources: src/properties/dispersion.rs, src/utils/free_atoms.rs,
+parameters/free_atoms.json (read only).
+Stoehr et al., J. Chem. Phys. 144, 151101 (2016), DOI 10.1063/1.4947214.
+Fukui finite differences / condensed populations / local softness:
+ https://www.scm.com/doc/GUI/Fukui.html
+Dual descriptor: Morell et al., J. Phys. Chem. A (2005), DOI 10.1021/jp046577a.
+Normalization and producer conventions cross-checked against IOData documentation:
+ https://raw.githubusercontent.com/theochem/iodata/main/iodata/formats/molden.py
+No additional runtime dependency on Molden, PySCF, IOData or Behemoth was added for
+analysis of already available files. External backends are needed only to compute
+new electronic structures.

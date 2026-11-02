@@ -1,6 +1,6 @@
 use super::*;
 
-fn world() -> World {
+pub(super) fn world() -> World {
     let mut world = World::new();
     world.insert_resource(Molecule::empty());
     world.init_resource::<XyzBuffer>();

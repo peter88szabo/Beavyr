@@ -238,7 +238,7 @@ impl QcRunTask {
 
 /// Writes the input, runs the program, reads the results.
 #[allow(clippy::too_many_arguments)]
-fn run_cancellable(
+pub(crate) fn run_cancellable(
     program: QcProgram,
     method: Option<QcMethod>,
     job: JobType,

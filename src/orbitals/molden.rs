@@ -11,6 +11,8 @@
 use bevy::prelude::*;
 
 use super::basis::{BasisLayout, Shell};
+#[path="../molden_conventions.rs"]
+mod conventions;
 
 /// Bohr radius in Angstrom, for `[Atoms] AU` files.
 const BOHR_TO_ANGSTROM: f32 = 0.529_177_210_9;
@@ -191,6 +193,7 @@ pub fn parse_molden(text: &str) -> Result<OrbitalData, MoldenError> {
     data.layout = BasisLayout::build(&data.shells);
 
     validate(&data)?;
+    conventions::apply(&mut data, text).map_err(|e|err(0,e))?;
     Ok(data)
 }
 

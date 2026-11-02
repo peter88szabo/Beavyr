@@ -11,7 +11,7 @@ pub struct MeasurementGizmos;
 #[derive(Default, Reflect, GizmoConfigGroup)]
 pub struct MeasurementHighlightGizmos;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct MeasurePair {
     pub id: u32,
     pub a: usize,
@@ -22,7 +22,7 @@ pub struct MeasurePair {
     pub label_on: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AngleMeasure {
     pub id: u32,
     pub a: usize,
@@ -31,7 +31,7 @@ pub struct AngleMeasure {
     pub degrees: f32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DihedralMeasure {
     pub id: u32,
     pub a: usize,
@@ -41,7 +41,7 @@ pub struct DihedralMeasure {
     pub degrees: f32,
 }
 
-#[derive(Resource, Debug, Clone)]
+#[derive(Resource, Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Measurements {
     // ---- Distances ----
     pub pairs: Vec<MeasurePair>,
@@ -117,6 +117,19 @@ impl Default for Measurements {
 }
 
 impl Measurements {
+    pub fn validate_for_project(&self, atoms: usize) -> Result<(), String> {
+        if self.pairs.iter().any(|p| p.a >= atoms || p.b >= atoms)
+            || self.angles.iter().any(|p| [p.a,p.b,p.c].iter().any(|i| *i >= atoms))
+            || self.dihedrals.iter().any(|p| [p.a,p.b,p.c,p.d].iter().any(|i| *i >= atoms))
+            || [self.line_width,self.dash_gap_scale,self.dash_line_scale].iter().any(|v| !v.is_finite() || *v < 0.)
+            || self.next_id == u32::MAX
+        {
+            return Err("Invalid saved measurement indices or style.".into());
+        }
+        let mut ids=std::collections::BTreeSet::new();
+        for id in self.pairs.iter().map(|p|p.id).chain(self.angles.iter().map(|p|p.id)).chain(self.dihedrals.iter().map(|p|p.id)) { if id>=self.next_id || !ids.insert(id){return Err("Invalid saved measurement IDs".into());} }
+        Ok(())
+    }
     // ---- Distance API ----
     pub fn new_pair(&mut self, a: usize, b: usize, dist: f32) {
         let (ai, bi) = if a <= b { (a, b) } else { (b, a) };

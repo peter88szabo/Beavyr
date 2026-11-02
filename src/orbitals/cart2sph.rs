@@ -60,6 +60,8 @@ pub fn cartesian_powers(l: usize) -> &'static [[u8; 3]] {
 /// `p > 0`.  Returns the row index into the generator's `m = -l ..= +l` table.
 pub fn molden_spherical_row(l: usize, slot: usize) -> usize {
     debug_assert!(slot < n_spherical(l));
+    // Molden s/p slots use Cartesian x,y,z order; only d and higher use m ordering.
+    if l <= 1 { return slot; }
     let m: isize = if slot == 0 {
         0
     } else if slot % 2 == 1 {

@@ -24,6 +24,9 @@ mod orientation;
 mod numerics;
 mod optimizer;
 mod orbitals;
+mod trajectory_wavefunctions;
+mod polarizability;
+mod reactivity;
 mod picking;
 mod pes_sampling;
 mod project;
@@ -207,6 +210,7 @@ fn main() {
         .init_resource::<uvvis::run::SpectrumTask>()
         .init_resource::<ui_layout::UiLayout>()
         .init_resource::<project::ProjectState>()
+        .add_plugins(project::autosave::Plugin)
         .add_systems(Update, project::process.before(UpdateSet::Core))
         // scene
         // Files named on the command line load before the camera is centred,
@@ -221,6 +225,9 @@ fn main() {
         .add_plugins(dataset_inspector::Plugin)
         .add_plugins(saved_views::Plugin)
         .add_plugins(comparison_view::Plugin)
+        .add_plugins(trajectory_wavefunctions::Plugin)
+        .add_plugins(polarizability::Plugin)
+        .add_plugins(reactivity::Plugin)
         // egui pass
         .add_systems(EguiPrimaryContextPass, ui::ui_panel)
         .add_systems(
@@ -236,6 +243,7 @@ fn main() {
                 export_image::update_export_select_area,
                 react_to_molecule_changed_mark_dirty,
                 measurements::clear_measurements_on_structure_load,
+                project::restore_measurements,
                 diagnostics::refresh_diagnostics_cache,
                 sync_coordinates_if_dirty,
                 update_lighting_if_dirty,

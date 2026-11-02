@@ -143,6 +143,7 @@ fn panel_body(
     ev_changed: &mut MessageWriter<MoleculeChanged>,
 ) -> bool {
     let mut loaded = false;
+    ui.horizontal_wrapped(|ui| { crate::trajectory_wavefunctions::button(ui); crate::polarizability::button(ui); crate::reactivity::button(ui); });
     ui.horizontal_wrapped(|ui| {
         if ui
             .add(crate::ui_style::primary("Load Molden…"))

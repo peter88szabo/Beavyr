@@ -6,6 +6,7 @@ version = 4
 name = "Beavyr"
 version = "0.2.1"
 dependencies = [
+ "ab_glyph",
  "anyhow",
  "bevy",
  "bevy_egui",

@@ -305,6 +305,8 @@ pub fn apply_current_frame(
 
 pub fn advance_trajectory(
     time: Res<Time>,
+    wavefunctions: Option<Res<crate::trajectory_wavefunctions::State>>,
+    reactivity: Option<Res<crate::reactivity::State>>,
     mut traj: ResMut<TrajectoryState>,
     mut mol: ResMut<Molecule>,
     mut settings: ResMut<MolSettings>,
@@ -314,8 +316,11 @@ pub fn advance_trajectory(
         return;
     }
 
+    if reactivity.as_ref().is_some_and(|r|r.hold_playback(&mol,&traj)) {traj.accum=0.;return;}
+    if wavefunctions.as_ref().is_some_and(|w| w.hold_playback(&traj)) { traj.accum=0.; return; }
     traj.accum += time.delta_secs();
-    let step_count = (traj.accum * traj.fps).floor() as usize;
+    let mut step_count = (traj.accum * traj.fps).floor() as usize;
+    if wavefunctions.as_ref().is_some_and(|w| w.follow) || reactivity.as_ref().is_some_and(|r|r.surface) { step_count=step_count.min(1); traj.accum=traj.accum.min(1. / traj.fps); }
     if step_count == 0 {
         return;
     }

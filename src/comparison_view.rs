@@ -10,6 +10,10 @@ use crate::{
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts, EguiPrimaryContextPass, EguiTextureHandle};
 const OPEN: &str = "open_side_by_side";
+#[path = "comparison_analysis.rs"]
+mod analysis;
+#[path = "comparison_controls.rs"]
+mod controls;
 pub struct Plugin;
 impl bevy::prelude::Plugin for Plugin {
     fn build(&self, app: &mut App) {
@@ -45,6 +49,7 @@ impl Default for Side {
 }
 #[derive(Resource)]
 struct State {
+    extra: controls::Controls,
     open: bool,
     sync: bool,
     sides: [Side; 2],
@@ -54,6 +59,7 @@ struct State {
 impl Default for State {
     fn default() -> Self {
         Self {
+            extra: Default::default(),
             open: false,
             sync: true,
             sides: Default::default(),
@@ -130,6 +136,8 @@ fn ui(
     let Ok(ctx) = contexts.ctx_mut().map(|c| c.clone()) else {
         return;
     };
+    let state = &mut *state;
+    controls::poll(&ctx, state);
     if ctx
         .data_mut(|d| d.remove_temp::<bool>(egui::Id::new(OPEN)))
         .unwrap_or(false)
@@ -158,6 +166,7 @@ fn ui(
     let Ok(projection) = camera.single() else {
         return;
     };
+    controls::refresh(state);
     for (index, side) in state.sides.iter_mut().enumerate() {
         if side.scene.is_none() && side.molecule.is_some() {
             let scene = Scene::new(
@@ -176,12 +185,13 @@ fn ui(
         }
         if side.dirty {
             if let (Some(scene), Some(molecule)) = (&mut side.scene, &side.molecule) {
-                scene.molecule(
+                scene.molecule_with_colors(
                     &mut commands,
                     &mut materials,
                     molecule,
                     &settings,
                     &Default::default(),
+                    state.extra.colors[index].as_deref(),
                 );
                 side.dirty = false;
             }
@@ -217,10 +227,12 @@ fn ui(
                     restore = true;
                 }
             });
+            controls::controls(ui, state, &mut actions);
             if !state.message.is_empty() {
                 ui.label(&state.message);
             }
             let height = (ui.available_height() - 85.).max(160.);
+            let linked = controls::linked(state);
             ui.columns(2, |columns| {
                 for (i, ui) in columns.iter_mut().enumerate() {
                     ui.push_id(i, |ui| {
@@ -250,7 +262,7 @@ fn ui(
                         if side.frames.len() > 1 {
                             let mut frame = side.frame + 1;
                             if ui
-                                .add(
+                                .add_enabled(!linked,
                                     egui::Slider::new(&mut frame, 1..=side.frames.len())
                                         .text("Frame"),
                                 )
@@ -411,17 +423,14 @@ fn ui(
                 .molecule
                 .as_ref()
                 .ok_or("Load molecule B first.")?;
-            if a.atoms != b.atoms {
-                return Err("Alignment requires the same elements in the same atom order.".into());
-            }
-            let transform = crate::molecular_alignment::superpose(&b.pos, &a.pos)?;
-            let positions = transform.apply_all(&b.pos);
-            let rmsd = crate::rmsd::kabsch::rmsd(&positions, &a.pos)?;
+            let fit = analysis::aligned(&a, b, &state.extra.mapping)?;
+            let positions = fit.positions;
+            let rmsd = fit.rmsd;
             state.alignment_undo = Some((b.pos.clone(), state.sides[1].orbit.clone()));
             state.sides[1].molecule.as_mut().unwrap().pos = positions;
             state.sides[1].dirty = true;
             state.sides[1].orbit.target = state.sides[0].orbit.target;
-            state.message = format!("Aligned RMSD: {rmsd:.6} Å (matching atom order)");
+            state.message = format!("Aligned RMSD: {rmsd:.6} Å (current atom mapping)");
             Ok(())
         })();
         if let Err(e) = result {
@@ -438,6 +447,7 @@ fn ui(
             }
         }
     }
+    if let Some(rect) = controls::mapping_window(&ctx, state) { regions.windows.push(rect); }
     for side in &state.sides {
         if let Some(scene) = &side.scene {
             commands

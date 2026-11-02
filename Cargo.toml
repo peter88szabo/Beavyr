@@ -21,6 +21,8 @@ ron = "0.12.2"
 rfd = "0.17"
 # GIF LZW compression; already present transitively, with no external encoder needed.
 weezl = "0.1.12"
+# Rasterize egui's bundled font into captured animation frames (no system font dependency).
+ab_glyph = "0.2.32"
 
 # Imported frequency-analysis code from the Behemoth project uses these two.
 # Both are pure Rust: `ndarray-linalg` (which would need a system BLAS) is

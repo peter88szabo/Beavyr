@@ -1,0 +1,10 @@
+   Compiling Beavyr v0.2.1 (/home/peter/DevCode/Beavyr)
+    Finished `test` profile [optimized + debuginfo] target(s) in 56.48s
+     Running unittests src/main.rs (target/debug/deps/Beavyr-401b2246fe058028)
+
+running 2 tests
+test reactivity::tests::real_orca_finite_difference ... ok
+test reactivity::tests::real_xtb_finite_difference ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 1622 filtered out; finished in 1.20s
+

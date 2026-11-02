@@ -1,0 +1,10 @@
+Final build: PASS; no compiler warnings.
+Default tests: 1576 passed, 0 failed, 49 ignored.
+Native Fukui: 2 passed.
+Native GFN2 trajectory: 1 passed.
+GPU rich export: 1 passed.
+Independent GIF decoding: 480x360, 4 frames, 4 distinct images.
+GUI startup with example trajectory: PASS, 163 frames, 27 atoms.
+X11 startup screenshot inspected.
+CPU affinity: 0-3; Cargo jobs: 4; native backends: 1 thread.
+No commits.

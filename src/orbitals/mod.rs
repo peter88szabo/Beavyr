@@ -8,6 +8,8 @@
 //! isovalue slider only re-runs the mesher.
 
 pub mod basis;
+#[path="../gaussian_overlap.rs"]
+pub mod overlap;
 pub mod browser;
 pub mod cart2sph;
 pub mod density;
@@ -16,6 +18,8 @@ pub mod grid;
 pub mod isosurface;
 pub mod molden;
 pub mod ui;
+#[path = "../trajectory_wavefunction_display.rs"]
+pub(crate) mod trajectory_display;
 
 use std::path::PathBuf;
 use std::sync::Arc;

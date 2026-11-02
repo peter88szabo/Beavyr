@@ -330,3 +330,11 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]mod molden_p_order_tests {
+    use super::*;
+    #[test]fn spherical_p_slots_are_x_y_z(){
+        let mut shell=Shell{center:0,l:1,spherical:true,exponents:vec![1.],raw_coefficients:vec![1.],coefficients:vec![]};shell.normalize();
+        for axis in 0..3 {let mut displacement=[0.;3];displacement[axis]=1.;let mut out=[0.;3];assert!(shell_values(&shell,displacement,&mut EvalScratch::default(),&mut out));for slot in 0..3 {if slot==axis{assert!(out[slot]>0.1);}else{assert!(out[slot].abs()<1e-14);}}}
+    }
+}

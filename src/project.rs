@@ -26,6 +26,11 @@ use std::{
 const VERSION: u32 = 1;
 static SERIAL: AtomicU64 = AtomicU64::new(0);
 
+#[path = "project_calculation.rs"]
+mod calculation;
+#[path = "autosave.rs"]
+pub mod autosave;
+
 #[derive(Clone, Serialize, Deserialize)]
 struct Workspace {
     memory: egui::Memory,
@@ -76,6 +81,13 @@ pub struct ProjectState {
     pub path: Option<PathBuf>,
     message: Option<String>,
     error: bool,
+    restored_measurements: Option<crate::measurements::Measurements>,
+}
+
+pub fn restore_measurements(mut state: ResMut<ProjectState>, mut measurements: ResMut<crate::measurements::Measurements>) {
+    if let Some(restored) = state.restored_measurements.take() {
+        *measurements = restored;
+    }
 }
 
 pub fn restore_ui(ctx: &egui::Context, state: &mut ProjectState) {
@@ -87,6 +99,10 @@ pub fn restore_ui(ctx: &egui::Context, state: &mut ProjectState) {
 /// Compact entry point next to the Structure file controls.
 pub fn menu(ui: &mut egui::Ui, state: &mut ProjectState) {
     ui.menu_button("Project", |ui| {
+        if ui.button("Autosave / recovery…").clicked_once() {
+            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("open_autosave"), true));
+            ui.close();
+        }
         if ui.button("Open project…").clicked_once() {
             if let Some(path) = crate::recent_dir::pick_file(
                 crate::recent_dir::open().add_filter("Beavyr project", &["beavyr"]),
@@ -231,6 +247,16 @@ impl Orbitals {
 #[derive(Clone, Serialize, Deserialize)]
 struct Snapshot {
     #[serde(default)]
+    measurements: crate::measurements::Measurements,
+    #[serde(default)]
+    completed_calculation: Option<calculation::Calculation>,
+    #[serde(default)]
+    wavefunction_manifest: Option<PathBuf>,
+    #[serde(default)]
+    polarizability: Option<crate::polarizability::Results>,
+    #[serde(default)]
+    reactivity: Option<crate::reactivity::data::Results>,
+    #[serde(default)]
     saved_views: crate::saved_views::Library,
     #[serde(default)]
     topology: Option<crate::molecule_builder::topology::Topology>,
@@ -259,6 +285,11 @@ impl Snapshot {
         let orbitals = world.resource::<OrbitalState>();
         let spectrum = world.resource::<UvVisState>();
         Ok(Self {
+            measurements: world.get_resource::<crate::measurements::Measurements>().cloned().unwrap_or_default(),
+            polarizability: world.get_resource::<crate::polarizability::State>().and_then(|s|s.results.as_deref()).cloned(),
+            reactivity: world.get_resource::<crate::reactivity::State>().and_then(|s|s.results.as_deref()).cloned(),
+            wavefunction_manifest: world.get_resource::<crate::trajectory_wavefunctions::State>().and_then(|s|s.series.as_ref()).map(|s|s.root.join(crate::trajectory_wavefunctions::job::MANIFEST)),
+            completed_calculation: world.get_resource::<crate::qchem_panel::run::QcRunTask>().and_then(calculation::Calculation::capture),
             saved_views: world.get_resource::<crate::saved_views::Library>().cloned().unwrap_or_default(),
             version: VERSION,
             application: env!("CARGO_PKG_VERSION").into(),
@@ -293,6 +324,7 @@ impl Snapshot {
         }
         self.saved_views.validate().map_err(anyhow::Error::msg)?;
         validate_geometry(&self.atoms, &self.positions)?;
+        self.measurements.validate_for_project(self.atoms.len()).map_err(anyhow::Error::msg)?;
         if self.topology.as_ref().is_some_and(|t| !t.valid_for(&self.atoms)) { bail!("Invalid saved residue topology"); }
         for frame in &self.trajectory.frames {
             validate_geometry(&frame.atoms, &frame.pos)?;
@@ -322,6 +354,8 @@ impl Snapshot {
                 bail!("Invalid saved analysis settings");
             }
         }
+        if let Some(data)=&self.polarizability{data.validate().map_err(anyhow::Error::msg)?;}
+        if let Some(data)=&self.reactivity{data.validate().map_err(anyhow::Error::msg)?;}
         self.frequencies.validate().map_err(anyhow::Error::msg)?;
         self.orbitals
             .as_ref()
@@ -382,7 +416,13 @@ impl Snapshot {
         world.insert_resource(self.camera);
         world.insert_resource(self.saved_views);
         world.insert_resource(self.trajectory);
+        let mut wave=crate::trajectory_wavefunctions::State::default();
+        if let Some(path)=self.wavefunction_manifest { match crate::trajectory_wavefunctions::job::read(&path) { Ok(series)=>wave.series=Some(std::sync::Arc::new(series)), Err(e)=>wave.error=Some(format!("Saved wavefunction files are unavailable: {e}")) } }
+        world.insert_resource(wave);
+        let mut polar=crate::polarizability::State::default();polar.results=self.polarizability.map(std::sync::Arc::new);world.insert_resource(polar);
+        let mut react=crate::reactivity::State::default();react.results=self.reactivity.map(std::sync::Arc::new);world.insert_resource(react);
         world.insert_resource(self.calculation);
+        world.insert_resource(self.completed_calculation.map(calculation::Calculation::restore).unwrap_or_default());
         world.insert_resource(self.optimization);
         world.insert_resource(self.frequency_settings);
         world
@@ -397,6 +437,14 @@ impl Snapshot {
             .resource_mut::<crate::measurements::Measurements>()
             .reset_all();
         world.resource_mut::<ProjectState>().restore_ui = Some(self.workspace);
+        self.measurements.is_active = false;
+        self.measurements.angle_active = false;
+        self.measurements.dihedral_active = false;
+        self.measurements.pending = None;
+        self.measurements.pending_angle.clear();
+        self.measurements.pending_dihedral.clear();
+        self.measurements.preview_highlight = None;
+        world.resource_mut::<ProjectState>().restored_measurements = Some(self.measurements);
         world.write_message(crate::events::MoleculeChanged::parse_xyz(false));
     }
 }
@@ -441,7 +489,7 @@ pub(crate) fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
 }
 
 fn busy(world: &World) -> bool {
-    world
+    world.get_resource::<crate::reactivity::State>().is_some_and(|s|s.is_running()) || world.get_resource::<crate::trajectory_wavefunctions::State>().is_some_and(|s|s.is_running()) || world
         .resource::<crate::qchem_panel::run::QcRunTask>()
         .is_running()
         || world
