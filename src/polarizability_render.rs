@@ -7,7 +7,7 @@ struct Halo;
 struct Cache {
     key: Vec<u64>,
     sphere: Option<Handle<Mesh>>,
-    material: Option<Handle<StandardMaterial>>,
+    materials: Vec<Handle<StandardMaterial>>,
 }
 pub struct Plugin;
 impl bevy::prelude::Plugin for Plugin {
@@ -35,6 +35,7 @@ fn halos(
 ) {
     let values = state.current(&mol, &traj).filter(|_| state.show);
     let mut key = vec![state.scale.to_bits() as u64, state.opacity.to_bits() as u64];
+    key.extend(state.colors.bounds.map(f64::to_bits));
     if let Some(v) = values {
         for (i, (&a, p)) in v.alpha.iter().zip(&mol.pos).enumerate() {
             key.extend([
@@ -60,27 +61,18 @@ fn halos(
         .sphere
         .get_or_insert_with(|| meshes.add(Sphere::new(1.).mesh().uv(32, 20)))
         .clone();
-    let material = cache
-        .material
-        .get_or_insert_with(|| {
-            materials.add(StandardMaterial {
-                base_color: Color::srgba(0.25, 0.75, 1., state.opacity),
-                alpha_mode: AlphaMode::Blend,
-                perceptual_roughness: 0.65,
-                cull_mode: Some(bevy::render::render_resource::Face::Back),
-                ..default()
-            })
-        })
-        .clone();
-    if let Some(mut m) = materials.get_mut(&material) {
-        m.base_color = Color::srgba(0.25, 0.75, 1., state.opacity);
-    }
+    cache.materials.clear();
     for (i, (&alpha, &pos)) in values.alpha.iter().zip(&mol.pos).enumerate() {
         if builder.selection.hidden.contains(&i) {
             continue;
         }
         let radius = data::radius(alpha, state.scale);
         if radius > 0. && radius.is_finite() {
+            let material=materials.add(StandardMaterial{
+                base_color:state.colors.color(alpha,Color::srgb(0.25,0.75,1.),Color::srgb(0.25,0.75,1.),state.opacity),
+                alpha_mode:AlphaMode::Blend,perceptual_roughness:0.65,..default()
+            });
+            cache.materials.push(material.clone());
             commands.spawn((
                 Halo,
                 Mesh3d(sphere.clone()),

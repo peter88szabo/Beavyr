@@ -897,8 +897,9 @@ geometry. GFN2-xTB is the default; GFN1-xTB and the supported HF/DFT Quantum Che
 setup routes are also available. Set charge/multiplicity, select the executable,
 choose a frame range and output folder. Each frame and an incremental manifest are
 stored on disk. Load `wavefunctions.beavyr-wfn` to reopen a series. Playback can wait
-for the matching surface, and follows the selected orbital index, not tracked orbital
-character. The xTB version tested exports no separate beta orbitals, so its Molden
+for the matching surface. Orbital index playback is the default; optional character
+tracking follows the selected orbital using adjacent-frame cross-AO overlaps and
+aligns its phase. Weak or ambiguous matches stop tracked playback. The xTB version tested exports no separate beta orbitals, so its Molden
 files cannot provide spin-density surfaces; a spin-resolved backend/file is required.
 
 **Surface Tools → Atomic polarizabilities…** provides the Stöhr CPA/TS analysis used
@@ -943,3 +944,40 @@ requiring a system font installation.
 
 - Simulated NMR spectra
 - File associations, so double-clicking an `.xyz` opens Beavyr
+
+## Surface controls, legends and trajectory workflow
+
+Surface Tools and its atomic-property windows use aligned compact control rows.
+Optional method/tracking details start collapsed. Atomic halos have an optional
+colour legend with a fixed range derived from all calculated frames; a custom
+range can be set. Polarizabilities use a sequential palette and signed reactivity
+uses a diverging palette. Radius/volume semantics are unchanged. Display-unit
+switches convert legend labels without changing the physical range. Animation
+exports use the same halo colours; the viewer legend itself is not overlaid on GIFs.
+
+**Trajectory wavefunctions → Resume calculation…** opens an existing calculation
+folder. New runs save `wavefunction-plan.ron`, `plan.checksum`, settings and an
+incremental manifest. Resume verifies the input plan, completed geometries and
+wavefunction checksums, skips verified frames, and retries unfinished frames in
+new folders. The saved method/charge/spin/range are used; current panel settings
+do not replace them. A file lock prevents two workers resuming the same folder.
+Older runs without a saved plan cannot be resumed. Progress shows elapsed time,
+completed/remaining frames, the active source frame and an estimated time remaining.
+
+In **Trajectory wavefunctions**, select an orbital in Surface Tools and choose
+**Track selected orbital**. Tracking works forward and backward from that anchor
+using normalized real-orbital overlaps `C(A)^T S(A,B) C(B)` within the same spin set.
+The default minimum absolute overlap is 0.5, with a 0.1 separation from the next
+candidate. Both thresholds can be adjusted. Phase signs are aligned for playback
+and orbital animation export; native files are not modified. Near-degenerate
+mixtures have no unique individual orbital identity, so ambiguous matches remain
+unassigned. Tracking uses stored orientations (no rigid-rotation alignment) and
+supports at most 1,000 basis functions per frame. Selecting another orbital turns
+tracking off so a new anchor can be chosen. Tracks are session-only and can be rebuilt.
+
+Polarizability, reactivity, trajectory-series and scan-energy plots offer a closed
+**Plot appearance / export** section: font size, colour, solid/dashed/no line,
+circle/square/no markers, line width, marker size and image dimensions. SVG and PNG
+exports share the plotted geometry, axis units and scan reference caption. Missing
+values remain gaps, and reversed scans preserve source-point selection. Spectrum
+plots and trajectory histograms retain their existing separate rendering controls.

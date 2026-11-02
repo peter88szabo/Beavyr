@@ -1,0 +1,8 @@
+Default suite: 1584 passed, 0 failed, 49 ignored.
+Build: PASS, no compiler warnings.
+Native GFN2 trajectory/tracking/resume: PASS.
+GPU rich export: PASS.
+SVG parsed; PNG decoded 800x600; GIF: 4 distinct frames.
+GUI startup and Surface Tools screenshot: PASS.
+Four-core affinity; native backend one thread.
+No commits.

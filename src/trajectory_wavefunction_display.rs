@@ -7,6 +7,8 @@ struct Preview {
     requested: Option<(PathBuf, usize)>,
     adopted: Option<(PathBuf, usize)>,
     choice: Option<(Quantity, Spin, Option<usize>, f32)>,
+    tracking_key: (bool,usize),
+    tracked_selection: Option<(Spin,usize)>,
 }
 pub struct Plugin;
 impl bevy::prelude::Plugin for Plugin {
@@ -25,7 +27,7 @@ fn update(
     mut preview: ResMut<Preview>,
     mut state: ResMut<State>,
     mut orbital: ResMut<OrbitalState>,
-    traj: Res<crate::trajectory::TrajectoryState>,
+    mut traj: ResMut<crate::trajectory::TrajectoryState>,
     mol: Res<crate::molecule::Molecule>,
 ) {
     let Some(series) = state
@@ -40,6 +42,16 @@ fn update(
         return;
     };
     let key = (series.root.clone(), traj.current_frame);
+    if state.tracking.enabled && preview.adopted.as_ref()==Some(&key) {
+        if let Some((spin,index))=preview.tracked_selection {
+            if orbital.quantity!=Quantity::Orbital || orbital.spin!=spin || orbital.selected!=Some(index) {
+                state.tracking.enabled=false;state.tracking.message="Orbital selection changed. Track this selection to choose a new anchor.".into();
+            }
+        }
+    }
+    let tracking_key=(state.tracking.enabled,state.tracking.track.as_ref().map_or(0,|t|std::sync::Arc::as_ptr(t)as usize));
+    if preview.tracking_key!=tracking_key {preview.tracking_key=tracking_key;preview.adopted=None;preview.requested=None;preview.task=None;preview.tracked_selection=None;}
+
     if orbital.data.is_some() {
         preview.choice = Some((
             orbital.quantity,
@@ -68,7 +80,7 @@ fn update(
     if let Some(result) = block_on(future::poll_once(task)) {
         preview.task = None;
         match result {
-            Ok((data, text)) if describes(&data, &mol) => {
+            Ok((mut data, text)) if describes(&data, &mol) => {
                 let choice = preview.choice;
                 if choice.is_some_and(|(q, _, _, _)| q == Quantity::SpinDensity)
                     && !data.is_open_shell()
@@ -77,6 +89,13 @@ fn update(
                     state.follow = false;
                     return;
                 }
+                let tracked=if state.tracking.enabled {
+                    let track=state.tracking.track.as_ref().unwrap();
+                    match crate::orbital_tracking::apply(&mut data,track,key.1) {
+                        Ok(c)=>Some((track.spin,c.index)),
+                        Err(e)=>{traj.playing=false;state.follow=false;state.error=Some(e);return;}
+                    }
+                }else{None};
                 orbital.adopt(
                     data,
                     Some(format!("Frame {}", key.1 + 1)),
@@ -90,6 +109,8 @@ fn update(
                     orbital.selected = selected
                         .filter(|i| *i < orbital.data.as_ref().unwrap().orbitals(spin).len());
                 }
+                if let Some((spin,index))=tracked {orbital.quantity=Quantity::Orbital;orbital.spin=spin;orbital.selected=Some(index);}
+                preview.tracked_selection=tracked;
                 if orbital.quantity == Quantity::Orbital && orbital.selected.is_none() {
                     state.follow = false;
                     state.error=Some("The selected orbital index is unavailable in this frame. Choose an available orbital before resuming.".into());

@@ -20,6 +20,8 @@ use std::{
     },
     time::Duration,
 };
+#[path="wavefunction_resume.rs"]
+pub mod resume;
 pub const MANIFEST: &str = "wavefunctions.beavyr-wfn";
 #[derive(Clone, Serialize, Deserialize)]
 pub enum Engine {
@@ -78,6 +80,8 @@ pub struct Frame {
     pub geometry: TrajectoryFrame,
     pub molden: PathBuf,
     pub spin_resolved: bool,
+    #[serde(default)]
+    pub checksum: Option<u64>,
 }
 #[derive(Clone, Serialize, Deserialize)]
 pub struct Manifest {
@@ -121,6 +125,9 @@ pub fn geometry_matches(a: &TrajectoryFrame, b: &TrajectoryFrame) -> bool {
 pub struct Control {
     pub cancel: Arc<AtomicBool>,
     pub progress: Arc<AtomicUsize>,
+    pub active: Arc<AtomicUsize>,
+    pub reused: Arc<AtomicUsize>,
+    pub phase: Arc<Mutex<String>>,
     pub child: Arc<Mutex<Option<Child>>>,
 }
 impl Control {
@@ -258,6 +265,11 @@ pub fn calculate(
     root: PathBuf,
     control: Control,
 ) -> Result<Series, String> {
+    let _lock=resume::lock(&root)?;
+    resume::save(&root,&engine,&frames)?;
+    calculate_inner(engine,frames,root,control,vec![])
+}
+fn calculate_inner(engine: Engine, frames: Vec<(usize,TrajectoryFrame)>, root: PathBuf, control: Control, completed: Vec<Frame>) -> Result<Series,String> {
     let (charge, multiplicity) = engine.state();
     if frames.is_empty() {
         return Err("No frames to calculate.".into());
@@ -267,7 +279,7 @@ pub fn calculate(
         method: engine.label(),
         charge,
         multiplicity,
-        frames: vec![],
+        frames: completed,
         requested_frames: frames.len(),
         complete: false,
     };
@@ -276,7 +288,11 @@ pub fn calculate(
         ron::ser::to_string(&engine).map_err(|e| e.to_string())?,
     )
     .map_err(|e| e.to_string())?;
-    for (n, (source_index, mut geometry)) in frames.into_iter().enumerate() {
+    let skip=manifest.frames.len();
+    control.progress.store(skip,Ordering::Relaxed);
+    for (n, (source_index, mut geometry)) in frames.into_iter().enumerate().skip(skip) {
+        control.active.store(n+1,Ordering::Relaxed);
+        *control.phase.lock().map_err(|e|e.to_string())?=format!("Computing source frame {}",source_index+1);
         control.check()?;
         let mol = crate::molecule::Molecule {
             atoms: geometry.atoms.clone(),
@@ -287,8 +303,12 @@ pub fn calculate(
         };
         crate::qchem_interfaces::valence::validate_electronic_state(&mol, charge, multiplicity)
             .map_err(|e| e.to_string())?;
-        let dir = root.join(format!("frame-{:06}", n + 1));
-        fs::create_dir(&dir).map_err(|e| e.to_string())?;
+        let mut attempt=0;
+        let dir=loop {
+            let name=if attempt==0 {format!("frame-{:06}",n+1)} else {format!("frame-{:06}-retry-{attempt}",n+1)};
+            let path=root.join(name);
+            match fs::create_dir(&path) {Ok(())=>break path,Err(e) if e.kind()==std::io::ErrorKind::AlreadyExists=>attempt+=1,Err(e)=>return Err(e.to_string())}
+        };
         fs::write(
             dir.join("input.xyz"),
             crate::trajectory_data::xyz(&[geometry.clone()], [0]),
@@ -363,6 +383,7 @@ pub fn calculate(
         let data = molden::parse_molden(&text).map_err(|e| e.to_string())?;
         check_geometry(&data, &geometry)?;
         let target = dir.join("wavefunction.molden");
+        let checksum=Some(resume::checksum(text.as_bytes()));
         fs::write(&target, text).map_err(|e| e.to_string())?;
         if let Some(e) = energy {
             geometry.metadata = crate::trajectory_data::Metadata::energy(
@@ -383,6 +404,7 @@ pub fn calculate(
                 .map_err(|e| e.to_string())?
                 .to_owned(),
             spin_resolved: data.is_open_shell(),
+            checksum,
         });
         manifest.complete = manifest.frames.len() == manifest.requested_frames;
         crate::project::atomic_write(
@@ -395,6 +417,8 @@ pub fn calculate(
         control.progress.store(n + 1, Ordering::Relaxed);
     }
     control.check()?;
+    manifest.complete=true;
+    control.active.store(0,Ordering::Relaxed);
     Ok(Series { root, manifest })
 }
 pub fn check_geometry(data: &OrbitalData, frame: &TrajectoryFrame) -> Result<(), String> {
@@ -444,6 +468,7 @@ pub fn load(series: &Series, index: usize) -> Result<(OrbitalData, String), Stri
         .get(index)
         .ok_or("No wavefunction for this frame.")?;
     let text = fs::read_to_string(series.root.join(&frame.molden)).map_err(|e| e.to_string())?;
+    if frame.checksum.is_some_and(|sum|sum!=resume::checksum(text.as_bytes())) {return Err(format!("The wavefunction file for frame {} was modified after calculation.",index+1));}
     let data = molden::parse_molden(&text).map_err(|e| e.to_string())?;
     check_geometry(&data, &frame.geometry)?;
     Ok((data, text))

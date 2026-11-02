@@ -43,6 +43,7 @@ pub struct State {
     pub angstrom: bool,
     pub scale: f32,
     pub opacity: f32,
+    pub colors: crate::property_legend::Scale,
     open: bool,
     plot_open: bool,
     task: Option<Running>,
@@ -62,6 +63,7 @@ impl Default for State {
             angstrom: true,
             scale: 1.,
             opacity: 0.2,
+            colors: Default::default(),
             open: false,
             plot_open: false,
             task: None,
@@ -214,6 +216,10 @@ fn ui(
     if let Some(error) = state.error.take() {
         crate::runtime_warning::push(ctx, "Atomic polarizabilities", &error);
     }
+    if let Some(r)=state.results.clone() {
+        state.colors.update((Arc::as_ptr(&r) as usize,0),false,||r.values.iter().flat_map(|v|v.alpha.iter().copied()).collect());
+    }
+    if state.show && state.current(&mol,&traj).is_some() { state.colors.overlay(ctx,"polar_legend","Atomic α",state.factor(),state.unit(),[Color::srgb(0.25,0.75,1.);2],0.); }
     if state.open {
         let mut open = true;
         let window=egui::Window::new("Atomic polarizabilities").open(&mut open).resizable(true).default_size([530.,420.]).show(ctx,|ui|{
@@ -230,9 +236,13 @@ fn ui(
             });
             crate::trajectory_wavefunctions::button(ui);
             if let Some(run)=&state.task{ui.add(egui::ProgressBar::new(run.progress.load(Ordering::Relaxed)as f32/run.total as f32));if ui.button("Cancel").clicked_once(){run.cancel.store(true,Ordering::Relaxed);}}
-            ui.horizontal(|ui|{ui.checkbox(&mut state.show,"Show atomic halos");ui.checkbox(&mut state.labels,"Show polarizability values");});
+            ui.horizontal(|ui|{ui.checkbox(&mut state.show,"Show atomic halos");ui.checkbox(&mut state.labels,"Values");});
             ui.horizontal(|ui|{ui.selectable_value(&mut state.angstrom,true,"Å³");ui.selectable_value(&mut state.angstrom,false,"bohr³");});
-            ui.add(egui::Slider::new(&mut state.scale,0.1..=3.).text("Radius scale"));ui.add(egui::Slider::new(&mut state.opacity,0.02..=0.8).text("Opacity"));
+            crate::surface_controls::rows(ui,"polar_controls",|ui|{
+                crate::surface_controls::slider(ui,"Radius scale",egui::Slider::new(&mut state.scale,0.1..=3.));
+                crate::surface_controls::slider(ui,"Opacity",egui::Slider::new(&mut state.opacity,0.02..=0.8));
+            });
+            let factor=state.factor();let unit=state.unit();state.colors.controls(ui,factor,unit);
             if let Some(result)=state.results.clone(){
                 ui.label(format!("{} · {} geometries",result.method,result.frames.len()));
                 if ui.button("Plot atom / group…").clicked_once(){state.plot_open=true;}
@@ -241,7 +251,7 @@ fn ui(
                     egui::ScrollArea::vertical().max_height(180.).show(ui,|ui|{egui::Grid::new("polar_table").striped(true).show(ui,|ui|{ui.label("Atom");ui.label(format!("α ({unit})"));ui.label("CPA population");ui.end_row();for(i,v)in values.alpha.iter().enumerate(){ui.label(format!("{} {}",i+1,mol.atoms[i]));ui.label(format!("{:.5}",v*factor));ui.label(format!("{:.5}",values.population[i]));ui.end_row();}});});
                 }else{ui.label("These results do not match the current geometry.");}
             }
-            ui.small("Stöhr CPA / TS: αA = αfree × hA/ZA. The sum is an atomic descriptor, not molecular response polarizability. Values depend on the basis; xTB/ECP wavefunctions omit core electrons.");
+            egui::CollapsingHeader::new("Method details").default_open(false).show(ui,|ui|{ui.small("Stöhr CPA / TS: αA = αfree × hA/ZA. The sum is an atomic descriptor, not molecular response polarizability. Values depend on the basis; xTB/ECP wavefunctions omit core electrons.");});
         });
         state.open = open;
         if let Some(w) = window {

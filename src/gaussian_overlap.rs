@@ -8,7 +8,7 @@ use crate::orbitals::{
 fn choose(n: u8, k: u8) -> f64 {
     (0..k).fold(1., |v, i| v * (n - i) as f64 / (i + 1) as f64)
 }
-fn axis_overlap(i: u8, j: u8, a: f64, b: f64, alpha: f64, beta: f64) -> f64 {
+pub(crate) fn axis_overlap(i: u8, j: u8, a: f64, b: f64, alpha: f64, beta: f64) -> f64 {
     let p = alpha + beta;
     let centre = (alpha * a + beta * b) / p;
     let mut sum = 0.;
@@ -28,7 +28,7 @@ fn axis_overlap(i: u8, j: u8, a: f64, b: f64, alpha: f64, beta: f64) -> f64 {
     }
     sum * (std::f64::consts::PI / p).sqrt() * (-alpha * beta / p * (a - b).powi(2)).exp()
 }
-fn terms(s: &Shell, slot: usize) -> Vec<([u8; 3], f64)> {
+pub(crate) fn terms(s: &Shell, slot: usize) -> Vec<([u8; 3], f64)> {
     let l = s.l as usize;
     let powers = cart2sph::cartesian_powers(l);
     if s.spherical {

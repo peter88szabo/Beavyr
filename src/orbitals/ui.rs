@@ -252,40 +252,11 @@ fn panel_body(
         surface_changed |= ui
             .checkbox(&mut state.show_surface, "Show surface")
             .changed();
-        ui.scope(|ui| {
-            let style = ui.style_mut();
-            style.spacing.slider_width = 80.0;
-            style.spacing.interact_size.y = 24.0;
-            style.spacing.button_padding = egui::vec2(6.0, 3.0);
-            style.drag_value_text_style = egui::TextStyle::Small;
-            // Useful isovalues span very different magnitudes for an orbital, a total
-            // density and a spin density, so the slider bounds follow the quantity.
-            let (isovalue_low, isovalue_high) = state.quantity.isovalue_range();
-            surface_changed |= ui
-                .add(
-                    egui::Slider::new(&mut state.isovalue, isovalue_low..=isovalue_high)
-                        .logarithmic(true)
-                        .text("Isovalue"),
-                )
-                .on_hover_text(if showing_orbital {
-                    "Lower encloses more of the orbital; higher shrinks to the core."
-                } else {
-                    "Lower encloses more of the distribution; higher shrinks to the densest region."
-                })
-                .changed();
-
-            surface_changed |= ui
-                .add(egui::Slider::new(&mut state.opacity, 0.1..=1.0).text("Opacity"))
-                .changed();
-            // Resolution changes the sampling density, so unlike the controls above it
-            // forces a resample rather than a remesh.
-            ui.add(
-                egui::Slider::new(
-                    &mut state.resolution,
-                    crate::orbitals::MIN_RESOLUTION..=crate::orbitals::MAX_RESOLUTION,
-                )
-                .text("Surface resolution"),
-            );
+        crate::surface_controls::rows(ui, "orbital_surface_controls", |ui| {
+            let (low, high) = state.quantity.isovalue_range();
+            surface_changed |= crate::surface_controls::slider(ui,"Isovalue",egui::Slider::new(&mut state.isovalue,low..=high).logarithmic(true));
+            surface_changed |= crate::surface_controls::slider(ui,"Opacity",egui::Slider::new(&mut state.opacity,0.1..=1.));
+            crate::surface_controls::slider(ui,"Surface resolution",egui::Slider::new(&mut state.resolution,crate::orbitals::MIN_RESOLUTION..=crate::orbitals::MAX_RESOLUTION));
         });
         ui.add_space(6.0);
         ui.horizontal(|ui| {

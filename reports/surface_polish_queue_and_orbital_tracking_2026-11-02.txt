@@ -1,0 +1,104 @@
+Beavyr: Surface Tools polish, property legends, resumable wavefunctions,
+plot export and orbital character tracking
+Date: 2026-11-02
+
+Requested order and scope
+-------------------------
+1. Compact consistent Surface Tools controls.
+2. Optional atomic-property colour legends and stable trajectory scales.
+5. Calculation progress and verified restart.
+3. Plot appearance and SVG/PNG export.
+4. Orbital character tracking.
+No commits. No changes to installed quantum-chemistry programs. Original files
+are backed up under target/change-backups/surface-polish-2026-11-02/.
+No implementation was added to a mod.rs file. No dependencies were added.
+Builds/tests/apps use CPU affinity 0-3, Cargo uses four jobs; native validation
+calculations use one thread.
+
+Controls and legends
+--------------------
+Surface isovalue, opacity and resolution have aligned labels/numeric fields.
+Atomic-property windows use the same compact row layout. Method and tracking
+explanations are collapsed initially; active display controls remain visible.
+Legends are optional overlays, with the same range for every frame in a result.
+Automatic ranges use all frames; custom ranges are entered in displayed units.
+Polarizability is sequential, signed Fukui/reactivity is diverging through neutral.
+Colour changes apply to halo rendering and animation-export snapshots. Atomic
+halo radius still uses cube-root magnitude. Density/orbital lobe colours remain
+user selectable. Viewer legend overlays are not included in exported animations.
+
+Calculation queue / resume
+--------------------------
+Progress shows completed, remaining and active source frames; elapsed time and
+estimated remaining duration. Resume uses the saved input plan, not current UI
+settings. New jobs save the complete selected geometry list and engine settings
+before starting. Completed wavefunctions are checked for geometry and file checksum.
+The input plan also has a checksum to detect accidental changes. These FNV-1a
+checksums detect corruption/edits; they are not authentication signatures.
+An OS file lock prevents concurrent workers writing the same calculation folder.
+Interrupted/failed frame directories are retained; retries use new numbered folders.
+Completed wavefunctions are reused unchanged. Native program installations and
+shell/environment setup are untouched. Older calculations lacking a saved input
+plan cannot be resumed. Changing saved executable paths/settings requires a new
+calculation rather than silently mixing results.
+
+Plots
+-----
+Shared styling/export is used by atomic-polarizability, reactivity, trajectory-series
+and scan-energy plots. Appearance controls start collapsed. SVG is vector output;
+PNG uses the existing Bevy image encoder and bundled font. Both are rendered from
+the same plot primitives used on screen. Export uses a white background, chosen
+font/line/marker settings and dimensions, and retains axis units and scan reference
+energy/point. Data order and missing-value gaps are preserved. Hover/click uses the
+original source point on reversed scans. Spectrum/histogram renderers are unchanged.
+
+Orbital tracking
+----------------
+Opt-in tracking starts from one selected orbital at a chosen anchor frame and
+walks adjacent geometries in both directions. Same-spin candidates are ranked by
+normalized |C_i(A)^T S(A,B) C_j(B)|, using analytic cross-geometry Gaussian overlaps
+with the same normalization/order as the Molden viewer. Both orbital norms are
+checked. No assumption of fixed energy ordering or occupied/virtual membership.
+An accumulated sign aligns orbital phases for viewer playback and animation export.
+Raw Molden files are unchanged. Default minimum |overlap| is 0.5; minimum separation
+from the next candidate is 0.1. Ambiguous/weak matches are left unassigned and tracked
+playback stops before showing an arbitrary replacement. Users can inspect the score,
+change thresholds or choose another anchor. Changing orbital selection disables
+tracking. Tracks live in the session and are rebuilt after reopening the application.
+Limitations: real MOs, at most 1000 AOs/frame, same atom order, stored orientation.
+Large rigid rotations/translations or sparse paths can cause low overlaps. There
+is no automatic rotational alignment, subspace mixing or excited-state tracking.
+Degenerate subspaces do not define unique individual orbital identities.
+
+Validation
+----------
+Final verification:
+- cargo build --offline --locked -j 4: PASS, no compiler warnings.
+- Full default suite: 1584 passed, 0 failed, 49 ignored.
+- Native GFN2-xTB trajectory / tracking / completed-run resume: 1 passed.
+- GPU GIF export with surfaces and property halos/labels: 1 passed.
+  Its headless renderer emits a ShadowLodOrigin advisory, not a build warning.
+- Independent PySCF cross-overlap fixture: PASS, every candidate MO overlap agrees
+  within 2e-6; the selected water HOMO is correctly matched at >0.99 overlap.
+- SVG parsed independently; PNG decoded at 800x600. Four distinct GIF frames decoded.
+  PNG plot and rendered Surface Tools window inspected visually.
+- Compiled desktop application: PASS, opened water Molden data and rendered the
+  Surface Tools panel. Isolated temporary XDG settings were used; only the test
+  application was stopped afterward.
+- git diff --check: PASS.
+Evidence: reports/testing_evidence_2026-11-02/surface_polish/.
+No release-profile build was performed.
+The independent reference fixture uses PySCF RHF/6-31G* water at two nearby
+geometries and gto.intor_cross('int1e_ovlp', A, B), including s, p and d functions.
+Tests exercise orbital swaps, arbitrary signs, ambiguous mixtures, cancellation,
+changed files/plans, failed-frame retry, concurrent resume locks, plot data gaps,
+reverse order, units/reference captions and SVG/PNG export.
+Full interactive acceptance of every control is not claimed.
+
+Primary reference
+-----------------
+PySCF gto.intor_cross documentation and two-molecule overlap examples:
+https://pyscf.org/pyscf_api_docs/pyscf.gto.html
+https://github.com/pyscf/pyscf.github.io/blob/master/examples/gto/20-ao_integrals.py
+The selected-orbital matching/ambiguity policy is Beavyr's implementation choice,
+not a claim that PySCF prescribes these thresholds.

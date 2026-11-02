@@ -10,6 +10,7 @@ struct Cache {
     key: Option<(usize, usize, u32, u32, data::Descriptor)>,
     task: Option<Task<Result<[crate::orbitals::isosurface::SurfaceMesh; 2], String>>>,
     halo_key: Vec<u64>,
+    halo_materials: Vec<Handle<StandardMaterial>>,
     sphere: Option<Handle<Mesh>>,
     materials: Vec<Handle<StandardMaterial>>,
     appearance: Vec<u32>,
@@ -62,7 +63,7 @@ fn update(
         state.negative.to_srgba().blue.to_bits(),
     ];
     if cache.appearance != appearance {
-        cache.appearance = appearance;
+        cache.appearance = appearance.clone();
         for (handle, color) in cache.materials.iter().zip([state.positive, state.negative]) {
             if let Some(mut m) = materials.get_mut(handle) {
                 let c = color.to_srgba();
@@ -147,6 +148,8 @@ fn update(
         .and_then(|i| state.descriptor.atoms(&result.as_ref()?.frames[i]))
         .filter(|_| state.halos);
     let mut halo_key = vec![state.scale.to_bits() as u64];
+    halo_key.extend(state.colors.bounds.map(f64::to_bits));
+    halo_key.extend(appearance.iter().map(|v|*v as u64));
     if let Some(v) = &values {
         for (i, (&x, p)) in v.iter().zip(&mol.pos).enumerate() {
             halo_key.extend([
@@ -163,6 +166,7 @@ fn update(
         for e in &halos {
             commands.entity(e).despawn();
         }
+        cache.halo_materials.clear();
         if let Some(values) = values {
             let sphere = cache
                 .sphere
@@ -173,10 +177,12 @@ fn update(
                     continue;
                 }
                 let radius = state.scale * value.abs().cbrt() as f32;
+                let material=materials.add(StandardMaterial{base_color:state.colors.color(value,state.positive,state.negative,state.opacity),alpha_mode:AlphaMode::Blend,perceptual_roughness:0.65,..default()});
+                cache.halo_materials.push(material.clone());
                 commands.spawn((
                     Halo,
                     Mesh3d(sphere.clone()),
-                    MeshMaterial3d(cache.materials[usize::from(value < 0.)].clone()),
+                    MeshMaterial3d(material),
                     Transform::from_translation(position).with_scale(Vec3::splat(radius)),
                     RenderLayers::layer(crate::scene::LAYER_MAIN),
                 ));

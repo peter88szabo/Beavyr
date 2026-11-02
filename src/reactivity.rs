@@ -42,6 +42,7 @@ pub struct State {
     pub labels: bool,
     pub surface: bool,
     pub opacity: f32,
+    pub colors: crate::property_legend::Scale,
     pub scale: f32,
     pub isovalue: f32,
     pub resolution: u32,
@@ -74,6 +75,7 @@ impl Default for State {
             labels: false,
             surface: false,
             opacity: 0.35,
+            colors: Default::default(),
             scale: 1.5,
             isovalue: 0.005,
             resolution: 7,
@@ -207,6 +209,11 @@ fn ui(
         crate::runtime_warning::push(ctx, "Reactivity analysis", &e);
     }
     let mut load = false;
+    if let Some(r)=state.results.clone() {
+        let descriptor=state.descriptor;
+        state.colors.update((Arc::as_ptr(&r) as usize,descriptor as usize),true,||r.frames.iter().filter_map(|f|descriptor.atoms(f)).flatten().collect());
+    }
+    if state.halos && state.descriptor.local() && state.current_index(&mol,&traj).is_some() {state.colors.overlay(ctx,"reactivity_legend",state.descriptor.label(),1.,state.descriptor.unit(),[state.positive,state.negative],90.);}
     if state.open {
         let mut open = true;
         let window=egui::Window::new("Reactivity / Fukui analysis").open(&mut open).resizable(true).default_size([650.,590.]).show(ctx,|ui|{
@@ -216,7 +223,7 @@ fn ui(
                 ui.horizontal(|ui|{ui.selectable_value(&mut state.use_trajectory,false,"Current structure");ui.selectable_value(&mut state.use_trajectory,true,"Trajectory");});
                 if state.approx{
                     ui.horizontal(|ui|{ui.label("Spin channel");ui.selectable_value(&mut state.spin,crate::orbitals::molden::Spin::Alpha,"Alpha / restricted");ui.selectable_value(&mut state.spin,crate::orbitals::molden::Spin::Beta,"Beta");});
-                    ui.small("f+ ≈ |LUMO|²; f− ≈ |HOMO|². Frontier indices are selected separately in each frame. Degenerate orbitals and open shells require care.");
+                    egui::CollapsingHeader::new("Approximation details").default_open(false).show(ui,|ui|{ui.small("f+ ≈ |LUMO|²; f− ≈ |HOMO|². Frontier indices are selected separately in each frame. Degenerate orbitals and open shells require care.");});
                     crate::trajectory_wavefunctions::button(ui);
                 }else{
                     ui.label(format!("Quantum Chemistry setup: {} · {}",qc.program.label(),qc.method.map(|m|m.label()).unwrap_or("Choose a method")));
@@ -249,13 +256,20 @@ fn ui(
                 ui.add_enabled_ui(state.descriptor.local(),|ui|{
                     ui.horizontal(|ui|{ui.checkbox(&mut state.halos,"Show atomic halos");ui.checkbox(&mut state.labels,"Show values");ui.checkbox(&mut state.surface,"Show surface");});
                     ui.horizontal(|ui|{ui.label("Positive");let mut c=state.positive.to_srgba().to_f32_array();if ui.color_edit_button_rgba_unmultiplied(&mut c).changed(){state.positive=Color::srgba(c[0],c[1],c[2],c[3]);}ui.label("Negative");let mut c=state.negative.to_srgba().to_f32_array();if ui.color_edit_button_rgba_unmultiplied(&mut c).changed(){state.negative=Color::srgba(c[0],c[1],c[2],c[3]);}});
-                    ui.add(egui::Slider::new(&mut state.scale,0.1..=5.).text("Halo radius scale"));ui.add(egui::Slider::new(&mut state.opacity,0.02..=1.).text("Opacity"));
-                    if state.surface{ui.add(egui::Slider::new(&mut state.isovalue,0.00001..=0.5).logarithmic(true).text("Isovalue"));ui.add(egui::Slider::new(&mut state.resolution,1..=10).text("Surface resolution"));}
+                    crate::surface_controls::rows(ui,"reactivity_controls",|ui|{
+                        crate::surface_controls::slider(ui,"Halo radius scale",egui::Slider::new(&mut state.scale,0.1..=5.));
+                        crate::surface_controls::slider(ui,"Opacity",egui::Slider::new(&mut state.opacity,0.02..=1.));
+                        if state.surface {
+                            crate::surface_controls::slider(ui,"Isovalue",egui::Slider::new(&mut state.isovalue,0.00001..=0.5).logarithmic(true));
+                            crate::surface_controls::slider(ui,"Surface resolution",egui::Slider::new(&mut state.resolution,1..=10));
+                        }
+                    });
+                    state.colors.controls(ui,1.,state.descriptor.unit());
                 });
                 if let Some(i)=state.current_index(&mol,&traj){let f=&result.frames[i];let g=&f.global;ui.label(format!("I {:.4} eV · A {:.4} eV · μ {:.4} eV · η {:.4} eV",g.ionization,g.affinity,g.mu,g.eta));if let(Some(s),Some(w))=(g.softness,g.electrophilicity){ui.label(format!("S {s:.5} eV⁻¹ · ω {w:.5} eV"));}else{ui.label("Nonpositive gap: softness and electrophilicity unavailable.");}
                     if let Some(values)=state.descriptor.atoms(f){egui::ScrollArea::vertical().max_height(160.).show(ui,|ui|{egui::Grid::new("fukui_atoms").striped(true).show(ui,|ui|{for (j,v)in values.iter().enumerate(){ui.label(format!("{} {}",j+1,f.geometry.atoms[j]));ui.label(format!("{v:+.6} {}",state.descriptor.unit()));ui.end_row();}});});}
                 }else{ui.label("Load the matching geometry to display its results.");}
-                ui.small("Atomic values use Mulliken partitioning and may be negative. η=(I−A)/2, S=1/(2η). Local philicity is ω f. Saved analyses reference their wavefunction files; keep the calculation folder.");
+                egui::CollapsingHeader::new("Method details").default_open(false).show(ui,|ui|{ui.small("Atomic values use Mulliken partitioning and may be negative. η=(I−A)/2, S=1/(2η). Local philicity is ω f. Saved analyses reference their wavefunction files; keep the calculation folder.");});
             }
             if let Some(dir)=&state.directory{if ui.button("Copy calculation folder").clicked_once(){ctx.copy_text(dir.display().to_string());}}
         });

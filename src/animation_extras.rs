@@ -34,6 +34,7 @@ pub struct Surface {
 pub struct Reactivity {
     pub results: Arc<crate::reactivity::data::Results>,
     pub descriptor: crate::reactivity::data::Descriptor,
+    pub color_scale: crate::property_legend::Scale,
     pub surface: bool,
     pub halos: bool,
     pub labels: bool,
@@ -51,9 +52,11 @@ pub struct Extras {
     pub labels: Option<crate::saved_views::Library>,
     surface: Option<Surface>,
     wavefunctions: Option<Arc<crate::trajectory_wavefunctions::job::Series>>,
+    tracking: Option<Arc<crate::orbital_tracking::Track>>,
     static_data: Option<Arc<OrbitalData>>,
     pub polar: Option<Arc<crate::polarizability::Results>>,
     pub polar_scale: f32,
+    pub polar_colors: crate::property_legend::Scale,
     pub polar_opacity: f32,
     pub polar_labels: bool,
     pub polar_angstrom: bool,
@@ -102,6 +105,7 @@ impl Extras {
                 iso: reactivity.isovalue,
                 spacing: settings.grid_spacing(),
                 colors: [reactivity.positive, reactivity.negative],
+                color_scale: reactivity.colors.clone(),
             })
         } else {
             None
@@ -118,7 +122,9 @@ impl Extras {
             } else {
                 None
             },
+            tracking: if wave.tracking.enabled {wave.tracking.track.clone()} else {None},
             polar_scale: polar.scale,
+            polar_colors: polar.colors.clone(),
             polar_opacity: polar.opacity,
             polar_labels: polar.labels,
             polar_angstrom: polar.angstrom,
@@ -177,6 +183,7 @@ impl Extras {
         use bevy::{asset::RenderAssetUsages, mesh::PrimitiveTopology};
         let mut meshes = vec![];
         if let Some(s) = &self.surface {
+            let mut index=s.index;
             let data = if let Some(d) = &self.static_data {
                 d.clone()
             } else {
@@ -192,7 +199,12 @@ impl Extras {
                         crate::trajectory_wavefunctions::job::geometry_matches(&f.geometry, frame)
                     })
                     .ok_or("No matching wavefunction")?;
-                Arc::new(crate::trajectory_wavefunctions::job::load(series, i)?.0)
+                let mut d=crate::trajectory_wavefunctions::job::load(series,i)?.0;
+                if let Some(t)=&self.tracking {if s.quantity==Quantity::Orbital {
+                    if t.root!=series.root || t.spin!=s.spin {return Err("Orbital tracking does not match the export spin or wavefunction series.".into());}
+                    index=crate::orbital_tracking::apply(&mut d,t,i)?.index;
+                }}
+                Arc::new(d)
             };
             crate::trajectory_wavefunctions::job::check_geometry(&data, frame)?;
             if !s.quantity.is_available(&data) {
@@ -203,10 +215,10 @@ impl Extras {
             }
             let grid = grid::plan_grid(&data.positions, 3., s.spacing, 2_000_000);
             let field = if s.quantity == Quantity::Orbital {
-                if s.index >= data.orbitals(s.spin).len() {
+                if index >= data.orbitals(s.spin).len() {
                     return Err("The selected orbital is missing from an exported frame.".into());
                 }
-                grid::sample_orbital(&data, s.spin, s.index, &grid)
+                grid::sample_orbital(&data, s.spin, index, &grid)
             } else {
                 density::sample_density(&data, &DensityMatrices::build(&data), s.quantity, &grid)
             };
@@ -272,7 +284,7 @@ impl Extras {
                 meshes.push((
                     Sphere::new(radius).mesh().uv(32, 20),
                     StandardMaterial {
-                        base_color: Color::srgba(0.25, 0.75, 1., self.polar_opacity),
+                        base_color: self.polar_colors.color(a,Color::srgb(0.25,0.75,1.),Color::srgb(0.25,0.75,1.),self.polar_opacity),
                         alpha_mode: AlphaMode::Blend,
                         perceptual_roughness: 0.65,
                         ..default()
@@ -322,7 +334,7 @@ impl Extras {
                         if hidden.contains(&i) || value.abs() < 1e-12 {
                             continue;
                         }
-                        let c = r.colors[usize::from(value < 0.)].to_srgba();
+                        let c = r.color_scale.color(value,r.colors[0],r.colors[1],r.opacity).to_srgba();
                         meshes.push((
                             Sphere::new(r.scale * value.abs().cbrt() as f32)
                                 .mesh()

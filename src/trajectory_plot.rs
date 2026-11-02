@@ -33,89 +33,10 @@ pub fn series(
     selected: usize,
     unit: &str,
 ) -> Option<usize> {
-    let (response, r) = canvas(ui);
-    let painter = ui.painter();
-    let color = ui.visuals().text_color();
-    let (lo, hi) = limits(values.iter().flatten().copied());
-    let max = (values.len().saturating_sub(1)).max(1) as f64;
-    let point = |i: usize, v: f64| {
-        egui::pos2(
-            r.left() + r.width() * (i as f64 / max) as f32,
-            r.bottom() - r.height() * ((v - lo) / (hi - lo)) as f32,
-        )
-    };
-    for k in 0..=4 {
-        let f = k as f32 / 4.;
-        let y = r.bottom() - f * r.height();
-        painter.line_segment(
-            [egui::pos2(r.left(), y), egui::pos2(r.right(), y)],
-            egui::Stroke::new(0.5, color.gamma_multiply(0.2)),
-        );
-        painter.text(
-            egui::pos2(r.left() - 6., y),
-            egui::Align2::RIGHT_CENTER,
-            format!("{:.3}", lo + (hi - lo) * f as f64),
-            egui::FontId::monospace(11.),
-            color,
-        );
-        let x = r.left() + f * r.width();
-        painter.text(
-            egui::pos2(x, r.bottom() + 5.),
-            egui::Align2::CENTER_TOP,
-            format!("{}", 1 + (max * f as f64).round() as usize),
-            egui::FontId::monospace(11.),
-            color,
-        );
-    }
-    painter.text(
-        egui::pos2(r.center().x, response.rect.bottom()),
-        egui::Align2::CENTER_BOTTOM,
-        "Frame",
-        egui::FontId::proportional(13.),
-        color,
-    );
-    let accent = egui::Color32::from_rgb(85, 180, 235);
-    let mut previous = None;
-    let mut nearest = None;
-    let mut distance = f32::INFINITY;
-    for (i, value) in values.iter().enumerate() {
-        if let Some(v) = value {
-            let p = point(i, *v);
-            if let Some(old) = previous {
-                painter.line_segment([old, p], egui::Stroke::new(1.5, accent));
-            }
-            previous = Some(p);
-            if values.len() < 1500 {
-                painter.circle_filled(p, 2.5, accent);
-            }
-            if i == selected {
-                painter.circle_stroke(p, 5., egui::Stroke::new(2., egui::Color32::YELLOW));
-            }
-            if let Some(mouse) = response.hover_pos() {
-                let d = p.distance_sq(mouse);
-                if d < distance {
-                    distance = d;
-                    nearest = Some((i, *v, p));
-                }
-            }
-        } else {
-            previous = None;
-        }
-    }
-    if let Some((index, value, p)) = nearest {
-        if distance <= 225. {
-            painter.circle_filled(p, 4., egui::Color32::YELLOW);
-            response.clone().on_hover_text(format!(
-                "Frame {}\n{value:.8} {unit}\nClick to display",
-                index + 1
-            ));
-            if response.clicked() {
-                return Some(index);
-            }
-        }
-    }
-    None
+    let points:Vec<_>=values.iter().enumerate().map(|(i,v)|v.map(|y|(i as f64+1.,y))).collect();
+    crate::analysis_plot::draw(ui,"trajectory_series",crate::analysis_plot::Plot{points:&points,x:"Frame",y:unit,note:"",reverse_x:false,point_ids:None},Some(selected))
 }
+
 pub fn histogram(ui: &mut egui::Ui, values: &[Option<f64>], bins: usize, unit: &str) {
     let data: Vec<_> = values.iter().flatten().copied().collect();
     let (lo, hi) = limits(data.iter().copied());

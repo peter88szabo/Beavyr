@@ -1,0 +1,9 @@
+    Blocking waiting for file lock on build directory
+    Finished `test` profile [optimized + debuginfo] target(s) in 34.66s
+     Running unittests src/main.rs (target/debug/deps/Beavyr-401b2246fe058028)
+
+running 1 test
+test trajectory_wavefunctions::job::tests::wavefunction_real_gfn2_trajectory ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1632 filtered out; finished in 0.13s
+

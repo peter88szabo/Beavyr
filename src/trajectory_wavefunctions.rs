@@ -27,6 +27,7 @@ struct Running {
     control: job::Control,
     total: usize,
     source: u64,
+    started: std::time::Instant,
 }
 impl Drop for Running {
     fn drop(&mut self) {
@@ -38,6 +39,7 @@ pub struct State {
     pub series: Option<Arc<job::Series>>,
     pub follow: bool,
     pub ready: Option<usize>,
+    pub tracking: crate::orbital_tracking::State,
     pub error: Option<String>,
     open: bool,
     running: Option<Running>,
@@ -59,6 +61,7 @@ impl Default for State {
             series: None,
             follow: false,
             ready: None,
+            tracking: Default::default(),
             error: None,
             open: false,
             running: None,
@@ -116,6 +119,7 @@ fn ui(
     settings: Res<crate::settings::MolSettings>,
     mut events: MessageWriter<crate::events::MoleculeChanged>,
     qc: Res<crate::qchem_panel::QcPanelState>,
+    orbital: Res<crate::orbitals::OrbitalState>,
     paths: Res<crate::qchem_interfaces::xtb_optimize::XtbPanelState>,
     mut layout: ResMut<crate::ui_layout::UiLayout>,
     mut history: ResMut<crate::structure_history::StructureHistory>,
@@ -124,6 +128,10 @@ fn ui(
     let Ok(ctx) = contexts.ctx_mut() else {
         return;
     };
+    let current_series=state.series.clone();
+    let tracking_was_enabled=state.tracking.enabled;
+    state.tracking.poll(current_series.as_deref());
+    if state.tracking.enabled && !tracking_was_enabled {state.follow=true;state.ready=None;}
     let mut load = false;
     if ctx
         .data_mut(|d| d.remove_temp::<bool>(egui::Id::new("open_trajectory_wavefunctions")))
@@ -206,8 +214,17 @@ fn ui(
                         let root=crate::qchem_interfaces::xtb_optimize::create_xtb_run_dir(&parent)?;state.directory=Some(root.clone());
                         let control=job::Control::default();let worker_control=control.clone();let total=selected.len();
                         let task=AsyncComputeTaskPool::get().spawn(async move{job::calculate(engine,selected,root,worker_control)});
-                        state.running=Some(Running{task,control,total,source});state.message.clear();Ok(())
+                        state.running=Some(Running{task,control,total,source,started:std::time::Instant::now()});state.message.clear();Ok(())
                     })();if let Err(e)=result{state.error=Some(e);}
+                }
+                if ui.button("Resume calculation…").on_hover_text("Uses the saved method, charge, spin and frame plan. Verifies completed files; retries unfinished frames in new folders.").clicked_once(){
+                    if let Some(root)=rfd::FileDialog::new().set_title("Choose the calculation folder containing wavefunction-plan.ron").pick_folder(){
+                        match job::resume::read_plan(&root){Ok(plan)=>{
+                            let total=plan.frames.len();let control=job::Control::default();let worker=control.clone();state.directory=Some(root.clone());
+                            let task=AsyncComputeTaskPool::get().spawn(async move{job::resume::run(root,worker)});
+                            state.running=Some(Running{task,control,total,source:0,started:std::time::Instant::now()});state.message.clear();
+                        },Err(e)=>state.error=Some(e)}
+                    }
                 }
                 if ui.button("Load wavefunction trajectory…").clicked_once(){
                     if let Some(path)=crate::recent_dir::pick_file(crate::recent_dir::open().add_filter("Wavefunction trajectory",&["beavyr-wfn"])){
@@ -216,7 +233,13 @@ fn ui(
                 }
             });
             if let Some(run)=&state.running{
-                ui.add(egui::ProgressBar::new(run.control.progress.load(Ordering::Relaxed)as f32/run.total as f32).text(format!("{} / {} frames",run.control.progress.load(Ordering::Relaxed),run.total)));
+                let done=run.control.progress.load(Ordering::Relaxed);let reused=run.control.reused.load(Ordering::Relaxed);
+                let elapsed=run.started.elapsed().as_secs_f64();let new_done=done.saturating_sub(reused);
+                ui.add(egui::ProgressBar::new(done as f32/run.total as f32).text(format!("{done} / {} completed · {} remaining",run.total,run.total.saturating_sub(done))));
+                if let Ok(phase)=run.control.phase.lock(){ui.label(phase.as_str());}
+                let eta=if new_done>0{job::resume::duration(elapsed/new_done as f64*run.total.saturating_sub(done)as f64)}else{"Estimating…".into()};
+                ui.label(format!("Elapsed {} · Remaining ≈ {eta}",job::resume::duration(elapsed)));
+                if reused>0{ui.small(format!("{reused} completed frames verified and reused"));}
                 if ui.button("Cancel").clicked_once(){run.control.cancel();}
             }
             if let Some(series)=state.series.clone(){
@@ -224,11 +247,12 @@ fn ui(
                 if !series.manifest.complete{ui.label("Partial calculation: only completed frames are available.");}
                 ui.horizontal(|ui|{
                     if ui.button("Load as Trajectory").clicked_once(){load=true;}
-                    if ui.checkbox(&mut state.follow,"Follow trajectory in Surface Tools").changed(){state.ready=None;}
+                    if ui.checkbox(&mut state.follow,"Follow trajectory in Surface Tools").changed(){state.ready=None;if !state.follow {state.tracking.enabled=false;}}
                     if ui.button("Copy manifest path").clicked_once(){ctx.copy_text(series.root.join(job::MANIFEST).display().to_string());}
                 });
                 if series.manifest.frames.iter().any(|f|!f.spin_resolved){ui.small("Some frames lack separate alpha/beta orbitals; spin density is unavailable for those files.");}
-                ui.small("Playback waits for each surface. Orbitals follow the selected index; orbital ordering can change along the path.");
+                ui.add_enabled_ui(series.matches(&traj),|ui|{state.tracking.ui(ui,&series,&orbital,traj.current_frame);});
+                if state.tracking.enabled {state.follow=true;}
             }
             if let Some(dir)=&state.directory{ui.horizontal(|ui|{ui.label("Calculation files");if ui.button("Copy folder path").clicked_once(){ctx.copy_text(dir.display().to_string());}});}
             if !state.message.is_empty(){ui.label(&state.message);}

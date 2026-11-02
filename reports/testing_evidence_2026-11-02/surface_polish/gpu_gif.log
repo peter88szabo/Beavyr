@@ -1,0 +1,13 @@
+    Blocking waiting for file lock on build directory
+    Finished `test` profile [optimized + debuginfo] target(s) in 32.82s
+     Running unittests src/main.rs (target/debug/deps/Beavyr-401b2246fe058028)
+
+running 1 test
+test animation_export::render_tests::offscreen_rich_export_includes_surface_halos_and_labels ... 2026-11-02T10:58:36.082223Z  INFO bevy_render::renderer: AdapterInfo { name: "AMD Ryzen 9 7900 12-Core Processor (RADV RAPHAEL_MENDOCINO)", vendor: 4098, device: 5710, device_type: IntegratedGpu, device_pci_bus_id: "0000:0f:00.0", driver: "radv", driver_info: "Mesa 26.0.8-1ubuntu0.3", backend: Vulkan, subgroup_min_size: 32, subgroup_max_size: 64, transient_saves_memory: false }
+2026-11-02T10:58:36.529343Z  INFO bevy_pbr::cluster: GPU clustering is supported on this device.
+2026-11-02T10:58:36.529436Z  INFO bevy_render::batching::gpu_preprocessing: GPU preprocessing is fully supported on this device.
+2026-11-02T10:58:36.575224Z  WARN bevy_light: Point lights and/or spot lights are present, but no entity has `ShadowLodOrigin`, and no camera that renders to the window has been found. Consider using the `ShadowLodOrigin` component to set a LOD origin.
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1632 filtered out; finished in 2.16s
+
