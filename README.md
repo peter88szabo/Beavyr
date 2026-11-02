@@ -878,13 +878,7 @@ ORCA handles its own properties. Behemoth has not been modified for this feature
 
 Validation and method details: `reports/vibronic_extensions_2026-11-01.txt`.
 
-## Recovery, comparison and trajectory properties
-
-**Project → Autosave / recovery…** controls periodic recovery snapshots (60 seconds
-by default, three generations per session). Recovery files are separate from manual
-projects. Inactive sessions can be restored without restarting interrupted jobs;
-Restore previous session undoes the restore. On Linux snapshots live in
-`$XDG_STATE_HOME/beavyr/recovery` or `~/.local/state/beavyr/recovery`.
+## Comparison and trajectory properties
 
 The side-by-side comparison window supports linked trajectory frames, manual or
 geometric atom mapping, and displacement colours after rigid alignment. Automatic
@@ -927,7 +921,7 @@ partition dependence and unbound electron-added states require interpretation.
 Reactivity displays support signed surfaces, signed halos, numerical labels,
 atom/group plots, global-descriptor plots, CSV copy/save, and reopenable analysis
 files. Analysis files retain paths to native wavefunctions: keep their calculation
-folders. Projects/recovery also retain completed polarizability and reactivity data,
+folders. Saved projects also retain completed polarizability and reactivity data,
 measurements and the last QC result; external native files remain at their paths.
 All these analysis windows resize in both directions.
 

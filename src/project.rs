@@ -28,8 +28,6 @@ static SERIAL: AtomicU64 = AtomicU64::new(0);
 
 #[path = "project_calculation.rs"]
 mod calculation;
-#[path = "autosave.rs"]
-pub mod autosave;
 
 #[derive(Clone, Serialize, Deserialize)]
 struct Workspace {
@@ -99,10 +97,6 @@ pub fn restore_ui(ctx: &egui::Context, state: &mut ProjectState) {
 /// Compact entry point next to the Structure file controls.
 pub fn menu(ui: &mut egui::Ui, state: &mut ProjectState) {
     ui.menu_button("Project", |ui| {
-        if ui.button("Autosave / recovery…").clicked_once() {
-            ui.ctx().data_mut(|d| d.insert_temp(egui::Id::new("open_autosave"), true));
-            ui.close();
-        }
         if ui.button("Open project…").clicked_once() {
             if let Some(path) = crate::recent_dir::pick_file(
                 crate::recent_dir::open().add_filter("Beavyr project", &["beavyr"]),

@@ -214,7 +214,6 @@ fn main() {
         .init_resource::<uvvis::run::SpectrumTask>()
         .init_resource::<ui_layout::UiLayout>()
         .init_resource::<project::ProjectState>()
-        .add_plugins(project::autosave::Plugin)
         .add_systems(Update, project::process.before(UpdateSet::Core))
         // scene
         // Files named on the command line load before the camera is centred,
