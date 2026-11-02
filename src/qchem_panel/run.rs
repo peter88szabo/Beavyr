@@ -41,9 +41,16 @@ mod correlated_job;
 #[path = "spectrum_job.rs"]
 pub(crate) mod spectrum_job;
 
+#[path = "wavefunction_output.rs"]
+mod wavefunction_output;
+
 #[path = "dreiding_job.rs"]
 mod dreiding_job;
 use dreiding_job::run as run_dreiding;
+
+#[cfg(test)]
+#[path = "wavefunction_completion_tests.rs"]
+mod wavefunction_completion_tests;
 
 #[cfg(test)]
 #[path = "dreiding_completion_tests.rs"]
@@ -102,6 +109,7 @@ pub struct QcRunTask {
     child: Option<Arc<Mutex<Option<Child>>>>,
     run_dir: Option<PathBuf>,
     started_at: Option<Instant>,
+    wavefunction_requested: bool,
     /// The last finished run, for the summary window.
     pub last: Option<QcRunOutput>,
     pub last_message: Option<String>,
@@ -175,6 +183,7 @@ impl QcRunTask {
         let task_child = child_slot.clone();
         let task_dir = run_dir.clone();
 
+        self.wavefunction_requested=wavefunction;
         let task = AsyncComputeTaskPool::get().spawn(async move {
             let started = Instant::now();
             let request = super::calculation_record::Request {
@@ -327,7 +336,7 @@ pub(crate) fn run_cancellable(
     if matches!(program, QcProgram::Xtb | QcProgram::Behemoth) {
         return run_xtb_family(
             program, job, binary, workdir, atoms, positions_angstrom, charge, multiplicity,
-            config, cancel, child_slot,
+            config, wavefunction, cancel, child_slot,
         );
     }
 
@@ -475,9 +484,8 @@ pub(crate) fn run_cancellable(
     // run afterwards on the binary orbital file, which is why this is a second
     // process rather than a flag on the first.
     let molden_path = if wavefunction {
-        crate::qchem_interfaces::orca_run::convert_to_molden(binary, workdir)
-            .inspect_err(|_| ())
-            .ok()
+        Some(crate::qchem_interfaces::orca_run::convert_to_molden(binary, workdir)
+            .map_err(|e|format!("The calculation finished, but requested wavefunction export failed: {e}. Native files remain in {}",workdir.display()))?)
     } else {
         None
     };
@@ -983,6 +991,7 @@ fn run_xtb_family(
     charge: i32,
     multiplicity: i32,
     config: &MethodConfig,
+    wavefunction: bool,
     cancel: &AtomicBool,
     child_slot: &Mutex<Option<Child>>,
 ) -> Result<QcRunOutput, String> {
@@ -1022,6 +1031,7 @@ fn run_xtb_family(
             .collect();
         gradient::prepare(program, &dir, &kept_atoms, &coords_bohr, charge, multiplicity, config)?;
         let mut command = gradient::command(program, binary, &dir, charge, multiplicity, config)?;
+        if wavefunction {wavefunction_output::request(&mut command,program);}
         let stdout_path = dir.join("program.stdout");
         let stdout = fs::File::create(&stdout_path)
             .map_err(|e| format!("Failed to create the output file: {e}"))?;
@@ -1115,9 +1125,14 @@ fn run_xtb_family(
         None
     };
 
+    let molden_path=if wavefunction {
+        let path=if matches!(job,JobType::SinglePoint|JobType::Gradient){wavefunction_output::produced(program,&workdir.join("energy"))?}
+        else{let geometry=trajectory_text.as_deref().and_then(last_frame_xyz).unwrap_or_else(||input_xyz.clone());wavefunction_output::final_xtb_family(program,binary,workdir,&geometry,charge,multiplicity,config,cancel,child_slot)?};
+        saveable.push(("Orbitals (Molden)",path.clone()));Some(path)
+    }else{None};
     Ok(QcRunOutput {
         scan: None,
-        molden_path: None,
+        molden_path,
         job,
         program,
         log,
@@ -1548,6 +1563,7 @@ pub fn poll_qc_run(
     mut freq_task: ResMut<crate::qchem_interfaces::xtb_freq::XtbFrequencyTask>,
     mut uvvis: ResMut<crate::uvvis::UvVisState>,
     mut orbitals: ResMut<crate::orbitals::OrbitalState>,
+    mut wavefunctions: Option<ResMut<crate::trajectory_wavefunctions::State>>,
 ) {
     let Some(running) = task.task.as_mut() else {
         return;
@@ -1567,6 +1583,7 @@ pub fn poll_qc_run(
     } else {
         result
     };
+    let wavefunction_requested=std::mem::take(&mut task.wavefunction_requested);
     task.task = None;
     task.cancel = None;
     task.child = None;
@@ -1629,6 +1646,9 @@ pub fn poll_qc_run(
                 opt_panel.energy_plot_open = true;
             }
 
+            let wavefunction=output.molden_path.as_deref().map(|p|wavefunction_output::read(p,output.program));
+            let wavefunction_data=wavefunction.as_ref().and_then(|r|r.as_ref().ok()).map(|(d,_)|d);
+
             // The trajectory, into the player, which the energy plot reads too.
             // Forced to play once rather than loop: watching an optimisation
             // ping-pong back and forth makes no physical sense, which is the
@@ -1636,8 +1656,9 @@ pub fn poll_qc_run(
             if let Some(text) = &output.trajectory_text {
                 if let Ok(frames) = crate::trajectory::parse_multi_xyz(text) {
                     if !frames.is_empty() {
+                        let matching=wavefunction_data.and_then(|data|frames.iter().rposition(|f|wavefunction_output::matches(data,&f.atoms,&f.pos)));
                         traj.frames = frames;
-                        traj.current_frame = 0;
+                        traj.current_frame = matching.unwrap_or(0);
                         traj.accum = 0.0;
                         traj.last_applied = None;
                         traj.overlay_dirty = true;
@@ -1653,7 +1674,7 @@ pub fn poll_qc_run(
                         ev_changed.write(crate::events::MoleculeChanged::parse_xyz(false));
                         traj.mode = crate::trajectory::PlaybackMode::Once;
                         traj.direction = 1;
-                        traj.playing = true;
+                        traj.playing = matching.is_none();
                         layout.open[crate::ui_layout::Tab::Trajectory.index()] = true;
                     }
                 }
@@ -1710,42 +1731,27 @@ pub fn poll_qc_run(
                 }
             }
 
-            // The orbitals, into the Surface tool. Asking for them is almost
-            // always so they can be looked at, so they are loaded rather than
-            // merely offered to save.
             let mut loaded_matching_orbitals = false;
-            if let Some(path) = &output.molden_path {
-                match fs::read_to_string(path) {
-                    Ok(text) => match crate::orbitals::molden::parse_molden(&text) {
-                        Ok(data) => {
-                            // Solid spheres hide the lobes they sit inside, so
-                            // the same switch the file loader makes is made here.
-                            settings.representation =
-                                crate::settings::RepresentationMode::SticksRounded;
-                            settings.geometry_dirty = true;
-                            orbitals.adopt(
-                                data,
-                                None,
-                                Some(format!("From this {} run", output.program.label())),
-                                Some(text),
-                            );
-                            loaded_matching_orbitals = true;
-                            layout.open[crate::ui_layout::Tab::Surface.index()] = true;
-                        }
-                        Err(err) => {
-                            // The calculation is still perfectly good, so this
-                            // is a note against it rather than a failed run.
-                            orbitals.warning = Some(format!(
-                                "The calculation ran, but its orbitals could not be read: {err}"
-                            ));
-                        }
-                    },
-                    Err(err) => {
-                        orbitals.warning =
-                            Some(format!("The orbital file could not be opened: {err}"));
-                    }
-                }
-            }
+            let load_result=match wavefunction {
+                Some(Ok((data,text))) if wavefunction_output::matches(&data,&mol.atoms,&mol.pos)=>{
+                    // Keep the result on its matching geometry instead of immediately
+                    // playing away from (and clearing) this single wavefunction.
+                    traj.playing=false;
+                    if let Some(wave)=wavefunctions.as_deref_mut(){wave.follow=false;wave.ready=None;wave.tracking.enabled=false;}
+                    settings.representation=crate::settings::RepresentationMode::SticksRounded;
+                    settings.geometry_dirty=true;
+                    orbitals.adopt(data,output.molden_path.as_ref().and_then(|p|p.file_name()).map(|s|s.to_string_lossy().into_owned()),Some(format!("From this {} run",output.program.label())),Some(text));
+                    orbitals.show_surface=true;
+                    loaded_matching_orbitals=true;
+                    layout.open[crate::ui_layout::Tab::Surface.index()]=true;
+                    Ok(())
+                },
+                Some(Ok(_))=>Err("The wavefunction was written, but its geometry differs from the displayed structure. Load its Molden file from the calculation results to display it.".to_string()),
+                Some(Err(e))=>Err(e),
+                None if wavefunction_requested=>Err("The calculation returned no Molden wavefunction despite Write Orbitals being enabled. Check the retained calculation output for export support or errors.".to_string()),
+                None=>Ok(()),
+            };
+            if let Err(error)=load_result {orbitals.warning=Some(error.clone());task.last_message=Some(error);task.last_is_error=true;}
 
             // The excited states, into the UV-Vis panel. ORCA's TD-DFT output
             // is exactly what that reader already takes, so nothing is parsed

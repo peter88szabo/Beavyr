@@ -1,0 +1,33 @@
+Quantum Chemistry wavefunction autoload — 2026-11-02
+
+Request: automatically load requested wavefunctions into Surface Tools when the
+Quantum Chemistry calculation finishes.
+
+Fixes:
+- Optimization completion selects the trajectory geometry matching the returned
+  wavefunction and pauses there. Previously it played from the first geometry,
+  causing the final-geometry wavefunction to be cleared as inconsistent.
+- Surface Tools opens, selects the HOMO through the existing importer, and enables
+  the surface. Previous trajectory-wavefunction following/tracking is disabled
+  when the new calculation wavefunction takes over.
+- xTB/Behemoth now honor Write Orbitals. Energy/gradient runs request native Molden
+  output. Optimization/Hessian workflows calculate the wavefunction at the final
+  geometry using the same method/settings. Original program files remain intact.
+- xTB import supplies its normalization provenance to the parser.
+- ORCA Molden conversion errors are no longer silently discarded. Missing/invalid
+  returned wavefunctions are reported through the existing copyable error popup.
+- Cancelled results do not load. A mismatched single-point wavefunction does not
+  replace a structure edited while the calculation was running.
+
+Validation:
+- cargo build --offline --locked -j 4: PASS, no compiler warnings.
+- Full regression suite: 1589 passed, 0 failed, 50 ignored.
+- Native xTB single-point + optimization autoload test: PASS (one opt-in test
+  exercising both jobs, using one calculation core).
+- Tests also cover Opt+Freq handoff, missing/invalid output, edited geometry,
+  cancellation and both native export flags. No new native Behemoth run was made.
+- git diff --check: PASS.
+Builds/tests restricted to CPU cores 0-3. No commits, no external-program edits,
+and no implementation in mod.rs. Original run.rs backed up under
+ target/change-backups/qchem-wavefunction-autoload-2026-11-02/.
+Evidence: reports/testing_evidence_2026-11-02/qchem_wavefunction_autoload/.
