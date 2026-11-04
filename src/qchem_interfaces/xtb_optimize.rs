@@ -513,7 +513,7 @@ fn optimization_panel_body(
         egui::ComboBox::from_id_salt("opt_program")
             .selected_text(panel_state.program.label())
             .show_ui(ui, |ui| {
-                for program in QcProgram::ALL.into_iter().filter(|p| *p != QcProgram::StdaXtb) {
+                for program in QcProgram::ALL.into_iter().filter(|p| !matches!(p, QcProgram::StdaXtb | QcProgram::Mrcc)) {
                     ui.selectable_value(&mut panel_state.program, program, program.label());
                 }
             });
@@ -1403,6 +1403,7 @@ fn parse_full_energy_history(stdout_text: &str) -> Vec<EnergyHistoryPoint> {
 /// still plots how far it got.
 fn energy_history_for(program: QcProgram, workdir: &Path) -> Vec<EnergyHistoryPoint> {
     match program {
+        QcProgram::Mrcc => Vec::new(),
         QcProgram::StdaXtb => Vec::new(),
         QcProgram::Xtb => read_energy_history(workdir),
         // DREIDING writes its trajectory in Behemoth's format precisely so that this, the
@@ -1561,6 +1562,7 @@ pub(crate) fn run_optimize_cancellable(
     // that file is written before the process is started. xTB and Behemoth
     // take everything on their command lines and need nothing here.
     match program {
+        QcProgram::Mrcc => return Err("Use the Quantum Chemistry panel for MRCC calculations.".into()),
         QcProgram::StdaXtb => return Err("sTDA-xTB calculates spectra only.".into()),
         QcProgram::Orca => {
             let (_, atoms, coords) = crate::molecule::parse_xyz_angstrom(input_xyz);
@@ -1637,6 +1639,7 @@ pub(crate) fn run_optimize_cancellable(
     let stderr = fs::File::create(workdir.join("xtb.stderr"))
         .map_err(|e| format!("Failed to create xtb.stderr: {e}"))?;
     let mut cmd = match program {
+        QcProgram::Mrcc => return Err("Use the Quantum Chemistry panel for MRCC calculations.".into()),
         QcProgram::StdaXtb => return Err("sTDA-xTB calculates spectra only.".into()),
         // Unreachable: the DREIDING branch returned above, before any command was built.
         QcProgram::Dreiding => unreachable!("DREIDING runs in process"),
@@ -1732,6 +1735,7 @@ pub(crate) fn run_optimize_cancellable(
     }
 
     let (trajectory_text, final_energy_hartree) = match program {
+        QcProgram::Mrcc => return Err("Use the Quantum Chemistry panel for MRCC calculations.".into()),
         QcProgram::StdaXtb => return Err("sTDA-xTB calculates spectra only.".into()),
         // Unreachable: see above.
         QcProgram::Dreiding => unreachable!("DREIDING runs in process"),

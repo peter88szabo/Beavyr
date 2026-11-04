@@ -1,0 +1,6 @@
+{
+  "status": "approved; MRCC conventional run at 3.142857 A stopped; preparing Behemoth 10 A validation",
+  "reference": "UHF",
+  "cores": 8,
+  "memory_MB": 16000
+}

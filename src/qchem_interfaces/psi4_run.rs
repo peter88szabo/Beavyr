@@ -124,6 +124,16 @@ pub fn method_name<'a>(method: QcMethod, functional: &'a str) -> &'a str {
         QcMethod::Casscf | QcMethod::Nevpt2 => unreachable!("not offered for Psi4"),
         QcMethod::DlpnoCcsdT => "ccsd(t)",
         QcMethod::CcsdTF12 => "ccsd(t)-f12",
+        QcMethod::Ccsd
+        | QcMethod::CcsdF12
+        | QcMethod::UccsdT
+        | QcMethod::Ccsdt
+        | QcMethod::CcsdtQ
+        | QcMethod::Ccsdtq
+        | QcMethod::Drpa
+        | QcMethod::Adc2
+        | QcMethod::ScsAdc2
+        | QcMethod::SosAdc2 => "BEAVYR_UNSUPPORTED_METHOD",
         QcMethod::Gfn1
         | QcMethod::Gfn2
         | QcMethod::GfnFf

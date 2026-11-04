@@ -440,6 +440,7 @@ fn picker(
 }
 
 fn functional_choices(program: QcProgram) -> Vec<Choice> {
+    if program == QcProgram::Mrcc {return crate::qchem_interfaces::mrcc::FUNCTIONALS.iter().map(|s|Choice{label:s,keyword:s,group:"MRCC"}).collect();}
     match program {
         QcProgram::Orca => orca_method::FUNCTIONALS
             .iter()
@@ -489,6 +490,9 @@ fn functional_choices(program: QcProgram) -> Vec<Choice> {
 }
 
 fn basis_choices(program: QcProgram, f12: bool) -> Vec<Choice> {
+    if program == QcProgram::Mrcc {
+        return crate::qchem_interfaces::mrcc::BASES.iter().filter(|s| !f12 || s.contains("-F12")).map(|s| Choice {label:s,keyword:s,group:"MRCC"}).collect();
+    }
     if f12 {
         return orca_run::F12_BASIS_SETS
             .iter()
@@ -591,6 +595,10 @@ fn theory_card(
             }
         }
 
+        if panel.program == QcProgram::Mrcc {
+            ui.add_enabled(!running, egui::Checkbox::new(&mut panel.config.mrcc.correlate_core, "Correlate core electrons"));
+            ui.add_enabled(!running, egui::Checkbox::new(&mut panel.config.mrcc.unrestricted, "Unrestricted reference"));
+        }
         if panel.method.is_some_and(job::correlated::needs_active_space) {
             ui.horizontal(|ui| {
                 ui.label("Active electrons");
@@ -841,6 +849,13 @@ fn blocking_reason(panel: &QcPanelState, mol: &Molecule, code: &CodeStatus) -> O
         if let Some(method) = panel.method {
             if let Err(error) = job::correlated::validate_active_space(method, &panel.config.active_space,
                 &mol.atoms, panel.charge, panel.multiplicity) { return Some(error); }
+        }
+    }
+    if panel.program == QcProgram::Mrcc {
+        if let Err(error) = crate::qchem_interfaces::mrcc::validate(panel.job, panel.method.unwrap_or(QcMethod::Hf), panel.charge, panel.multiplicity, &panel.config, &mol.atoms) {return Some(error);}
+        if panel.advanced && panel.has_input_file() {
+            let xyz:Vec<f64>=mol.pos.iter().flat_map(|p|[p.x as f64,p.y as f64,p.z as f64]).collect();
+            if let Err(error)=crate::qchem_interfaces::mrcc::validate_custom(&panel.generated_input(&mol.atoms,&xyz),&panel.advanced_text){return Some(error);}
         }
     }
     if panel.has_input_file() && panel.advanced && panel.advanced_text.trim().is_empty() {

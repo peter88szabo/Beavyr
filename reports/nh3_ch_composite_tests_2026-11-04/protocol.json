@@ -1,0 +1,38 @@
+{
+  "points": [
+    10.0,
+    3.142857142857143,
+    6.571428571428571,
+    7.714285714285714,
+    8.857142857142858
+  ],
+  "cores": 8,
+  "memory_MB": 16000,
+  "reference": "UHF",
+  "charge": 0,
+  "multiplicity": 2,
+  "scftol": 9,
+  "cctol": 8,
+  "scfmaxit": 400,
+  "ccmaxit": 200,
+  "cbs_basis_pair": [
+    "cc-pVTZ-F12",
+    "cc-pVQZ-F12"
+  ],
+  "cbs_correlation_exponent": 4.071516,
+  "cbs_reference": "Larger-basis HF+CABS; extrapolate MP2-F12 correlation only",
+  "cbs_higher_order_correction_basis": "aug-cc-pVDZ",
+  "reused_components": "Original cc_f12_adz and mp2_f12_atz at all five points; original thresholds and timings retained",
+  "jun_label": "MRCC adaptation of junChS-F12, not the published Molpro implementation",
+  "jun_extrapolation": "n^-3 extrapolation of jun-T/Q MP2-F12 totals; subtract jun-T total to form correction",
+  "jun_core_correction": "all-electron minus frozen-core MP2-F12/cc-pwCVTZ (H: cc-pVTZ)",
+  "f12": "MRCC 2B/F+K MP2-F12, CCSD(F12*) with standard unscaled (T)",
+  "basis_source": "/home/peter/DevCode/Beavyr/reports/nh3_ch_composite_tests_2026-11-04/bases/sources.json",
+  "counterpoise": false,
+  "executable": "/home/peter/Programs/MRCC/binary/dmrcc",
+  "sha256": "d9fa54993b1196334f90b625844e92c945de61490e32ba48b885865f0ddf66f1",
+  "sources": [
+    "https://pubs.acs.org/doi/10.1021/ct500513b",
+    "https://arxiv.org/abs/2110.03075"
+  ]
+}

@@ -1,7 +1,7 @@
 //! File inputs carry their own geometry; never infer it from the current viewer.
 use super::{duschinsky::mass_weighted_superposition, CM1_TO_AU};
-use crate::normalmode::{normal_modes_with_projection, EckartMode};
-use crate::qchem_interfaces::{hessian_file, orca_engrad, orca_hess};
+use crate::normalmode::{cartesian, EckartMode};
+use crate::qchem_interfaces::{hessian_io, orca_engrad};
 use ndarray::Array2;
 
 #[derive(Clone, Default)]
@@ -59,81 +59,20 @@ fn xyz(text: &str) -> Result<(Vec<String>, Vec<f64>), String> {
     }
     Ok((atoms, coords))
 }
-fn linear(x: &[f64]) -> bool {
-    if x.len() <= 6 {
-        return true;
-    }
-    let axis: Vec<f64> = x
-        .chunks_exact(3)
-        .map(|p| (0..3).map(|k| p[k] - x[k]).collect::<Vec<_>>())
-        .max_by(|a, b| {
-            a.iter()
-                .map(|v| v * v)
-                .sum::<f64>()
-                .total_cmp(&b.iter().map(|v| v * v).sum::<f64>())
-        })
-        .unwrap();
-    let norm: f64 = axis.iter().map(|v| v * v).sum();
-    norm > 0.
-        && x.chunks_exact(3).all(|p| {
-            let a: [f64; 3] = std::array::from_fn(|k| p[k] - x[k]);
-            let cross = [
-                a[1] * axis[2] - a[2] * axis[1],
-                a[2] * axis[0] - a[0] * axis[2],
-                a[0] * axis[1] - a[1] * axis[0],
-            ];
-            cross.iter().map(|v| v * v).sum::<f64>() / norm < 1e-10
-        })
-}
 pub fn load(source: &HessianSource, cutoff: f64) -> Result<StateModes, String> {
     let text = read(&source.path)?;
-    let (atoms, masses, coords, hessian) = if text.lines().any(|l| l.trim() == "$atoms") {
-        let h = orca_hess::parse_orca_hess(&text)?;
-        (h.atoms, h.masses_amu, h.coords_bohr, h.hessian)
+    let geometry = if source.xyz.trim().is_empty() {
+        None
     } else {
-        if source.xyz.trim().is_empty() {
-            return Err("This Hessian has no geometry. Select its matching XYZ file (Å).".into());
-        }
         let (atoms, coords) = xyz(&read(&source.xyz)?)?;
-        let masses = atoms
-            .iter()
-            .map(|a| {
-                crate::molecule::atomic_mass_amu(a).ok_or_else(|| format!("Unknown element: {a}"))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        let h = hessian_file::parse_turbomole_hessian(&text.replace(['D', 'd'], "E"), atoms.len())?;
-        (atoms, masses, coords, h)
+        Some((atoms, coords.iter().map(|v| v * hessian_io::BOHR).collect()))
     };
-    if atoms.len() < 2
-        || masses.len() != atoms.len()
-        || coords.len() != 3 * atoms.len()
-        || hessian.dim() != (coords.len(), coords.len())
-        || atoms.iter().any(|a| crate::molecule::is_dummy(a))
-        || masses.iter().any(|v| !v.is_finite() || *v <= 0.)
-        || coords.iter().chain(hessian.iter()).any(|v| !v.is_finite())
-    {
-        return Err(
-            "Invalid Hessian, atom masses or geometry. Hessians must contain real atoms only."
-                .into(),
-        );
+    let h = hessian_io::parse(&text, geometry.as_ref())?;
+    let (atoms, masses, coords, hessian) = (h.atoms, h.masses_amu, h.coords_bohr, h.hessian);
+    if atoms.len() < 2 {
+        return Err("Vibrational analysis needs at least two atoms.".into());
     }
-    let scale = hessian.iter().fold(1_f64, |a, b| a.max(b.abs()));
-    for i in 0..hessian.nrows() {
-        for j in 0..i {
-            if (hessian[(i, j)] - hessian[(j, i)]).abs() > 1e-7 * scale {
-                return Err("Hessian is not symmetric".into());
-            }
-        }
-    }
-    let nm = normal_modes_with_projection(
-        &masses,
-        &hessian,
-        linear(&coords),
-        Some(&coords),
-        EckartMode::VibRot,
-        None,
-    )
-    .map_err(|e| e.to_string())?;
+    let nm = cartesian::analyze(&masses, &coords, &hessian, EckartMode::VibRot, None)?;
     let frequencies: Vec<_> = nm.frequencies_au.iter().map(|f| f / CM1_TO_AU).collect();
     let selected: Vec<_> = nm
         .positive_indices

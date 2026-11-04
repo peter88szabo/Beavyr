@@ -269,16 +269,9 @@ fn output(
         ("Search summary", dir.join("search_summary.txt")),
     ];
     if let Some(h) = result.hessian {
-        let mut text = String::from("$hessian\n");
-        for row in h.rows() {
-            for value in row {
-                text.push_str(&format!(" {value:.14e}"));
-            }
-            text.push('\n');
-        }
-        text.push_str("$end\n");
-        let path = dir.join("ts_hessian.txt");
-        fs::write(&path, text).map_err(|e| e.to_string())?;
+        let data = crate::qchem_interfaces::hessian_io::from_geometry(atoms.to_vec(), result.x.clone(), h)?;
+        let path = dir.join("ts_hessian.hess");
+        crate::qchem_interfaces::hessian_io::save(&path, &data)?;
         saveable.push(("TS Hessian", path));
     }
     Ok(QcRunOutput {

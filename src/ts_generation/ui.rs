@@ -367,7 +367,7 @@ fn panel_body(
                         // A force field is refused, with the reason on hover
                         // rather than by being absent -- a missing entry reads as
                         // an oversight where a disabled one reads as a decision.
-                        for program in QcProgram::ALL.into_iter().filter(|p| *p != QcProgram::StdaXtb) {
+                        for program in QcProgram::ALL.into_iter().filter(|p| !matches!(p, QcProgram::StdaXtb | QcProgram::Mrcc)) {
                             match crate::qchem_interfaces::gradient::unsupported_reason(program) {
                                 None => {
                                     ui.selectable_value(

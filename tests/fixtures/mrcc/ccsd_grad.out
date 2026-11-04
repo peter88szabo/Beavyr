@@ -1,0 +1,15 @@
+ Total number of basis functions:      7
+ ***FINAL HARTREE-FOCK ENERGY:        -74.9634797173962255 [AU]
+ Total number of configurations:                     93
+ Total number of determinants: 93
+ Total CCSD energy [au]:                      -75.013238339433
+ Total MP2 energy [au]:                       -74.999194270368
+ Total CCSD energy [au]:                      -75.013238339433
+ Total energy from RDM [au]:                  -75.013238339432
+ Cartesian gradient in original orientation [au]:
+    1  O     -0.0000000000     0.0000000000     0.1059822686
+    2  H     -0.0444849528     0.0000000000    -0.0529911343
+    3  H      0.0444849528     0.0000000000    -0.0529911343
+ 
+ ************************ 2026-11-03 19:23:51 *************************
+                      Normal termination of mrcc.

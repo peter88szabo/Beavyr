@@ -1,0 +1,37 @@
+MRCC NH3 + CH benchmark: stopped at user request
+================================================
+
+NH3 geometry supplied by the user, translated only. Approximate CH bond 1.12 A.
+Fragment COM separation 3.0 A. Neutral doublet, 17 electrons.
+Fixed-geometry single-point energy calculations; no optimization.
+Executable: /home/peter/Programs/MRCC/binary/dmrcc, MRCC 26.1.3.
+AMD Ryzen 9 7900. CPU affinity: 0; 0,1; 0,1,2,3.
+scftype=UHF; core=frozen; mem=2048MB; symmetry off.
+OMP_NUM_THREADS/MKL_NUM_THREADS set to the requested core count. MRCC also
+uses its own internal thread settings (see input echo in each mrcc.out).
+Wall times below are from GNU time for the entire dmrcc invocation.
+
+UCCSD(T)/cc-pVTZ:
+  1 core: 146.33 seconds, energy -94.874867122852 Eh.
+  2 cores: 123.58 seconds, energy -94.874867122852 Eh.
+  4 cores: 103.12 seconds, energy -94.874867122854 Eh.
+All three completed successfully. Energy spread 2e-12 Eh.
+The first one-core timing overlapped other heavy user jobs and is excluded
+from a clean timing comparison. Its planned repeat was cancelled.
+The 2- and 4-core runs began after the user confirmed heavy jobs stopped.
+Desktop applications remained open. Only one quantum calculation ran at a time.
+
+UCCSD(T)/aug-cc-pVTZ, 1 core: CANCELLED during CCSD iterations at user request.
+No successful final energy or completed timing is claimed for that run.
+The 2-/4-core augmented runs and the original triple-zeta F12 series were
+not started. The scheduler and current MRCC worker were terminated.
+
+The user subsequently requested a separate Behemoth ROHF-reference
+UCCSD(T)/aug-cc-pVTZ comparison on 1,2,4 cores, followed by a separate MRCC
+UCCSD(T)-F12/aug-cc-pVDZ comparison on 1,2,4 cores. Those are recorded in
+sibling report directories, not as completion of this cancelled series.
+
+Inputs, output logs and successful GNU time logs are retained in run
+subdirectories. results.json/results.csv label the excluded and cancelled runs.
+NH3_CH_COM_3A.xyz is the exact geometry used by all follow-up calculations.
+No application source or installation configuration changed for this benchmark.

@@ -36,6 +36,9 @@ pub fn detect_and_parse(
     text: &str,
     source: &std::path::Path,
 ) -> Result<types::TddftResult, String> {
+    if text.contains("Normal termination of mrcc.") {
+        return crate::qchem_interfaces::mrcc::parse_spectrum(text, source);
+    }
     if psi4::is_psi4_output(text) {
         return psi4::parse_psi4_tddft(text, source);
     }

@@ -1,0 +1,2746 @@
+ **********************************************************************
+                          MRCC program system
+ **********************************************************************
+ 
+                              Written by
+     Mihaly Kallay, Peter R. Nagy, David Mester, Laszlo Gyevi-Nagy,
+        Jozsef Csoka, P. Bernat Szabo, Zoltan Rolik, Gyula Samu,
+      Bence Hegely, Bence Ladoczki, Klara Petrov, Jozsef Csontos,
+     Adam Ganyecz, Istvan Ladjanszki, Lorant Szegedy, Mate Farkas,
+          Pal D. Mezei, Reka A. Horvath, and Balazs D. Lorincz
+ 
+        Department of Physical Chemistry and Materials Science
+            Budapest University of Technology and Economics
+                  Budapest P.O.Box 91, H-1521 Hungary
+ 
+                              www.mrcc.hu
+ 
+                            Version: 26.1.3
+
+ ************************ 2026-11-04 00:23:50 *************************
+ Executing minp...
+
+ Reading input from MINP...
+ 
+ Input file:
+ 
+calc=MP2-F12
+basis=atomtype
+N:cc-pwCVTZ
+H:cc-pVTZ
+C:cc-pwCVTZ
+charge=0
+mult=2
+scftype=UHF
+mem=16000MB
+core=frozen
+symm=off
+unit=angs
+molden=off
+scftol=9
+cctol=8
+scfmaxit=400
+ccmaxit=200
+dfbasis_scf=aug-cc-pVQZ-RI-JK
+dfbasis_cor=atomtype
+N:aug-cc-pwCVQZ-RI
+H:aug-cc-pVQZ-RI
+C:aug-cc-pwCVQZ-RI
+dfbasis_cab=atomtype
+N:cc-pCVTZ-F12-OPTRI
+H:cc-pVTZ-F12-OPTRI
+C:cc-pCVTZ-F12-OPTRI
+gamma=1.0
+geom=xyz
+6
+
+N -0.02349796675709 -0.03131447141800 0.05596451866831
+H 0.98894806324291 -0.04143068141800 0.00596592866831
+H -0.30418134675709 0.94184417858200 0.01320137866831
+H -0.35824288675709 -0.46527282141800 -0.79684093133169
+C 0.00000000000000 0.00000000000000 3.05614080519680
+H 0.00000000000000 0.00000000000000 4.17614080519680
+ 
+ 
+ Checking keyword combinations...
+ 
+ Keywords:
+ 
+ active=none
+ agrid=ld0006-ld0590
+ agrid_pssp=ld0006-ld0194
+ agrid_pssp_sm=ld0006-ld0074
+ ao_trunc=off
+ ao_trunc_tol=1e-4
+ basis=atomtype
+ basis_sm=atomtype
+ basopt=off
+ bfbasis=none
+ bfgsmem=10
+ bfgstol=1.0d-3
+ bfgscimem=5
+ boysalg=jacobi
+ bpcompo=0.985
+ bpcompv=0.98
+ bpdfo=0.985
+ bpocc=0.985
+ bppdo=0.985
+ bppdv=0.98
+ bpedo=0.985
+ bpedv=0.98
+ bp_subsyso=0.95
+ bp_subsysv=0.95
+ cabscorr=off
+ cabsdom=bpsmall
+ cabsdual=off
+ calc=mp2-f12
+ ccmaxit=200
+ ccprog=ccsd
+ ccsdalg=dfdirect
+ ccsdmkl=seq
+ ccsdrest=trf
+ ccsdthreads=2
+ cctol=8
+ charge=0
+ cialg=auto
+ ciguess=off
+ cmpgrp=auto
+ codegen=on
+ comprest=off
+ coord_sys=ric
+ core=frozen
+ corembed=off
+ csapprox=off
+ cvs=off
+ dboc=off
+ deltaf12=off
+ delocsomofact=
+ dendec=cholesky
+ dens=0
+ denscorr=0
+ dfalg=lineq
+ dfbasis_cab=atomtype
+ dfbasis_cor=atomtype
+ dfbasis_scf=aug-cc-pvqz-ri-jk
+ dfbasis_scf_sm=auto
+ dfintran=drpa
+ df_trunc=off
+ df_trunc_corr=off
+ df_trunc_corr_tol=5e-4
+ df_trunc_tol=5e-4
+ dft=off
+ dhexc=adc(2)
+ diag=david
+ docc=
+ domrad=10.d0
+ drpaalg=fit
+ dual=on
+ dual_df=off
+ dyson=off
+ ecp=auto
+ edisp=off
+ edisp_embed=off
+ embed=off
+ epairestfact=off
+ epairscale=1.d0
+ etemp=300
+ epert=none
+ eps=
+ espcharge=off
+ excrad=0.d0
+ excrad_f12=0.d0
+ excrad_fin=0.000000000D+00
+ fastdbbsc=v2
+ fitting=coulomb
+ fmm=off
+ fmmord=8
+ fnonorb=
+ freq=off
+ gamma=1.0
+ gauss=spher
+ geom=xyz
+ gopt=off
+ ghost=none
+ gtol=7
+ grdens=off
+ grid=auto
+ grid_sm=auto
+ gridbatch_cos=2000
+ grtol=10
+ guido_ct=off
+ hamilton=nonrel
+ hl_scfalg=direct
+ iface=none
+ incore=off
+ intalg=os
+ ip_ea=off
+ itol=13
+ laptol=1.d-2
+ lccoporder=trffirst
+ lcorthr=normal
+ lccrest=off
+ ldfgrad_tol=8
+ lmp2dens=on
+ lnoepso=1e-6
+ lnoepsv=1e-7
+ localcc=off
+ localcorrsymm=off
+ locintrf=disk
+ mact=
+ maxact=off
+ maxdim=200
+ maxex=0
+ maxmicroit=100
+ mcscfiguess=hf
+ mem=16000mb
+ mmprog=
+ molden=off
+ mp2ongrid=off
+ mpitasks=1
+ mulmet=0
+ mult=2
+ nab=off
+ nacto=0
+ nactv=0
+ naf_amp=3.16d-3
+ naf_cor=off
+ naf_f12=off
+ naf_scf=off
+ nafalg=albe
+ nafdens=off
+ naftyp=
+ nchol=auto
+ ndeps=1e-3
+ nevpt=
+ nstate=1
+ nsing=0
+ nto=off
+ ntrip=0
+ num_grad=off
+ occ=
+ occri=off
+ oniom=off
+ oniom_eechg=off
+ oniom_pcm=off
+ oniom_qcorr=off
+ optalg=
+ optmaxit=50
+ optetol=1e-6
+ optex=0
+ optgtol=1e-4
+ optstol=1e-3
+ orblocc=off
+ orbloce=off
+ orbloco=off
+ orblocv=off
+ orblocguess=cholesky
+ osveps=1e-3
+ ovirt=off
+ ovltol=1e-7
+ ovosnorb=80.0
+ pao_subsys_tol=1e-3
+ pao_tol=1e-3
+ pcm=off
+ popul=off
+ pressure=100000
+ pssp=off
+ ptfreq=0.0
+ ptthreads=2
+ qmreg=
+ qmmm=off
+ qro=off
+ qscf=off
+ redcost_exc=off
+ redcost_tddft=off
+ refdet=none
+ rest=0
+ rgrid=log3
+ rism=off
+ rohfcore=semicanonical
+ rohftype=semicanonical
+ scfalg=direct
+ scf_conv=auto
+ scfdamp=0.0d0
+ scfdamp_mode=off
+ scfdamp_end=400
+ scfdamp_dampstep=0.d0
+ scfdamp_dtol=0.0d0
+ scfdamp_maxfact=0.0d0
+ scfdamp_minfact=0.0d0
+ scfdiis=on
+ scfdiis_dtol=0.0d0
+ scfdiis_end=400
+ scfdiis_start=2
+ scfdiis_step=1
+ scfdiis_watch=off
+ scfdiis_wrange=10
+ scfdiis_wlimit=5
+ scfdiis_delmax=2
+ scfdtol=10
+ scfext=10
+ scfguessdens=
+ scfiguess=sad
+ scfloc=off
+ scflshift=0.20
+ scflshift_end=8
+ scflshift_dtol=0.0
+ scflshift_gaptol=0.20
+ scfmaxit=400
+ scftype=uhf
+ scftype_low=uhf
+ scftype_high=uhf
+ scftol=9
+ scspe=1.d0
+ scsph=1.d0
+ scsps=1.2d0
+ scsps_t=1.2d0
+ scspt=0.33333333333333
+ scspt_t=0.33333333333333
+ scspv=1.d0
+ spairtol=1e-4
+ sqmprog=
+ subminp=top
+ subsys_bopu=on
+ symm=0
+ talg=occ
+ temp=298.15
+ test=off
+ tfunc=off
+ theodore=off
+ tlmo=0.999
+ tpao=0.94
+ tprint=off
+ uncontract=off
+ unit=angs
+ usedisk=2
+ verbosity=2
+ wpairtol=0.100000000E-05
+
+ ************************ 2026-11-04 00:23:50 *************************
+ Executing integ...
+
+ Allocation of 15.6 Gbytes of memory...
+ 
+ 
+ Number of atoms:                  6
+ Charge:                           0
+ Number of electrons:             17
+ Number of core electrons:         4
+ Spin multiplicity:                2
+ 
+                 Cartesian coordinates [bohr]      Atomic mass [AMU]  Z
+   1  N    -0.04440472   -0.05917577    0.10575761    14.003074       7
+   2  H     1.86884099   -0.07829264    0.01127397     1.007825       1
+   3  H    -0.57481944    1.77982755    0.02494699     1.007825       1
+   4  H    -0.67698094   -0.87923821   -1.50581113     1.007825       1
+   5  C     0.00000000    0.00000000    5.77526912    12.000000       6
+   6  H     0.00000000    0.00000000    7.89176239     1.007825       1
+ 
+ This molecule is an asymmetric top.
+ 
+ Rotational constants [cm-1]: 
+      7.201431751585      0.222673190069      0.221739306369
+ 
+ Point group: C1  
+ Computational point group: C1  
+ 
+ Cartesian coordinates in standard orientation [bohr]
+   1  N    -2.46692189   -0.00000002    0.05886370
+   2  H    -2.55445722   -1.54178476   -1.07473198
+   3  H    -2.54066458    1.52802066   -1.09418365
+   4  H    -4.08480953    0.01376581    1.08456294
+   5  C     3.20293665   -0.00000011    0.01964106
+   6  H     5.31939014   -0.00000018    0.03261715
+ 
+ Nuclear repulsion energy [au]:         26.230560519274
+ 
+ 
+ Basis set information:
+ 
+ Maximum angular momentum: h
+ Maximum number of contracted Gaussians:   13
+ Maximum number of primitive Gaussians:    13
+ Spherical harmonic GTOs are used.
+ 
+ 
+ Conventional basis set:
+ 
+   1  N  cc-pwcvtz [ 12s 7p 3d 1f | 6s 5p 3d 1f ]
+   2  H  cc-pvtz [ 5s 2p 1d | 3s 2p 1d ]
+   3  H  cc-pvtz [ 5s 2p 1d | 3s 2p 1d ]
+   4  H  cc-pvtz [ 5s 2p 1d | 3s 2p 1d ]
+   5  C  cc-pwcvtz [ 12s 7p 3d 1f | 6s 5p 3d 1f ]
+   6  H  cc-pvtz [ 5s 2p 1d | 3s 2p 1d ]
+ 
+ Total number of basis functions:    142
+ 
+ 
+ Fitting basis set for the SCF calculation:
+ 
+   1  N  aug-cc-pvqz-ri-jk [ 11s 8p 6d 4f 3g 2h | 11s 8p 6d 4f 3g 2h ]
+   2  H  aug-cc-pvqz-ri-jk [ 5s 4p 4d 3f 2g | 5s 4p 4d 3f 2g ]
+   3  H  aug-cc-pvqz-ri-jk [ 5s 4p 4d 3f 2g | 5s 4p 4d 3f 2g ]
+   4  H  aug-cc-pvqz-ri-jk [ 5s 4p 4d 3f 2g | 5s 4p 4d 3f 2g ]
+   5  C  aug-cc-pvqz-ri-jk [ 11s 8p 6d 4f 3g 2h | 11s 8p 6d 4f 3g 2h ]
+   6  H  aug-cc-pvqz-ri-jk [ 5s 4p 4d 3f 2g | 5s 4p 4d 3f 2g ]
+ 
+ Total number of basis functions:    588
+ 
+ 
+ Fitting basis set for the correlation calculation:
+ 
+   1  N  aug-cc-pwcvqz-ri [ 13s 12p 10d 8f 5g 2h | 13s 12p 10d 8f 5g 2h ]
+   2  H  aug-cc-pvqz-ri [ 6s 5p 4d 3f 2g | 6s 5p 4d 3f 2g ]
+   3  H  aug-cc-pvqz-ri [ 6s 5p 4d 3f 2g | 6s 5p 4d 3f 2g ]
+   4  H  aug-cc-pvqz-ri [ 6s 5p 4d 3f 2g | 6s 5p 4d 3f 2g ]
+   5  C  aug-cc-pwcvqz-ri [ 13s 12p 10d 8f 5g 2h | 13s 12p 10d 8f 5g 2h ]
+   6  H  aug-cc-pvqz-ri [ 6s 5p 4d 3f 2g | 6s 5p 4d 3f 2g ]
+ 
+ Total number of basis functions:    764
+ 
+ 
+ Initializing the SAD routines for the initial guess...
+ Checking the files required for the initial guess...
+ Density files have not been found for the initial guess.
+ Generating SCFDENSITIES.N.cc-pwcvtz.0
+ Generating SCFDENSITIES.H.cc-pvtz.0
+ Generating SCFDENSITIES.C.cc-pwcvtz.0
+ CPU time [min]:     0.022                   Wall time [min]:     0.029
+ 
+ Character table for point group C1:
+ 
+          E  
+    A     1
+ 
+ Number of basis functions per irrep:
+    A     142
+ 
+ 
+ Calculation of overlap integrals...
+ CPU time [min]:     0.023                   Wall time [min]:     0.029
+ 
+ Calculation of the square root of the overlap matrix...
+ Minimum eigenvalue of the overlap matrix: 0.902767E-03
+ CPU time [min]:     0.023                   Wall time [min]:     0.029
+ 
+ Calculation of kinetic energy integrals...
+ CPU time [min]:     0.023                   Wall time [min]:     0.029
+ Calculation of nuclear attraction integrals...
+ CPU time [min]:     0.023                   Wall time [min]:     0.029
+ 
+ Calculation of prescreening integrals...
+ CPU time [min]:     0.026                   Wall time [min]:     0.029
+ 
+ Calculation of two-center Coulomb integrals...
+   1% done.
+  12% done.
+  25% done.
+  36% done.
+  47% done.
+  62% done.
+  76% done.
+  87% done.
+ 100% done.
+ CPU time [min]:     0.027                   Wall time [min]:     0.030
+ 
+ Cholesky decomposition of the two-center matrix...
+ Reciprocal of the condition number:  0.426473E-05
+ CPU time [min]:     0.028                   Wall time [min]:     0.030
+ 
+
+ ************************ 2026-11-04 00:23:52 *************************
+ Executing scf...
+
+ Allocation of 15.6 Gbytes of memory...
+ ======================================================================
+ ITERATION STEP   1
+ CPU time [min]:     0.004                   Wall time [min]:     0.004
+ 
+ Constructing alpha Fock-matrix...
+ 
+ First step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 9.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.012                   Wall time [min]:     0.005
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.012                   Wall time [min]:     0.005
+ 
+ Constructing beta Fock-matrix...
+ 
+ Second step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 8.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.017                   Wall time [min]:     0.005
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.017                   Wall time [min]:     0.005
+ 
+ RMS of alpha [F,P] :                                  0.25028919490859
+ RMS of beta  [F,P] :                                  0.12914090496984
+ RMS of alpha difference density:                      0.03810560908685
+ RMS of beta  difference density:                      0.01117107910546
+ Gap [au]:  0.01137270
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP   1 IS        -56.3319285336249180 [AU]
+ ======================================================================
+ ITERATION STEP   2
+ CPU time [min]:     0.018                   Wall time [min]:     0.006
+ 
+ Constructing alpha Fock-matrix...
+ 
+ First step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 9.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.024                   Wall time [min]:     0.006
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.024                   Wall time [min]:     0.006
+ 
+ Constructing beta Fock-matrix...
+ 
+ Second step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 8.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.029                   Wall time [min]:     0.007
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.029                   Wall time [min]:     0.007
+ 
+ RMS of alpha [F,P] :                                  0.01221830497827
+ RMS of beta  [F,P] :                                  0.01299959491941
+ RMS of alpha difference density:                      0.03181050143865
+ RMS of beta  difference density:                      0.00775578867293
+ Gap [au]:  0.05052970
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP   2 IS        -93.8123704623977090 [AU]
+ ======================================================================
+ ITERATION STEP   3
+ CPU time [min]:     0.030                   Wall time [min]:     0.007
+ 
+ Constructing alpha Fock-matrix...
+ 
+ First step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 9.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.036                   Wall time [min]:     0.008
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.036                   Wall time [min]:     0.008
+ 
+ Constructing beta Fock-matrix...
+ 
+ Second step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 8.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.041                   Wall time [min]:     0.008
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.041                   Wall time [min]:     0.008
+ 
+ RMS of alpha [F,P] :                                  0.00161917190363
+ RMS of beta  [F,P] :                                  0.00122079522507
+ RMS of alpha difference density:                      0.00581178613123
+ RMS of beta  difference density:                      0.00163236331226
+ Gap [au]:  0.39698650
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP   3 IS        -94.4471044721009605 [AU]
+ ======================================================================
+ ITERATION STEP   4
+ CPU time [min]:     0.042                   Wall time [min]:     0.009
+ 
+ Constructing alpha Fock-matrix...
+ 
+ First step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 9.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.049                   Wall time [min]:     0.009
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.049                   Wall time [min]:     0.009
+ 
+ Constructing beta Fock-matrix...
+ 
+ Second step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 8.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.054                   Wall time [min]:     0.010
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.054                   Wall time [min]:     0.010
+ 
+ RMS of alpha [F,P] :                                  0.00059134199624
+ RMS of beta  [F,P] :                                  0.00033169103768
+ RMS of alpha difference density:                      0.00328710640033
+ RMS of beta  difference density:                      0.00080955922772
+ Gap [au]:  0.44495075
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP   4 IS        -94.4802774191411032 [AU]
+ ======================================================================
+ ITERATION STEP   5
+ CPU time [min]:     0.055                   Wall time [min]:     0.010
+ 
+ Constructing alpha Fock-matrix...
+ 
+ First step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 9.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.061                   Wall time [min]:     0.011
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.061                   Wall time [min]:     0.011
+ 
+ Constructing beta Fock-matrix...
+ 
+ Second step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 8.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.066                   Wall time [min]:     0.012
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.066                   Wall time [min]:     0.012
+ 
+ RMS of alpha [F,P] :                                  0.00019134375927
+ RMS of beta  [F,P] :                                  0.00014182245234
+ RMS of alpha difference density:                      0.00079178403920
+ RMS of beta  difference density:                      0.00030423518449
+ Gap [au]:  0.45431778
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP   5 IS        -94.4886732461441312 [AU]
+ ======================================================================
+ ITERATION STEP   6
+ CPU time [min]:     0.067                   Wall time [min]:     0.012
+ 
+ Constructing alpha Fock-matrix...
+ 
+ First step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 9.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.073                   Wall time [min]:     0.012
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.073                   Wall time [min]:     0.012
+ 
+ Constructing beta Fock-matrix...
+ 
+ Second step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 8.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.078                   Wall time [min]:     0.013
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.078                   Wall time [min]:     0.013
+ 
+ RMS of alpha [F,P] :                                  0.00007954901248
+ RMS of beta  [F,P] :                                  0.00006436655406
+ RMS of alpha difference density:                      0.00023679640441
+ RMS of beta  difference density:                      0.00013104001424
+ Gap [au]:  0.45205891
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP   6 IS        -94.4894427156977912 [AU]
+ ======================================================================
+ ITERATION STEP   7
+ CPU time [min]:     0.079                   Wall time [min]:     0.013
+ 
+ Constructing alpha Fock-matrix...
+ 
+ First step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 9.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.085                   Wall time [min]:     0.014
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.086                   Wall time [min]:     0.014
+ 
+ Constructing beta Fock-matrix...
+ 
+ Second step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 8.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.091                   Wall time [min]:     0.015
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.091                   Wall time [min]:     0.015
+ 
+ RMS of alpha [F,P] :                                  0.00002780810146
+ RMS of beta  [F,P] :                                  0.00002476703542
+ RMS of alpha difference density:                      0.00012433716134
+ RMS of beta  difference density:                      0.00008846825102
+ Gap [au]:  0.45266748
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP   7 IS        -94.4895577735191949 [AU]
+ ======================================================================
+ ITERATION STEP   8
+ CPU time [min]:     0.092                   Wall time [min]:     0.015
+ 
+ Constructing alpha Fock-matrix...
+ 
+ First step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 9.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.098                   Wall time [min]:     0.016
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.098                   Wall time [min]:     0.016
+ 
+ Constructing beta Fock-matrix...
+ 
+ Second step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 8.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.103                   Wall time [min]:     0.016
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.103                   Wall time [min]:     0.016
+ 
+ RMS of alpha [F,P] :                                  0.00000654116729
+ RMS of beta  [F,P] :                                  0.00000688714731
+ RMS of alpha difference density:                      0.00002583577723
+ RMS of beta  difference density:                      0.00002562936162
+ Gap [au]:  0.45266083
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP   8 IS        -94.4895826221670632 [AU]
+ ======================================================================
+ ITERATION STEP   9
+ CPU time [min]:     0.104                   Wall time [min]:     0.016
+ 
+ Constructing alpha Fock-matrix...
+ 
+ First step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 9.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.110                   Wall time [min]:     0.017
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.110                   Wall time [min]:     0.017
+ 
+ Constructing beta Fock-matrix...
+ 
+ Second step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 8.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.115                   Wall time [min]:     0.018
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.115                   Wall time [min]:     0.018
+ 
+ RMS of alpha [F,P] :                                  0.00000295531507
+ RMS of beta  [F,P] :                                  0.00000275973019
+ RMS of alpha difference density:                      0.00001120270262
+ RMS of beta  difference density:                      0.00001061183215
+ Gap [au]:  0.45263321
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP   9 IS        -94.4895843956723525 [AU]
+ ======================================================================
+ ITERATION STEP  10
+ CPU time [min]:     0.116                   Wall time [min]:     0.018
+ 
+ Constructing alpha Fock-matrix...
+ 
+ First step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 9.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.122                   Wall time [min]:     0.019
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.122                   Wall time [min]:     0.019
+ 
+ Constructing beta Fock-matrix...
+ 
+ Second step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 8.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.127                   Wall time [min]:     0.019
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.127                   Wall time [min]:     0.019
+ 
+ RMS of alpha [F,P] :                                  0.00000128168512
+ RMS of beta  [F,P] :                                  0.00000115833075
+ RMS of alpha difference density:                      0.00000565248288
+ RMS of beta  difference density:                      0.00000540285602
+ Gap [au]:  0.45265494
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP  10 IS        -94.4895848030522814 [AU]
+ ======================================================================
+ ITERATION STEP  11
+ CPU time [min]:     0.128                   Wall time [min]:     0.019
+ 
+ Constructing alpha Fock-matrix...
+ 
+ First step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 9.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.134                   Wall time [min]:     0.020
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.134                   Wall time [min]:     0.020
+ 
+ Constructing beta Fock-matrix...
+ 
+ Second step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 8.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.139                   Wall time [min]:     0.021
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.140                   Wall time [min]:     0.021
+ 
+ RMS of alpha [F,P] :                                  0.00000052479397
+ RMS of beta  [F,P] :                                  0.00000042981506
+ RMS of alpha difference density:                      0.00000199500281
+ RMS of beta  difference density:                      0.00000166565384
+ Gap [au]:  0.45264778
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP  11 IS        -94.4895848927164792 [AU]
+ ======================================================================
+ ITERATION STEP  12
+ CPU time [min]:     0.141                   Wall time [min]:     0.021
+ 
+ Constructing alpha Fock-matrix...
+ 
+ First step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 9.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.147                   Wall time [min]:     0.022
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.147                   Wall time [min]:     0.022
+ 
+ Constructing beta Fock-matrix...
+ 
+ Second step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 8.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.152                   Wall time [min]:     0.022
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.152                   Wall time [min]:     0.022
+ 
+ RMS of alpha [F,P] :                                  0.00000033461850
+ RMS of beta  [F,P] :                                  0.00000032811279
+ RMS of alpha difference density:                      0.00000078390689
+ RMS of beta  difference density:                      0.00000073581605
+ Gap [au]:  0.45264681
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP  12 IS        -94.4895849090563331 [AU]
+ ======================================================================
+ ITERATION STEP  13
+ CPU time [min]:     0.153                   Wall time [min]:     0.022
+ 
+ Constructing alpha Fock-matrix...
+ 
+ First step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 9.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.159                   Wall time [min]:     0.023
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.159                   Wall time [min]:     0.023
+ 
+ Constructing beta Fock-matrix...
+ 
+ Second step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 8.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.164                   Wall time [min]:     0.024
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.164                   Wall time [min]:     0.024
+ 
+ RMS of alpha [F,P] :                                  0.00000034405100
+ RMS of beta  [F,P] :                                  0.00000034169118
+ RMS of alpha difference density:                      0.00000081838716
+ RMS of beta  difference density:                      0.00000081955041
+ Gap [au]:  0.45264686
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP  13 IS        -94.4895849179618494 [AU]
+ ======================================================================
+ ITERATION STEP  14
+ CPU time [min]:     0.165                   Wall time [min]:     0.024
+ 
+ Constructing alpha Fock-matrix...
+ 
+ First step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 9.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.171                   Wall time [min]:     0.025
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.171                   Wall time [min]:     0.025
+ 
+ Constructing beta Fock-matrix...
+ 
+ Second step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 8.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.176                   Wall time [min]:     0.025
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.176                   Wall time [min]:     0.025
+ 
+ RMS of alpha [F,P] :                                  0.00000031292550
+ RMS of beta  [F,P] :                                  0.00000030803102
+ RMS of alpha difference density:                      0.00000433743994
+ RMS of beta  difference density:                      0.00000440961144
+ Gap [au]:  0.45264448
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP  14 IS        -94.4895849080271546 [AU]
+ ======================================================================
+ ITERATION STEP  15
+ CPU time [min]:     0.177                   Wall time [min]:     0.025
+ 
+ Constructing alpha Fock-matrix...
+ 
+ First step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 9.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.183                   Wall time [min]:     0.026
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.183                   Wall time [min]:     0.026
+ 
+ Constructing beta Fock-matrix...
+ 
+ Second step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 8.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.188                   Wall time [min]:     0.027
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.188                   Wall time [min]:     0.027
+ 
+ RMS of alpha [F,P] :                                  0.00000013627611
+ RMS of beta  [F,P] :                                  0.00000010610864
+ RMS of alpha difference density:                      0.00000130939175
+ RMS of beta  difference density:                      0.00000135658584
+ Gap [au]:  0.45264593
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP  15 IS        -94.4895848764057149 [AU]
+ ======================================================================
+ ITERATION STEP  16
+ CPU time [min]:     0.189                   Wall time [min]:     0.027
+ 
+ Constructing alpha Fock-matrix...
+ 
+ First step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 9.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.195                   Wall time [min]:     0.028
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.196                   Wall time [min]:     0.028
+ 
+ Constructing beta Fock-matrix...
+ 
+ Second step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 8.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.200                   Wall time [min]:     0.028
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.201                   Wall time [min]:     0.028
+ 
+ RMS of alpha [F,P] :                                  0.00000009417230
+ RMS of beta  [F,P] :                                  0.00000004676552
+ RMS of alpha difference density:                      0.00000028420021
+ RMS of beta  difference density:                      0.00000018993391
+ Gap [au]:  0.45264621
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP  16 IS        -94.4895848743082496 [AU]
+ ======================================================================
+ ITERATION STEP  17
+ CPU time [min]:     0.202                   Wall time [min]:     0.029
+ 
+ Constructing alpha Fock-matrix...
+ 
+ First step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 9.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.208                   Wall time [min]:     0.029
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.208                   Wall time [min]:     0.029
+ 
+ Constructing beta Fock-matrix...
+ 
+ Second step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 8.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.213                   Wall time [min]:     0.030
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.213                   Wall time [min]:     0.030
+ 
+ RMS of alpha [F,P] :                                  0.00000008943428
+ RMS of beta  [F,P] :                                  0.00000003471133
+ RMS of alpha difference density:                      0.00000035672852
+ RMS of beta  difference density:                      0.00000011385275
+ Gap [au]:  0.45264661
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP  17 IS        -94.4895848747454608 [AU]
+ ======================================================================
+ ITERATION STEP  18
+ CPU time [min]:     0.214                   Wall time [min]:     0.030
+ 
+ Constructing alpha Fock-matrix...
+ 
+ First step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 9.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.220                   Wall time [min]:     0.031
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.220                   Wall time [min]:     0.031
+ 
+ Constructing beta Fock-matrix...
+ 
+ Second step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 8.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.225                   Wall time [min]:     0.031
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.225                   Wall time [min]:     0.031
+ 
+ RMS of alpha [F,P] :                                  0.00000008866399
+ RMS of beta  [F,P] :                                  0.00000002634628
+ RMS of alpha difference density:                      0.00000040419501
+ RMS of beta  difference density:                      0.00000008131460
+ Gap [au]:  0.45264714
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP  18 IS        -94.4895848754220680 [AU]
+ ======================================================================
+ ITERATION STEP  19
+ CPU time [min]:     0.226                   Wall time [min]:     0.032
+ 
+ Constructing alpha Fock-matrix...
+ 
+ First step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 9.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.232                   Wall time [min]:     0.032
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.232                   Wall time [min]:     0.032
+ 
+ Constructing beta Fock-matrix...
+ 
+ Second step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 8.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.237                   Wall time [min]:     0.033
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.238                   Wall time [min]:     0.033
+ 
+ RMS of alpha [F,P] :                                  0.00000008848853
+ RMS of beta  [F,P] :                                  0.00000002260882
+ RMS of alpha difference density:                      0.00000028585970
+ RMS of beta  difference density:                      0.00000003795853
+ Gap [au]:  0.45264708
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP  19 IS        -94.4895848761712784 [AU]
+ ======================================================================
+ ITERATION STEP  20
+ CPU time [min]:     0.239                   Wall time [min]:     0.033
+ 
+ Constructing alpha Fock-matrix...
+ 
+ First step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 9.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.245                   Wall time [min]:     0.034
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.245                   Wall time [min]:     0.034
+ 
+ Constructing beta Fock-matrix...
+ 
+ Second step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 8.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.250                   Wall time [min]:     0.035
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.250                   Wall time [min]:     0.035
+ 
+ RMS of alpha [F,P] :                                  0.00000008847022
+ RMS of beta  [F,P] :                                  0.00000002159921
+ RMS of alpha difference density:                      0.00000025903161
+ RMS of beta  difference density:                      0.00000002013785
+ Gap [au]:  0.45264716
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP  20 IS        -94.4895848766945221 [AU]
+ ======================================================================
+ ITERATION STEP  21
+ CPU time [min]:     0.251                   Wall time [min]:     0.035
+ 
+ Constructing alpha Fock-matrix...
+ 
+ First step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 9.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.257                   Wall time [min]:     0.035
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.257                   Wall time [min]:     0.035
+ 
+ Constructing beta Fock-matrix...
+ 
+ Second step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 8.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.262                   Wall time [min]:     0.036
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.263                   Wall time [min]:     0.036
+ 
+ RMS of alpha [F,P] :                                  0.00000008850880
+ RMS of beta  [F,P] :                                  0.00000002141554
+ RMS of alpha difference density:                      0.00000011596055
+ RMS of beta  difference density:                      0.00000000693856
+ Gap [au]:  0.45264717
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP  21 IS        -94.4895848771666067 [AU]
+ ======================================================================
+ ITERATION STEP  22
+ CPU time [min]:     0.263                   Wall time [min]:     0.036
+ 
+ Constructing alpha Fock-matrix...
+ 
+ First step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 9.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.270                   Wall time [min]:     0.037
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.270                   Wall time [min]:     0.037
+ 
+ Constructing beta Fock-matrix...
+ 
+ Second step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 8.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.275                   Wall time [min]:     0.038
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.275                   Wall time [min]:     0.038
+ 
+ RMS of alpha [F,P] :                                  0.00000008848197
+ RMS of beta  [F,P] :                                  0.00000002142694
+ RMS of alpha difference density:                      0.00000102205534
+ RMS of beta  difference density:                      0.00000005820029
+ Gap [au]:  0.45264718
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP  22 IS        -94.4895848769553766 [AU]
+ ======================================================================
+ ITERATION STEP  23
+ CPU time [min]:     0.276                   Wall time [min]:     0.038
+ 
+ Constructing alpha Fock-matrix...
+ 
+ First step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 9.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.282                   Wall time [min]:     0.039
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.282                   Wall time [min]:     0.039
+ 
+ Constructing beta Fock-matrix...
+ 
+ Second step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 8.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.287                   Wall time [min]:     0.039
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.288                   Wall time [min]:     0.039
+ 
+ RMS of alpha [F,P] :                                  0.00000008823438
+ RMS of beta  [F,P] :                                  0.00000002145194
+ RMS of alpha difference density:                      0.00000635058999
+ RMS of beta  difference density:                      0.00000036115793
+ Gap [au]:  0.45264731
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP  23 IS        -94.4895848750966678 [AU]
+ ======================================================================
+ ITERATION STEP  24
+ CPU time [min]:     0.289                   Wall time [min]:     0.039
+ 
+ Constructing alpha Fock-matrix...
+ 
+ First step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 9.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.295                   Wall time [min]:     0.040
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.295                   Wall time [min]:     0.040
+ 
+ Constructing beta Fock-matrix...
+ 
+ Second step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 8.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.300                   Wall time [min]:     0.041
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.300                   Wall time [min]:     0.041
+ 
+ RMS of alpha [F,P] :                                  0.00000008668781
+ RMS of beta  [F,P] :                                  0.00000002150392
+ RMS of alpha difference density:                      0.00003273953330
+ RMS of beta  difference density:                      0.00000185609002
+ Gap [au]:  0.45265319
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP  24 IS        -94.4895848636758728 [AU]
+ ======================================================================
+ ITERATION STEP  25
+ CPU time [min]:     0.301                   Wall time [min]:     0.041
+ 
+ Constructing alpha Fock-matrix...
+ 
+ First step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 9.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.307                   Wall time [min]:     0.042
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.307                   Wall time [min]:     0.042
+ 
+ Constructing beta Fock-matrix...
+ 
+ Second step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 8.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.312                   Wall time [min]:     0.042
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.313                   Wall time [min]:     0.042
+ 
+ RMS of alpha [F,P] :                                  0.00000008108709
+ RMS of beta  [F,P] :                                  0.00000002416673
+ RMS of alpha difference density:                      0.00001316254443
+ RMS of beta  difference density:                      0.00000075783224
+ Gap [au]:  0.45265383
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP  25 IS        -94.4895848083031922 [AU]
+ ======================================================================
+ ITERATION STEP  26
+ CPU time [min]:     0.314                   Wall time [min]:     0.043
+ 
+ Constructing alpha Fock-matrix...
+ 
+ First step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 9.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.320                   Wall time [min]:     0.043
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.320                   Wall time [min]:     0.043
+ 
+ Constructing beta Fock-matrix...
+ 
+ Second step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 8.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.325                   Wall time [min]:     0.044
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.325                   Wall time [min]:     0.044
+ 
+ RMS of alpha [F,P] :                                  0.00000007912965
+ RMS of beta  [F,P] :                                  0.00000002587828
+ RMS of alpha difference density:                      0.00003922024314
+ RMS of beta  difference density:                      0.00000230860323
+ Gap [au]:  0.45265406
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP  26 IS        -94.4895847877018156 [AU]
+ ======================================================================
+ ITERATION STEP  27
+ CPU time [min]:     0.326                   Wall time [min]:     0.044
+ 
+ Constructing alpha Fock-matrix...
+ 
+ First step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 9.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.332                   Wall time [min]:     0.045
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.332                   Wall time [min]:     0.045
+ 
+ Constructing beta Fock-matrix...
+ 
+ Second step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 8.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.337                   Wall time [min]:     0.045
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.338                   Wall time [min]:     0.046
+ 
+ RMS of alpha [F,P] :                                  0.00000007286022
+ RMS of beta  [F,P] :                                  0.00000002948524
+ RMS of alpha difference density:                      0.00000731467481
+ RMS of beta  difference density:                      0.00000047477818
+ Gap [au]:  0.45264743
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP  27 IS        -94.4895847320454152 [AU]
+ ======================================================================
+ ITERATION STEP  28
+ CPU time [min]:     0.339                   Wall time [min]:     0.046
+ 
+ Constructing alpha Fock-matrix...
+ 
+ First step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 9.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.345                   Wall time [min]:     0.046
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.345                   Wall time [min]:     0.046
+ 
+ Constructing beta Fock-matrix...
+ 
+ Second step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 8.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.350                   Wall time [min]:     0.047
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.350                   Wall time [min]:     0.047
+ 
+ RMS of alpha [F,P] :                                  0.00000006732323
+ RMS of beta  [F,P] :                                  0.00000002906929
+ RMS of alpha difference density:                      0.00003854758403
+ RMS of beta  difference density:                      0.00000219697816
+ Gap [au]:  0.45269295
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP  28 IS        -94.4895847226973302 [AU]
+ ======================================================================
+ ITERATION STEP  29
+ CPU time [min]:     0.351                   Wall time [min]:     0.047
+ 
+ Constructing alpha Fock-matrix...
+ 
+ First step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 9.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.357                   Wall time [min]:     0.048
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.357                   Wall time [min]:     0.048
+ 
+ Constructing beta Fock-matrix...
+ 
+ Second step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 8.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.362                   Wall time [min]:     0.049
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.362                   Wall time [min]:     0.049
+ 
+ RMS of alpha [F,P] :                                  0.00000015227564
+ RMS of beta  [F,P] :                                  0.00000010000063
+ RMS of alpha difference density:                      0.00004078997461
+ RMS of beta  difference density:                      0.00000225714387
+ Gap [au]:  0.45277148
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP  29 IS        -94.4895846774837054 [AU]
+ ======================================================================
+ ITERATION STEP  30
+ CPU time [min]:     0.363                   Wall time [min]:     0.049
+ 
+ Constructing alpha Fock-matrix...
+ 
+ First step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 9.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.369                   Wall time [min]:     0.049
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.369                   Wall time [min]:     0.049
+ 
+ Constructing beta Fock-matrix...
+ 
+ Second step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 8.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.374                   Wall time [min]:     0.050
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.374                   Wall time [min]:     0.050
+ 
+ RMS of alpha [F,P] :                                  0.00000037171638
+ RMS of beta  [F,P] :                                  0.00000025925014
+ RMS of alpha difference density:                      0.00000253669005
+ RMS of beta  difference density:                      0.00000014212706
+ Gap [au]:  0.45277999
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP  30 IS        -94.4895846371373977 [AU]
+ ======================================================================
+ ITERATION STEP  31
+ CPU time [min]:     0.375                   Wall time [min]:     0.050
+ 
+ Constructing alpha Fock-matrix...
+ 
+ First step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 9.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.381                   Wall time [min]:     0.051
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.382                   Wall time [min]:     0.051
+ 
+ Constructing beta Fock-matrix...
+ 
+ Second step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 8.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.387                   Wall time [min]:     0.052
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.387                   Wall time [min]:     0.052
+ 
+ RMS of alpha [F,P] :                                  0.00000039564713
+ RMS of beta  [F,P] :                                  0.00000027663770
+ RMS of alpha difference density:                      0.00000101637578
+ RMS of beta  difference density:                      0.00000005623476
+ Gap [au]:  0.45278087
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP  31 IS        -94.4895846347962163 [AU]
+ ======================================================================
+ ITERATION STEP  32
+ CPU time [min]:     0.388                   Wall time [min]:     0.052
+ 
+ Constructing alpha Fock-matrix...
+ 
+ First step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 9.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.394                   Wall time [min]:     0.053
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.394                   Wall time [min]:     0.053
+ 
+ Constructing beta Fock-matrix...
+ 
+ Second step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 8.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.399                   Wall time [min]:     0.053
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.399                   Wall time [min]:     0.053
+ 
+ RMS of alpha [F,P] :                                  0.00000039813366
+ RMS of beta  [F,P] :                                  0.00000027841285
+ RMS of alpha difference density:                      0.00000042234535
+ RMS of beta  difference density:                      0.00000002343013
+ Gap [au]:  0.45278060
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP  32 IS        -94.4895846339335463 [AU]
+ ======================================================================
+ ITERATION STEP  33
+ CPU time [min]:     0.400                   Wall time [min]:     0.053
+ 
+ Constructing alpha Fock-matrix...
+ 
+ First step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 9.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.406                   Wall time [min]:     0.054
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.406                   Wall time [min]:     0.054
+ 
+ Constructing beta Fock-matrix...
+ 
+ Second step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 8.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.411                   Wall time [min]:     0.055
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.411                   Wall time [min]:     0.055
+ 
+ RMS of alpha [F,P] :                                  0.00000039737091
+ RMS of beta  [F,P] :                                  0.00000027786577
+ RMS of alpha difference density:                      0.00000018815844
+ RMS of beta  difference density:                      0.00000001045416
+ Gap [au]:  0.45278071
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP  33 IS        -94.4895846342885761 [AU]
+ ======================================================================
+ ITERATION STEP  34
+ CPU time [min]:     0.412                   Wall time [min]:     0.055
+ 
+ Constructing alpha Fock-matrix...
+ 
+ First step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 9.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.418                   Wall time [min]:     0.056
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.418                   Wall time [min]:     0.056
+ 
+ Constructing beta Fock-matrix...
+ 
+ Second step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 8.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.423                   Wall time [min]:     0.056
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.423                   Wall time [min]:     0.056
+ 
+ RMS of alpha [F,P] :                                  0.00000039766473
+ RMS of beta  [F,P] :                                  0.00000027807849
+ RMS of alpha difference density:                      0.00000008455376
+ RMS of beta  difference density:                      0.00000000470137
+ Gap [au]:  0.45278066
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP  34 IS        -94.4895846341308498 [AU]
+ ======================================================================
+ ITERATION STEP  35
+ CPU time [min]:     0.424                   Wall time [min]:     0.056
+ 
+ Constructing alpha Fock-matrix...
+ 
+ First step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 9.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.430                   Wall time [min]:     0.057
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.430                   Wall time [min]:     0.057
+ 
+ Constructing beta Fock-matrix...
+ 
+ Second step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 8.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.435                   Wall time [min]:     0.058
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.436                   Wall time [min]:     0.058
+ 
+ RMS of alpha [F,P] :                                  0.00000039754629
+ RMS of beta  [F,P] :                                  0.00000027799219
+ RMS of alpha difference density:                      0.00000003823134
+ RMS of beta  difference density:                      0.00000000212660
+ Gap [au]:  0.45278068
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP  35 IS        -94.4895846342015346 [AU]
+ ======================================================================
+ ITERATION STEP  36
+ CPU time [min]:     0.437                   Wall time [min]:     0.058
+ 
+ Constructing alpha Fock-matrix...
+ 
+ First step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 9.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.443                   Wall time [min]:     0.059
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.443                   Wall time [min]:     0.059
+ 
+ Constructing beta Fock-matrix...
+ 
+ Second step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 8.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.448                   Wall time [min]:     0.059
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.448                   Wall time [min]:     0.059
+ 
+ RMS of alpha [F,P] :                                  0.00000039759579
+ RMS of beta  [F,P] :                                  0.00000027802842
+ RMS of alpha difference density:                      0.00000001740139
+ RMS of beta  difference density:                      0.00000000096816
+ Gap [au]:  0.45278067
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP  36 IS        -94.4895846341696029 [AU]
+ ======================================================================
+ ITERATION STEP  37
+ CPU time [min]:     0.449                   Wall time [min]:     0.059
+ 
+ Constructing alpha Fock-matrix...
+ 
+ First step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 9.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.455                   Wall time [min]:     0.060
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.455                   Wall time [min]:     0.060
+ 
+ Constructing beta Fock-matrix...
+ 
+ Second step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 8.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.460                   Wall time [min]:     0.061
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.460                   Wall time [min]:     0.061
+ 
+ RMS of alpha [F,P] :                                  0.00000039757431
+ RMS of beta  [F,P] :                                  0.00000027801265
+ RMS of alpha difference density:                      0.00000000795837
+ RMS of beta  difference density:                      0.00000000044285
+ Gap [au]:  0.45278068
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP  37 IS        -94.4895846341841263 [AU]
+ ======================================================================
+ ITERATION STEP  38
+ CPU time [min]:     0.461                   Wall time [min]:     0.061
+ 
+ Constructing alpha Fock-matrix...
+ 
+ First step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 9.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.467                   Wall time [min]:     0.062
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.467                   Wall time [min]:     0.062
+ 
+ Constructing beta Fock-matrix...
+ 
+ Second step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 8.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.472                   Wall time [min]:     0.062
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.472                   Wall time [min]:     0.062
+ 
+ RMS of alpha [F,P] :                                  0.00000039758393
+ RMS of beta  [F,P] :                                  0.00000027801973
+ RMS of alpha difference density:                      0.00000000362670
+ RMS of beta  difference density:                      0.00000000020182
+ Gap [au]:  0.45278068
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP  38 IS        -94.4895846341774757 [AU]
+ ======================================================================
+ ITERATION STEP  39
+ CPU time [min]:     0.473                   Wall time [min]:     0.062
+ 
+ Constructing alpha Fock-matrix...
+ 
+ First step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 9.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.479                   Wall time [min]:     0.063
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.479                   Wall time [min]:     0.063
+ 
+ Constructing beta Fock-matrix...
+ 
+ Second step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 8.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.484                   Wall time [min]:     0.064
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.484                   Wall time [min]:     0.064
+ 
+ RMS of alpha [F,P] :                                  0.00000039757969
+ RMS of beta  [F,P] :                                  0.00000027801660
+ RMS of alpha difference density:                      0.00000000164754
+ RMS of beta  difference density:                      0.00000000009167
+ Gap [au]:  0.45278068
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP  39 IS        -94.4895846341805452 [AU]
+ ======================================================================
+ ITERATION STEP  40
+ CPU time [min]:     0.485                   Wall time [min]:     0.064
+ 
+ Constructing alpha Fock-matrix...
+ 
+ First step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 9.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.493                   Wall time [min]:     0.065
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.493                   Wall time [min]:     0.065
+ 
+ Constructing beta Fock-matrix...
+ 
+ Second step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 8.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.498                   Wall time [min]:     0.066
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.498                   Wall time [min]:     0.066
+ 
+ RMS of alpha [F,P] :                                  0.00000039758151
+ RMS of beta  [F,P] :                                  0.00000027801794
+ RMS of alpha difference density:                      0.00000000076808
+ RMS of beta  difference density:                      0.00000000004274
+ Gap [au]:  0.45278068
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP  40 IS        -94.4895846341792662 [AU]
+ ======================================================================
+ ITERATION STEP  41
+ CPU time [min]:     0.499                   Wall time [min]:     0.066
+ 
+ Constructing alpha Fock-matrix...
+ 
+ First step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 9.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.505                   Wall time [min]:     0.067
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.505                   Wall time [min]:     0.067
+ 
+ Constructing beta Fock-matrix...
+ 
+ Second step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 8.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.510                   Wall time [min]:     0.067
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.510                   Wall time [min]:     0.067
+ 
+ RMS of alpha [F,P] :                                  0.00000039758060
+ RMS of beta  [F,P] :                                  0.00000027801728
+ RMS of alpha difference density:                      0.00000000034962
+ RMS of beta  difference density:                      0.00000000001946
+ Gap [au]:  0.45278068
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP  41 IS        -94.4895846341798631 [AU]
+ ======================================================================
+ ITERATION STEP  42
+ CPU time [min]:     0.511                   Wall time [min]:     0.067
+ 
+ Constructing alpha Fock-matrix...
+ 
+ First step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 9.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.517                   Wall time [min]:     0.068
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.517                   Wall time [min]:     0.068
+ 
+ Constructing beta Fock-matrix...
+ 
+ Second step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 8.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.522                   Wall time [min]:     0.069
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.523                   Wall time [min]:     0.069
+ 
+ RMS of alpha [F,P] :                                  0.00000039758100
+ RMS of beta  [F,P] :                                  0.00000027801757
+ RMS of alpha difference density:                      0.00000000016078
+ RMS of beta  difference density:                      0.00000000000895
+ Gap [au]:  0.45278068
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP  42 IS        -94.4895846341794368 [AU]
+ ======================================================================
+ ITERATION STEP  43
+ CPU time [min]:     0.524                   Wall time [min]:     0.069
+ 
+ Constructing alpha Fock-matrix...
+ 
+ First step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 9.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.530                   Wall time [min]:     0.070
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.530                   Wall time [min]:     0.070
+ 
+ Constructing beta Fock-matrix...
+ 
+ Second step of Coulomb + first step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 8.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.535                   Wall time [min]:     0.070
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.535                   Wall time [min]:     0.070
+ 
+ RMS of alpha [F,P] :                                  0.00000039758081
+ RMS of beta  [F,P] :                                  0.00000027801743
+ RMS of alpha difference density:                      0.00000000007363
+ RMS of beta  difference density:                      0.00000000000410
+ Gap [au]:  0.45278068
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP  43 IS        -94.4895846341796641 [AU]
+ ======================================================================
+ 
+ SUCCESS...
+ THE SCF ITERATION HAS CONVERGED!
+ 
+                   A   
+ FINAL ALPHA OCC:   9
+ FINAL BETA  OCC:   8
+ 
+ ***FINAL HARTREE-FOCK ENERGY:        -94.4895846341796641 [AU]
+ 
+ Expectation value of S^2:  0.7586
+ Average multiplicity:      2.0086
+ 
+ RETURNING FROM SCF ALGORITHM
+ ======================================================================
+
+ ************************ 2026-11-04 00:23:56 *************************
+ Executing integ...
+
+ Allocation of 15.6 Gbytes of memory...
+ 
+ 
+ Number of atoms:                  6
+ Charge:                           0
+ Number of electrons:             17
+ Number of core electrons:         4
+ Spin multiplicity:                2
+ 
+                 Cartesian coordinates [bohr]      Atomic mass [AMU]  Z
+   1  N    -0.04440472   -0.05917577    0.10575761    14.003074       7
+   2  H     1.86884099   -0.07829264    0.01127397     1.007825       1
+   3  H    -0.57481944    1.77982755    0.02494699     1.007825       1
+   4  H    -0.67698094   -0.87923821   -1.50581113     1.007825       1
+   5  C     0.00000000    0.00000000    5.77526912    12.000000       6
+   6  H     0.00000000    0.00000000    7.89176239     1.007825       1
+ 
+ This molecule is an asymmetric top.
+ 
+ Rotational constants [cm-1]: 
+      7.201431751585      0.222673190069      0.221739306369
+ 
+ Point group: C1  
+ Computational point group: C1  
+ 
+ Cartesian coordinates in standard orientation [bohr]
+   1  N    -2.46692189   -0.00000002    0.05886370
+   2  H    -2.55445722   -1.54178476   -1.07473198
+   3  H    -2.54066458    1.52802066   -1.09418365
+   4  H    -4.08480953    0.01376581    1.08456294
+   5  C     3.20293665   -0.00000011    0.01964106
+   6  H     5.31939014   -0.00000018    0.03261715
+ 
+ Nuclear repulsion energy [au]:         26.230560519274
+ 
+ 
+ Basis set information:
+ 
+ Maximum angular momentum: h
+ Maximum number of contracted Gaussians:   13
+ Maximum number of primitive Gaussians:    18
+ Spherical harmonic GTOs are used.
+ 
+ 
+ Conventional basis set:
+ 
+   1  N  cc-pwcvtz [ 12s 7p 3d 1f | 6s 5p 3d 1f ]
+   2  H  cc-pvtz [ 5s 2p 1d | 3s 2p 1d ]
+   3  H  cc-pvtz [ 5s 2p 1d | 3s 2p 1d ]
+   4  H  cc-pvtz [ 5s 2p 1d | 3s 2p 1d ]
+   5  C  cc-pwcvtz [ 12s 7p 3d 1f | 6s 5p 3d 1f ]
+   6  H  cc-pvtz [ 5s 2p 1d | 3s 2p 1d ]
+ 
+ Total number of basis functions:    142
+ 
+ 
+ Fitting basis set for the SCF calculation:
+ 
+   1  N  aug-cc-pvqz-ri-jk [ 11s 8p 6d 4f 3g 2h | 11s 8p 6d 4f 3g 2h ]
+   2  H  aug-cc-pvqz-ri-jk [ 5s 4p 4d 3f 2g | 5s 4p 4d 3f 2g ]
+   3  H  aug-cc-pvqz-ri-jk [ 5s 4p 4d 3f 2g | 5s 4p 4d 3f 2g ]
+   4  H  aug-cc-pvqz-ri-jk [ 5s 4p 4d 3f 2g | 5s 4p 4d 3f 2g ]
+   5  C  aug-cc-pvqz-ri-jk [ 11s 8p 6d 4f 3g 2h | 11s 8p 6d 4f 3g 2h ]
+   6  H  aug-cc-pvqz-ri-jk [ 5s 4p 4d 3f 2g | 5s 4p 4d 3f 2g ]
+ 
+ Total number of basis functions:    588
+ 
+ 
+ Fitting basis set for the correlation calculation:
+ 
+   1  N  aug-cc-pwcvqz-ri [ 13s 12p 10d 8f 5g 2h | 13s 12p 10d 8f 5g 2h ]
+   2  H  aug-cc-pvqz-ri [ 6s 5p 4d 3f 2g | 6s 5p 4d 3f 2g ]
+   3  H  aug-cc-pvqz-ri [ 6s 5p 4d 3f 2g | 6s 5p 4d 3f 2g ]
+   4  H  aug-cc-pvqz-ri [ 6s 5p 4d 3f 2g | 6s 5p 4d 3f 2g ]
+   5  C  aug-cc-pwcvqz-ri [ 13s 12p 10d 8f 5g 2h | 13s 12p 10d 8f 5g 2h ]
+   6  H  aug-cc-pvqz-ri [ 6s 5p 4d 3f 2g | 6s 5p 4d 3f 2g ]
+ 
+ Total number of basis functions:    764
+ 
+ 
+ Old basis set for SCF restart
+ 
+   1  N  cc-pwcvtz [ 12s 7p 3d 1f | 6s 5p 3d 1f ]
+   2  H  cc-pvtz [ 5s 2p 1d | 3s 2p 1d ]
+   3  H  cc-pvtz [ 5s 2p 1d | 3s 2p 1d ]
+   4  H  cc-pvtz [ 5s 2p 1d | 3s 2p 1d ]
+   5  C  cc-pwcvtz [ 12s 7p 3d 1f | 6s 5p 3d 1f ]
+   6  H  cc-pvtz [ 5s 2p 1d | 3s 2p 1d ]
+ 
+ Total number of basis functions:    142
+ 
+ 
+ Complimentary auxiliary basis set (CABS):
+ 
+   1  N  cc-pcvtz-f12-optri [ 6s 6p 5d 4f 2g | 6s 6p 5d 4f 2g ]
+   2  H  cc-pvtz-f12-optri [ 3s 3p 3d 2f | 3s 3p 3d 2f ]
+   3  H  cc-pvtz-f12-optri [ 3s 3p 3d 2f | 3s 3p 3d 2f ]
+   4  H  cc-pvtz-f12-optri [ 3s 3p 3d 2f | 3s 3p 3d 2f ]
+   5  C  cc-pcvtz-f12-optri [ 6s 6p 5d 4f 2g | 6s 6p 5d 4f 2g ]
+   6  H  cc-pvtz-f12-optri [ 3s 3p 3d 2f | 3s 3p 3d 2f ]
+ 
+ Total number of basis functions:    354
+ 
+ 
+ Character table for point group C1:
+ 
+          E  
+    A     1
+ 
+ Number of basis functions per irrep:
+    A     496
+ 
+ 
+ Calculation of overlap integrals...
+ CPU time [min]:     0.010                   Wall time [min]:     0.003
+ 
+ Calculation of the square root of the overlap matrix...
+ Minimum eigenvalue of the overlap matrix: 0.155326E-06
+ Warning! Near linear dependence in the AO basis set.
+ This may result in convergence problems.
+ CPU time [min]:     0.013                   Wall time [min]:     0.003
+ 
+ Calculation of kinetic energy integrals...
+ CPU time [min]:     0.013                   Wall time [min]:     0.003
+ Calculation of nuclear attraction integrals...
+ CPU time [min]:     0.014                   Wall time [min]:     0.003
+ Calculation of overlap integrals...
+ CPU time [min]:     0.014                   Wall time [min]:     0.003
+ 
+ Calculation of prescreening integrals...
+ CPU time [min]:     0.060                   Wall time [min]:     0.015
+ 
+ Calculation of two-center Coulomb integrals...
+   1% done.
+  12% done.
+  25% done.
+  36% done.
+  47% done.
+  62% done.
+  76% done.
+  87% done.
+ 100% done.
+ CPU time [min]:     0.061                   Wall time [min]:     0.016
+ 
+ Cholesky decomposition of the two-center matrix...
+ Reciprocal of the condition number:  0.426473E-05
+ CPU time [min]:     0.062                   Wall time [min]:     0.016
+ 
+
+ ************************ 2026-11-04 00:23:57 *************************
+ Executing scf...
+
+ Allocation of 15.6 Gbytes of memory...
+ Constructing alpha Fock-matrix...
+ 
+ First step of Coulomb...
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.009                   Wall time [min]:     0.004
+ 
+ Second step of Coulomb...
+   1% done.
+  36% done.
+  72% done.
+  94% done.
+ CPU time [min]:     0.020                   Wall time [min]:     0.006
+ 
+ 
+ First step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 9.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.034                   Wall time [min]:     0.008
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.035                   Wall time [min]:     0.008
+ 
+ Constructing beta Fock-matrix...
+ 
+ First step of exchange...
+ Exchange contribution is evaluated for MOs 1 to 8.
+   2% done.
+  14% done.
+  25% done.
+  36% done.
+  56% done.
+  73% done.
+  85% done.
+ 100% done.
+ CPU time [min]:     0.045                   Wall time [min]:     0.009
+ 
+ Fitting and assembly step of exchange...
+ CPU time [min]:     0.046                   Wall time [min]:     0.010
+ 
+
+ ************************ 2026-11-04 00:23:58 *************************
+ Executing mp2f12...
+
+ MP2-F12 calculation
+ 
+ Allocation of 15.6 Gbytes of memory...
+ 
+ Calculating CABS singles correction...
+ CPU time [min]:     0.007                   Wall time [min]:     0.001
+ 
+ 
+ Calculating Coulomb integrals in memory...
+ CPU time [min]:     0.039                   Wall time [min]:     0.005
+ 
+ Calculating (DelF12)^2 integrals...
+ CPU time [min]:     0.055                   Wall time [min]:     0.007
+ 
+ Calculating F12/r12 integrals...
+ CPU time [min]:     0.071                   Wall time [min]:     0.009
+ 
+ Calculating F12^2 integrals...
+ CPU time [min]:     0.157                   Wall time [min]:     0.020
+ 
+ Calculating F12 integrals...
+ CPU time [min]:     0.193                   Wall time [min]:     0.025
+ 
+ Calculating pair energies...
+ CPU time [min]:     0.261                   Wall time [min]:     0.034
+ 
+ Reference energy [au]:                   -94.489584634180
+ CABS singles correction [au]:             -0.004968970373
+ Corrected reference energy [au]:         -94.494553604553
+ MP2 correlation energy [au]:              -0.344540777229
+ MP2 energy [au]:                         -94.834125411408
+ F12 contribution [au]:                    -0.030824044358
+ Coupling term [au]:                       -0.003434042677
+ MP2-F12 correlation energy [au]:          -0.378798864263
+ MP2-F12 energy [au]:                     -94.873352468816
+ 
+ CPU time [min]:     0.261                   Wall time [min]:     0.034
+ 
+ ************************ 2026-11-04 00:24:00 *************************
+                      Normal termination of mrcc.
+ **********************************************************************

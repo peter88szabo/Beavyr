@@ -1,0 +1,9 @@
+ Total number of basis functions:      2
+ ***FINAL HARTREE-FOCK ENERGY:         -1.1108503890136419 [AU]
+ Cartesian gradient in original orientation [au]:
+    1  H      0.0000000000     0.0000000000    -0.0737829661
+    2  H      0.0000000000     0.0000000000     0.0737829661
+ 
+ ************************ 2026-11-03 19:22:24 *************************
+                      Normal termination of mrcc.
+ **********************************************************************

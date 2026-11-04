@@ -1,0 +1,14 @@
+nproc = 1
+memory = 16000
+method = ROHF CCSD(T)
+basis = aug-cc-pVTZ
+charge = 0
+multi = 2
+xyzfile = "NH3_CH_COM_3A.xyz"
+@scf
+  max_iterations = 200
+end
+@ccsd
+  frozen_core = auto
+  max_iterations = 100
+end

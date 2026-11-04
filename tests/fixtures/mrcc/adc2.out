@@ -1,0 +1,65 @@
+ Total number of basis functions:     24
+ Total number of basis functions:    116
+ Total number of basis functions:     84
+ ***FINAL HARTREE-FOCK ENERGY:        -76.0266041153098513 [AU]
+ Total number of basis functions:     24
+ Total number of basis functions:    116
+ Total number of basis functions:     84
+                         Total              Energy                Norm of
+                         Total              Energy                Norm of
+                         Total              Energy                Norm of
+                         Total              Energy                Norm of
+                         Total              Energy                Norm of
+                         Total              Energy                Norm of
+                         Total              Energy                Norm of
+ Final results of the CIS calculations for the excited states:
+ Singlet excited states:
+ 
+ Excited      Total          Excitation     Excitation     Excitation        Absorption
+  state    energy [au]       energy [au]    energy [eV]  energy [cm^-1]    wavelength [nm]
+ =========================================================================================
+    1     -75.689586355      0.33701776       9.1707        73966.85          135.20
+    2     -75.624144692      0.40245942      10.9515        88329.63          113.21
+ =========================================================================================
+ 
+ CPU time [min]:     0.003                   Wall time [min]:     0.004
+ 
+ Excited       dipole moment in length gauge [au]         Dipole          Oscillator
+  state        x              y              z         strength [au]       strength
+ ===================================================================================
+    1     -0.3535066      0.0000000      0.0000000       0.1249669         0.0280774
+    2     -0.0000000      0.0000000      0.0000000       0.0000000         0.0000000
+ ===================================================================================
+ 
+ Total reference energy:          -76.026604115310
+ Total MP2 energy:                -76.228465000248
+       Total ADC(2)          Energy                Norm of
+       Total ADC(2)          Energy                Norm of
+       Total ADC(2)          Energy                Norm of
+ Total reference energy:          -76.026604115310
+ Total ADC(2) energy:             -75.933125893899
+       Total ADC(2)          Energy                Norm of
+       Total ADC(2)          Energy                Norm of
+       Total ADC(2)          Energy                Norm of
+ Total reference energy:          -76.026604115310
+ Total ADC(2) energy:             -75.857486165132
+ Final results of the ADC(2) calculations for the excited states:
+ Singlet states
+ 
+ Excited   Excitation     Excitation     Excitation        Absorption      
+  state    energy [au]    energy [eV]  energy [cm^-1]    wavelength [nm]  
+ ============================================================================
+    1      0.29533911       8.0366        64819.44          154.27
+    2      0.37097884      10.0948        81420.44          122.82
+ ============================================================================
+ 
+ Calculate transition density matrix...
+ Incore algorithm!
+ Excited               dipole moment in length gauge [au]         Dipole          Oscillator
+  state                x              y              z         strength [au]       strength
+ ===========================================================================================
+    1       0     -0.3700195      0.0000000      0.0000000       0.1369144         0.0269575
+    2       0      0.0000000      0.0000000      0.0000000       0.0000000         0.0000000
+ ===========================================================================================
+ 
+                      Normal termination of mrcc.

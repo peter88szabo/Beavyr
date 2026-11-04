@@ -221,18 +221,23 @@ fn saveable_files(ui: &mut egui::Ui, output: &QcRunOutput) {
                 .on_disabled_hover_text("This file is no longer in the run directory.")
                 .clicked()
             {
-                let suggested = path
-                    .file_name()
-                    .map(|name| name.to_string_lossy().to_string())
-                    .unwrap_or_else(|| "orca_output".to_string());
+                let hessian = what.contains("Hessian");
+                let suggested = if hessian {
+                    path.with_extension("hess").file_name().unwrap_or_default().to_string_lossy().into_owned()
+                } else {
+                    path.file_name().unwrap_or_default().to_string_lossy().into_owned()
+                };
                 if let Some(target) = rfd::FileDialog::new().set_file_name(suggested).save_file() {
-                    // A copy, not a move: the panel may still need the original,
-                    // and a second Save should work as well as the first.
-                    if let Err(err) = std::fs::copy(path, &target) {
-                        ui.colored_label(
-                            egui::Color32::from_rgb(230, 120, 90),
-                            format!("Could not save: {err}"),
-                        );
+                    // Even older calculation archives export the standard format.
+                    // Native backend files remain available in the complete archive.
+                    let saved = if hessian {
+                        super::run::hessian_output::load(output, path)
+                            .and_then(|data| crate::qchem_interfaces::hessian_io::save(&target, &data))
+                    } else {
+                        std::fs::copy(path, &target).map(|_| ()).map_err(|e| e.to_string())
+                    };
+                    if let Err(err) = saved {
+                        crate::runtime_warning::push(ui.ctx(), "Could not save calculation file", &err);
                     }
                 }
             }

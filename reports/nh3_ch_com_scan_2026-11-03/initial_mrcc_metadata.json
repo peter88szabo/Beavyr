@@ -1,0 +1,53 @@
+{
+  "executable": "/home/peter/Programs/MRCC/binary/dmrcc",
+  "executable_sha256": "d9fa54993b1196334f90b625844e92c945de61490e32ba48b885865f0ddf66f1",
+  "source_geometry": "/home/peter/DevCode/Beavyr/reports/mrcc_nh3_ch_benchmark_2026-11-03/NH3_CH_COM_3A.xyz",
+  "distances_angstrom": [
+    2.0,
+    3.142857142857143,
+    4.285714285714286,
+    5.428571428571429,
+    6.571428571428571,
+    7.714285714285714,
+    8.857142857142858,
+    10.0
+  ],
+  "execution_point_order": [
+    7,
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6
+  ],
+  "cores": 8,
+  "cpu_ids": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7
+  ],
+  "memory_MB": 16000,
+  "reference": "UHF",
+  "charge": 0,
+  "multiplicity": 2,
+  "core": "frozen",
+  "rigid_fragments": true,
+  "masses_amu": {
+    "N": 14.007,
+    "C": 12.011,
+    "H": 1.008
+  },
+  "composite": "CCSD(F12*)(T)/aDZ + MP2-F12/aTZ - MP2-F12/aDZ",
+  "comparison": "Conventional CCSD(T)/aTZ",
+  "zero": "Each curve independently referenced to its own 10.0 Angstrom energy",
+  "mp2_adz_source": "MP2-F12 total energy, including CABS singles, printed within the CCSD(T)-F12/aDZ job",
+  "BSSE": "No counterpoise correction; same full-complex prescription throughout",
+  "scratch": "/home/peter/DevCode/Beavyr/target/benchmarks/nh3_ch_com_scan_2026-11-03"
+}

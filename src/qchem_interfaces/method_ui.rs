@@ -17,6 +17,7 @@ use super::program::QcProgram;
 /// legible without opening the section.
 pub fn method_summary(program: QcProgram, config: &MethodConfig) -> String {
     match program {
+        QcProgram::Mrcc => format!("{}/{}",config.mrcc.method.label(),config.basis),
         QcProgram::StdaXtb => "sTDA-xTB".to_owned(),
         QcProgram::Xtb => config.xtb.label().to_string(),
         QcProgram::Dreiding => "DREIDING force field".to_string(),
@@ -103,6 +104,7 @@ pub fn method_config_ui(
         .default_open(true)
         .show(ui, |ui| {
             match program {
+                QcProgram::Mrcc => { ui.label("Configure MRCC in the Quantum Chemistry panel."); },
                 QcProgram::StdaXtb => { ui.label("sTDA-xTB spectra only"); },
                 QcProgram::Dreiding => {
                     ui.label(

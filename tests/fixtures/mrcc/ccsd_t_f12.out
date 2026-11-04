@@ -1,0 +1,16 @@
+ Total number of basis functions:     48
+ Total number of basis functions:    196
+ Total number of basis functions:    228
+ ***FINAL HARTREE-FOCK ENERGY:        -76.0582791242010643 [AU]
+ Total number of basis functions:     48
+ Total number of basis functions:    196
+ Total number of basis functions:    228
+ Total number of basis functions:     48
+ Total number of basis functions:    110
+ MP2-F12 energy [au]:                     -76.357502719615
+ Total MP2 energy [au]:             -76.299682614658
+ Total CCSD(F12*) energy [au]:                  -76.351989318982
+ Total CCSD(F12*)(T)  energy [au]:            -76.358776277629
+ Total CCSD(F12*)(T*) energy [au]:            -76.360311329697
+ Total CCSD(F12*)(T+) energy [au]:            -76.360281498562
+                      Normal termination of mrcc.

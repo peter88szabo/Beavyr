@@ -114,6 +114,11 @@ fn charge_and_multiplicity(ui: &mut egui::Ui, panel: &mut QcPanelState, running:
 /// method has no fitting set for. Either way the basis is switched to something
 /// the new method can use rather than left to fail at run time.
 fn adopt_method_defaults(panel: &mut QcPanelState, method: QcMethod) {
+    if panel.program == QcProgram::Mrcc {
+        panel.config.mrcc.method = method;
+        if crate::qchem_interfaces::mrcc::adc(method) { panel.job = JobType::TdDft; }
+        else if crate::qchem_interfaces::mrcc::job_problem(Some(method), panel.job).is_some() { panel.job = JobType::SinglePoint; }
+    }
     if job::correlated::energy_only(panel.program, method) && panel.job != JobType::Scan { panel.job = JobType::SinglePoint; }
     let is_f12_basis = panel.config.basis.to_ascii_uppercase().contains("-F12");
     if method.is_f12() && !is_f12_basis {
@@ -125,6 +130,10 @@ fn adopt_method_defaults(panel: &mut QcPanelState, method: QcMethod) {
 }
 
 fn excited_state_row(ui: &mut egui::Ui, panel: &mut QcPanelState, running: bool) {
+    if panel.program == QcProgram::Mrcc && panel.method.is_some_and(crate::qchem_interfaces::mrcc::adc) {
+        ui.horizontal(|ui| { ui.label("States"); ui.add_enabled(!running, egui::DragValue::new(&mut panel.excited.states).range(1..=200)); });
+        return;
+    }
     ui.horizontal(|ui| {
         ui.label("States");
         ui.add_enabled(

@@ -1,0 +1,2 @@
+engine,method,basis,reference,cores,cpu_ids,status,wall_seconds,energy_hartree,started,exit_code,failure,user_cpu_seconds,system_cpu_seconds,max_process_rss_kb,directory
+behemoth,UCCSD(T),aug-cc-pVTZ,ROHF,4,"0,1,2,3",PASS,131.66,-94.884813432378,2026-11-03 22:37:56 +0100,0,,423.09,39.33,13115852.0,/home/peter/DevCode/Beavyr/reports/behemoth_nh3_ch_benchmark_2026-11-03/4cores

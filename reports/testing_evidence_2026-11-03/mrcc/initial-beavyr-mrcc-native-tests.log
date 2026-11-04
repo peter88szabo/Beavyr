@@ -1,0 +1,44 @@
+
+running 1 test
+test qchem_panel::run::mrcc_job::tests::mrcc_native_energy_spectrum_gradient_and_optimization ... MRCC native evidence: /tmp/beavyr-mrcc-native-3
+PASS HF: Some(-74.96347971739594)
+PASS DFT: Some(-75.24659835661865)
+PASS MP2: Some(-74.999194270367)
+PASS RI-MP2: Some(-76.228465000248)
+PASS MP2-F12: Some(-76.357502719615)
+PASS CCSD: Some(-75.013238313373)
+PASS CCSD(T): Some(-75.013305880922)
+PASS UCCSD(T): Some(-75.013306105554)
+PASS CCSD-F12: Some(-76.351989318982)
+PASS CCSD(T)-F12: Some(-76.358776277629)
+PASS CCSDT: Some(-75.013331793225)
+PASS CCSDT(Q): Some(-75.013348110741)
+PASS CCSDTQ: Some(-75.013355981003)
+PASS CASSCF: Some(-74.97548224508712)
+PASS NEVPT2: Some(-75.003881253632)
+PASS dRPA: Some(-76.305390693738)
+PASS ADC(2): Some(-76.228465000248)
+PASS SCS-ADC(2): Some(-76.224804951369)
+PASS SOS-ADC(2): Some(-76.222974995538)
+PASS TDDFT tda=true
+PASS TDDFT tda=false
+PASS analytical gradient HF
+PASS analytical gradient DFT
+PASS analytical gradient RI-MP2
+PASS analytical gradient CCSD
+PASS analytical gradient CCSDT
+PASS analytical gradient CCSDTQ
+
+thread 'qchem_panel::run::mrcc_job::tests::mrcc_native_energy_spectrum_gradient_and_optimization' (4) panicked at src/qchem_panel/mrcc_job_tests.rs:39:5:
+assertion failed: result.log.contains("Number of core electrons:         0") ||
+    result.log.contains("Number of core electrons:          0")
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    qchem_panel::run::mrcc_job::tests::mrcc_native_energy_spectrum_gradient_and_optimization
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 1655 filtered out; finished in 136.61s
+

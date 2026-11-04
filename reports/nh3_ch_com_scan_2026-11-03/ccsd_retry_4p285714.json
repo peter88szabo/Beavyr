@@ -1,0 +1,21 @@
+[
+  {
+    "engine": "Behemoth",
+    "point": 2,
+    "distance_angstrom": 4.285714285714286,
+    "job": "cc_atz",
+    "calc": "CCSD(T)",
+    "basis": "aug-cc-pVTZ",
+    "status": "FAILED",
+    "energy_hartree": null,
+    "mp2_f12_hartree": null,
+    "wall_seconds": 301.52,
+    "peak_rss_kib": 13364836,
+    "started": "2026-11-03 23:35:48 +0100",
+    "exit_code": 1,
+    "failure": "",
+    "spin_diagnostics": "Actual <S^2>: 0.7595307135 | Optimal <S^2>: 0.7500000000",
+    "evidence": "/home/peter/DevCode/Beavyr/reports/nh3_ch_com_scan_2026-11-03/runs/p03_4.285714A_behemoth_cc_atz_ccsd_not_converged",
+    "scratch": "/home/peter/DevCode/Beavyr/target/benchmarks/nh3_ch_com_scan_2026-11-03/p03_4.285714A_behemoth_cc_atz_ccsd_not_converged"
+  }
+]

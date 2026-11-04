@@ -1,0 +1,806 @@
+ **********************************************************************
+                          MRCC program system
+ **********************************************************************
+ 
+                              Written by
+     Mihaly Kallay, Peter R. Nagy, David Mester, Laszlo Gyevi-Nagy,
+        Jozsef Csoka, P. Bernat Szabo, Zoltan Rolik, Gyula Samu,
+      Bence Hegely, Bence Ladoczki, Klara Petrov, Jozsef Csontos,
+     Adam Ganyecz, Istvan Ladjanszki, Lorant Szegedy, Mate Farkas,
+          Pal D. Mezei, Reka A. Horvath, and Balazs D. Lorincz
+ 
+        Department of Physical Chemistry and Materials Science
+            Budapest University of Technology and Economics
+                  Budapest P.O.Box 91, H-1521 Hungary
+ 
+                              www.mrcc.hu
+ 
+                            Version: 26.1.3
+
+ ************************ 2026-11-03 19:56:19 *************************
+ Executing minp...
+
+ Reading input from MINP...
+ 
+ Input file:
+ 
+calc=dRPA
+basis=cc-pVDZ
+charge=0
+mult=1
+scftype=RHF
+mem=768MB
+core=frozen
+symm=off
+unit=angs
+molden=on
+dft=PBE0
+geom=xyz
+3
+
+O 0.00000000000000 0.00000000000000 0.00000000000000
+H 0.75800000000000 0.00000000000000 0.59000000000000
+H -0.75800000000000 0.00000000000000 0.59000000000000
+ 
+ 
+ Checking keyword combinations...
+ 
+ Keywords:
+ 
+ active=none
+ agrid=ld0006-ld0590
+ agrid_pssp=ld0006-ld0194
+ agrid_pssp_sm=ld0006-ld0074
+ ao_trunc=off
+ ao_trunc_tol=1e-4
+ basis=cc-pvdz
+ basis_sm=none
+ basopt=off
+ bfbasis=none
+ bfgsmem=10
+ bfgstol=1.0d-3
+ bfgscimem=5
+ boysalg=jacobi
+ bpcompo=0.985
+ bpcompv=0.98
+ bpdfo=0.985
+ bpocc=0.985
+ bppdo=0.985
+ bppdv=0.98
+ bpedo=0.985
+ bpedv=0.98
+ bp_subsyso=0.95
+ bp_subsysv=0.95
+ cabscorr=off
+ cabsdom=bplarge
+ cabsdual=off
+ calc=drpa
+ ccmaxit=50
+ ccprog=mrcc
+ ccsdalg=disk
+ ccsdmkl=seq
+ ccsdrest=off
+ ccsdthreads=2
+ cctol=6
+ charge=0
+ cialg=disk
+ ciguess=off
+ cmpgrp=auto
+ codegen=on
+ comprest=off
+ coord_sys=ric
+ core=frozen
+ corembed=off
+ csapprox=off
+ cvs=off
+ dboc=off
+ deltaf12=off
+ delocsomofact=
+ dendec=cholesky
+ dens=0
+ denscorr=0
+ dfalg=lineq
+ dfbasis_cab=none
+ dfbasis_cor=auto
+ dfbasis_scf=auto
+ dfbasis_scf_sm=auto
+ dfintran=drpa
+ df_trunc=off
+ df_trunc_corr=off
+ df_trunc_corr_tol=5e-4
+ df_trunc_tol=5e-4
+ dft=pbe0
+ dhexc=adc(2)
+ diag=david
+ docc=
+ domrad=10.d0
+ drpaalg=fit
+ dual=off
+ dual_df=off
+ dyson=off
+ ecp=auto
+ edisp=off
+ edisp_embed=off
+ embed=off
+ epairestfact=off
+ epairscale=1.d0
+ etemp=300
+ epert=none
+ eps=
+ espcharge=off
+ excrad=0.d0
+ excrad_f12=0.d0
+ excrad_fin=0.000000000D+00
+ fastdbbsc=v2
+ fitting=coulomb
+ fmm=off
+ fmmord=8
+ fnonorb=
+ freq=off
+ gamma=1.d0
+ gauss=spher
+ geom=xyz
+ gopt=off
+ ghost=none
+ gtol=7
+ grdens=off
+ grid=auto
+ grid_sm=auto
+ gridbatch_cos=2000
+ grtol=10
+ guido_ct=off
+ hamilton=nonrel
+ hl_scfalg=auto
+ iface=none
+ incore=off
+ intalg=auto
+ ip_ea=off
+ itol=10
+ laptol=1.d-2
+ lccoporder=trffirst
+ lcorthr=normal
+ lccrest=off
+ ldfgrad_tol=8
+ lmp2dens=on
+ lnoepso=0.d0
+ lnoepsv=1e-5
+ localcc=off
+ localcorrsymm=off
+ locintrf=disk
+ mact=
+ maxact=off
+ maxdim=200
+ maxex=0
+ maxmicroit=100
+ mcscfiguess=hf
+ mem=768mb
+ mmprog=
+ molden=on
+ mp2ongrid=off
+ mpitasks=1
+ mulmet=0
+ mult=1
+ nab=off
+ nacto=0
+ nactv=0
+ naf_amp=3.16d-3
+ naf_cor=off
+ naf_f12=off
+ naf_scf=off
+ nafalg=albe
+ nafdens=off
+ naftyp=
+ nchol=auto
+ ndeps=1e-3
+ nevpt=
+ nstate=1
+ nsing=0
+ nto=off
+ ntrip=0
+ num_grad=off
+ occ=
+ occri=off
+ oniom=off
+ oniom_eechg=off
+ oniom_pcm=off
+ oniom_qcorr=off
+ optalg=
+ optmaxit=50
+ optetol=1e-6
+ optex=0
+ optgtol=1e-4
+ optstol=1e-3
+ orblocc=off
+ orbloce=off
+ orbloco=off
+ orblocv=off
+ orblocguess=cholesky
+ osveps=1e-3
+ ovirt=off
+ ovltol=1e-7
+ ovosnorb=80.0
+ pao_subsys_tol=1e-3
+ pao_tol=1e-3
+ pcm=off
+ popul=off
+ pressure=100000
+ pssp=off
+ ptfreq=0.0
+ ptthreads=2
+ qmreg=
+ qmmm=off
+ qro=off
+ qscf=off
+ redcost_exc=off
+ redcost_tddft=off
+ refdet=none
+ rest=0
+ rgrid=log3
+ rism=off
+ rohfcore=semicanonical
+ rohftype=semicanonical
+ scfalg=auto
+ scf_conv=auto
+ scfdamp=0.7d0
+ scfdamp_mode=1
+ scfdamp_end=3
+ scfdamp_dampstep=0.d0
+ scfdamp_dtol=0.0d0
+ scfdamp_maxfact=0.7d0
+ scfdamp_minfact=0.7d0
+ scfdiis=on
+ scfdiis_dtol=0.0d0
+ scfdiis_end=50
+ scfdiis_start=2
+ scfdiis_step=1
+ scfdiis_watch=off
+ scfdiis_wrange=10
+ scfdiis_wlimit=5
+ scfdiis_delmax=2
+ scfdtol=7
+ scfext=10
+ scfguessdens=
+ scfiguess=sad
+ scfloc=off
+ scflshift=0.20
+ scflshift_end=8
+ scflshift_dtol=0.0
+ scflshift_gaptol=0.20
+ scfmaxit=50
+ scftype=rhf
+ scftype_low=rhf
+ scftype_high=rhf
+ scftol=6
+ scspe=1.d0
+ scsph=1.d0
+ scsps=1.2d0
+ scsps_t=1.2d0
+ scspt=0.33333333333333
+ scspt_t=0.33333333333333
+ scspv=1.d0
+ spairtol=1e-4
+ sqmprog=
+ subminp=top
+ subsys_bopu=on
+ symm=0
+ talg=occ
+ temp=298.15
+ test=off
+ tfunc=off
+ theodore=off
+ tlmo=0.999
+ tpao=0.94
+ tprint=off
+ uncontract=off
+ unit=angs
+ usedisk=2
+ verbosity=2
+ wpairtol=0.100000000E-05
+
+ ************************ 2026-11-03 19:56:19 *************************
+ Executing integ...
+
+ Allocation of 768.0 Mbytes of memory...
+ 
+ 
+ Number of atoms:                  3
+ Charge:                           0
+ Number of electrons:             10
+ Number of core electrons:         2
+ Spin multiplicity:                1
+ 
+                 Cartesian coordinates [bohr]      Atomic mass [AMU]  Z
+   1  O     0.00000000    0.00000000    0.00000000    15.994915       8
+   2  H     1.43241240    0.00000000    1.11493841     1.007825       1
+   3  H    -1.43241240    0.00000000    1.11493841     1.007825       1
+ 
+ This molecule is an asymmetric top.
+ This molecule is planar.
+ 
+ Rotational constants [cm-1]: 
+     27.053455114895     14.556030177176      9.463969724334
+ 
+ Point group: C2v 
+ Computational point group: C1  
+ 
+ Cartesian coordinates in standard orientation [bohr]
+   1  O     0.00000000    0.00000000   -0.12477819
+   2  H     0.00000000    1.43241240    0.99016022
+   3  H     0.00000000   -1.43241240    0.99016022
+ 
+ Nuclear repulsion energy [au]:          9.163594877415
+ 
+ Density functional: PBE hybrid functional (PBE0)
+ 
+ 
+ Basis set information:
+ 
+ Maximum angular momentum: f
+ Maximum number of contracted Gaussians:   10
+ Maximum number of primitive Gaussians:    10
+ Spherical harmonic GTOs are used.
+ 
+ 
+ Conventional basis set:
+ 
+   1  O  cc-pvdz [ 9s 4p 1d | 3s 2p 1d ]
+   2  H  cc-pvdz [ 4s 1p | 2s 1p ]
+   3  H  cc-pvdz [ 4s 1p | 2s 1p ]
+ 
+ Total number of basis functions:     24
+ 
+ 
+ Fitting basis set for the SCF calculation:
+ 
+   1  O  cc-pvdz-ri-jk [ 10s 7p 5d 2f | 10s 7p 5d 2f ]
+   2  H  cc-pvdz-ri-jk [ 4s 3p 2d | 4s 3p 2d ]
+   3  H  cc-pvdz-ri-jk [ 4s 3p 2d | 4s 3p 2d ]
+ 
+ Total number of basis functions:    116
+ 
+ 
+ Fitting basis set for the correlation calculation:
+ 
+   1  O  cc-pvdz-ri [ 7s 5p 4d 2f | 7s 5p 4d 2f ]
+   2  H  cc-pvdz-ri [ 3s 2p 1d | 3s 2p 1d ]
+   3  H  cc-pvdz-ri [ 3s 2p 1d | 3s 2p 1d ]
+ 
+ Total number of basis functions:     84
+ 
+ 
+ Initializing the SAD routines for the initial guess...
+ Checking the files required for the initial guess...
+ Density files have not been found for the initial guess.
+ Generating SCFDENSITIES.O.cc-pvdz.0
+ Generating SCFDENSITIES.H.cc-pvdz.0
+ CPU time [min]:     0.005                   Wall time [min]:     0.037
+ 
+ Character table for point group C1:
+ 
+          E  
+    A     1
+ 
+ Number of basis functions per irrep:
+    A      24
+ 
+ MRCC is compiled with Libxc support.
+ Libxc version: 7.0.0
+ Reference: S. Lehtola, C. Steigemann, M. J.T. Oliveira, and M. A.L. Marques.,  SoftwareX 7, 1–5 (2018)
+ DOI: 10.1016/j.softx.2017.11.002
+ 
+ Constructing integration grid for DFT...
+ Angular integration grid: adaptive 590-point Lebedev quadrature
+ Radial integration grid: Log3 quadrature
+ Total number of grid points: 21230       
+ CPU time [min]:     0.010                   Wall time [min]:     0.041
+ 
+ Calculation of overlap integrals...
+ CPU time [min]:     0.010                   Wall time [min]:     0.041
+ 
+ Calculation of the square root of the overlap matrix...
+ Minimum eigenvalue of the overlap matrix: 0.176470E-01
+ CPU time [min]:     0.010                   Wall time [min]:     0.041
+ 
+ Calculation of kinetic energy integrals...
+ CPU time [min]:     0.010                   Wall time [min]:     0.041
+ Calculation of nuclear attraction integrals...
+ CPU time [min]:     0.010                   Wall time [min]:     0.041
+ 
+ Calculation of prescreening integrals...
+ CPU time [min]:     0.011                   Wall time [min]:     0.041
+ 
+ Calculation of two-center Coulomb integrals...
+   1% done.
+  24% done.
+  37% done.
+  51% done.
+  64% done.
+  84% done.
+ 100% done.
+ CPU time [min]:     0.011                   Wall time [min]:     0.042
+ 
+ Cholesky decomposition of the two-center matrix...
+ Calculation of three-center Coulomb integrals...
+   2% done.
+  15% done.
+  35% done.
+  63% done.
+  77% done.
+ 100% done.
+ CPU time [min]:     0.012                   Wall time [min]:     0.042
+
+ ************************ 2026-11-03 19:56:21 *************************
+ Executing scf...
+
+ Allocation of 768.0 Mbytes of memory...
+ ======================================================================
+ ITERATION STEP   1
+ CPU time [min]:     0.005                   Wall time [min]:     0.005
+ 
+ Constructing Fock-matrix...
+ Number of integral batches:    1
+ Occupied indices per batch:    5
+ CPU time [min]:     0.005                   Wall time [min]:     0.005
+ 
+ Calculating the exchange-correlation matrix...
+ Exchange-correlation energy [au]:     -6.910492144363
+ CPU time [min]:     0.008                   Wall time [min]:     0.007
+ 
+ RMS of [F,P]:                                         0.10213185870185
+ RMS of difference density:                            0.02846348568336
+ Gap [au]:  0.40560126
+ ALPHA OCC:   5
+ BETA  OCC:   5
+ 
+ ***KOHN-SHAM ENERGY IN STEP   1 IS           -76.0486640810208883 [AU]
+ ======================================================================
+ ITERATION STEP   2
+ CPU time [min]:     0.009                   Wall time [min]:     0.008
+ 
+ Constructing Fock-matrix...
+ Number of integral batches:    1
+ Occupied indices per batch:    5
+ CPU time [min]:     0.009                   Wall time [min]:     0.008
+ 
+ Calculating the exchange-correlation matrix...
+ Exchange-correlation energy [au]:     -6.982394956780
+ CPU time [min]:     0.013                   Wall time [min]:     0.010
+ 
+ RMS of [F,P]:                                         0.06951205032770
+ RMS of difference density:                            0.02133948784995
+ Gap [au]:  0.37648369
+ ALPHA OCC:   5
+ BETA  OCC:   5
+ 
+ ***KOHN-SHAM ENERGY IN STEP   2 IS           -76.2133739361882760 [AU]
+ ======================================================================
+ ITERATION STEP   3
+ CPU time [min]:     0.013                   Wall time [min]:     0.010
+ 
+ Constructing Fock-matrix...
+ Number of integral batches:    1
+ Occupied indices per batch:    5
+ CPU time [min]:     0.014                   Wall time [min]:     0.010
+ 
+ Calculating the exchange-correlation matrix...
+ Exchange-correlation energy [au]:     -7.011012645760
+ CPU time [min]:     0.018                   Wall time [min]:     0.012
+ 
+ RMS of [F,P]:                                         0.04772677615675
+ RMS of difference density:                            0.01437954737417
+ Gap [au]:  0.35621275
+ ALPHA OCC:   5
+ BETA  OCC:   5
+ 
+ ***KOHN-SHAM ENERGY IN STEP   3 IS           -76.2824769702291690 [AU]
+ ======================================================================
+ ITERATION STEP   4
+ CPU time [min]:     0.018                   Wall time [min]:     0.012
+ 
+ Constructing Fock-matrix...
+ Number of integral batches:    1
+ Occupied indices per batch:    5
+ CPU time [min]:     0.018                   Wall time [min]:     0.012
+ 
+ Calculating the exchange-correlation matrix...
+ Exchange-correlation energy [au]:     -7.005809658775
+ CPU time [min]:     0.023                   Wall time [min]:     0.016
+ 
+ RMS of [F,P]:                                         0.03504041448617
+ RMS of difference density:                            0.05389078706968
+ Gap [au]:  0.37003106
+ ALPHA OCC:   5
+ BETA  OCC:   5
+ 
+ ***KOHN-SHAM ENERGY IN STEP   4 IS           -76.3031911688747755 [AU]
+ ======================================================================
+ ITERATION STEP   5
+ CPU time [min]:     0.023                   Wall time [min]:     0.016
+ 
+ Constructing Fock-matrix...
+ Number of integral batches:    1
+ Occupied indices per batch:    5
+ CPU time [min]:     0.024                   Wall time [min]:     0.016
+ 
+ Calculating the exchange-correlation matrix...
+ Exchange-correlation energy [au]:     -7.038487735551
+ CPU time [min]:     0.026                   Wall time [min]:     0.017
+ 
+ RMS of [F,P]:                                         0.00566758307468
+ RMS of difference density:                            0.00869263920532
+ Gap [au]:  0.37816641
+ ALPHA OCC:   5
+ BETA  OCC:   5
+ 
+ ***KOHN-SHAM ENERGY IN STEP   5 IS           -76.3361780116737521 [AU]
+ ======================================================================
+ ITERATION STEP   6
+ CPU time [min]:     0.026                   Wall time [min]:     0.017
+ 
+ Constructing Fock-matrix...
+ Number of integral batches:    1
+ Occupied indices per batch:    5
+ CPU time [min]:     0.027                   Wall time [min]:     0.018
+ 
+ Calculating the exchange-correlation matrix...
+ Exchange-correlation energy [au]:     -7.054135523813
+ CPU time [min]:     0.036                   Wall time [min]:     0.027
+ 
+ RMS of [F,P]:                                         0.00262930059389
+ RMS of difference density:                            0.00306193994549
+ Gap [au]:  0.37120489
+ ALPHA OCC:   5
+ BETA  OCC:   5
+ 
+ ***KOHN-SHAM ENERGY IN STEP   6 IS           -76.3382974043429527 [AU]
+ ======================================================================
+ ITERATION STEP   7
+ CPU time [min]:     0.037                   Wall time [min]:     0.027
+ 
+ Constructing Fock-matrix...
+ Number of integral batches:    1
+ Occupied indices per batch:    5
+ CPU time [min]:     0.037                   Wall time [min]:     0.027
+ 
+ Calculating the exchange-correlation matrix...
+ Exchange-correlation energy [au]:     -7.042323557545
+ CPU time [min]:     0.040                   Wall time [min]:     0.030
+ 
+ RMS of [F,P]:                                         0.00182485708034
+ RMS of difference density:                            0.00454183952497
+ Gap [au]:  0.37110268
+ ALPHA OCC:   5
+ BETA  OCC:   5
+ 
+ ***KOHN-SHAM ENERGY IN STEP   7 IS           -76.3386099328078558 [AU]
+ ======================================================================
+ ITERATION STEP   8
+ CPU time [min]:     0.040                   Wall time [min]:     0.030
+ 
+ Constructing Fock-matrix...
+ Number of integral batches:    1
+ Occupied indices per batch:    5
+ CPU time [min]:     0.040                   Wall time [min]:     0.030
+ 
+ Calculating the exchange-correlation matrix...
+ Exchange-correlation energy [au]:     -7.042656200604
+ CPU time [min]:     0.047                   Wall time [min]:     0.036
+ 
+ RMS of [F,P]:                                         0.00027192751301
+ RMS of difference density:                            0.00087576439425
+ Gap [au]:  0.37106203
+ ALPHA OCC:   5
+ BETA  OCC:   5
+ 
+ ***KOHN-SHAM ENERGY IN STEP   8 IS           -76.3389099896789389 [AU]
+ ======================================================================
+ ITERATION STEP   9
+ CPU time [min]:     0.048                   Wall time [min]:     0.036
+ 
+ Constructing Fock-matrix...
+ Number of integral batches:    1
+ Occupied indices per batch:    5
+ CPU time [min]:     0.048                   Wall time [min]:     0.037
+ 
+ Calculating the exchange-correlation matrix...
+ Exchange-correlation energy [au]:     -7.042530650681
+ CPU time [min]:     0.050                   Wall time [min]:     0.038
+ 
+ RMS of [F,P]:                                         0.00001147819571
+ RMS of difference density:                            0.00003105452091
+ Gap [au]:  0.37105677
+ ALPHA OCC:   5
+ BETA  OCC:   5
+ 
+ ***KOHN-SHAM ENERGY IN STEP   9 IS           -76.3389172662207329 [AU]
+ ======================================================================
+ ITERATION STEP  10
+ CPU time [min]:     0.050                   Wall time [min]:     0.038
+ 
+ Constructing Fock-matrix...
+ Number of integral batches:    1
+ Occupied indices per batch:    5
+ CPU time [min]:     0.050                   Wall time [min]:     0.038
+ 
+ Calculating the exchange-correlation matrix...
+ Exchange-correlation energy [au]:     -7.042526356815
+ CPU time [min]:     0.053                   Wall time [min]:     0.040
+ 
+ RMS of [F,P]:                                         0.00000040151791
+ RMS of difference density:                            0.00000132023399
+ Gap [au]:  0.37105650
+ ALPHA OCC:   5
+ BETA  OCC:   5
+ 
+ ***KOHN-SHAM ENERGY IN STEP  10 IS           -76.3389172775805065 [AU]
+ ======================================================================
+ ITERATION STEP  11
+ CPU time [min]:     0.053                   Wall time [min]:     0.040
+ 
+ Constructing Fock-matrix...
+ Number of integral batches:    1
+ Occupied indices per batch:    5
+ CPU time [min]:     0.054                   Wall time [min]:     0.040
+ 
+ Calculating the exchange-correlation matrix...
+ Exchange-correlation energy [au]:     -7.042525842151
+ CPU time [min]:     0.061                   Wall time [min]:     0.047
+ 
+ RMS of [F,P]:                                         0.00000007787571
+ RMS of difference density:                            0.00000025155215
+ Gap [au]:  0.37105647
+ ALPHA OCC:   5
+ BETA  OCC:   5
+ 
+ ***KOHN-SHAM ENERGY IN STEP  11 IS           -76.3389172775934952 [AU]
+ ======================================================================
+ ITERATION STEP  12
+ CPU time [min]:     0.061                   Wall time [min]:     0.047
+ 
+ Constructing Fock-matrix...
+ Number of integral batches:    1
+ Occupied indices per batch:    5
+ CPU time [min]:     0.062                   Wall time [min]:     0.047
+ 
+ Calculating the exchange-correlation matrix...
+ Exchange-correlation energy [au]:     -7.042525806261
+ CPU time [min]:     0.064                   Wall time [min]:     0.049
+ 
+ RMS of [F,P]:                                         0.00000000472153
+ RMS of difference density:                            0.00000001446940
+ Gap [au]:  0.37105647
+ ALPHA OCC:   5
+ BETA  OCC:   5
+ 
+ ***KOHN-SHAM ENERGY IN STEP  12 IS           -76.3389172775941063 [AU]
+ ======================================================================
+ 
+ SUCCESS...
+ THE SCF ITERATION HAS CONVERGED!
+ 
+                   A   
+ FINAL ALPHA OCC:   5
+ FINAL BETA  OCC:   5
+ 
+ ***FINAL KOHN-SHAM ENERGY:           -76.3389172775941063 [AU]
+ 
+ Calculating reference energy with Kohn-Sham orbitals...
+ Constructing Fock-matrix...
+ Number of integral batches:    1
+ Occupied indices per batch:    5
+ CPU time [min]:     0.064                   Wall time [min]:     0.050
+ 
+ Reference energy:                    -76.0243175634671076 [AU]
+ CPU time [min]:     0.064                   Wall time [min]:     0.050
+ 
+ Calculating rSE correction...
+ rSE correction:                       -0.0020006402522897 [AU]
+ CPU time [min]:     0.064                   Wall time [min]:     0.050
+
+ ************************ 2026-11-03 19:56:24 *************************
+ Executing integ...
+
+ Allocation of 768.0 Mbytes of memory...
+ 
+ 
+ Basis set information:
+ 
+ Maximum angular momentum: f
+ Maximum number of contracted Gaussians:   10
+ Maximum number of primitive Gaussians:    10
+ Spherical harmonic GTOs are used.
+ 
+ 
+ Conventional basis set:
+ 
+   1  O  cc-pvdz [ 9s 4p 1d | 3s 2p 1d ]
+   2  H  cc-pvdz [ 4s 1p | 2s 1p ]
+   3  H  cc-pvdz [ 4s 1p | 2s 1p ]
+ 
+ Total number of basis functions:     24
+ 
+ 
+ Fitting basis set for the SCF calculation:
+ 
+   1  O  cc-pvdz-ri-jk [ 10s 7p 5d 2f | 10s 7p 5d 2f ]
+   2  H  cc-pvdz-ri-jk [ 4s 3p 2d | 4s 3p 2d ]
+   3  H  cc-pvdz-ri-jk [ 4s 3p 2d | 4s 3p 2d ]
+ 
+ Total number of basis functions:    116
+ 
+ 
+ Fitting basis set for the correlation calculation:
+ 
+   1  O  cc-pvdz-ri [ 7s 5p 4d 2f | 7s 5p 4d 2f ]
+   2  H  cc-pvdz-ri [ 3s 2p 1d | 3s 2p 1d ]
+   3  H  cc-pvdz-ri [ 3s 2p 1d | 3s 2p 1d ]
+ 
+ Total number of basis functions:     84
+ 
+ 
+ Calculation of prescreening integrals...
+ CPU time [min]:     0.002                   Wall time [min]:     0.002
+ 
+ Calculation of two-center Coulomb integrals...
+   1% done.
+  25% done.
+  45% done.
+  60% done.
+  76% done.
+  89% done.
+ 100% done.
+ CPU time [min]:     0.002                   Wall time [min]:     0.003
+ 
+ Cholesky decomposition of the inverse of the two-center matrix...
+ CPU time [min]:     0.002                   Wall time [min]:     0.003
+ 
+ Calculation of three-center Coulomb integrals...
+   2% done.
+  15% done.
+  35% done.
+  63% done.
+  77% done.
+ 100% done.
+ CPU time [min]:     0.002                   Wall time [min]:     0.005
+
+ ************************ 2026-11-03 19:56:25 *************************
+ Executing drpa...
+
+ Three-index integral transformation and DF-dRPA calculation
+ Allocation of 768.0 Mbytes of memory...
+ 
+ 
+ Cholesky-decomposition of energy denominators...
+ Number of Cholesky vectors: 6   
+ Minimal memory requirement for (ai|P) integrals:     0.3 MB
+
+ Calculating (ai|P) integrals...
+ Number of integral batches:    1
+ Occupied indices per batch:    4
+ 
+ Transforming integrals of batch 1...
+ CPU time [min]:     0.001                   Wall time [min]:     0.001
+ 
+ Starting dRPA iteration...
+ 
+ Iter.      Convergence        dRPA energy [au]    CPU [min]  Wall [min]
+   1       0.241514235151      -76.287929467378      0.001      0.002
+   2       0.105946678704      -76.287203723748      0.001      0.002
+   3       0.019249294782      -76.311033045157      0.001      0.002
+   4       0.007195966288      -76.303208351996      0.001      0.002
+   5       0.000874060261      -76.305627984238      0.001      0.002
+   6       0.000064224719      -76.305384501035      0.001      0.002
+   7       0.000004291334      -76.305390494894      0.001      0.002
+   8       0.000000700738      -76.305390693738      0.001      0.002
+ 
+ Iteration has converged in  8 steps.
+ 
+ Reference energy [au]:                       -76.024317563467
+ DF-dRPA singlet pair energy [au]:             -0.140536565136
+ DF-dRPA triplet pair energy [au]:             -0.140536565136
+ DF-dRPA correlation energy [au]:              -0.281073130271
+ DF-dRPA energy [au]:                         -76.305390693738
+ 
+ ************************ 2026-11-03 19:56:25 *************************
+                      Normal termination of mrcc.
+ **********************************************************************

@@ -1,0 +1,171 @@
+MRCC engine integration — 2026-11-03
+==================================
+
+Scope
+-----
+Added MRCC to the Quantum Chemistry panel for energies and excited states,
+then added Beavyr-driven minimum optimization where a supported analytical
+MRCC gradient is available, as requested. No Hessian, TS, scan or MECP support
+is claimed for this integration. No commits or pushes were made.
+
+The executable is selected by the user in Configure and remembered in
+mrcc_path.txt. There is no installation-specific executable path in the
+application. The local installation used for validation was
+/home/peter/Programs/MRCC/binary/dmrcc, which reports version 26.1.3.
+
+Methods and jobs
+----------------
+Ground-state energies:
+  HF, DFT, MP2, RI-MP2, MP2-F12, CCSD, CCSD(T), UCCSD(T), CCSD-F12,
+  CCSD(T)-F12, CCSDT, CCSDT(Q), CCSDTQ, CASSCF, NEVPT2 and dRPA.
+
+UCCSD(T) means CCSD(T) with an unrestricted HF reference, not unitary CC.
+Other compatible methods automatically use UHF for multiplicity > 1, and
+have an unrestricted-reference setting. CASSCF uses MCSCF instead.
+NEVPT2 reports the strongly contracted energy; the PC-NEVPT2 energy is
+retained in the native output but is not silently substituted.
+MRCC's CCSD-F12 and CCSD(T)-F12 labels use its CCSD(F12*) and
+CCSD(F12*)(T) energies, respectively. Scaled triples energies printed by
+MRCC remain in the native output.
+
+Excited states:
+  HF: CIS (TDA enabled) or TDHF.
+  DFT: TDA or full TDDFT.
+  ADC(2), SCS-ADC(2), SOS-ADC(2).
+
+The excited-state interface currently requires a restricted closed-shell
+singlet. The requested count refers to excited states; MINP's nstate also
+includes the ground state, so it receives requested_count + 1. Final ADC
+roots replace preliminary CIS/TDHF roots. The parser reads final length-
+gauge oscillator strengths and transition dipoles; it never substitutes
+preliminary strengths when the final correlated table is absent.
+
+Analytical gradients and Beavyr optimization:
+  HF; PBE, PBE0, BLYP, B3LYP, BP86, TPSS, TPSSh, M06 and M06-2X DFT;
+  closed-shell RHF RI-MP2; CCSD; CCSDT; CCSDTQ.
+
+Conventional MP2 is offered as energy; choose RI-MP2 for its supported
+analytical gradient. Perturbative CCSD(T), CCSDT(Q), F12, CASSCF/NEVPT2,
+dRPA and ADC optimization are not offered. No numerical-gradient fallback
+is performed. The existing Beavyr optimizer provides the coordinate choices,
+convergence tolerances, iteration limits, trajectory and convergence status.
+MRCC's gradient in ORIGINAL ORIENTATION is required and read in Hartree/bohr.
+
+Core correlation and inputs
+---------------------------
+Frozen core is the default. Correlate core electrons writes core=corr and
+requires a recognized cc-pCVXZ or cc-pwCVXZ orbital basis, including augmented
+variants. Valence-only bases are rejected when core correlation is selected.
+For H/He, an explicit atomtype basis block selects the corresponding valence
+member, since these atoms have no core shell. Other atoms retain the selected
+core-correlation basis.
+
+Core-correlated F12 is not enabled in this interface. Core-fitting F12
+auxiliary basis sets in the installation are not core-correlation orbital
+bases; they must not be used as such.
+
+CASSCF and NEVPT2 use the existing active-electron/orbital controls. Electron
+count, active-space parity, charge/multiplicity and atom coordinates are
+validated. Dummy atoms are removed before generating the input.
+
+MINP is generated with explicit charge, multiplicity, basis, reference,
+resources, units and C1 symmetry. The input editor permits selected extra
+SCF/CC convergence controls, but scientific settings/geometry must remain
+consistent with the panel and cannot bypass its validation.
+
+Execution and results
+---------------------
+Each job writes MINP in its own scratch directory and launches the chosen
+dmrcc directly, without an input filename argument or a shell. The executable's
+parent is prepended to PATH ONLY in its child process so MRCC can find its
+companion programs. OMP_NUM_THREADS and MKL_NUM_THREADS follow the selected
+core count. No shell startup files, global environment or ORCA MPI settings
+are modified.
+
+Cancellation terminates the MRCC process group, including companion programs.
+Live Output discovers mrcc.out/mrcc.err. Input, native output and analytical
+gradients are available to save; the existing complete-calculation export
+retains the run directory and metadata. Abnormal termination, non-convergence,
+missing requested-level energies and incomplete/non-finite gradients are
+errors. A missing correlated energy is never replaced with an HF/MP2 value.
+
+Write Orbitals saves MRCC's MOLDEN file. MRCC rotates/translates geometry to
+standard orientation. Automatic Surface Tools loading still requires a
+matching displayed geometry; otherwise the existing mismatch message is
+shown and the saved file can be loaded separately. No MO rotation or change
+to the user's displayed geometry was introduced. A general GUI smoke test
+with interactive display/copy/save clicks was not performed in this task.
+
+Verification
+------------
+All compilation/tests and native runs were restricted to CPU IDs 0–3.
+Native calculations used two OpenMP/MKL threads and 768 MB in the integration
+test (512 MB for the initial H2 probe).
+
+Automated regression suite: 1,611 passed, 0 failed, 51 ignored.
+The ignored tests include explicitly opt-in external/GPU/timing tests; the
+new native MRCC test is executed separately, not counted as an automatic pass.
+
+MRCC unit tests cover:
+  method-specific final energies, including higher-CC outputs that print MP2
+  after the requested energy; non-convergence with normal termination;
+  non-finite/incomplete data; analytical-gradient orientation and dimensions;
+  final ADC energies/strengths; missing final correlated strengths; valid job
+  restrictions; core basis enforcement and hydrogen mapping; charge/spin/CAS
+  checks; dummy removal; input consistency and direct executable invocation.
+  A subprocess cancellation test checks that companion work does not survive.
+
+Initial standalone native calculations and the first Beavyr integration pass
+validated all 19 choices, DFT TDA/full TDDFT, and all six analytical-gradient
+routes. The first integration pass stopped on an incorrect TEST assertion:
+MRCC prints the chemical core-electron count even with core=corr. The assertion
+now checks the correlated occupied-orbital count (5 for all-electron water,
+compared with 4 when the O 1s orbital is frozen).
+
+Final native integration: PASS (159.61 seconds).
+  All 19 method choices completed with finite requested-level energies and
+  requested MOLDEN files. Both DFT TDA/full-TDDFT jobs returned two roots.
+  Analytical gradients completed for HF, PBE0 DFT, RI-MP2, CCSD, CCSDT and CCSDTQ.
+  Open-shell OH UCCSD(T) completed: -74.387154232683 Hartree.
+  Rotated-water HF derivative: analytical -0.1135017722 Hartree/bohr;
+  central finite difference -0.1135017723186138 Hartree/bohr (step 1e-4 bohr).
+  All-electron water CCSD(T)/cc-pCVDZ: -76.282346837026 Hartree;
+  five occupied orbitals were correlated, including the O 1s orbital.
+  Beavyr/MRCC HF/STO-3G H2 optimization reached convergence:
+  final energy -1.1175058801823092 Hartree, with a saved trajectory.
+  These results are integration smoke tests, not accuracy/basis benchmarks.
+Final non-test application compilation check: PASS, no compiler warnings.
+Command: taskset -c 0-3 cargo check --offline --locked -j 4
+Final full-suite command:
+  taskset -c 0-3 cargo test --offline --locked -j 4 -- --test-threads=1
+Native opt-in test:
+  mrcc_native_energy_spectrum_gradient_and_optimization
+  BEAVYR_MRCC_EXECUTABLE points to the selected local dmrcc executable.
+The installed desktop application was not replaced; rebuild/reinstall to use
+these source changes.
+
+Evidence and source references
+------------------------------
+Final logs and selected native MINP/output/gradient files:
+  reports/testing_evidence_2026-11-03/mrcc/
+Native-output parser fixtures:
+  tests/fixtures/mrcc/
+Core implementation:
+  src/qchem_interfaces/mrcc.rs
+  src/qchem_interfaces/mrcc_output.rs
+  src/qchem_panel/mrcc_job.rs
+
+Capability/input references:
+  /home/peter/Programs/MRCC/manual.pdf (sections 6.2, 6.4 and keyword reference)
+  /home/peter/Programs/MRCC/source/MTEST/
+  /home/peter/Programs/MRCC/source/{dmrcc,prop,scf,ccsd,mrcc,nevpt}.f
+  https://www.mrcc.hu/index.php/forum/updates/416-new-mrcc-version-26-1-0
+Local source/native execution was authoritative for the installed version.
+
+Reversibility
+-------------
+Before-change copies of affected existing files are retained under
+  target/change-backups/mrcc-2026-11-03/
+Existing uncommitted PES/Hessian changes were preserved. No changes were made
+to reinstall.sh, Cargo.toml, Cargo.lock or packaging/build-deb.sh. No commits,
+pushes, installation changes or edits to MRCC's installation were performed.

@@ -174,6 +174,16 @@ pub fn method_keyword<'a>(method: QcMethod, functional: &'a str) -> &'a str {
         QcMethod::DlpnoCcsdT => "DLPNO-CCSD(T)",
         QcMethod::CcsdTF12 => "CCSD(T)-F12",
         // Not ORCA methods; the panel never offers them for this program.
+        QcMethod::Ccsd
+        | QcMethod::CcsdF12
+        | QcMethod::UccsdT
+        | QcMethod::Ccsdt
+        | QcMethod::CcsdtQ
+        | QcMethod::Ccsdtq
+        | QcMethod::Drpa
+        | QcMethod::Adc2
+        | QcMethod::ScsAdc2
+        | QcMethod::SosAdc2 => "BEAVYR_UNSUPPORTED_METHOD",
         QcMethod::Gfn1
         | QcMethod::Gfn2
         | QcMethod::GfnFf

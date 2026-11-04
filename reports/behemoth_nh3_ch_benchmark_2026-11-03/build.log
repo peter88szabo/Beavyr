@@ -1,0 +1,44 @@
+warning: use of deprecated constant `std::f64::NAN`: replaced by the `NAN` associated constant on `f64`
+  --> src/hamiltonian/acp_hamiltonian/acp1.rs:49:36
+   |
+49 |         let mut e_prev = std::f64::NAN;
+   |                                    ^^^
+   |
+   = note: `#[warn(deprecated)]` on by default
+
+warning: type `MolecularSphericalBasis` is more private than the item `project_into_target_basis`
+   --> src/solver/minus_one_electron_guess.rs:108:1
+    |
+108 | / pub fn project_into_target_basis(
+109 | |     source: &RemovedElectronOrbitals,
+110 | |     target: &Molecule,
+111 | |     target_overlap: &Array2<f64>,
+...   |
+115 | |     overlap_eigenvalue_floor: f64,
+116 | | ) -> Result<(Array2<f64>, Array2<f64>)> {
+    | |_______________________________________^ function `project_into_target_basis` is reachable at visibility `pub`
+    |
+note: but type `MolecularSphericalBasis` is only usable at visibility `pub(crate)`
+   --> src/integrals/molecular_spherical_basis.rs:22:1
+    |
+ 22 | pub(crate) struct MolecularSphericalBasis {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = note: `#[warn(private_interfaces)]` on by default
+
+warning: `Behemoth` (lib) generated 2 warnings
+warning: unused import: `Behemoth::normalmode::fd_hessian::numerical_hessian_from_gradients`
+  --> src/main.rs:70:5
+   |
+70 | use Behemoth::normalmode::fd_hessian::numerical_hessian_from_gradients;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `Behemoth::correlation::frozen_core::FrozenCorePolicy`
+    --> src/main.rs:2746:9
+     |
+2746 |     use Behemoth::correlation::frozen_core::FrozenCorePolicy;
+     |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `Behemoth` (bin "behemoth") generated 2 warnings (run `cargo fix --bin "behemoth" -p Behemoth` to apply 2 suggestions)
+    Finished `release` profile [optimized] target(s) in 0.13s

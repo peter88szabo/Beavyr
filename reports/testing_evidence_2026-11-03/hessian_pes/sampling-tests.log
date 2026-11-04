@@ -1,0 +1,35 @@
+   Compiling Beavyr v0.2.1 (/home/peter/DevCode/Beavyr)
+    Finished `test` profile [optimized + debuginfo] target(s) in 2m 09s
+     Running unittests src/main.rs (target/debug/deps/Beavyr-401b2246fe058028)
+
+running 27 tests
+test pes_sampling::calculation::tests::pes_calculation_button_is_only_available_for_hessian_jobs ... ok
+test pes_sampling::calculation::tests::pes_calculation_handoff_loads_self_contained_orca_hessian ... ok
+test pes_sampling::calculation::tests::pes_calculation_handoff_uses_each_backends_hessian_geometry ... ok
+test pes_sampling::mode_tests::eckart_modes_and_frequencies_match_frequency_analysis_for_linear_and_nonlinear_molecules ... ok
+test pes_sampling::mode_tests::ts_mode_is_retained_after_eckart_and_samples_both_sides_by_default ... ok
+test pes_sampling::mode_tests::ts_one_sided_settings_and_disable_are_honoured_in_generated_trajectories ... ok
+test pes_sampling::rotors::tests::rotor_angles_are_uniform_and_assigned_mode_can_be_replaced ... ok
+test pes_sampling::rotors::tests::rotor_fragment_rotation_preserves_bonds_axis_and_spectator ... ok
+test pes_sampling::rotors::tests::rotor_ring_invalid_atoms_duplicate_axes_and_modes_are_rejected ... ok
+test pes_sampling::rotors::tests::rotors_work_for_both_collision_partners_and_keep_the_com_distance ... ok
+test pes_sampling::tests::hessian_export_reloads_for_both_pes_partners_and_frequency_analysis ... ok
+test pes_sampling::tests::pes_bimolecular_count_order_exact_com_and_independent_rotations ... ok
+test pes_sampling::tests::pes_cancellation_bad_input_and_impossible_filter_are_reported ... ok
+test pes_sampling::tests::pes_default_overlap_filter_checks_between_collision_partners ... ok
+test pes_sampling::tests::pes_default_overlap_filter_redraws_unimolecular_samples ... ok
+test pes_sampling::tests::pes_diatomic_modes_mass_normalization_amplitude_and_morse_bounds ... ok
+test pes_sampling::tests::pes_euler_rotations_are_isotropic_and_preserve_geometry ... ok
+test pes_sampling::tests::pes_linear_hessian_retains_one_mode_and_respects_isotope_mass ... ok
+test pes_sampling::tests::pes_matches_mature_smite_fixed_random_draws ... ok
+test pes_sampling::tests::pes_mode_limits_override_global_values ... ok
+test pes_sampling::tests::pes_pebble_overlap_thresholds_and_pair_order ... ok
+test pes_sampling::tests::pes_real_example_hessian_projects_modes_and_keeps_imaginary_modes_excluded ... ok
+test pes_sampling::tests::pes_result_loads_automatically_stopped_and_can_be_saved ... ok
+test pes_sampling::tests::pes_temperature_rules_have_distinct_correct_limits ... ok
+test pes_sampling::tests::pes_ui_labels_and_old_layout_serialization_stay_compatible ... ok
+test pes_sampling::tests::pes_uniform_phase_has_arcsine_displacements_and_conserves_mode_energy ... ok
+test pes_sampling::tests::pes_window_retains_user_resize_in_both_dimensions ... ok
+
+test result: ok. 27 passed; 0 failed; 0 ignored; 0 measured; 1622 filtered out; finished in 0.08s
+

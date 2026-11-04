@@ -1,0 +1,15 @@
+ Total number of basis functions:     24
+ Total number of basis functions:    116
+ Total number of basis functions:     84
+ ***FINAL HARTREE-FOCK ENERGY:        -76.0266041153104766 [AU]
+ Total number of basis functions:     24
+ Total number of basis functions:    116
+ Total number of basis functions:     84
+ DF-MP2 energy [au]:                          -76.228465000238
+ Cartesian gradient in original orientation [au]:
+    1  O      0.0000000000     0.0000000000     0.0092173873
+    2  H     -0.0003685037    -0.0000000000    -0.0046086936
+    3  H      0.0003685037    -0.0000000000    -0.0046086936
+ 
+ ************************ 2026-11-03 19:23:56 *************************
+                      Normal termination of mrcc.

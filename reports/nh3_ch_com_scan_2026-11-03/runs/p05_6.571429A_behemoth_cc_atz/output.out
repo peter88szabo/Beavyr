@@ -1,0 +1,158 @@
+Run resources
+Compute cores: 8
+Memory limit:  16000 MiB
+
+
+Basis set summary
+Orbital basis: aug-cc-pvtz (all 6 atoms; elements C,H,N)
+
+============================================================================
+                       Molecular integrals completed                        
+============================================================================
+  Overlap matrix                             0.002092 s
+  Kinetic-energy matrix                      0.007569 s
+  Nuclear-attraction matrix                  0.018836 s
+  AO representation transformation           0.002395 s
+  Two-electron AO integral setup             0.553919 s
+  ----------------------------------------------------------------------
+  Complete molecular-integral setup           0.584811 s
+============================================================================
+
+
+============================================================================
+                   UHF self-consistent-field calculation                    
+============================================================================
+
+Basis representation: real spherical Gaussian
+ERI algorithm:         Hybrid explicit low-L / Obara-Saika
+Electrons:              17
+Alpha electrons:        9
+Beta electrons:         8
+AO functions:           184
+Alpha/beta Fock size:   184 x 184 each
+Initial guess:          spin-resolved superposition of atomic densities
+Fermi smearing:         disabled (integer occupations)
+SCF accelerator:       adaptive EDIIS / ADIIS / CDIIS
+Occupied root following: enabled
+UHF stability analysis:  disabled
+Convergence tolerance:  1.000e-10 Eh, 1.000e-8 RMS density
+
+------------------------------------------------------------------------------------------------------------
+ Iter     Total Energy (Eh)      Delta E (Eh)       RMS Delta P      RMS Commutator
+------------------------------------------------------------------------------------------------------------
+    1      -94.408595455499                 -       1.149368e-2          2.448046e-3
+    2      -94.479470098151       7.087464e-2       3.203804e-3          1.220023e-3
+    3      -94.500338790105       2.086869e-2       1.170564e-3          1.964486e-4
+    4      -94.501721999137       1.383209e-3       3.367795e-4          4.548137e-5
+    5      -94.501834507940       1.125088e-4       1.048385e-4          1.688893e-5
+    6      -94.501850890425       1.638248e-5       4.631623e-5          6.651589e-6
+    7      -94.501853893976       3.003551e-6       2.293191e-5          2.485085e-6
+    8      -94.501854385801       4.918247e-7       8.319810e-6          1.080290e-6
+    9      -94.501854496509       1.107077e-7       4.302104e-6          3.782703e-7
+   10      -94.501854513539       1.703089e-8       1.137444e-6          3.045014e-7
+   11      -94.501854523937       1.039800e-8       5.445783e-7          3.155707e-7
+   12      -94.501854495001       2.893646e-8       1.577650e-6          2.619343e-7
+   13      -94.501854446537       4.846399e-8       5.055466e-6          7.401980e-8
+   14      -94.501854444942       1.594856e-9       1.106426e-6          1.929417e-8
+   15      -94.501854444958      1.602984e-11       1.089395e-7          6.796152e-9
+   16      -94.501854444962      3.751666e-12       2.386553e-8          2.611345e-9
+   17      -94.501854444962      2.273737e-13       1.023747e-8         9.796744e-10
+
+------------------------------------------------------------------------------------------------------------
+
+                         SCF successfully converged                         
+                       UHF completed in 17 iterations                       
+
+Final UHF energy
+--------------------------------------------------------------------------------
+Electronic energy:        -114.8290786107 Hartree
+Nuclear repulsion:          20.3272241657 Hartree
+------------------------------------------------------
+SCF total energy:          -94.5018544450 Hartree
+======================================================
+SCF iterations:                        17
+
+Spin diagnostics
+Actual <S^2>:                0.7596446116
+Optimal <S^2>:               0.7500000000
+Difference:                 +0.0096446116
+--------------------------------------------------------------------------------
+
+Timings
+--------------------------------------------------------------------------------
+One-electron integrals:            0.031 s
+AO ERI build:                      0.554 s
+Fock construction:                 1.941 s
+Remaining SCF work:                0.581 s
+Complete SCF phase:                2.521 s
+Whole UHF:                         3.106 s
+--------------------------------------------------------------------------------
+
+
+UCCSD(T) settings
+Reference determinant:      UHF
+Triples:                    perturbative (T) in semicanonical orbitals (frozen core not rotated)
+Frozen core:                2 orbitals per spin (chemical core, default; @ccsd frozen_core = none correlates all)
+Two-electron integrals:     Cholesky, threshold 1.0e-10 (UCCSD has no four-index route; 1e-10 reproduces exact energies to ~1e-12 Eh)
+
+  Unrestricted CCSD (UHF reference, T1-dressed, Cholesky integrals, threshold 1e-10, rank 2557)
+    correlated orbitals     alpha 7 occupied, 175 virtual; beta 6 occupied, 176 virtual
+    frozen core             2 per spin
+    residual                rank-free, on stored integral blocks (factor rank above 6x the orbitals)
+    orbitals                semicanonical (for (T))
+
+  iter         E_corr / Eh            dE      max|dt|     time/s
+     0      -0.343260477277         (MP2)
+     1      -0.365022498944    -2.176e-2    1.145e-2      2.656
+     2      -0.376354418336    -1.133e-2    8.126e-3      2.587
+     3      -0.379079225432    -2.725e-3    5.001e-3      2.640
+     4      -0.379250544592    -1.713e-4    2.624e-3      2.625
+     5      -0.379279574913    -2.903e-5    1.158e-3      2.821
+     6      -0.379297262145    -1.769e-5    5.290e-4      2.627
+     7      -0.379301747689    -4.486e-6    1.562e-4      2.605
+     8      -0.379303319048    -1.571e-6    4.677e-5      2.513
+     9      -0.379302813735     5.053e-7    1.962e-5      2.778
+    10      -0.379302379869     4.339e-7    1.245e-5      2.510
+    11      -0.379302402515    -2.265e-8    9.442e-6      2.782
+    12      -0.379302370903     3.161e-8    8.430e-6      2.489
+    13      -0.379302289028     8.187e-8    7.487e-6      2.701
+    14      -0.379302401268    -1.122e-7    5.940e-6      2.791
+    15      -0.379302421181    -1.991e-8    3.476e-6      2.521
+    16      -0.379302431858    -1.068e-8    1.388e-6      2.589
+    17      -0.379302445714    -1.386e-8    1.052e-6      2.500
+    18      -0.379302431015     1.470e-8    8.015e-7      2.510
+    19      -0.379302414687     1.633e-8    5.445e-7      2.686
+    20      -0.379302409667     5.021e-9    3.331e-7      2.522
+
+  Perturbative triples (T), semicanonical orbitals
+    spin case            occupied triples        E / Eh            wall
+    alpha-alpha-alpha                  35    -0.000221761750        0.3 s
+    alpha-alpha-beta                  126    -0.006509259560        3.0 s
+    beta-beta-beta                     20    -0.000171941386        0.2 s
+    beta-beta-alpha                   105    -0.004959692660        2.6 s
+    E(T)                              286    -0.011862655355        6.1 s
+    occupied batches        1 alpha, 1 beta, of up to 7 orbitals (1844 MB beyond the CCSD's arrays)
+
+    E(reference)                   -94.5018544450 Eh
+    E(MP2) correlation              -0.3432604773 Eh
+    E(UCCSD) correlation            -0.3793024097 Eh
+    E(UCCSD) total                 -94.8811568546 Eh
+    E(T)                            -0.0118626554 Eh
+    E(UCCSD(T)) correlation         -0.3911650650 Eh
+    E(UCCSD(T)) total              -94.8930195100 Eh
+
+Total UCCSD(T) energy:         -94.893019509984 Hartree
+
+UCCSD(T) timing summary
+  SCF (UHF )                        3.106 s   17 iterations
+  Cholesky/RI factors              3.723 s
+  MO factors, fixed blocks        26.370 s
+  MP2 (iteration 0)                0.018 s
+  UCCSD iterations                52.116 s   20 iterations, 2605.8 ms/iteration
+    dressing 15.122 s, singles+F 3.389 s, hole-hole 9.667 s, ladder 10.046 s, rings 12.494 s, DIIS+energy 1.398 s
+  (T)                              6.135 s   286 occupied triples, 20.66 ms/triple, 1844 MB
+    semicanonical 0.086 s, operands 0.228 s, same-spin 0.522 s, mixed-spin 5.386 s (GEMM 41.0 / energy step 3.3 core-s)
+  Total wall (SCF to end)         92.592 s
+
+Total run time (s): 92.615
+Total run time (days:hours:minutes:s): 0:00:01:32.615

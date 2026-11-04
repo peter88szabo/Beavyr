@@ -44,6 +44,7 @@ pub enum QcProgram {
     Dreiding,
     /// ORCA, driven by writing an input file and running the executable on it.
     Orca,
+    Mrcc,
     /// PySCF, driven by generating a Python script and running it with `python3`
     /// from the environment selected in Configure.
     PySCF,
@@ -74,12 +75,13 @@ impl QcProgram {
     ///
     /// The three that were here first keep their positions, so an existing habit still lands on
     /// the same entry.
-    pub const ALL: [QcProgram; 9] = [
+    pub const ALL: [QcProgram; 10] = [
         QcProgram::Xtb,
         QcProgram::StdaXtb,
         QcProgram::Behemoth,
         QcProgram::Dreiding,
         QcProgram::Orca,
+        QcProgram::Mrcc,
         QcProgram::PySCF,
         QcProgram::Psi4,
         QcProgram::Psi4Py,
@@ -93,6 +95,7 @@ impl QcProgram {
             QcProgram::Behemoth => "Behemoth",
             QcProgram::Dreiding => "DREIDING",
             QcProgram::Orca => "ORCA",
+            QcProgram::Mrcc => "MRCC",
             QcProgram::PySCF => "PySCF",
             QcProgram::Psi4 => "Psi4",
             QcProgram::Psi4Py => "Psi4 (Python)",
@@ -135,6 +138,7 @@ impl QcProgram {
             QcProgram::StdaXtb => "stda",
             QcProgram::Behemoth => "behemoth",
             QcProgram::Orca => "orca",
+            QcProgram::Mrcc => "dmrcc",
             QcProgram::Psi4 => "psi4",
             // Built in, or reached through Python: there is no executable to find.
             QcProgram::Dreiding
@@ -154,6 +158,7 @@ impl QcProgram {
             QcProgram::StdaXtb => "stda_path.txt",
             QcProgram::Behemoth => "behemoth_path.txt",
             QcProgram::Orca => "orca_path.txt",
+            QcProgram::Mrcc => "mrcc_path.txt",
             QcProgram::Psi4 => "psi4_path.txt",
             // Nothing to remember.
             QcProgram::Dreiding
@@ -176,7 +181,7 @@ mod tests {
 
     #[test]
     fn every_program_is_listed_once_and_described() {
-        assert_eq!(QcProgram::ALL.len(), 9);
+        assert_eq!(QcProgram::ALL.len(), 10);
         for program in QcProgram::ALL {
             assert_eq!(
                 QcProgram::ALL.iter().filter(|&&p| p == program).count(),

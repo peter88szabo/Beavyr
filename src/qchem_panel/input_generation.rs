@@ -1,6 +1,19 @@
 //! Input preview shared with the actual calculation runners.
 use super::*;
 impl QcPanelState {
+    /// The name the input is written under, for the save dialog's suggestion.
+    pub fn input_file_name(&self) -> &'static str {
+        match self.program {
+            QcProgram::Mrcc => "MINP",
+            QcProgram::Orca => "orca_job.inp",
+            QcProgram::Psi4 => "input.dat",
+            QcProgram::Psi4Py => "run_psi4.py",
+            QcProgram::PySCF => "run_pyscf.py",
+            _ => "input.txt",
+        }
+    }
+
+
     /// Whether this program is genuinely driven by an input file.
     ///
     /// Four are: ORCA by its `.inp`, Psi4 by an input file that is itself
@@ -20,7 +33,7 @@ impl QcPanelState {
     pub fn has_input_file(&self) -> bool {
         !matches!(self.job, JobType::Scan | JobType::Mecp) && !crate::qchem_interfaces::job::search::local(self.program, self.job, &self.config.search) && matches!(
             self.program,
-            QcProgram::Orca | QcProgram::Psi4 | QcProgram::Psi4Py | QcProgram::PySCF
+            QcProgram::Mrcc | QcProgram::Orca | QcProgram::Psi4 | QcProgram::Psi4Py | QcProgram::PySCF
         )
     }
 
@@ -36,6 +49,7 @@ impl QcPanelState {
 
         let method = self.method.unwrap_or(QcMethod::Dft);
         match self.program {
+            QcProgram::Mrcc => crate::qchem_interfaces::mrcc::input(self.job, method, self.charge, self.multiplicity, &self.config, self.excited, self.wavefunction, atoms, positions_angstrom).unwrap_or_else(|e| format!("# {e}")),
             QcProgram::Orca => orca_run::panel_input_text(
                 self.job,
                 method,

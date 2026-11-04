@@ -22,6 +22,7 @@ pub fn unsupported_job(
     method: Option<QcMethod>,
     job: JobType,
 ) -> Option<&'static str> {
+    if program == QcProgram::Mrcc { return super::super::mrcc::job_problem(method, job); }
     if method.is_some_and(|m| energy_only(program, m)) && !matches!(job, JobType::SinglePoint | JobType::Scan) {
         return Some("This method is available for Energy calculations in Beavyr.");
     }

@@ -59,7 +59,10 @@ fn calculator_energy_and_frequencies_exclude_dummy_atoms_consistently() {
             assert!(output.energetics.final_energy_hartree.unwrap().is_finite());
         } else {
             let text = fs::read_to_string(output.hessian_path.unwrap()).unwrap();
-            assert_eq!(text.lines().filter(|line| !line.starts_with('$')).count(), 9);
+            let data = crate::qchem_interfaces::hessian_io::parse(&text, None).unwrap();
+            assert_eq!(data.hessian.dim(), (9, 9));
+            assert_eq!(data.atoms, vec!["O", "H", "H"]);
+            assert_eq!(data.hessian, data.hessian.t());
         }
     }
     let _ = fs::remove_dir_all(path);

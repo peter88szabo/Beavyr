@@ -1,0 +1,35 @@
+NH3 + CH timing results, 2026-11-03
+====================================
+
+Neutral doublet, COM separation 3.0 Angstrom, identical fixed six-atom geometry.
+All times below are elapsed seconds for the complete executable invocation.
+
+Engine    Reference / method / basis                      Cores    Seconds
+Behemoth  ROHF UCCSD(T) / aug-cc-pVTZ                         4     131.66
+MRCC      UHF UCCSD(T)-F12 / aug-cc-pVDZ                      1      31.60
+MRCC      UHF UCCSD(T)-F12 / aug-cc-pVDZ                      2      21.82
+MRCC      UHF UCCSD(T)-F12 / aug-cc-pVDZ                      4      16.82
+
+These four runs used a 16000 MB allowance and completed successfully.
+Behemoth energy: -94.884813432378 Eh; reference <S^2>=0.7500000000.
+MRCC F12 energy: -94.882779028434 Eh (4-core run).
+Peak resident memory: Behemoth 12.51 GiB; MRCC F12 736-752 MiB.
+Different references, bases and algorithms: not a matched-method speedup test.
+
+Earlier conventional MRCC UHF UCCSD(T)/cc-pVTZ, 2048 MB allowance:
+  1 core: 146.33 s (overlapped other heavy jobs; excluded from clean comparison).
+  2 cores: 123.58 s.
+  4 cores: 103.12 s.
+
+Cancelled at user request: conventional MRCC aug-cc-pVTZ one-core run, and
+the initial low-memory (2048 MB) Behemoth one-core run. Neither yielded a
+completed UCCSD(T) result. The latest Behemoth instruction was to use four
+cores, so no completed Behemoth 1-/2-core timings are claimed.
+
+Detailed reports and raw inputs/outputs:
+  mrcc_nh3_ch_benchmark_2026-11-03/report.txt
+  behemoth_nh3_ch_benchmark_2026-11-03/report.txt
+  mrcc_f12_dz_nh3_ch_benchmark_2026-11-03/report.txt
+
+Geometry: mrcc_nh3_ch_benchmark_2026-11-03/NH3_CH_COM_3A.xyz
+Also available as examples/NH3_CH_COM_3A.xyz in the Beavyr repository.

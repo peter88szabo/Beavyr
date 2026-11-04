@@ -21,7 +21,7 @@ use ndarray::Array2;
 
 use crate::molecule::{atomic_mass_amu, parse_xyz_angstrom, Molecule};
 use crate::normalmode::thermofuncs::{self, ThermoResults};
-use crate::normalmode::{normal_modes_with_projection, EckartMode};
+use crate::normalmode::EckartMode;
 use crate::spectrum::broadening::{format_spectrum_dat, format_spectrum_sticks, BroadeningKind};
 use crate::spectrum::plot::{draw_spectrum, SpectrumAxis};
 use crate::trajectory::{PlaybackMode, TrajectoryFrame, TrajectoryState};
@@ -422,6 +422,7 @@ pub(crate) fn run_hess_cancellable(
     // Both of these are told what to do by a file, written before the process
     // starts rather than by flags on its command line.
     match program {
+        QcProgram::Mrcc => return Err("Use the Quantum Chemistry panel for MRCC calculations.".into()),
         QcProgram::StdaXtb => return Err("sTDA-xTB calculates spectra only.".into()),
         QcProgram::Orca => {
             let (_, symbols, coords) = parse_xyz_angstrom(input_xyz);
@@ -507,6 +508,7 @@ pub(crate) fn run_hess_cancellable(
     let stderr = fs::File::create(workdir.join("xtb.stderr"))
         .map_err(|e| format!("Failed to create xtb.stderr: {e}"))?;
     let mut cmd = match program {
+        QcProgram::Mrcc => return Err("Use the Quantum Chemistry panel for MRCC calculations.".into()),
         QcProgram::StdaXtb => return Err("sTDA-xTB calculates spectra only.".into()),
         // Unreachable: the DREIDING branch returned at the top of this function, before any
         // command was built.
@@ -775,25 +777,10 @@ pub(crate) fn run_hess_cancellable(
 /// True when every atom lies on one line through the first two atoms, to
 /// within a small tolerance -- linear molecules have 5 low modes instead of
 /// the usual 6 (no rotation about the molecular axis to project out).
+#[cfg(test)]
 fn is_linear(coords_bohr: &[f64], natoms: usize) -> bool {
-    if natoms < 3 {
-        return true;
-    }
-    let at = |i: usize| Vec3::new(
-        coords_bohr[3 * i] as f32,
-        coords_bohr[3 * i + 1] as f32,
-        coords_bohr[3 * i + 2] as f32,
-    );
-    let origin = at(0);
-    let axis = (at(1) - origin).normalize_or_zero();
-    if axis.length() < 1.0e-6 {
-        return true;
-    }
-    (2..natoms).all(|i| {
-        let v = at(i) - origin;
-        let v_len = v.length();
-        v_len < 1.0e-6 || axis.cross(v).length() / v_len < 1.0e-3
-    })
+    assert_eq!(coords_bohr.len(), 3 * natoms);
+    crate::normalmode::cartesian::is_linear(coords_bohr)
 }
 
 /// Turns a raw xTB run into the full analysis: normal modes, thermochemistry,
@@ -817,7 +804,6 @@ fn analyze(
             .map(|s| atomic_mass_amu(s).ok_or_else(|| format!("Unknown element {s:?}")))
             .collect::<Result<_, _>>()?,
     };
-    let linear = is_linear(&raw.coords_bohr, natoms);
 
     let mut eckart_used = eckart_requested;
     let mut reaction_path_fallback_note = None;
@@ -852,15 +838,8 @@ fn analyze(
         None
     };
 
-    let result = normal_modes_with_projection(
-        &mass,
-        &raw.hessian,
-        linear,
-        Some(&raw.coords_bohr),
-        eckart_used,
-        grad_cart,
-    )
-    .map_err(|e| e.to_string())?;
+    let result = crate::normalmode::cartesian::analyze(
+        &mass, &raw.coords_bohr, &raw.hessian, eckart_used, grad_cart)?;
 
     let mut frequencies_cm1 = thermofuncs::freqs_au_to_cm1(&result.frequencies_au);
     // Applied before anything reads the frequencies, so the mode list, the IR
@@ -890,14 +869,8 @@ fn analyze(
     // projection moved, rather than having to take the projected numbers on
     // trust.
     let standard_frequencies_cm1 = if eckart_used == EckartMode::ReactionPath {
-        match normal_modes_with_projection(
-            &mass,
-            &raw.hessian,
-            linear,
-            Some(&raw.coords_bohr),
-            EckartMode::VibRot,
-            None,
-        ) {
+        match crate::normalmode::cartesian::analyze(
+            &mass, &raw.coords_bohr, &raw.hessian, EckartMode::VibRot, None) {
             Ok(plain) => {
                 let mut f = thermofuncs::freqs_au_to_cm1(&plain.frequencies_au);
                 if scaled {
@@ -1195,27 +1168,18 @@ fn read_hessian_file(path: &Path) -> Result<(HessianSource, Option<f64>), String
         return Ok((HessianSource::Imported(Box::new(imported)), None));
     }
 
-    let hess = super::orca_hess::parse_orca_hess(&text)
+    let hess = super::hessian_io::parse(&text, None)
         .map_err(|e| format!("{}: {e}", path.display()))?;
     let raw = RawFrequencyOutput {
-        atoms: hess.atoms.clone(),
-        coords_bohr: hess.coords_bohr.clone(),
-        hessian: hess.hessian.clone(),
+        atoms: hess.atoms,
+        coords_bohr: hess.coords_bohr,
+        hessian: hess.hessian,
         vib_lines: Vec::new(),
-        // A `.hess` is written at a stationary point and stores no gradient,
-        // so a reaction-path request falls back to the ordinary Eckart
-        // projection with a note -- `analyze` already handles that.
         gradient_bohr: None,
-        masses_amu: Some(hess.masses_amu.clone()),
-        ir_intensities_km_mol: {
-            let ordered = hess.ir_intensities_in_eigenvalue_order();
-            (!ordered.is_empty()).then_some(ordered)
-        },
+        masses_amu: Some(hess.masses_amu),
+        ir_intensities_km_mol: (!hess.ir_intensities.is_empty()).then_some(hess.ir_intensities),
     };
-    Ok((
-        HessianSource::Computed(Box::new(raw)),
-        hess.frequency_scale_factor,
-    ))
+    Ok((HessianSource::Computed(Box::new(raw)), hess.frequency_scale_factor))
 }
 
 pub fn animate_mode(
@@ -1578,7 +1542,7 @@ pub(crate) fn load_gradient_from_path(
 fn load_hessian_from_dialog(freq_panel: &mut XtbFreqPanelState, freq_task: &mut XtbFrequencyTask) {
     let Some(path) = crate::recent_dir::pick_file(
         crate::recent_dir::open()
-            .add_filter("Hessian or frequency output", &["hess", "log", "out"])
+            .add_filter("Hessian or frequency output", &["hess", "hessian", "txt", "dat", "log", "out"])
             .add_filter("All files", &["*"]),
     ) else {
         return;
@@ -1621,32 +1585,27 @@ pub(crate) fn load_bare_hessian_from_path(
     freq_panel: &mut XtbFreqPanelState,
     freq_task: &mut XtbFrequencyTask,
 ) -> bool {
-    let parsed = std::fs::read_to_string(path)
-        .map_err(|e| format!("cannot read {}: {e}", path.display()))
-        .and_then(|text| {
-            super::hessian_file::parse_turbomole_hessian(&text, atoms.len())
-                .map_err(|e| format!("{}: {e}", path.display()))
-        });
-    let hessian = match parsed {
-        Ok(matrix) => matrix,
+    let hess = match super::hessian_io::load(path, Some(&(atoms.to_vec(), coords_angstrom.to_vec()))) {
+        Ok(data) => data,
         Err(err) => {
             freq_task.last_message = Some(err);
             freq_task.last_is_error = true;
             return false;
         }
     };
+    let scale = hess.frequency_scale_factor;
     let raw = RawFrequencyOutput {
-        atoms: atoms.to_vec(),
-        coords_bohr: coords_angstrom.iter().map(|c| c * ANGSTROM_TO_BOHR).collect(),
-        hessian,
+        atoms: hess.atoms,
+        coords_bohr: hess.coords_bohr,
+        hessian: hess.hessian,
         vib_lines: Vec::new(),
         gradient_bohr: None,
-        masses_amu: None,
-        ir_intensities_km_mol: None,
+        masses_amu: Some(hess.masses_amu),
+        ir_intensities_km_mol: (!hess.ir_intensities.is_empty()).then_some(hess.ir_intensities),
     };
     adopt_hessian(
         HessianSource::Computed(Box::new(raw)),
-        None,
+        scale,
         path,
         freq_panel,
         freq_task,
@@ -1952,7 +1911,7 @@ fn frequency_panel_body(
                 egui::ComboBox::from_id_salt("freq_program")
                     .selected_text(freq_panel.program.label())
                     .show_ui(ui, |ui| {
-                        for program in QcProgram::ALL.into_iter().filter(|p| *p != QcProgram::StdaXtb) {
+                        for program in QcProgram::ALL.into_iter().filter(|p| !matches!(p, QcProgram::StdaXtb | QcProgram::Mrcc)) {
                             ui.selectable_value(&mut freq_panel.program, program, program.label());
                         }
                     });

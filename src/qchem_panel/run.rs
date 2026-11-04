@@ -24,6 +24,9 @@ use crate::qchem_interfaces::xtb_optimize::{
     create_xtb_run_dir, xtb_scratch_dir,
 };
 
+#[path = "hessian_output.rs"]
+pub(crate) mod hessian_output;
+
 #[path = "geometry_search_job.rs"]
 pub(crate) mod geometry_search_job;
 
@@ -69,6 +72,9 @@ mod pyscf_completion_tests;
 mod calculation_files_tests;
 
 /// How often a cancelled run is checked for having died.
+#[path = "mrcc_job.rs"]
+mod mrcc_job;
+
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 /// Everything a finished run produced.
@@ -264,6 +270,34 @@ pub(crate) fn run_cancellable(
     cancel: &AtomicBool,
     child_slot: &Mutex<Option<Child>>,
 ) -> Result<QcRunOutput, String> {
+    let mut output = run_cancellable_native(program, method, job, binary, workdir, atoms,
+        positions_angstrom, charge, multiplicity, config, excited, wavefunction,
+        hand_written, cancel, child_slot)?;
+    hessian_output::prepare(&mut output)?;
+    Ok(output)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_cancellable_native(
+    program: QcProgram,
+    method: Option<QcMethod>,
+    job: JobType,
+    binary: &Path,
+    workdir: &Path,
+    atoms: &[String],
+    positions_angstrom: &[f64],
+    charge: i32,
+    multiplicity: i32,
+    config: &MethodConfig,
+    excited: ExcitedStateOptions,
+    wavefunction: bool,
+    hand_written: Option<&str>,
+    cancel: &AtomicBool,
+    child_slot: &Mutex<Option<Child>>,
+) -> Result<QcRunOutput, String> {
+    if program == QcProgram::Mrcc {
+        if let Some(reason) = crate::qchem_interfaces::mrcc::job_problem(method, job) { return Err(reason.into()); }
+    }
     if crate::qchem_interfaces::job::search::local(program, job, &config.search) || (program == QcProgram::Behemoth && job == JobType::TransitionState) {
         let output = geometry_search_job::run(program, method, job, binary, workdir, atoms, positions_angstrom, charge, multiplicity, config, cancel, child_slot)?;
         return if wavefunction && output.converged == Some(true) {
@@ -289,6 +323,9 @@ pub(crate) fn run_cancellable(
     }
     fs::create_dir_all(workdir).map_err(|e| format!("Failed to create the run directory: {e}"))?;
 
+    if program == QcProgram::Mrcc {
+        return mrcc_job::run(method.unwrap_or(QcMethod::Hf), job, binary, workdir, atoms, positions_angstrom, charge, multiplicity, config, excited, wavefunction, hand_written, cancel);
+    }
     if program == QcProgram::StdaXtb || (program == QcProgram::Behemoth && job.is_excited_state()) {
         return spectrum_job::run(program, job, binary, workdir, atoms, positions_angstrom,
             charge, multiplicity, config, excited, cancel, child_slot);
@@ -1689,7 +1726,7 @@ pub fn poll_qc_run(
                 // computed at: the last frame of an optimisation, or the
                 // structure that was sent.
                 let bare = fs::read_to_string(path)
-                    .map(|text| !text.contains("$atoms"))
+                    .map(|text| !crate::qchem_interfaces::hessian_io::is_self_contained(&text))
                     .unwrap_or(false);
                 let loaded = if bare {
                     let (atoms, coords) = match output
@@ -1762,7 +1799,7 @@ pub fn poll_qc_run(
                 let label = std::path::PathBuf::from(format!("{} run", output.program.label()));
                 match if output.program == QcProgram::StdaXtb {
                     spectrum_job::parse_stda(&output.log, &label)
-                } else { crate::uvvis::detect_and_parse(&output.log, &label) } {
+                } else if output.program == QcProgram::Mrcc { crate::qchem_interfaces::mrcc::parse_spectrum(&output.log, &label) } else { crate::uvvis::detect_and_parse(&output.log, &label) } {
                     Ok(result) => {
                         uvvis.expanded_root = None;
                         uvvis.load_error = None;

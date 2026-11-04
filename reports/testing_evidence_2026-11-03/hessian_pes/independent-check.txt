@@ -1,0 +1,6 @@
+PySCF 2.14.0; NumPy 2.5.4
+Smite numpy.loadtxt(delimiter=" ") compatibility: PASS
+Shape 9x9: PASS
+Exact equality to (H+H.T)/2: PASS
+Exact symmetry: PASS
+Original asymmetry maximum: 1.1009901323966176e-10

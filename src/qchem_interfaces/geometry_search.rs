@@ -125,6 +125,7 @@ pub fn active(job: JobType) -> bool {
     )
 }
 pub fn local(program: QcProgram, job: JobType, o: &Options) -> bool {
+    if program == QcProgram::Mrcc { return job == JobType::Optimize; }
     program != QcProgram::Behemoth
         && (job != JobType::TransitionState || ts_supported(program))
         && active(job)
@@ -152,6 +153,7 @@ pub fn method_problem(
     job: JobType,
     o: &Options,
 ) -> Option<&'static str> {
+    if program == QcProgram::Mrcc { return super::super::mrcc::job_problem(method, job); }
     if job == JobType::TransitionState
         && program == QcProgram::Behemoth
         && method != Some(QcMethod::Gfn1)

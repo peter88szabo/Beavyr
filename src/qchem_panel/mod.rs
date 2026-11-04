@@ -148,17 +148,6 @@ impl QcPanelState {
         self.job.is_excited_state()
     }
 
-    /// The name the input is written under, for the save dialog's suggestion.
-    pub fn input_file_name(&self) -> &'static str {
-        match self.program {
-            QcProgram::Orca => "orca_job.inp",
-            QcProgram::Psi4 => "input.dat",
-            QcProgram::Psi4Py => "run_psi4.py",
-            QcProgram::PySCF => "run_pyscf.py",
-            _ => "input.txt",
-        }
-    }
-
     /// A one-line description of what will run, for the panel header.
     pub fn summary_line(&self) -> String {
         let method = match self.method {

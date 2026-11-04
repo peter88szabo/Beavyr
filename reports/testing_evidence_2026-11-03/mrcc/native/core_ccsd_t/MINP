@@ -1,0 +1,18 @@
+calc=CCSD(T)
+basis=atomtype
+O:cc-pCVDZ
+H:cc-pvdz
+charge=0
+mult=1
+scftype=RHF
+mem=768MB
+core=corr
+symm=off
+unit=angs
+molden=off
+geom=xyz
+3
+
+O 0.00000000000000 0.00000000000000 0.00000000000000
+H 0.75800000000000 0.00000000000000 0.59000000000000
+H -0.75800000000000 0.00000000000000 0.59000000000000

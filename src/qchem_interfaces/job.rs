@@ -241,6 +241,16 @@ pub enum QcMethod {
     Nevpt2,
     DlpnoCcsdT,
     CcsdTF12,
+    Ccsd,
+    CcsdF12,
+    UccsdT,
+    Ccsdt,
+    CcsdtQ,
+    Ccsdtq,
+    Drpa,
+    Adc2,
+    ScsAdc2,
+    SosAdc2,
 }
 
 impl QcMethod {
@@ -261,6 +271,17 @@ impl QcMethod {
             QcMethod::Nevpt2 => "NEVPT2",
             QcMethod::DlpnoCcsdT => "DLPNO-CCSD(T)",
             QcMethod::CcsdTF12 => "CCSD(T)-F12",
+            QcMethod::Ccsd => "CCSD",
+            QcMethod::CcsdF12 => "CCSD-F12",
+            QcMethod::UccsdT => "UCCSD(T)",
+            QcMethod::Ccsdt => "CCSDT",
+            QcMethod::CcsdtQ => "CCSDT(Q)",
+            QcMethod::Ccsdtq => "CCSDTQ",
+            QcMethod::Drpa => "dRPA",
+            QcMethod::Adc2 => "ADC(2)",
+            QcMethod::ScsAdc2 => "SCS-ADC(2)",
+            QcMethod::SosAdc2 => "SOS-ADC(2)",
+
         }
     }
 
@@ -269,7 +290,7 @@ impl QcMethod {
         // Sparrow's parametrisation travels in the same field a functional
         // does, so the row is shown for it too -- filled from Sparrow's own
         // catalogue rather than a functional list.
-        matches!(self, QcMethod::Dft | QcMethod::Semiempirical)
+        matches!(self, QcMethod::Dft | QcMethod::Drpa | QcMethod::Semiempirical)
     }
 
     /// Whether this method expands the wavefunction in a Gaussian basis, and so
@@ -308,7 +329,7 @@ impl QcMethod {
     /// Whether this is an explicitly correlated method, which additionally
     /// needs a complementary auxiliary basis and an F12-specific orbital basis.
     pub fn is_f12(self) -> bool {
-        matches!(self, QcMethod::Mp2F12 | QcMethod::CcsdTF12)
+        matches!(self, QcMethod::Mp2F12 | QcMethod::CcsdTF12 | QcMethod::CcsdF12)
     }
 
     /// Whether a correlated method's cost is worth warning about before the
@@ -328,6 +349,7 @@ impl QcMethod {
 /// whole level-of-theory block disappears for it.
 pub fn methods_for(program: QcProgram) -> &'static [QcMethod] {
     match program {
+        QcProgram::Mrcc => super::mrcc::METHODS,
         QcProgram::Xtb => &[QcMethod::Gfn2, QcMethod::Gfn1, QcMethod::GfnFf],
         QcProgram::Behemoth => &[
             QcMethod::Gfn1,
@@ -375,6 +397,7 @@ pub fn default_method(program: QcProgram) -> Option<QcMethod> {
 /// The message is what the disabled entry says, so it has to name the program
 /// and the alternative rather than just refusing.
 pub fn unsupported_reason(program: QcProgram, job: JobType) -> Option<&'static str> {
+    if program == QcProgram::Mrcc { return super::mrcc::job_problem(None, job); }
     match (program, job) {
         (program, JobType::TransitionState) if search::ts_supported(program) => None,
         (program, JobType::Mecp) => mecp::program_problem(program),
@@ -477,7 +500,7 @@ mod tests {
                 JobType::Frequencies,
                 JobType::OptimizeThenFrequencies,
             ] {
-                assert_eq!(supports(program, job), program != QcProgram::StdaXtb, "{program:?} / {job:?}");
+                assert_eq!(supports(program, job), program != QcProgram::StdaXtb && (program != QcProgram::Mrcc || matches!(job,JobType::SinglePoint|JobType::Gradient|JobType::Optimize)), "{program:?} / {job:?}");
             }
         }
 

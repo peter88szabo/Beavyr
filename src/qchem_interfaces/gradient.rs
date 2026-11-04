@@ -102,6 +102,10 @@ pub fn prepare(
     let angstrom: Vec<f64> = coords_bohr.iter().map(|c| c * BOHR_TO_ANGSTROM).collect();
 
     match program {
+        QcProgram::Mrcc => {
+            let text=super::mrcc::input(JobType::Gradient,method.mrcc.method,charge,multiplicity,method,Default::default(),false,atoms,&angstrom)?;
+            std::fs::write(workdir.join("MINP"),text).map_err(|e|e.to_string())?;
+        }
         QcProgram::Xtb | QcProgram::Behemoth => {
             std::fs::write(
                 workdir.join(GEOMETRY_FILE),
@@ -227,6 +231,7 @@ pub fn command(
     }
 
     Ok(match program {
+        QcProgram::Mrcc => super::mrcc::command(binary,workdir,method.nproc)?,
         QcProgram::Xtb => {
             let mut command = Command::new(binary);
             command
@@ -273,6 +278,7 @@ pub fn command(
 /// Where this program leaves its gradient.
 pub(crate) fn gradient_path(program: QcProgram, workdir: &Path) -> PathBuf {
     match program {
+        QcProgram::Mrcc => workdir.join("mrcc_gradient.txt"),
         QcProgram::Orca => super::orca_run::job_files(workdir).engrad,
         QcProgram::Psi4 | QcProgram::Psi4Py => super::psi4_run::job_files(workdir).gradient,
         QcProgram::PySCF => super::pyscf_run::job_files(workdir).gradient,
@@ -308,6 +314,10 @@ pub fn read(
     let gradient_file = gradient_path(program, workdir);
 
     let (energy, gradient) = match program {
+        QcProgram::Mrcc => {
+            let energy=captured.lines().rev().find_map(|l|l.strip_prefix("Beavyr MRCC selected energy: ").and_then(|v|v.parse::<f64>().ok())).ok_or("Missing selected MRCC energy")?;
+            (energy,super::mrcc::parse_gradient(captured,natoms)?)
+        }
         QcProgram::Xtb => (
             super::xtbrun::parse_xtb_energy(captured)?,
             super::xtbrun::parse_xtb_grad(&gradient_file, natoms)?,

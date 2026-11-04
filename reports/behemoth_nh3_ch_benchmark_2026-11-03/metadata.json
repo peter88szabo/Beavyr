@@ -1,0 +1,36 @@
+{
+  "engine": "behemoth",
+  "source": "/home/peter/DevCode/Behemoth",
+  "geometry_source": "/home/peter/DevCode/Beavyr/reports/mrcc_nh3_ch_benchmark_2026-11-03/NH3_CH_COM_3A.xyz",
+  "method": "UCCSD(T)",
+  "basis": "aug-cc-pVTZ",
+  "charge": 0,
+  "multiplicity": 2,
+  "memory_MB": 16000,
+  "core": "frozen",
+  "requested_cores": [
+    1,
+    2,
+    4
+  ],
+  "build": "cargo build --release --locked --offline -j 4 --bin behemoth",
+  "reference_difference": "MRCC timings used UHF; Behemoth is requested to use ROHF. Energies need not match.",
+  "source_head": "101cf26bcf497c1086b3590881c065ef2402563f",
+  "source_status_before_build": " M Cargo.lock\n M src/correlation/beyond_rpa_tdexx_kernels/auxiliary_space.rs\n M src/correlation/beyond_rpa_tdexx_kernels/cholesky_tests.rs\n M src/correlation/beyond_rpa_tdexx_kernels/driver.rs\n M src/correlation/beyond_rpa_tdexx_kernels/frozen_core_tests.rs\n M src/correlation/beyond_rpa_tdexx_kernels/mod.rs\n M src/correlation/beyond_rpa_tdexx_kernels/oep_transfer.rs\n M src/correlation/beyond_rpa_tdexx_kernels/options.rs\n M src/correlation/beyond_rpa_tdexx_kernels/second_order_tests.rs\n M src/correlation/beyond_rpa_tdexx_kernels/stabilizer_tests.rs\n M src/correlation/beyond_rpa_tdexx_kernels/tests.rs\n M src/correlation/beyond_rpa_tdexx_kernels/vertex.rs\n M src/integrals/ri_auxiliary_basis.rs\n M src/utils/cli/beyond_rpa_tdexx_kernels.rs\n M src/utils/cli/beyond_rpa_tdexx_kernels_runner.rs\n M src/utils/cli/help/acfd.rs\n M src/utils/cli/input.rs\n?? Papers/YNK/OEP_test.odt\n",
+  "prior_binary_backup": "/home/peter/DevCode/Beavyr/target/change-backups/behemoth-timing-2026-11-03/behemoth.before-release-build",
+  "build_environment": {
+    "RUSTFLAGS": null,
+    "CARGO_ENCODED_RUSTFLAGS": null,
+    "CARGO_TARGET_DIR": null
+  },
+  "executable": "/home/peter/DevCode/Behemoth/target/release/behemoth",
+  "executable_sha256": "3ca06d299057bd14b91dd7816a8250e5cae7f723da843df2e07a9a46521f0c74",
+  "reference": "ROHF",
+  "frozen_core": true,
+  "core_counts": [
+    4
+  ],
+  "geometry": "NH3_CH_COM_3A.xyz",
+  "timing": "GNU time, complete executable invocation, one fresh-directory run per core count",
+  "started": "2026-11-03 22:37:56 +0100"
+}

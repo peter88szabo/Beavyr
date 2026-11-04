@@ -1,0 +1,900 @@
+ **********************************************************************
+                          MRCC program system
+ **********************************************************************
+ 
+                              Written by
+     Mihaly Kallay, Peter R. Nagy, David Mester, Laszlo Gyevi-Nagy,
+        Jozsef Csoka, P. Bernat Szabo, Zoltan Rolik, Gyula Samu,
+      Bence Hegely, Bence Ladoczki, Klara Petrov, Jozsef Csontos,
+     Adam Ganyecz, Istvan Ladjanszki, Lorant Szegedy, Mate Farkas,
+          Pal D. Mezei, Reka A. Horvath, and Balazs D. Lorincz
+ 
+        Department of Physical Chemistry and Materials Science
+            Budapest University of Technology and Economics
+                  Budapest P.O.Box 91, H-1521 Hungary
+ 
+                              www.mrcc.hu
+ 
+                            Version: 26.1.3
+
+ ************************ 2026-11-03 22:19:16 *************************
+ Executing minp...
+
+ Reading input from MINP...
+ 
+ Input file:
+ 
+calc=CCSD(T)
+basis=aug-cc-pVTZ
+charge=0
+mult=2
+scftype=UHF
+mem=2048MB
+core=frozen
+symm=off
+unit=angs
+molden=off
+scfmaxit=200
+ccmaxit=100
+geom=xyz
+6
+
+N -0.02349796675709 -0.03131447141800 0.05596451866831
+H 0.98894806324291 -0.04143068141800 0.00596592866831
+H -0.30418134675709 0.94184417858200 0.01320137866831
+H -0.35824288675709 -0.46527282141800 -0.79684093133169
+C 0.00000000000000 0.00000000000000 2.91328366233966
+H 0.00000000000000 0.00000000000000 4.03328366233966
+ 
+ 
+ Checking keyword combinations...
+ 
+ Keywords:
+ 
+ active=none
+ agrid=ld0006-ld0590
+ agrid_pssp=ld0006-ld0194
+ agrid_pssp_sm=ld0006-ld0074
+ ao_trunc=off
+ ao_trunc_tol=1e-4
+ basis=aug-cc-pvtz
+ basis_sm=none
+ basopt=off
+ bfbasis=none
+ bfgsmem=10
+ bfgstol=1.0d-3
+ bfgscimem=5
+ boysalg=jacobi
+ bpcompo=0.985
+ bpcompv=0.98
+ bpdfo=0.985
+ bpocc=0.985
+ bppdo=0.985
+ bppdv=0.98
+ bpedo=0.985
+ bpedv=0.98
+ bp_subsyso=0.95
+ bp_subsysv=0.95
+ cabscorr=off
+ cabsdom=bpsmall
+ cabsdual=off
+ calc=ccsd(t)
+ ccmaxit=100
+ ccprog=ccsd
+ ccsdalg=disk
+ ccsdmkl=seq
+ ccsdrest=trf
+ ccsdthreads=2
+ cctol=6
+ charge=0
+ cialg=auto
+ ciguess=off
+ cmpgrp=auto
+ codegen=on
+ comprest=off
+ coord_sys=ric
+ core=frozen
+ corembed=off
+ csapprox=off
+ cvs=off
+ dboc=off
+ deltaf12=off
+ delocsomofact=
+ dendec=cholesky
+ dens=0
+ denscorr=0
+ dfalg=lineq
+ dfbasis_cab=none
+ dfbasis_cor=none
+ dfbasis_scf=none
+ dfbasis_scf_sm=auto
+ dfintran=ovirt
+ df_trunc=off
+ df_trunc_corr=off
+ df_trunc_corr_tol=5e-4
+ df_trunc_tol=5e-4
+ dft=off
+ dhexc=adc(2)
+ diag=david
+ docc=
+ domrad=10.d0
+ drpaalg=fit
+ dual=off
+ dual_df=off
+ dyson=off
+ ecp=auto
+ edisp=off
+ edisp_embed=off
+ embed=off
+ epairestfact=off
+ epairscale=1.d0
+ etemp=300
+ epert=none
+ eps=
+ espcharge=off
+ excrad=0.d0
+ excrad_f12=0.d0
+ excrad_fin=0.000000000D+00
+ fastdbbsc=v2
+ fitting=coulomb
+ fmm=off
+ fmmord=8
+ fnonorb=
+ freq=off
+ gamma=1.1d0
+ gauss=spher
+ geom=xyz
+ gopt=off
+ ghost=none
+ gtol=7
+ grdens=off
+ grid=auto
+ grid_sm=auto
+ gridbatch_cos=2000
+ grtol=10
+ guido_ct=off
+ hamilton=nonrel
+ hl_scfalg=auto
+ iface=none
+ incore=off
+ intalg=auto
+ ip_ea=off
+ itol=10
+ laptol=1.d-2
+ lccoporder=trffirst
+ lcorthr=normal
+ lccrest=off
+ ldfgrad_tol=8
+ lmp2dens=on
+ lnoepso=0.d0
+ lnoepsv=1e-5
+ localcc=off
+ localcorrsymm=off
+ locintrf=disk
+ mact=
+ maxact=off
+ maxdim=200
+ maxex=0
+ maxmicroit=100
+ mcscfiguess=hf
+ mem=2048mb
+ mmprog=
+ molden=off
+ mp2ongrid=off
+ mpitasks=1
+ mulmet=0
+ mult=2
+ nab=off
+ nacto=0
+ nactv=0
+ naf_amp=3.16d-3
+ naf_cor=off
+ naf_f12=off
+ naf_scf=off
+ nafalg=albe
+ nafdens=off
+ naftyp=
+ nchol=auto
+ ndeps=1e-3
+ nevpt=
+ nstate=1
+ nsing=0
+ nto=off
+ ntrip=0
+ num_grad=off
+ occ=
+ occri=off
+ oniom=off
+ oniom_eechg=off
+ oniom_pcm=off
+ oniom_qcorr=off
+ optalg=
+ optmaxit=50
+ optetol=1e-6
+ optex=0
+ optgtol=1e-4
+ optstol=1e-3
+ orblocc=off
+ orbloce=off
+ orbloco=off
+ orblocv=off
+ orblocguess=cholesky
+ osveps=1e-3
+ ovirt=off
+ ovltol=1e-7
+ ovosnorb=80.0
+ pao_subsys_tol=1e-3
+ pao_tol=1e-3
+ pcm=off
+ popul=off
+ pressure=100000
+ pssp=off
+ ptfreq=0.0
+ ptthreads=2
+ qmreg=
+ qmmm=off
+ qro=off
+ qscf=off
+ redcost_exc=off
+ redcost_tddft=off
+ refdet=none
+ rest=0
+ rgrid=log3
+ rism=off
+ rohfcore=semicanonical
+ rohftype=semicanonical
+ scfalg=auto
+ scf_conv=auto
+ scfdamp=0.0d0
+ scfdamp_mode=off
+ scfdamp_end=200
+ scfdamp_dampstep=0.d0
+ scfdamp_dtol=0.0d0
+ scfdamp_maxfact=0.0d0
+ scfdamp_minfact=0.0d0
+ scfdiis=on
+ scfdiis_dtol=0.0d0
+ scfdiis_end=200
+ scfdiis_start=2
+ scfdiis_step=1
+ scfdiis_watch=off
+ scfdiis_wrange=10
+ scfdiis_wlimit=5
+ scfdiis_delmax=2
+ scfdtol=7
+ scfext=10
+ scfguessdens=
+ scfiguess=sad
+ scfloc=off
+ scflshift=0.20
+ scflshift_end=8
+ scflshift_dtol=0.0
+ scflshift_gaptol=0.20
+ scfmaxit=200
+ scftype=uhf
+ scftype_low=uhf
+ scftype_high=uhf
+ scftol=6
+ scspe=1.d0
+ scsph=1.d0
+ scsps=1.2d0
+ scsps_t=1.2d0
+ scspt=0.33333333333333
+ scspt_t=0.33333333333333
+ scspv=1.d0
+ spairtol=1e-4
+ sqmprog=
+ subminp=top
+ subsys_bopu=on
+ symm=0
+ talg=occ
+ temp=298.15
+ test=off
+ tfunc=off
+ theodore=off
+ tlmo=0.999
+ tpao=0.94
+ tprint=off
+ uncontract=off
+ unit=angs
+ usedisk=2
+ verbosity=2
+ wpairtol=0.100000000E-05
+
+ ************************ 2026-11-03 22:19:17 *************************
+ Executing integ...
+
+ Allocation of 2048.0 Mbytes of memory...
+ 
+ 
+ Number of atoms:                  6
+ Charge:                           0
+ Number of electrons:             17
+ Number of core electrons:         4
+ Spin multiplicity:                2
+ 
+                 Cartesian coordinates [bohr]      Atomic mass [AMU]  Z
+   1  N    -0.04440472   -0.05917577    0.10575761    14.003074       7
+   2  H     1.86884099   -0.07829264    0.01127397     1.007825       1
+   3  H    -0.57481944    1.77982755    0.02494699     1.007825       1
+   4  H    -0.67698094   -0.87923821   -1.50581113     1.007825       1
+   5  C     0.00000000    0.00000000    5.50530825    12.000000       6
+   6  H     0.00000000    0.00000000    7.62180151     1.007825       1
+ 
+ This molecule is an asymmetric top.
+ 
+ Rotational constants [cm-1]: 
+      7.202252365131      0.243486467477      0.242369352564
+ 
+ Point group: C1  
+ Computational point group: C1  
+ 
+ Cartesian coordinates in standard orientation [bohr]
+   1  N    -2.35003936   -0.00000001    0.05819322
+   2  H    -2.43690548   -1.54178476   -1.07545393
+   3  H    -2.42310135    1.52802066   -1.09489747
+   4  H    -3.96853223    0.01376583    1.08293718
+   5  C     3.04988658   -0.00000011    0.02050324
+   6  H     5.16633203   -0.00000019    0.03472875
+ 
+ Nuclear repulsion energy [au]:         26.762696595124
+ 
+ 
+ Basis set information:
+ 
+ Maximum angular momentum: f
+ Maximum number of contracted Gaussians:    5
+ Maximum number of primitive Gaussians:    11
+ Spherical harmonic GTOs are used.
+ 
+   1  N  aug-cc-pvtz [ 11s 6p 3d 2f | 5s 4p 3d 2f ]
+   2  H  aug-cc-pvtz [ 6s 3p 2d | 4s 3p 2d ]
+   3  H  aug-cc-pvtz [ 6s 3p 2d | 4s 3p 2d ]
+   4  H  aug-cc-pvtz [ 6s 3p 2d | 4s 3p 2d ]
+   5  C  aug-cc-pvtz [ 11s 6p 3d 2f | 5s 4p 3d 2f ]
+   6  H  aug-cc-pvtz [ 6s 3p 2d | 4s 3p 2d ]
+ 
+ Total number of basis functions:    184
+ 
+ 
+ Initializing the SAD routines for the initial guess...
+ Checking the files required for the initial guess...
+ Density files have not been found for the initial guess.
+ Generating SCFDENSITIES.N.aug-cc-pvtz.0
+ Generating SCFDENSITIES.H.aug-cc-pvtz.0
+ Generating SCFDENSITIES.C.aug-cc-pvtz.0
+ CPU time [min]:     0.002                   Wall time [min]:     0.028
+ 
+ Character table for point group C1:
+ 
+          E  
+    A     1
+ 
+ Number of basis functions per irrep:
+    A     184
+ 
+ 
+ Calculation of overlap integrals...
+ CPU time [min]:     0.002                   Wall time [min]:     0.028
+ 
+ Calculation of the square root of the overlap matrix...
+ Minimum eigenvalue of the overlap matrix: 0.133647E-03
+ CPU time [min]:     0.002                   Wall time [min]:     0.028
+ 
+ Calculation of kinetic energy integrals...
+ CPU time [min]:     0.002                   Wall time [min]:     0.028
+ Calculation of nuclear attraction integrals...
+ CPU time [min]:     0.002                   Wall time [min]:     0.028
+ 
+ Calculation of prescreening integrals...
+ CPU time [min]:     0.003                   Wall time [min]:     0.029
+ 
+ Calculation of two-electron integrals...
+   1% done.
+  15% done.
+  27% done.
+  41% done.
+  59% done.
+  80% done.
+ 100% done.
+ CPU time [min]:     0.090                   Wall time [min]:     0.116
+
+ ************************ 2026-11-03 22:19:24 *************************
+ Executing scf...
+
+ Allocation of 2048.0 Mbytes of memory...
+ ======================================================================
+ ITERATION STEP   1
+ CPU time [min]:     0.004                   Wall time [min]:     0.004
+ 
+ RMS of alpha [F,P] :                                  0.00675389645557
+ RMS of beta  [F,P] :                                  0.00667399264707
+ RMS of alpha difference density:                      0.00805480944978
+ RMS of beta  difference density:                      0.00810040777594
+ Gap [au]:  0.42571377
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP   1 IS        -94.1141005845939134 [AU]
+ ======================================================================
+ ITERATION STEP   2
+ CPU time [min]:     0.028                   Wall time [min]:     0.028
+ 
+ RMS of alpha [F,P] :                                  0.00093507834696
+ RMS of beta  [F,P] :                                  0.00092160106391
+ RMS of alpha difference density:                      0.00122257603509
+ RMS of beta  difference density:                      0.00121785965445
+ Gap [au]:  0.40650654
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP   2 IS        -94.4732222950252662 [AU]
+ ======================================================================
+ ITERATION STEP   3
+ CPU time [min]:     0.052                   Wall time [min]:     0.052
+ 
+ RMS of alpha [F,P] :                                  0.00031227057860
+ RMS of beta  [F,P] :                                  0.00030672266350
+ RMS of alpha difference density:                      0.00041665066482
+ RMS of beta  difference density:                      0.00041096821195
+ Gap [au]:  0.41766217
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP   3 IS        -94.4868622290769480 [AU]
+ ======================================================================
+ ITERATION STEP   4
+ CPU time [min]:     0.076                   Wall time [min]:     0.076
+ 
+ RMS of alpha [F,P] :                                  0.00011961375179
+ RMS of beta  [F,P] :                                  0.00011149901998
+ RMS of alpha difference density:                      0.00018587848096
+ RMS of beta  difference density:                      0.00017107150511
+ Gap [au]:  0.41044254
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP   4 IS        -94.4885189468577664 [AU]
+ ======================================================================
+ ITERATION STEP   5
+ CPU time [min]:     0.100                   Wall time [min]:     0.100
+ 
+ RMS of alpha [F,P] :                                  0.00003214276956
+ RMS of beta  [F,P] :                                  0.00002834055392
+ RMS of alpha difference density:                      0.00006675918075
+ RMS of beta  difference density:                      0.00005431241498
+ Gap [au]:  0.41096749
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP   5 IS        -94.4888598157619981 [AU]
+ ======================================================================
+ ITERATION STEP   6
+ CPU time [min]:     0.124                   Wall time [min]:     0.124
+ 
+ RMS of alpha [F,P] :                                  0.00000887076274
+ RMS of beta  [F,P] :                                  0.00000663980022
+ RMS of alpha difference density:                      0.00002375144503
+ RMS of beta  difference density:                      0.00001624161147
+ Gap [au]:  0.41090685
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP   6 IS        -94.4888912236302616 [AU]
+ ======================================================================
+ ITERATION STEP   7
+ CPU time [min]:     0.148                   Wall time [min]:     0.148
+ 
+ RMS of alpha [F,P] :                                  0.00000627474139
+ RMS of beta  [F,P] :                                  0.00000537195894
+ RMS of alpha difference density:                      0.00001455271524
+ RMS of beta  difference density:                      0.00001161509483
+ Gap [au]:  0.41094499
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP   7 IS        -94.4888967625372658 [AU]
+ ======================================================================
+ ITERATION STEP   8
+ CPU time [min]:     0.172                   Wall time [min]:     0.172
+ 
+ RMS of alpha [F,P] :                                  0.00000622115113
+ RMS of beta  [F,P] :                                  0.00000587120344
+ RMS of alpha difference density:                      0.00002073365525
+ RMS of beta  difference density:                      0.00001989645987
+ Gap [au]:  0.41095600
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP   8 IS        -94.4889012851925543 [AU]
+ ======================================================================
+ ITERATION STEP   9
+ CPU time [min]:     0.196                   Wall time [min]:     0.196
+ 
+ RMS of alpha [F,P] :                                  0.00000552403556
+ RMS of beta  [F,P] :                                  0.00000493140881
+ RMS of alpha difference density:                      0.00005306820454
+ RMS of beta  difference density:                      0.00005553894256
+ Gap [au]:  0.41090045
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP   9 IS        -94.4888942188728294 [AU]
+ ======================================================================
+ ITERATION STEP  10
+ CPU time [min]:     0.220                   Wall time [min]:     0.220
+ 
+ RMS of alpha [F,P] :                                  0.00000314383789
+ RMS of beta  [F,P] :                                  0.00000255208225
+ RMS of alpha difference density:                      0.00002982372818
+ RMS of beta  difference density:                      0.00003546142737
+ Gap [au]:  0.41091318
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP  10 IS        -94.4888822432080957 [AU]
+ ======================================================================
+ ITERATION STEP  11
+ CPU time [min]:     0.244                   Wall time [min]:     0.244
+ 
+ RMS of alpha [F,P] :                                  0.00000097951792
+ RMS of beta  [F,P] :                                  0.00000101917015
+ RMS of alpha difference density:                      0.00000588442744
+ RMS of beta  difference density:                      0.00000876801257
+ Gap [au]:  0.41087573
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP  11 IS        -94.4888802017285769 [AU]
+ ======================================================================
+ ITERATION STEP  12
+ CPU time [min]:     0.268                   Wall time [min]:     0.268
+ 
+ RMS of alpha [F,P] :                                  0.00000033185317
+ RMS of beta  [F,P] :                                  0.00000029179011
+ RMS of alpha difference density:                      0.00000118235613
+ RMS of beta  difference density:                      0.00000145389469
+ Gap [au]:  0.41086183
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP  12 IS        -94.4888802198513815 [AU]
+ ======================================================================
+ ITERATION STEP  13
+ CPU time [min]:     0.292                   Wall time [min]:     0.292
+ 
+ RMS of alpha [F,P] :                                  0.00000017738002
+ RMS of beta  [F,P] :                                  0.00000010815971
+ RMS of alpha difference density:                      0.00000055749134
+ RMS of beta  difference density:                      0.00000047753529
+ Gap [au]:  0.41085270
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP  13 IS        -94.4888802290283110 [AU]
+ ======================================================================
+ ITERATION STEP  14
+ CPU time [min]:     0.316                   Wall time [min]:     0.316
+ 
+ RMS of alpha [F,P] :                                  0.00000015414236
+ RMS of beta  [F,P] :                                  0.00000004668196
+ RMS of alpha difference density:                      0.00000039812711
+ RMS of beta  difference density:                      0.00000010650644
+ Gap [au]:  0.41085170
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP  14 IS        -94.4888802321232646 [AU]
+ ======================================================================
+ ITERATION STEP  15
+ CPU time [min]:     0.340                   Wall time [min]:     0.340
+ 
+ RMS of alpha [F,P] :                                  0.00000015138069
+ RMS of beta  [F,P] :                                  0.00000003979685
+ RMS of alpha difference density:                      0.00000059498150
+ RMS of beta  difference density:                      0.00000008556460
+ Gap [au]:  0.41085157
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP  15 IS        -94.4888802342603924 [AU]
+ ======================================================================
+ ITERATION STEP  16
+ CPU time [min]:     0.364                   Wall time [min]:     0.364
+ 
+ RMS of alpha [F,P] :                                  0.00000015027163
+ RMS of beta  [F,P] :                                  0.00000003647835
+ RMS of alpha difference density:                      0.00000060716185
+ RMS of beta  difference density:                      0.00000005693181
+ Gap [au]:  0.41085175
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP  16 IS        -94.4888802374017018 [AU]
+ ======================================================================
+ ITERATION STEP  17
+ CPU time [min]:     0.388                   Wall time [min]:     0.388
+ 
+ RMS of alpha [F,P] :                                  0.00000014981588
+ RMS of beta  [F,P] :                                  0.00000003545597
+ RMS of alpha difference density:                      0.00000074344164
+ RMS of beta  difference density:                      0.00000004993890
+ Gap [au]:  0.41085168
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP  17 IS        -94.4888802405745452 [AU]
+ ======================================================================
+ ITERATION STEP  18
+ CPU time [min]:     0.412                   Wall time [min]:     0.412
+ 
+ RMS of alpha [F,P] :                                  0.00000014945816
+ RMS of beta  [F,P] :                                  0.00000003532875
+ RMS of alpha difference density:                      0.00000114378031
+ RMS of beta  difference density:                      0.00000006444717
+ Gap [au]:  0.41085188
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP  18 IS        -94.4888802444419014 [AU]
+ ======================================================================
+ ITERATION STEP  19
+ CPU time [min]:     0.435                   Wall time [min]:     0.436
+ 
+ RMS of alpha [F,P] :                                  0.00000014902356
+ RMS of beta  [F,P] :                                  0.00000003553489
+ RMS of alpha difference density:                      0.00000297162167
+ RMS of beta  difference density:                      0.00000016801831
+ Gap [au]:  0.41085177
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP  19 IS        -94.4888802503778322 [AU]
+ ======================================================================
+ ITERATION STEP  20
+ CPU time [min]:     0.459                   Wall time [min]:     0.460
+ 
+ RMS of alpha [F,P] :                                  0.00000014802015
+ RMS of beta  [F,P] :                                  0.00000003616093
+ RMS of alpha difference density:                      0.00001019232329
+ RMS of beta  difference density:                      0.00000059024427
+ Gap [au]:  0.41085197
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP  20 IS        -94.4888802657310123 [AU]
+ ======================================================================
+ ITERATION STEP  21
+ CPU time [min]:     0.483                   Wall time [min]:     0.483
+ 
+ RMS of alpha [F,P] :                                  0.00000014498691
+ RMS of beta  [F,P] :                                  0.00000003789280
+ RMS of alpha difference density:                      0.00002318427539
+ RMS of beta  difference density:                      0.00000137297710
+ Gap [au]:  0.41085138
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP  21 IS        -94.4888803176370118 [AU]
+ ======================================================================
+ ITERATION STEP  22
+ CPU time [min]:     0.507                   Wall time [min]:     0.507
+ 
+ RMS of alpha [F,P] :                                  0.00000013923312
+ RMS of beta  [F,P] :                                  0.00000003941022
+ RMS of alpha difference density:                      0.00002974028175
+ RMS of beta  difference density:                      0.00000178723024
+ Gap [au]:  0.41085169
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP  22 IS        -94.4888804313986554 [AU]
+ ======================================================================
+ ITERATION STEP  23
+ CPU time [min]:     0.530                   Wall time [min]:     0.531
+ 
+ RMS of alpha [F,P] :                                  0.00000013321044
+ RMS of beta  [F,P] :                                  0.00000004205777
+ RMS of alpha difference density:                      0.00002010574571
+ RMS of beta  difference density:                      0.00000121657414
+ Gap [au]:  0.41085176
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP  23 IS        -94.4888805686096589 [AU]
+ ======================================================================
+ ITERATION STEP  24
+ CPU time [min]:     0.554                   Wall time [min]:     0.555
+ 
+ RMS of alpha [F,P] :                                  0.00000012616866
+ RMS of beta  [F,P] :                                  0.00000004112885
+ RMS of alpha difference density:                      0.00005061964116
+ RMS of beta  difference density:                      0.00000303601226
+ Gap [au]:  0.41085230
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP  24 IS        -94.4888806559078205 [AU]
+ ======================================================================
+ ITERATION STEP  25
+ CPU time [min]:     0.578                   Wall time [min]:     0.579
+ 
+ RMS of alpha [F,P] :                                  0.00000016922304
+ RMS of beta  [F,P] :                                  0.00000010170209
+ RMS of alpha difference density:                      0.00000822298300
+ RMS of beta  difference density:                      0.00000049520050
+ Gap [au]:  0.41085276
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP  25 IS        -94.4888808552946102 [AU]
+ ======================================================================
+ ITERATION STEP  26
+ CPU time [min]:     0.602                   Wall time [min]:     0.603
+ 
+ RMS of alpha [F,P] :                                  0.00000024477166
+ RMS of beta  [F,P] :                                  0.00000016274186
+ RMS of alpha difference density:                      0.00000224493334
+ RMS of beta  difference density:                      0.00000013732934
+ Gap [au]:  0.41085260
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP  26 IS        -94.4888808839366590 [AU]
+ ======================================================================
+ ITERATION STEP  27
+ CPU time [min]:     0.626                   Wall time [min]:     0.627
+ 
+ RMS of alpha [F,P] :                                  0.00000022331555
+ RMS of beta  [F,P] :                                  0.00000014593301
+ RMS of alpha difference density:                      0.00000122593654
+ RMS of beta  difference density:                      0.00000007387147
+ Gap [au]:  0.41085265
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP  27 IS        -94.4888808762647443 [AU]
+ ======================================================================
+ ITERATION STEP  28
+ CPU time [min]:     0.650                   Wall time [min]:     0.650
+ 
+ RMS of alpha [F,P] :                                  0.00000023308100
+ RMS of beta  [F,P] :                                  0.00000015362760
+ RMS of alpha difference density:                      0.00000053118593
+ RMS of beta  difference density:                      0.00000003200220
+ Gap [au]:  0.41085263
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP  28 IS        -94.4888808805031175 [AU]
+ ======================================================================
+ ITERATION STEP  29
+ CPU time [min]:     0.673                   Wall time [min]:     0.674
+ 
+ RMS of alpha [F,P] :                                  0.00000022893781
+ RMS of beta  [F,P] :                                  0.00000015036745
+ RMS of alpha difference density:                      0.00000022905615
+ RMS of beta  difference density:                      0.00000001379057
+ Gap [au]:  0.41085264
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP  29 IS        -94.4888808786684109 [AU]
+ ======================================================================
+ ITERATION STEP  30
+ CPU time [min]:     0.697                   Wall time [min]:     0.698
+ 
+ RMS of alpha [F,P] :                                  0.00000023069808
+ RMS of beta  [F,P] :                                  0.00000015175471
+ RMS of alpha difference density:                      0.00000009836373
+ RMS of beta  difference density:                      0.00000000592191
+ Gap [au]:  0.41085263
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP  30 IS        -94.4888808794604813 [AU]
+ ======================================================================
+ 
+ SUCCESS...
+ THE SCF ITERATION HAS CONVERGED!
+ 
+                   A   
+ FINAL ALPHA OCC:   9
+ FINAL BETA  OCC:   8
+ 
+ ***FINAL HARTREE-FOCK ENERGY:        -94.4888808794604813 [AU]
+ 
+ Expectation value of S^2:  0.7592
+ Average multiplicity:      2.0092
+ 
+ RETURNING FROM SCF ALGORITHM
+ ======================================================================
+
+ ************************ 2026-11-03 22:20:07 *************************
+ Executing ovirt...
+
+ ovirt, the routine of orbital optimization and integral transformation 
+Tue Nov  3 22:20:07 CET 2026
+ Allocated memory:                    2048  Mb
+ UHF calculation! 
+ integral transformation: AOs --- MOs (alpha-alpha)
+ # of basis functions, # of int. blocks   184     5
+ 20 % 
+ 40 % 
+ 60 % 
+ 80 % 
+100 % 
+ second part
+ 20 %
+ 40 %
+ 60 %
+ 80 %
+100 %
+ integral transformation is completed! 
+ integral transformation: AOs ------ MOs (beta-beta)
+ # of basis functions, # of int. blocks   184     5
+ 20 % 
+ 40 % 
+ 60 % 
+ 80 % 
+100 % 
+ second part
+ 20 %
+ 40 %
+ 60 %
+ 80 %
+100 %
+ integral transformation is completed! 
+ integral transformation: AOs ----- MOs (alpha-beta)
+# of basis functions, # of int. blocks   184     5
+ integral transformation
+======================================== 
+Tue Nov  3 22:22:38 CET 2026
+  ovirt terminated normally 
+
+ ************************ 2026-11-03 22:22:38 *************************
+ Executing uccsd...
+
+ Allocation of 2048.0 Mbytes of memory...
+ 
+ CCSD(T) calculation.
+ Minimal memory requirement for CCSD: 113.73 MB
+ Disk space requirement for CCSD:       6.12 GB
+ Minimal memory requirement for (T):  294.80 MB
+ Disk space requirement for (T):        1.32 GB
+ 
+ Reference energy [au]:                      -94.488880879460
+ T1 contributions [au]:                       -0.000000000000
+ Same spin MP2 energy [au]:                   -0.069676425768
+ Opposite spin MP2 energy [au]:               -0.277550851367
+ MP2 correlation energy [au]:                 -0.347227277134
+ Total MP2 energy [au]:                      -94.836108156595
+ 
+ Projected  S^2 /   T1,    T2, total/    0.000000   0.000000   0.759222
+ 
+ Starting CCSD iterations...
+ 
+                     Residual norm     Correlation energy [au]
+ -------------------------------------------------------------
+ Iteration  1       0.067840541613        -0.368876340907
+ Iteration  2       0.027840467688        -0.380755193354
+ Iteration  3       0.013437563131        -0.383326457159
+ Iteration  4       0.005616840935        -0.383334300567
+ Iteration  5       0.002568394625        -0.383394937654
+ Iteration  6       0.001232135433        -0.383422827649
+ Iteration  7       0.000630318318        -0.383423103390
+ Iteration  8       0.000400628401        -0.383427237773
+ Iteration  9       0.000304862541        -0.383429480992
+ Iteration 10       0.000261678734        -0.383427756236
+ Iteration 11       0.000200969168        -0.383427759489
+ Iteration 12       0.000135078045        -0.383429563784
+ Iteration 13       0.000098342367        -0.383429696712
+ Iteration 14       0.000074928621        -0.383429366965
+ Iteration 15       0.000046939979        -0.383429847633
+ Iteration 16       0.000021158098        -0.383430081953
+ Iteration 17       0.000010587085        -0.383429940251
+ Iteration 18       0.000005909033        -0.383429813771
+
+ Program dmrcc recieved SIGTERM
+
+ Sending signal 15 to child processes

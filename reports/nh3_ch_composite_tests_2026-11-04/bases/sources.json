@@ -1,0 +1,22 @@
+[
+  {
+    "label": "jun-cc-pVTZ",
+    "source": "/home/peter/micromamba/envs/psi4env/share/psi4/basis/jun-cc-pvtz.gbs",
+    "sha256": "90feb6cf78db5feb0ee1e432cf0ae94d2f80323e6f2dc801132d31a02d382974",
+    "spherical_basis_functions": {
+      "H": 14,
+      "C": 39,
+      "N": 39
+    }
+  },
+  {
+    "label": "jun-cc-pVQZ",
+    "source": "/home/peter/micromamba/envs/psi4env/share/psi4/basis/jun-cc-pvqz.gbs",
+    "sha256": "47fc2e6de64ac67674aa26ea7cbee42d56c4c65b70c2a5d26033436a6fa4a6bb",
+    "spherical_basis_functions": {
+      "H": 30,
+      "C": 71,
+      "N": 71
+    }
+  }
+]

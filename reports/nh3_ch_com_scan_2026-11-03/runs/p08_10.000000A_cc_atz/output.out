@@ -1,0 +1,660 @@
+ **********************************************************************
+                          MRCC program system
+ **********************************************************************
+ 
+                              Written by
+     Mihaly Kallay, Peter R. Nagy, David Mester, Laszlo Gyevi-Nagy,
+        Jozsef Csoka, P. Bernat Szabo, Zoltan Rolik, Gyula Samu,
+      Bence Hegely, Bence Ladoczki, Klara Petrov, Jozsef Csontos,
+     Adam Ganyecz, Istvan Ladjanszki, Lorant Szegedy, Mate Farkas,
+          Pal D. Mezei, Reka A. Horvath, and Balazs D. Lorincz
+ 
+        Department of Physical Chemistry and Materials Science
+            Budapest University of Technology and Economics
+                  Budapest P.O.Box 91, H-1521 Hungary
+ 
+                              www.mrcc.hu
+ 
+                            Version: 26.1.3
+
+ ************************ 2026-11-03 22:48:37 *************************
+ Executing minp...
+
+ Reading input from MINP...
+ 
+ Input file:
+ 
+calc=CCSD(T)
+basis=aug-cc-pVTZ
+charge=0
+mult=2
+scftype=UHF
+mem=16000MB
+core=frozen
+symm=off
+unit=angs
+molden=off
+scfmaxit=200
+ccmaxit=100
+geom=xyz
+6
+
+N -0.02349796675709 -0.03131447141800 0.05596451866831
+H 0.98894806324291 -0.04143068141800 0.00596592866831
+H -0.30418134675709 0.94184417858200 0.01320137866831
+H -0.35824288675709 -0.46527282141800 -0.79684093133169
+C 0.00000000000000 0.00000000000000 9.91328366233966
+H 0.00000000000000 0.00000000000000 11.03328366233966
+ 
+ 
+ Checking keyword combinations...
+ 
+ Keywords:
+ 
+ active=none
+ agrid=ld0006-ld0590
+ agrid_pssp=ld0006-ld0194
+ agrid_pssp_sm=ld0006-ld0074
+ ao_trunc=off
+ ao_trunc_tol=1e-4
+ basis=aug-cc-pvtz
+ basis_sm=none
+ basopt=off
+ bfbasis=none
+ bfgsmem=10
+ bfgstol=1.0d-3
+ bfgscimem=5
+ boysalg=jacobi
+ bpcompo=0.985
+ bpcompv=0.98
+ bpdfo=0.985
+ bpocc=0.985
+ bppdo=0.985
+ bppdv=0.98
+ bpedo=0.985
+ bpedv=0.98
+ bp_subsyso=0.95
+ bp_subsysv=0.95
+ cabscorr=off
+ cabsdom=bpsmall
+ cabsdual=off
+ calc=ccsd(t)
+ ccmaxit=100
+ ccprog=ccsd
+ ccsdalg=disk
+ ccsdmkl=seq
+ ccsdrest=trf
+ ccsdthreads=2
+ cctol=6
+ charge=0
+ cialg=auto
+ ciguess=off
+ cmpgrp=auto
+ codegen=on
+ comprest=off
+ coord_sys=ric
+ core=frozen
+ corembed=off
+ csapprox=off
+ cvs=off
+ dboc=off
+ deltaf12=off
+ delocsomofact=
+ dendec=cholesky
+ dens=0
+ denscorr=0
+ dfalg=lineq
+ dfbasis_cab=none
+ dfbasis_cor=none
+ dfbasis_scf=none
+ dfbasis_scf_sm=auto
+ dfintran=ovirt
+ df_trunc=off
+ df_trunc_corr=off
+ df_trunc_corr_tol=5e-4
+ df_trunc_tol=5e-4
+ dft=off
+ dhexc=adc(2)
+ diag=david
+ docc=
+ domrad=10.d0
+ drpaalg=fit
+ dual=off
+ dual_df=off
+ dyson=off
+ ecp=auto
+ edisp=off
+ edisp_embed=off
+ embed=off
+ epairestfact=off
+ epairscale=1.d0
+ etemp=300
+ epert=none
+ eps=
+ espcharge=off
+ excrad=0.d0
+ excrad_f12=0.d0
+ excrad_fin=0.000000000D+00
+ fastdbbsc=v2
+ fitting=coulomb
+ fmm=off
+ fmmord=8
+ fnonorb=
+ freq=off
+ gamma=1.1d0
+ gauss=spher
+ geom=xyz
+ gopt=off
+ ghost=none
+ gtol=7
+ grdens=off
+ grid=auto
+ grid_sm=auto
+ gridbatch_cos=2000
+ grtol=10
+ guido_ct=off
+ hamilton=nonrel
+ hl_scfalg=auto
+ iface=none
+ incore=off
+ intalg=auto
+ ip_ea=off
+ itol=10
+ laptol=1.d-2
+ lccoporder=trffirst
+ lcorthr=normal
+ lccrest=off
+ ldfgrad_tol=8
+ lmp2dens=on
+ lnoepso=0.d0
+ lnoepsv=1e-5
+ localcc=off
+ localcorrsymm=off
+ locintrf=disk
+ mact=
+ maxact=off
+ maxdim=200
+ maxex=0
+ maxmicroit=100
+ mcscfiguess=hf
+ mem=16000mb
+ mmprog=
+ molden=off
+ mp2ongrid=off
+ mpitasks=1
+ mulmet=0
+ mult=2
+ nab=off
+ nacto=0
+ nactv=0
+ naf_amp=3.16d-3
+ naf_cor=off
+ naf_f12=off
+ naf_scf=off
+ nafalg=albe
+ nafdens=off
+ naftyp=
+ nchol=auto
+ ndeps=1e-3
+ nevpt=
+ nstate=1
+ nsing=0
+ nto=off
+ ntrip=0
+ num_grad=off
+ occ=
+ occri=off
+ oniom=off
+ oniom_eechg=off
+ oniom_pcm=off
+ oniom_qcorr=off
+ optalg=
+ optmaxit=50
+ optetol=1e-6
+ optex=0
+ optgtol=1e-4
+ optstol=1e-3
+ orblocc=off
+ orbloce=off
+ orbloco=off
+ orblocv=off
+ orblocguess=cholesky
+ osveps=1e-3
+ ovirt=off
+ ovltol=1e-7
+ ovosnorb=80.0
+ pao_subsys_tol=1e-3
+ pao_tol=1e-3
+ pcm=off
+ popul=off
+ pressure=100000
+ pssp=off
+ ptfreq=0.0
+ ptthreads=2
+ qmreg=
+ qmmm=off
+ qro=off
+ qscf=off
+ redcost_exc=off
+ redcost_tddft=off
+ refdet=none
+ rest=0
+ rgrid=log3
+ rism=off
+ rohfcore=semicanonical
+ rohftype=semicanonical
+ scfalg=auto
+ scf_conv=auto
+ scfdamp=0.0d0
+ scfdamp_mode=off
+ scfdamp_end=200
+ scfdamp_dampstep=0.d0
+ scfdamp_dtol=0.0d0
+ scfdamp_maxfact=0.0d0
+ scfdamp_minfact=0.0d0
+ scfdiis=on
+ scfdiis_dtol=0.0d0
+ scfdiis_end=200
+ scfdiis_start=2
+ scfdiis_step=1
+ scfdiis_watch=off
+ scfdiis_wrange=10
+ scfdiis_wlimit=5
+ scfdiis_delmax=2
+ scfdtol=7
+ scfext=10
+ scfguessdens=
+ scfiguess=sad
+ scfloc=off
+ scflshift=0.20
+ scflshift_end=8
+ scflshift_dtol=0.0
+ scflshift_gaptol=0.20
+ scfmaxit=200
+ scftype=uhf
+ scftype_low=uhf
+ scftype_high=uhf
+ scftol=6
+ scspe=1.d0
+ scsph=1.d0
+ scsps=1.2d0
+ scsps_t=1.2d0
+ scspt=0.33333333333333
+ scspt_t=0.33333333333333
+ scspv=1.d0
+ spairtol=1e-4
+ sqmprog=
+ subminp=top
+ subsys_bopu=on
+ symm=0
+ talg=occ
+ temp=298.15
+ test=off
+ tfunc=off
+ theodore=off
+ tlmo=0.999
+ tpao=0.94
+ tprint=off
+ uncontract=off
+ unit=angs
+ usedisk=2
+ verbosity=2
+ wpairtol=0.100000000E-05
+
+ ************************ 2026-11-03 22:48:37 *************************
+ Executing integ...
+
+ Allocation of 15.6 Gbytes of memory...
+ 
+ 
+ Number of atoms:                  6
+ Charge:                           0
+ Number of electrons:             17
+ Number of core electrons:         4
+ Spin multiplicity:                2
+ 
+                 Cartesian coordinates [bohr]      Atomic mass [AMU]  Z
+   1  N    -0.04440472   -0.05917577    0.10575761    14.003074       7
+   2  H     1.86884099   -0.07829264    0.01127397     1.007825       1
+   3  H    -0.57481944    1.77982755    0.02494699     1.007825       1
+   4  H    -0.67698094   -0.87923821   -1.50581113     1.007825       1
+   5  C     0.00000000    0.00000000   18.73339113    12.000000       6
+   6  H     0.00000000    0.00000000   20.84988439     1.007825       1
+ 
+ This molecule is an asymmetric top.
+ 
+ Rotational constants [cm-1]: 
+      7.193769108506      0.022771660958      0.022761934014
+ 
+ Point group: C1  
+ Computational point group: C1  
+ 
+ Cartesian coordinates in standard orientation [bohr]
+   1  N    -8.07869410   -0.00000008    0.06904571
+   2  H    -8.17248469   -1.54178477   -1.06404963
+   3  H    -8.15879971    1.52802065   -1.08357700
+   4  H    -9.69089597    0.01376566    1.10365892
+   5  C    10.54898119   -0.00000004    0.00645610
+   6  H    12.66547405   -0.00000004    0.00775068
+ 
+ Nuclear repulsion energy [au]:         18.440768805612
+ 
+ 
+ Basis set information:
+ 
+ Maximum angular momentum: f
+ Maximum number of contracted Gaussians:    5
+ Maximum number of primitive Gaussians:    11
+ Spherical harmonic GTOs are used.
+ 
+   1  N  aug-cc-pvtz [ 11s 6p 3d 2f | 5s 4p 3d 2f ]
+   2  H  aug-cc-pvtz [ 6s 3p 2d | 4s 3p 2d ]
+   3  H  aug-cc-pvtz [ 6s 3p 2d | 4s 3p 2d ]
+   4  H  aug-cc-pvtz [ 6s 3p 2d | 4s 3p 2d ]
+   5  C  aug-cc-pvtz [ 11s 6p 3d 2f | 5s 4p 3d 2f ]
+   6  H  aug-cc-pvtz [ 6s 3p 2d | 4s 3p 2d ]
+ 
+ Total number of basis functions:    184
+ 
+ 
+ Initializing the SAD routines for the initial guess...
+ Checking the files required for the initial guess...
+ Density files have not been found for the initial guess.
+ Generating SCFDENSITIES.N.aug-cc-pvtz.0
+ Generating SCFDENSITIES.H.aug-cc-pvtz.0
+ Generating SCFDENSITIES.C.aug-cc-pvtz.0
+ CPU time [min]:     0.023                   Wall time [min]:     0.027
+ 
+ Character table for point group C1:
+ 
+          E  
+    A     1
+ 
+ Number of basis functions per irrep:
+    A     184
+ 
+ 
+ Calculation of overlap integrals...
+ CPU time [min]:     0.024                   Wall time [min]:     0.027
+ 
+ Calculation of the square root of the overlap matrix...
+ Minimum eigenvalue of the overlap matrix: 0.208056E-03
+ CPU time [min]:     0.025                   Wall time [min]:     0.027
+ 
+ Calculation of kinetic energy integrals...
+ CPU time [min]:     0.025                   Wall time [min]:     0.027
+ Calculation of nuclear attraction integrals...
+ CPU time [min]:     0.025                   Wall time [min]:     0.027
+ 
+ Calculation of prescreening integrals...
+ CPU time [min]:     0.028                   Wall time [min]:     0.028
+ 
+ Calculation of two-electron integrals...
+   1% done.
+  15% done.
+  27% done.
+  41% done.
+  59% done.
+  80% done.
+ 100% done.
+ CPU time [min]:     0.396                   Wall time [min]:     0.074
+
+ ************************ 2026-11-03 22:48:41 *************************
+ Executing scf...
+
+ Allocation of 15.6 Gbytes of memory...
+ ======================================================================
+ ITERATION STEP   1
+ CPU time [min]:     0.005                   Wall time [min]:     0.003
+ 
+ RMS of alpha [F,P] :                                  0.00676138075658
+ RMS of beta  [F,P] :                                  0.00668484993841
+ RMS of alpha difference density:                      0.00800596204163
+ RMS of beta  difference density:                      0.00804341678389
+ Gap [au]:  0.44809551
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP   1 IS        -94.1358739960819690 [AU]
+ ======================================================================
+ ITERATION STEP   2
+ CPU time [min]:     0.039                   Wall time [min]:     0.012
+ 
+ RMS of alpha [F,P] :                                  0.00092437668824
+ RMS of beta  [F,P] :                                  0.00091396360566
+ RMS of alpha difference density:                      0.00119385325575
+ RMS of beta  difference density:                      0.00121140902647
+ Gap [au]:  0.43501888
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP   2 IS        -94.4861905894644423 [AU]
+ ======================================================================
+ ITERATION STEP   3
+ CPU time [min]:     0.071                   Wall time [min]:     0.021
+ 
+ RMS of alpha [F,P] :                                  0.00033481830379
+ RMS of beta  [F,P] :                                  0.00032848244522
+ RMS of alpha difference density:                      0.00042718604243
+ RMS of beta  difference density:                      0.00042606781063
+ Gap [au]:  0.44474077
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP   3 IS        -94.4999118927539286 [AU]
+ ======================================================================
+ ITERATION STEP   4
+ CPU time [min]:     0.104                   Wall time [min]:     0.029
+ 
+ RMS of alpha [F,P] :                                  0.00012081590364
+ RMS of beta  [F,P] :                                  0.00011674044028
+ RMS of alpha difference density:                      0.00019162548080
+ RMS of beta  difference density:                      0.00018785863425
+ Gap [au]:  0.44465003
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP   4 IS        -94.5017738073926239 [AU]
+ ======================================================================
+ ITERATION STEP   5
+ CPU time [min]:     0.137                   Wall time [min]:     0.038
+ 
+ RMS of alpha [F,P] :                                  0.00003145560087
+ RMS of beta  [F,P] :                                  0.00002949638785
+ RMS of alpha difference density:                      0.00006672090671
+ RMS of beta  difference density:                      0.00006167778874
+ Gap [au]:  0.44436002
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP   5 IS        -94.5021690160844514 [AU]
+ ======================================================================
+ ITERATION STEP   6
+ CPU time [min]:     0.170                   Wall time [min]:     0.047
+ 
+ RMS of alpha [F,P] :                                  0.00000682683232
+ RMS of beta  [F,P] :                                  0.00000556202084
+ RMS of alpha difference density:                      0.00001921288353
+ RMS of beta  difference density:                      0.00001485813590
+ Gap [au]:  0.44427519
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP   6 IS        -94.5022014563565733 [AU]
+ ======================================================================
+ ITERATION STEP   7
+ CPU time [min]:     0.203                   Wall time [min]:     0.055
+ 
+ RMS of alpha [F,P] :                                  0.00000246943225
+ RMS of beta  [F,P] :                                  0.00000225398855
+ RMS of alpha difference density:                      0.00000825394167
+ RMS of beta  difference density:                      0.00000680914011
+ Gap [au]:  0.44423386
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP   7 IS        -94.5022036533242442 [AU]
+ ======================================================================
+ ITERATION STEP   8
+ CPU time [min]:     0.236                   Wall time [min]:     0.064
+ 
+ RMS of alpha [F,P] :                                  0.00000100809701
+ RMS of beta  [F,P] :                                  0.00000103896665
+ RMS of alpha difference density:                      0.00000475697828
+ RMS of beta  difference density:                      0.00000486906875
+ Gap [au]:  0.44424533
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP   8 IS        -94.5022040479221914 [AU]
+ ======================================================================
+ ITERATION STEP   9
+ CPU time [min]:     0.271                   Wall time [min]:     0.073
+ 
+ RMS of alpha [F,P] :                                  0.00000024647023
+ RMS of beta  [F,P] :                                  0.00000030583045
+ RMS of alpha difference density:                      0.00000121961105
+ RMS of beta  difference density:                      0.00000142739568
+ Gap [au]:  0.44425044
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP   9 IS        -94.5022041523071010 [AU]
+ ======================================================================
+ ITERATION STEP  10
+ CPU time [min]:     0.302                   Wall time [min]:     0.081
+ 
+ RMS of alpha [F,P] :                                  0.00000005851237
+ RMS of beta  [F,P] :                                  0.00000004557105
+ RMS of alpha difference density:                      0.00000017448301
+ RMS of beta  difference density:                      0.00000015269836
+ Gap [au]:  0.44425468
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP  10 IS        -94.5022041595959053 [AU]
+ ======================================================================
+ ITERATION STEP  11
+ CPU time [min]:     0.335                   Wall time [min]:     0.090
+ 
+ RMS of alpha [F,P] :                                  0.00000001651324
+ RMS of beta  [F,P] :                                  0.00000001638573
+ RMS of alpha difference density:                      0.00000004234903
+ RMS of beta  difference density:                      0.00000004258151
+ Gap [au]:  0.44425539
+ ALPHA OCC:   9
+ BETA  OCC:   8
+ 
+ ***HARTREE-FOCK ENERGY IN STEP  11 IS        -94.5022041597761984 [AU]
+ ======================================================================
+ 
+ SUCCESS...
+ THE SCF ITERATION HAS CONVERGED!
+ 
+                   A   
+ FINAL ALPHA OCC:   9
+ FINAL BETA  OCC:   8
+ 
+ ***FINAL HARTREE-FOCK ENERGY:        -94.5022041597761984 [AU]
+ 
+ Expectation value of S^2:  0.7597
+ Average multiplicity:      2.0096
+ 
+ RETURNING FROM SCF ALGORITHM
+ ======================================================================
+
+ ************************ 2026-11-03 22:48:47 *************************
+ Executing ovirt...
+
+ ovirt, the routine of orbital optimization and integral transformation 
+Tue Nov  3 22:48:47 CET 2026
+ Allocated memory:                   16000  Mb
+ UHF calculation! 
+ integral transformation: AOs --- MOs (alpha-alpha)
+ # of basis functions, # of int. blocks   184     1
+100 % 
+ second part
+100 %
+ integral transformation is completed! 
+ integral transformation: AOs ------ MOs (beta-beta)
+ # of basis functions, # of int. blocks   184     1
+100 % 
+ second part
+100 %
+ integral transformation is completed! 
+ integral transformation: AOs ----- MOs (alpha-beta)
+# of basis functions, # of int. blocks   184     1
+ integral transformation
+======================================== 
+Tue Nov  3 22:51:13 CET 2026
+  ovirt terminated normally 
+
+ ************************ 2026-11-03 22:51:14 *************************
+ Executing uccsd...
+
+ Allocation of 15.6 Gbytes of memory...
+ 
+ CCSD(T) calculation.
+ Minimal memory requirement for CCSD: 113.73 MB
+ Disk space requirement for CCSD:       6.12 GB
+ Minimal memory requirement for (T):  294.80 MB
+ Disk space requirement for (T):        1.32 GB
+ 
+ Reference energy [au]:                      -94.502204159776
+ T1 contributions [au]:                       -0.000000000000
+ Same spin MP2 energy [au]:                   -0.068120326641
+ Opposite spin MP2 energy [au]:               -0.275076389379
+ MP2 correlation energy [au]:                 -0.343196716020
+ Total MP2 energy [au]:                      -94.845400875797
+ 
+ Projected  S^2 /   T1,    T2, total/   -0.000000   0.000000   0.759666
+ 
+ Starting CCSD iterations...
+ 
+                     Residual norm     Correlation energy [au]
+ -------------------------------------------------------------
+ Iteration  1       0.066263701434        -0.364955850656
+ Iteration  2       0.027075251757        -0.376826060936
+ Iteration  3       0.012308831689        -0.379147328108
+ Iteration  4       0.004935711412        -0.379154368709
+ Iteration  5       0.002025594784        -0.379203930555
+ Iteration  6       0.000901979292        -0.379214979625
+ Iteration  7       0.000317802101        -0.379216827301
+ Iteration  8       0.000110343902        -0.379220293149
+ Iteration  9       0.000036589019        -0.379219934478
+ Iteration 10       0.000012964064        -0.379219544006
+ Iteration 11       0.000004862884        -0.379219569383
+ 
+ CCSD iteration has converged in 11 steps.
+ 
+ T1 contribution [au]:                                  0.000000000000
+ Opposite spin CCSD energy [au]:                       -0.315042359028
+ Same spin CCSD energy [au]:                           -0.064177210356
+ CCSD correlation energy [au]:                         -0.379219569383
+ Total CCSD energy [au]:                              -94.881423729159
+ 
+ Projected  S^2 /   T1,    T2, total/    0.000951   0.000001   0.760617
+ 
+ Alpha T1 diagnostic:      1.312E-02      D1 diagnostic:      1.840E-02
+ Beta  T1 diagnostic:      1.506E-02      D1 diagnostic:      2.647E-02
+ CPU time [min]:     9.642                   Wall time [min]:     4.585
+ 
+ Calculation of (T) correction...
+   1% done.
+  12% done.
+  24% done.
+  34% done.
+  45% done.
+  55% done.
+  70% done.
+  85% done.
+ 100% done.
+ 
+ (T) correction [au]:                                 -0.011851566155
+ CCSD(T) correlation energy [au]:                     -0.391071135539
+ Total CCSD(T) energy [au]:                          -94.893275295315
+ CPU time [min]:    10.673                   Wall time [min]:     4.814
+ 
+ ************************ 2026-11-03 22:56:03 *************************
+                      Normal termination of mrcc.
+ **********************************************************************

@@ -1,0 +1,4 @@
+Optimization
+Minimum-search convergence reached.
+Steps: 6
+Final energy: -1.117505880182 Eh

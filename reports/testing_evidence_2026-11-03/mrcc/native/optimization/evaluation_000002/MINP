@@ -1,0 +1,16 @@
+calc=HF
+basis=STO-3G
+charge=0
+mult=1
+scftype=RHF
+mem=768MB
+core=frozen
+symm=off
+unit=angs
+molden=off
+dens=2
+geom=xyz
+2
+
+H 0.01139572968174 0.01519430624232 0.03038861248465
+H 0.28860427031826 0.38480569375768 0.76961138751535

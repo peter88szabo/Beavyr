@@ -1,0 +1,27 @@
+[
+  {
+    "point": 5,
+    "distance_angstrom": 7.714285714285714,
+    "job": "cc_f12_juntz",
+    "calc": "CCSD(T)-F12",
+    "basis": "jun-cc-pVTZ",
+    "core": "frozen",
+    "status": "FAILED",
+    "energy_hartree": -94.912766514099,
+    "mp2_hartree": -94.840963851139,
+    "mp2_f12_hartree": -94.879044456054,
+    "mp2_f12_correlation": -0.375511560127,
+    "reference_hartree": -94.501747783705,
+    "cabs_hartree": -0.001785112222,
+    "s2": 0.7595,
+    "excess_s2": 0.009499999999999953,
+    "wall_seconds": 145.1,
+    "peak_rss_kib": 4664004,
+    "exit_code": 0,
+    "failure": "THE SCF ITERATION HAS NOT CONVERGED,",
+    "evidence": "/home/peter/DevCode/Beavyr/reports/nh3_ch_composite_tests_2026-11-04/runs/p06_7.714286A_cc_f12_juntz_scf400_not_converged",
+    "scratch": "/home/peter/DevCode/Beavyr/target/benchmarks/nh3_ch_composite_tests_2026-11-04/p06_7.714286A_cc_f12_juntz_scf400_not_converged",
+    "reused": false,
+    "restart_preparation_seconds": 0.0
+  }
+]

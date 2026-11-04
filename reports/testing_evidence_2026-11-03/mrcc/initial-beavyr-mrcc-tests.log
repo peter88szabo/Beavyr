@@ -1,0 +1,15 @@
+   Compiling Beavyr v0.2.1 (/home/peter/DevCode/Beavyr)
+    Finished `test` profile [optimized + debuginfo] target(s) in 2m 12s
+     Running unittests src/main.rs (target/debug/deps/Beavyr-401b2246fe058028)
+
+running 7 tests
+test qchem_interfaces::mrcc::tests::mrcc_adc_uses_final_correlated_roots_and_length_gauge_strengths ... ok
+test qchem_interfaces::mrcc::tests::mrcc_capabilities_restrict_jobs_and_references ... ok
+test qchem_interfaces::mrcc::tests::mrcc_core_correlation_cannot_use_a_valence_basis ... ok
+test qchem_interfaces::mrcc::tests::mrcc_final_energies_are_method_specific ... ok
+test qchem_interfaces::mrcc::tests::mrcc_gradient_requires_original_frame_and_complete_finite_rows ... ok
+test qchem_interfaces::mrcc::tests::mrcc_inputs_define_charge_spin_active_space_and_requested_roots ... ok
+test qchem_panel::run::mrcc_job::tests::mrcc_native_energy_spectrum_gradient_and_optimization ... ignored, Native MRCC: set BEAVYR_MRCC_EXECUTABLE; runs on at most four assigned cores
+
+test result: ok. 6 passed; 0 failed; 1 ignored; 0 measured; 1649 filtered out; finished in 0.00s
+

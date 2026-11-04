@@ -1,0 +1,50 @@
+Behemoth NH3 + CH: ROHF-reference UCCSD(T)/aug-cc-pVTZ
+====================================================
+
+Completed: 4 cores, memory = 16000 MB, wall time 131.66 seconds.
+Final energy: -94.884813432378 Hartree.
+Reference <S^2>: 0.7500000000, matching the doublet target.
+Peak process resident memory (GNU time): 13115852 KiB,
+approximately 12.51 GiB.
+
+Same NH3 + CH geometry as the MRCC benchmarks, neutral doublet, COM distance
+3.0 Angstrom. NH3 supplied by user; CH bond 1.12 Angstrom. Spherical aug-cc-pVTZ,
+184 basis functions. Frozen C/N 1s orbitals: 2 occupied orbitals per spin.
+Input file: 4cores/input.inp. Executed as behemoth input.inp, not a custom API.
+Method line: method = ROHF CCSD(T). ROHF convergence verified in output.
+Behemoth implements this route with Cholesky factors at threshold 1e-10,
+semicanonical orbitals, and perturbative triples. SCF tolerance 1e-10 Eh and
+1e-8 RMS density; CCSD default energy/amplitude tolerances 1e-8 and 1e-6.
+The successful run stored the integral blocks in memory.
+
+Reported internal timings (seconds):
+  ROHF: 22.130 (139 iterations)
+  Cholesky factors: 4.176
+  MO factors/fixed integral blocks: 35.297
+  MP2 starting energy: 0.019
+  CCSD: 59.193 (21 iterations; about 2.819 seconds per iteration)
+  Triples (T): 9.665
+  Internal total: 131.598
+  External complete-process wall time: 131.66
+
+Build: cargo build --release --offline --locked -j 4 --bin behemoth,
+CPU affinity 0-3. Release target verified current (Cargo reused compiled
+artifacts, 0.13 seconds); build.log records success and four existing warnings.
+No application source files were changed. Prior executable backed up at
+location recorded in metadata.json. Source HEAD, existing uncommitted changes,
+executable hash and build environment are retained in metadata.json.
+Run: CPU affinity 0-3; nproc=4; OMP/MKL/OpenBLAS/Rayon thread variables=4.
+Only one quantum calculation ran at a time. Desktop applications remained open.
+One timing measurement, not a repeated-run statistical benchmark.
+
+The initial one-core run with memory=2048 MB was cancelled at user request
+before finishing its first CCSD iteration. Its logs and original input are
+preserved in cancelled_2048MB_1core/. The user approved 16000 MB and then
+explicitly requested 4 cores, so the restarted calculation used 4 cores.
+No completed 1-/2-core Behemoth timings are claimed, and no numerical speedup
+factor can be inferred from the cancelled low-memory run.
+
+The earlier MRCC calculations used a UHF reference; Behemoth uses the ROHF
+reference requested by the user. Energies and timings therefore are not a
+comparison of identical reference/algorithm settings. The MRCC F12 comparison
+also uses a different basis and an explicitly correlated method.

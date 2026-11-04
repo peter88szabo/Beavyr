@@ -1,0 +1,38 @@
+[
+  {
+    "point": 7,
+    "distance_angstrom": 10.0,
+    "job": "cc_atz",
+    "calc": "CCSD(T)",
+    "basis": "aug-cc-pVTZ",
+    "status": "PASS",
+    "energy_hartree": -94.893275295315,
+    "mp2_f12_hartree": null,
+    "wall_seconds": 446.43,
+    "peak_rss_kib": 12757160,
+    "started": "2026-11-03 22:48:37 +0100",
+    "exit_code": 0,
+    "failure": "",
+    "spin_diagnostics": "Expectation value of S^2: 0.7597 | Projected S^2 / T1, T2, total/ -0.000000 0.000000 0.759666 | Projected S^2 / T1, T2, total/ 0.000951 0.000001 0.760617",
+    "evidence": "/home/peter/DevCode/Beavyr/reports/nh3_ch_com_scan_2026-11-03/runs/p08_10.000000A_cc_atz",
+    "scratch": "/home/peter/DevCode/Beavyr/target/benchmarks/nh3_ch_com_scan_2026-11-03/p08_10.000000A_cc_atz"
+  },
+  {
+    "point": 0,
+    "distance_angstrom": 2.0,
+    "job": "cc_atz",
+    "calc": "CCSD(T)",
+    "basis": "aug-cc-pVTZ",
+    "status": "PASS",
+    "energy_hartree": -94.79971435477,
+    "mp2_f12_hartree": null,
+    "wall_seconds": 949.04,
+    "peak_rss_kib": 12757596,
+    "started": "2026-11-03 22:56:34 +0100",
+    "exit_code": 0,
+    "failure": "",
+    "spin_diagnostics": "Expectation value of S^2: 0.7761 | Projected S^2 / T1, T2, total/ -0.000000 -0.000003 0.776105 | Projected S^2 / T1, T2, total/ -0.002056 -0.000007 0.774044",
+    "evidence": "/home/peter/DevCode/Beavyr/reports/nh3_ch_com_scan_2026-11-03/runs/p01_2.000000A_cc_atz",
+    "scratch": "/home/peter/DevCode/Beavyr/target/benchmarks/nh3_ch_com_scan_2026-11-03/p01_2.000000A_cc_atz"
+  }
+]

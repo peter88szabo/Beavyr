@@ -457,6 +457,8 @@ pub struct MethodConfig {
     pub search: super::job::search::Options,
     #[serde(default)]
     pub active_space: super::job::correlated::ActiveSpace,
+    #[serde(default)]
+    pub mrcc: super::mrcc::Options,
     pub xtb: XtbMethod,
     pub behemoth: BehemothMethod,
     pub functional: String,
@@ -489,6 +491,7 @@ impl Default for MethodConfig {
             mecp: Default::default(),
             search: Default::default(),
             active_space: Default::default(),
+            mrcc: Default::default(),
             xtb: XtbMethod::default(),
             behemoth: BehemothMethod::default(),
             functional: DEFAULT_FUNCTIONAL.to_string(),
@@ -515,6 +518,7 @@ impl Default for MethodConfig {
 /// leave the panel showing something the new program cannot run.
 pub fn defaults_for(program: QcProgram) -> (String, String) {
     match program {
+        QcProgram::Mrcc => ("PBE".into(), "cc-pVDZ".into()),
         QcProgram::Orca => (
             super::orca_method::DEFAULT_FUNCTIONAL.to_string(),
             super::orca_method::DEFAULT_BASIS.to_string(),
@@ -629,7 +633,7 @@ pub fn visible_fields(program: QcProgram, config: &MethodConfig) -> VisibleField
             nproc: true,
             ..hidden
         },
-        QcProgram::Psi4 | QcProgram::Psi4Py => VisibleFields {
+        QcProgram::Mrcc | QcProgram::Psi4 | QcProgram::Psi4Py => VisibleFields {
             functional: true,
             basis: true,
             memory: true,

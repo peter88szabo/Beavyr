@@ -1,0 +1,1479 @@
+ **********************************************************************
+                          MRCC program system
+ **********************************************************************
+ 
+                              Written by
+     Mihaly Kallay, Peter R. Nagy, David Mester, Laszlo Gyevi-Nagy,
+        Jozsef Csoka, P. Bernat Szabo, Zoltan Rolik, Gyula Samu,
+      Bence Hegely, Bence Ladoczki, Klara Petrov, Jozsef Csontos,
+     Adam Ganyecz, Istvan Ladjanszki, Lorant Szegedy, Mate Farkas,
+          Pal D. Mezei, Reka A. Horvath, and Balazs D. Lorincz
+ 
+        Department of Physical Chemistry and Materials Science
+            Budapest University of Technology and Economics
+                  Budapest P.O.Box 91, H-1521 Hungary
+ 
+                              www.mrcc.hu
+ 
+                            Version: 26.1.3
+
+ ************************ 2026-11-03 19:56:13 *************************
+ Executing minp...
+
+ Reading input from MINP...
+ 
+ Input file:
+ 
+calc=MCSCF
+basis=STO-3G
+charge=0
+mult=1
+scftype=MCSCF
+mem=768MB
+core=frozen
+symm=off
+unit=angs
+molden=on
+docc=3
+mact=3
+nevpt=on
+geom=xyz
+3
+
+O 0.00000000000000 0.00000000000000 0.00000000000000
+H 0.75800000000000 0.00000000000000 0.59000000000000
+H -0.75800000000000 0.00000000000000 0.59000000000000
+ 
+ 
+ Checking keyword combinations...
+ 
+ Warning! scfalg has been set to disk!
+ Keywords:
+ 
+ active=none
+ agrid=ld0006-ld0590
+ agrid_pssp=ld0006-ld0194
+ agrid_pssp_sm=ld0006-ld0074
+ ao_trunc=off
+ ao_trunc_tol=1e-4
+ basis=sto-3g
+ basis_sm=none
+ basopt=off
+ bfbasis=none
+ bfgsmem=10
+ bfgstol=1.0d-3
+ bfgscimem=5
+ boysalg=jacobi
+ bpcompo=0.985
+ bpcompv=0.98
+ bpdfo=0.985
+ bpocc=0.985
+ bppdo=0.985
+ bppdv=0.98
+ bpedo=0.985
+ bpedv=0.98
+ bp_subsyso=0.95
+ bp_subsysv=0.95
+ cabscorr=off
+ cabsdom=bpsmall
+ cabsdual=off
+ calc=scf
+ ccmaxit=50
+ ccprog=mrcc
+ ccsdalg=disk
+ ccsdmkl=seq
+ ccsdrest=off
+ ccsdthreads=2
+ cctol=6
+ charge=0
+ cialg=disk
+ ciguess=off
+ cmpgrp=auto
+ codegen=on
+ comprest=off
+ coord_sys=ric
+ core=frozen
+ corembed=off
+ csapprox=off
+ cvs=off
+ dboc=off
+ deltaf12=off
+ delocsomofact=
+ dendec=cholesky
+ dens=0
+ denscorr=0
+ dfalg=invsqrt
+ dfbasis_cab=none
+ dfbasis_cor=none
+ dfbasis_scf=none
+ dfbasis_scf_sm=auto
+ dfintran=ovirt
+ df_trunc=off
+ df_trunc_corr=off
+ df_trunc_corr_tol=5e-4
+ df_trunc_tol=5e-4
+ dft=off
+ dhexc=adc(2)
+ diag=david
+ docc=3
+ domrad=10.d0
+ drpaalg=fit
+ dual=off
+ dual_df=off
+ dyson=off
+ ecp=auto
+ edisp=off
+ edisp_embed=off
+ embed=off
+ epairestfact=off
+ epairscale=1.d0
+ etemp=300
+ epert=none
+ eps=
+ espcharge=off
+ excrad=0.d0
+ excrad_f12=0.d0
+ excrad_fin=0.000000000D+00
+ fastdbbsc=v2
+ fitting=coulomb
+ fmm=off
+ fmmord=8
+ fnonorb=
+ freq=off
+ gamma=1.d0
+ gauss=spher
+ geom=xyz
+ gopt=off
+ ghost=none
+ gtol=7
+ grdens=off
+ grid=auto
+ grid_sm=auto
+ gridbatch_cos=2000
+ grtol=10
+ guido_ct=off
+ hamilton=nonrel
+ hl_scfalg=disk
+ iface=none
+ incore=off
+ intalg=auto
+ ip_ea=off
+ itol=10
+ laptol=1.d-2
+ lccoporder=trffirst
+ lcorthr=normal
+ lccrest=off
+ ldfgrad_tol=8
+ lmp2dens=on
+ lnoepso=0.d0
+ lnoepsv=1e-5
+ localcc=off
+ localcorrsymm=off
+ locintrf=disk
+ mact=3
+ maxact=off
+ maxdim=200
+ maxex=0
+ maxmicroit=100
+ mcscfiguess=hf
+ mem=768mb
+ mmprog=
+ molden=on
+ mp2ongrid=off
+ mpitasks=1
+ mulmet=0
+ mult=1
+ nab=off
+ nacto=0
+ nactv=0
+ naf_amp=3.16d-3
+ naf_cor=off
+ naf_f12=off
+ naf_scf=off
+ nafalg=albe
+ nafdens=off
+ naftyp=
+ nchol=auto
+ ndeps=1e-3
+ nevpt=on
+ nstate=1
+ nsing=0
+ nto=off
+ ntrip=0
+ num_grad=off
+ occ=
+ occri=off
+ oniom=off
+ oniom_eechg=off
+ oniom_pcm=off
+ oniom_qcorr=off
+ optalg=
+ optmaxit=50
+ optetol=1e-6
+ optex=0
+ optgtol=1e-4
+ optstol=1e-3
+ orblocc=off
+ orbloce=off
+ orbloco=off
+ orblocv=off
+ orblocguess=cholesky
+ osveps=1e-3
+ ovirt=off
+ ovltol=1e-7
+ ovosnorb=80.0
+ pao_subsys_tol=1e-3
+ pao_tol=1e-3
+ pcm=off
+ popul=off
+ pressure=100000
+ pssp=off
+ ptfreq=0.0
+ ptthreads=2
+ qmreg=
+ qmmm=off
+ qro=off
+ qscf=aughessg
+ redcost_exc=off
+ redcost_tddft=off
+ refdet=none
+ rest=0
+ rgrid=log3
+ rism=off
+ rohfcore=semicanonical
+ rohftype=standard
+ scfalg=disk
+ scf_conv=auto
+ scfdamp=0.0d0
+ scfdamp_mode=off
+ scfdamp_end=50
+ scfdamp_dampstep=0.d0
+ scfdamp_dtol=0.0d0
+ scfdamp_maxfact=0.0d0
+ scfdamp_minfact=0.0d0
+ scfdiis=on
+ scfdiis_dtol=0.0d0
+ scfdiis_end=50
+ scfdiis_start=2
+ scfdiis_step=1
+ scfdiis_watch=off
+ scfdiis_wrange=10
+ scfdiis_wlimit=5
+ scfdiis_delmax=2
+ scfdtol=6
+ scfext=10
+ scfguessdens=
+ scfiguess=sad
+ scfloc=off
+ scflshift=0.20
+ scflshift_end=8
+ scflshift_dtol=0.0
+ scflshift_gaptol=0.20
+ scfmaxit=50
+ scftype=mcscf
+ scftype_low=mcscf
+ scftype_high=mcscf
+ scftol=6
+ scspe=1.d0
+ scsph=1.d0
+ scsps=1.2d0
+ scsps_t=1.2d0
+ scspt=0.33333333333333
+ scspt_t=0.33333333333333
+ scspv=1.d0
+ spairtol=1e-4
+ sqmprog=
+ subminp=top
+ subsys_bopu=on
+ symm=0
+ talg=occ
+ temp=298.15
+ test=off
+ tfunc=off
+ theodore=off
+ tlmo=0.999
+ tpao=0.94
+ tprint=off
+ uncontract=off
+ unit=angs
+ usedisk=2
+ verbosity=2
+ wpairtol=0.100000000E-05
+
+ ************************ 2026-11-03 19:56:13 *************************
+ Executing integ...
+
+ Allocation of 768.0 Mbytes of memory...
+ 
+ 
+ Number of atoms:                  3
+ Charge:                           0
+ Number of electrons:             10
+ Number of core electrons:         2
+ Spin multiplicity:                1
+ 
+                 Cartesian coordinates [bohr]      Atomic mass [AMU]  Z
+   1  O     0.00000000    0.00000000    0.00000000    15.994915       8
+   2  H     1.43241240    0.00000000    1.11493841     1.007825       1
+   3  H    -1.43241240    0.00000000    1.11493841     1.007825       1
+ 
+ This molecule is an asymmetric top.
+ This molecule is planar.
+ 
+ Rotational constants [cm-1]: 
+     27.053455114895     14.556030177176      9.463969724334
+ 
+ Point group: C2v 
+ Computational point group: C1  
+ 
+ Cartesian coordinates in standard orientation [bohr]
+   1  O     0.00000000    0.00000000   -0.12477819
+   2  H     0.00000000    1.43241240    0.99016022
+   3  H     0.00000000   -1.43241240    0.99016022
+ 
+ Nuclear repulsion energy [au]:          9.163594877415
+ 
+ 
+ Basis set information:
+ 
+ Maximum angular momentum: p
+ Maximum number of contracted Gaussians:    2
+ Maximum number of primitive Gaussians:     6
+ Spherical harmonic GTOs are used.
+ 
+   1  O  sto-3g [ 6s 3p | 2s 1p ]
+   2  H  sto-3g [ 3s | 1s ]
+   3  H  sto-3g [ 3s | 1s ]
+ 
+ Total number of basis functions:      7
+ 
+ 
+ Initializing the SAD routines for the initial guess...
+ Checking the files required for the initial guess...
+ Density files have not been found for the initial guess.
+ Generating SCFDENSITIES.O.sto-3g.0
+ Generating SCFDENSITIES.H.sto-3g.0
+ CPU time [min]:     0.003                   Wall time [min]:     0.030
+ 
+ Character table for point group C1:
+ 
+          E  
+    A     1
+ 
+ Number of basis functions per irrep:
+    A       7
+ 
+ 
+ Calculation of overlap integrals...
+ CPU time [min]:     0.003                   Wall time [min]:     0.030
+ 
+ Calculation of the square root of the overlap matrix...
+ Minimum eigenvalue of the overlap matrix: 0.344388E+00
+ CPU time [min]:     0.003                   Wall time [min]:     0.030
+ 
+ Calculation of kinetic energy integrals...
+ CPU time [min]:     0.003                   Wall time [min]:     0.030
+ Calculation of nuclear attraction integrals...
+ CPU time [min]:     0.003                   Wall time [min]:     0.030
+ 
+ Calculation of prescreening integrals...
+ CPU time [min]:     0.003                   Wall time [min]:     0.030
+ 
+ Calculation of two-electron integrals...
+   1% done.
+  30% done.
+  57% done.
+ 100% done.
+ CPU time [min]:     0.003                   Wall time [min]:     0.030
+
+ ************************ 2026-11-03 19:56:15 *************************
+ Executing scf...
+
+ Allocation of 768.0 Mbytes of memory...
+ ======================================================================
+ ITERATION STEP   1
+ CPU time [min]:     0.006                   Wall time [min]:     0.006
+ 
+ RMS of [F,P]:                                         0.31480799918637
+ RMS of difference density:                            0.14294631882975
+ Gap [au]:  0.87633454
+ ALPHA OCC:   5
+ BETA  OCC:   5
+ 
+ ***HARTREE-FOCK ENERGY IN STEP   1 IS        -74.7417957912988129 [AU]
+ ======================================================================
+ ITERATION STEP   2
+ CPU time [min]:     0.006                   Wall time [min]:     0.007
+ 
+ RMS of [F,P]:                                         0.02611500598421
+ RMS of difference density:                            0.02977029123233
+ Gap [au]:  0.98909212
+ ALPHA OCC:   5
+ BETA  OCC:   5
+ 
+ ***HARTREE-FOCK ENERGY IN STEP   2 IS        -74.9559668461676836 [AU]
+ ======================================================================
+ ITERATION STEP   3
+ CPU time [min]:     0.006                   Wall time [min]:     0.007
+ 
+ RMS of [F,P]:                                         0.00676381424059
+ RMS of difference density:                            0.01222273594529
+ Gap [au]:  0.99192674
+ ALPHA OCC:   5
+ BETA  OCC:   5
+ 
+ ***HARTREE-FOCK ENERGY IN STEP   3 IS        -74.9628558547692876 [AU]
+ ======================================================================
+ ITERATION STEP   4
+ CPU time [min]:     0.007                   Wall time [min]:     0.007
+ 
+ RMS of [F,P]:                                         0.00093455833949
+ RMS of difference density:                            0.00183758865169
+ Gap [au]:  0.99417994
+ ALPHA OCC:   5
+ BETA  OCC:   5
+ 
+ ***HARTREE-FOCK ENERGY IN STEP   4 IS        -74.9634621856476997 [AU]
+ ======================================================================
+ ITERATION STEP   5
+ CPU time [min]:     0.007                   Wall time [min]:     0.008
+ 
+ RMS of [F,P]:                                         0.00027356485829
+ RMS of difference density:                            0.00064643120828
+ Gap [au]:  0.99399388
+ ALPHA OCC:   5
+ BETA  OCC:   5
+ 
+ ***HARTREE-FOCK ENERGY IN STEP   5 IS        -74.9634781161953470 [AU]
+ ======================================================================
+ ITERATION STEP   6
+ CPU time [min]:     0.007                   Wall time [min]:     0.008
+ 
+ RMS of [F,P]:                                         0.00003143894483
+ RMS of difference density:                            0.00008174422864
+ Gap [au]:  0.99415532
+ ALPHA OCC:   5
+ BETA  OCC:   5
+ 
+ ***HARTREE-FOCK ENERGY IN STEP   6 IS        -74.9634796975292090 [AU]
+ ======================================================================
+ ITERATION STEP   7
+ CPU time [min]:     0.008                   Wall time [min]:     0.008
+ 
+ RMS of [F,P]:                                         0.00000014490020
+ RMS of difference density:                            0.00000023021334
+ Gap [au]:  0.99415493
+ ALPHA OCC:   5
+ BETA  OCC:   5
+ 
+ ***HARTREE-FOCK ENERGY IN STEP   7 IS        -74.9634797173959413 [AU]
+ ======================================================================
+ 
+ SUCCESS...
+ THE SCF ITERATION HAS CONVERGED!
+ 
+                   A   
+ FINAL ALPHA OCC:   5
+ FINAL BETA  OCC:   5
+ 
+ ***FINAL HARTREE-FOCK ENERGY:        -74.9634797173959413 [AU]
+ 
+ RETURNING FROM SCF ALGORITHM
+ ======================================================================
+
+ ************************ 2026-11-03 19:56:16 *************************
+ Executing scf...
+
+ @scfsetup: the forced occupation is
+ Allocation of 768.0 Mbytes of memory...
+ ======================================================================
+ ITERATION STEP   1
+ CPU time [min]:     0.005                   Wall time [min]:     0.007
+ 
+ **********************************************************************
+ CISDTQ analytic gradient calculation                                   
+ 
+ 
+ OpenMP parallel version is running.
+ Number of CPU cores:   2
+ Allocation of  500.0 Mbytes of memory...
+ Number of spinorbitals:   6
+ Number of alpha electrons:  2
+ Number of beta  electrons:  2
+ Spin multiplicity: 1
+ z-component of spin:  0.0
+ Spatial symmetry is not used.
+ Convergence criterion:  1.0E-06
+ Construction of occupation graphs...
+ Number of 0-fold excitations: 1
+ Number of 1-fold excitations: 4
+ Number of 2-fold excitations: 4
+ Total number of determinants: 9
+ Calculation of coupling coefficients...
+ Initial cluster amplitudes are generated.
+ Length of intermediate file (Mbytes):       0.1
+ Reading integral list from unit 55...
+ Sorting integrals...
+ Energy of reference determinant [au]:     -74.963479717396
+ Calculation of diagonal elements of Hamiltonian...
+ 
+ Starting CI iteration for root                      1 ...
+ ======================================================================
+ Norm of residual vector:     0.07938679      Convergence:   1.00000000
+ CPU time [min]:     0.002                   Wall time [min]:     0.002
+ 
+ Iteration  1  CI energy:   -74.96347972  Energy decrease:   0.0000E+00
+ ======================================================================
+ Norm of residual vector:     0.00520509      Convergence:   0.05591954
+ CPU time [min]:     0.003                   Wall time [min]:     0.003
+ 
+ Iteration  2  CI energy:   -74.96791043  Energy decrease:   0.00443071
+ ======================================================================
+ Norm of residual vector:     0.00061560      Convergence:   0.00804479
+ CPU time [min]:     0.003                   Wall time [min]:     0.003
+ 
+ Iteration  3  CI energy:   -74.96795184  Energy decrease:   0.00004141
+ ======================================================================
+ Norm of residual vector:     0.0000E+00      Convergence:   5.0710E-04
+ CPU time [min]:     0.003                   Wall time [min]:     0.003
+ 
+ Iteration  4  CI energy:   -74.96795215  Energy decrease:   0.00000031
+ ======================================================================
+ 
+ Iteration has converged in  4 steps.
+ 
+ Final results:
+ Total CISDTQ energy [au]:                    -74.967952149237
+ 
+ Dominant CI coefficients
+ Printing threshold:  1.00E-14
+ 
+   -0.998381  Reference determinant                                     
+    0.005579  1b -> 3b                                                  
+    0.005579  1a -> 3a                                                  
+    0.047669  1a 1b -> 3a 3b                                            
+    0.030019  2a 2b -> 3a 3b                                            
+ 
+ Calculating reduced density-matrix for root 1...
+ 
+ Total energy from RDM [au]:                  -74.967952149237
+ 
+ <Psi|S^2|Psi> = 0.00000
+ Multiplicity:   1.00000
+ Gap [au]:  0.00000000
+ *** MCSCF ENERGY IN STEP   1 IS              -74.9679521492369219 [AU]
+ ======================================================================
+ ITERATION STEP   2
+ CPU time [min]:     0.006                   Wall time [min]:     0.012
+ 
+ Gradient norm:      1.3279E-02
+ **********************************************************************
+ Calculating trust region step...
+ Calculating initial trial vectors...
+ Microiteration    1         Norm of the residual vector:   2.30913E-02
+ Microiteration    2         Norm of the residual vector:   2.64701E-03
+ Microiteration    3         Norm of the residual vector:   2.12859E-04
+ Microiteration    4         Norm of the residual vector:   4.24447E-15
+ Trust region step has converged!
+ **********************************************************************
+ Starting line search...
+ **********************************************************************
+ CISDTQ analytic gradient calculation                                   
+ 
+ 
+ OpenMP parallel version is running.
+ Number of CPU cores:   2
+ Allocation of  500.0 Mbytes of memory...
+ Number of spinorbitals:   6
+ Number of alpha electrons:  2
+ Number of beta  electrons:  2
+ Spin multiplicity: 1
+ z-component of spin:  0.0
+ Spatial symmetry is not used.
+ Convergence criterion:  1.0E-06
+ Construction of occupation graphs...
+ Number of 0-fold excitations: 1
+ Number of 1-fold excitations: 4
+ Number of 2-fold excitations: 4
+ Total number of determinants: 9
+ Calculation of coupling coefficients...
+ Initial cluster amplitudes are generated.
+ Length of intermediate file (Mbytes):       0.1
+ Reading integral list from unit 55...
+ Sorting integrals...
+ Energy of reference determinant [au]:     -74.963472400221
+ Calculation of diagonal elements of Hamiltonian...
+ 
+ Starting CI iteration for root                      1 ...
+ ======================================================================
+ Norm of residual vector:     0.10136358      Convergence:   1.00000000
+ CPU time [min]:     0.002                   Wall time [min]:     0.002
+ 
+ Iteration  1  CI energy:   -74.96347240  Energy decrease:   0.0000E+00
+ ======================================================================
+ Norm of residual vector:     0.00650868      Convergence:   0.07326945
+ CPU time [min]:     0.003                   Wall time [min]:     0.003
+ 
+ Iteration  2  CI energy:   -74.97090747  Energy decrease:   0.00743507
+ ======================================================================
+ Norm of residual vector:     0.00048357      Convergence:   0.00904665
+ CPU time [min]:     0.004                   Wall time [min]:     0.004
+ 
+ Iteration  3  CI energy:   -74.97096562  Energy decrease:   0.00005815
+ ======================================================================
+ Norm of residual vector:     0.0000E+00      Convergence:   4.0868E-04
+ CPU time [min]:     0.005                   Wall time [min]:     0.005
+ 
+ Iteration  4  CI energy:   -74.97096582  Energy decrease:   0.00000020
+ ======================================================================
+ 
+ Iteration has converged in  4 steps.
+ 
+ Final results:
+ Total CISDTQ energy [au]:                    -74.970965816530
+ 
+ Dominant CI coefficients
+ Printing threshold:  1.00E-14
+ 
+    0.997230  Reference determinant                                     
+   -0.007238  1b -> 3b                                                  
+   -0.007238  1a -> 3a                                                  
+   -0.067326  1a 1b -> 3a 3b                                            
+   -0.029900  2a 2b -> 3a 3b                                            
+ 
+ Calculating reduced density-matrix for root 1...
+ 
+ Total energy from RDM [au]:                  -74.970965816530
+ 
+ <Psi|S^2|Psi> = 0.00000
+ Multiplicity:   1.00000
+ SCF energy in microiteration  1 is     -74.9709658165301249 [AU]
+ Augemented Hessian step has been accepted!
+ **********************************************************************
+ RMS of occupied difference density:                   0.07665776322863
+ RMS of active difference density:                     0.00253409182869
+ Gap [au]:  0.00000000
+ *** MCSCF ENERGY IN STEP   2 IS              -74.9709658165301249 [AU]
+ ======================================================================
+ ITERATION STEP   3
+ CPU time [min]:     0.007                   Wall time [min]:     0.020
+ 
+ Gradient norm:      1.6455E-02
+ **********************************************************************
+ Calculating trust region step...
+ Calculating initial trial vectors...
+ Microiteration    1         Norm of the residual vector:   1.21631E-01
+ Microiteration    2         Norm of the residual vector:   6.11689E-04
+ Microiteration    3         Norm of the residual vector:   7.21779E-05
+ Microiteration    4         Norm of the residual vector:   2.65483E-15
+ Trust region step has converged!
+ **********************************************************************
+ Starting line search...
+ **********************************************************************
+ CISDTQ analytic gradient calculation                                   
+ 
+ 
+ OpenMP parallel version is running.
+ Number of CPU cores:   2
+ Allocation of  500.0 Mbytes of memory...
+ Number of spinorbitals:   6
+ Number of alpha electrons:  2
+ Number of beta  electrons:  2
+ Spin multiplicity: 1
+ z-component of spin:  0.0
+ Spatial symmetry is not used.
+ Convergence criterion:  1.0E-06
+ Construction of occupation graphs...
+ Number of 0-fold excitations: 1
+ Number of 1-fold excitations: 4
+ Number of 2-fold excitations: 4
+ Total number of determinants: 9
+ Calculation of coupling coefficients...
+ Initial cluster amplitudes are generated.
+ Length of intermediate file (Mbytes):       0.1
+ Reading integral list from unit 55...
+ Sorting integrals...
+ Energy of reference determinant [au]:     -74.963461663896
+ Calculation of diagonal elements of Hamiltonian...
+ 
+ Starting CI iteration for root                      1 ...
+ ======================================================================
+ Norm of residual vector:     0.12612972      Convergence:   1.00000000
+ CPU time [min]:     0.002                   Wall time [min]:     0.002
+ 
+ Iteration  1  CI energy:   -74.96346166  Energy decrease:   0.0000E+00
+ ======================================================================
+ Norm of residual vector:     0.00664295      Convergence:   0.08455783
+ CPU time [min]:     0.003                   Wall time [min]:     0.004
+ 
+ Iteration  2  CI energy:   -74.97413433  Energy decrease:   0.01067267
+ ======================================================================
+ Norm of residual vector:     0.00030205      Convergence:   0.00766318
+ CPU time [min]:     0.003                   Wall time [min]:     0.004
+ 
+ Iteration  3  CI energy:   -74.97418472  Energy decrease:   0.00005039
+ ======================================================================
+ Norm of residual vector:     0.0000E+00      Convergence:   2.5562E-04
+ CPU time [min]:     0.003                   Wall time [min]:     0.004
+ 
+ Iteration  4  CI energy:   -74.97418480  Energy decrease:   0.00000008
+ ======================================================================
+ 
+ Iteration has converged in  4 steps.
+ 
+ Final results:
+ Total CISDTQ energy [au]:                    -74.974184796890
+ 
+ Dominant CI coefficients
+ Printing threshold:  1.00E-14
+ 
+    0.996357  Reference determinant                                     
+   -0.007275  1b -> 3b                                                  
+   -0.007275  1a -> 3a                                                  
+   -0.079229  1a 1b -> 3a 3b                                            
+   -0.029835  2a 2b -> 3a 3b                                            
+ 
+ Calculating reduced density-matrix for root 1...
+ 
+ Total energy from RDM [au]:                  -74.974184796890
+ 
+ <Psi|S^2|Psi> = 0.00000
+ Multiplicity:   1.00000
+ SCF energy in microiteration  1 is     -74.9741847968897446 [AU]
+ Augemented Hessian step has been accepted!
+ **********************************************************************
+ RMS of occupied difference density:                   0.08856291330952
+ RMS of active difference density:                     0.00164434840647
+ Gap [au]:  0.00000000
+ *** MCSCF ENERGY IN STEP   3 IS              -74.9741847968897446 [AU]
+ ======================================================================
+ ITERATION STEP   4
+ CPU time [min]:     0.007                   Wall time [min]:     0.026
+ 
+ Gradient norm:      1.0676E-02
+ **********************************************************************
+ Calculating trust region step...
+ Calculating initial trial vectors...
+ Microiteration    1         Norm of the residual vector:   3.78317E-02
+ Microiteration    2         Norm of the residual vector:   3.60717E-03
+ Microiteration    3         Norm of the residual vector:   1.70221E-05
+ Microiteration    4         Norm of the residual vector:   8.59108E-15
+ Trust region step has converged!
+ **********************************************************************
+ Starting line search...
+ **********************************************************************
+ CISDTQ analytic gradient calculation                                   
+ 
+ 
+ OpenMP parallel version is running.
+ Number of CPU cores:   2
+ Allocation of  500.0 Mbytes of memory...
+ Number of spinorbitals:   6
+ Number of alpha electrons:  2
+ Number of beta  electrons:  2
+ Spin multiplicity: 1
+ z-component of spin:  0.0
+ Spatial symmetry is not used.
+ Convergence criterion:  1.0E-06
+ Construction of occupation graphs...
+ Number of 0-fold excitations: 1
+ Number of 1-fold excitations: 4
+ Number of 2-fold excitations: 4
+ Total number of determinants: 9
+ Calculation of coupling coefficients...
+ Initial cluster amplitudes are generated.
+ Length of intermediate file (Mbytes):       0.1
+ Reading integral list from unit 55...
+ Sorting integrals...
+ Energy of reference determinant [au]:     -74.963464792827
+ Calculation of diagonal elements of Hamiltonian...
+ 
+ Starting CI iteration for root                      1 ...
+ ======================================================================
+ Norm of residual vector:     0.14612775      Convergence:   1.00000000
+ CPU time [min]:     0.002                   Wall time [min]:     0.001
+ 
+ Iteration  1  CI energy:   -74.96346479  Energy decrease:   0.0000E+00
+ ======================================================================
+ Norm of residual vector:     0.00688183      Convergence:   0.08233689
+ CPU time [min]:     0.002                   Wall time [min]:     0.001
+ 
+ Iteration  2  CI energy:   -74.97543718  Energy decrease:   0.01197239
+ ======================================================================
+ Norm of residual vector:     0.00027085      Convergence:   0.00641090
+ CPU time [min]:     0.002                   Wall time [min]:     0.001
+ 
+ Iteration  3  CI energy:   -74.97548101  Energy decrease:   0.00004382
+ ======================================================================
+ Norm of residual vector:     0.0000E+00      Convergence:   2.2668E-04
+ CPU time [min]:     0.002                   Wall time [min]:     0.001
+ 
+ Iteration  4  CI energy:   -74.97548107  Energy decrease:   0.00000006
+ ======================================================================
+ 
+ Iteration has converged in  4 steps.
+ 
+ Final results:
+ Total CISDTQ energy [au]:                    -74.975481069248
+ 
+ Dominant CI coefficients
+ Printing threshold:  1.00E-14
+ 
+    0.996575  Reference determinant                                     
+   -0.006235  1b -> 3b                                                  
+   -0.006235  1a -> 3a                                                  
+   -0.076769  1a 1b -> 3a 3b                                            
+   -0.029456  2a 2b -> 3a 3b                                            
+ 
+ Calculating reduced density-matrix for root 1...
+ 
+ Total energy from RDM [au]:                  -74.975481069248
+ 
+ <Psi|S^2|Psi> = 0.00000
+ Multiplicity:   1.00000
+ SCF energy in microiteration  1 is     -74.9754810692477633 [AU]
+ Augemented Hessian step has been accepted!
+ **********************************************************************
+ RMS of occupied difference density:                   0.09360416396029
+ RMS of active difference density:                     0.00096454000508
+ Gap [au]:  0.00000000
+ *** MCSCF ENERGY IN STEP   4 IS              -74.9754810692477633 [AU]
+ ======================================================================
+ ITERATION STEP   5
+ CPU time [min]:     0.008                   Wall time [min]:     0.028
+ 
+ Gradient norm:      2.6156E-03
+ **********************************************************************
+ Calculating trust region step...
+ Calculating initial trial vectors...
+ Microiteration    1         Norm of the residual vector:   7.05739E-05
+ Microiteration    2         Norm of the residual vector:   5.20198E-06
+ Microiteration    3         Norm of the residual vector:   7.61962E-07
+ Trust region step has converged!
+ **********************************************************************
+ Starting line search...
+ **********************************************************************
+ CISDTQ analytic gradient calculation                                   
+ 
+ 
+ OpenMP parallel version is running.
+ Number of CPU cores:   2
+ Allocation of  500.0 Mbytes of memory...
+ Number of spinorbitals:   6
+ Number of alpha electrons:  2
+ Number of beta  electrons:  2
+ Spin multiplicity: 1
+ z-component of spin:  0.0
+ Spatial symmetry is not used.
+ Convergence criterion:  1.0E-06
+ Construction of occupation graphs...
+ Number of 0-fold excitations: 1
+ Number of 1-fold excitations: 4
+ Number of 2-fold excitations: 4
+ Total number of determinants: 9
+ Calculation of coupling coefficients...
+ Initial cluster amplitudes are generated.
+ Length of intermediate file (Mbytes):       0.1
+ Reading integral list from unit 55...
+ Sorting integrals...
+ Energy of reference determinant [au]:     -74.963470017844
+ Calculation of diagonal elements of Hamiltonian...
+ 
+ Starting CI iteration for root                      1 ...
+ ======================================================================
+ Norm of residual vector:     0.14614749      Convergence:   1.00000000
+ CPU time [min]:     0.001                   Wall time [min]:     0.001
+ 
+ Iteration  1  CI energy:   -74.96347002  Energy decrease:   0.0000E+00
+ ======================================================================
+ Norm of residual vector:     0.00698198      Convergence:   0.08228632
+ CPU time [min]:     0.001                   Wall time [min]:     0.001
+ 
+ Iteration  2  CI energy:   -74.97543699  Energy decrease:   0.01196698
+ ======================================================================
+ Norm of residual vector:     0.00027018      Convergence:   0.00650903
+ CPU time [min]:     0.001                   Wall time [min]:     0.001
+ 
+ Iteration  3  CI energy:   -74.97548214  Energy decrease:   0.00004514
+ ======================================================================
+ Norm of residual vector:     0.0000E+00      Convergence:   2.2604E-04
+ CPU time [min]:     0.001                   Wall time [min]:     0.001
+ 
+ Iteration  4  CI energy:   -74.97548220  Energy decrease:   0.00000006
+ ======================================================================
+ 
+ Iteration has converged in  4 steps.
+ 
+ Final results:
+ Total CISDTQ energy [au]:                    -74.975482197005
+ 
+ Dominant CI coefficients
+ Printing threshold:  1.00E-14
+ 
+    0.996579  Reference determinant                                     
+   -0.005934  1b -> 3b                                                  
+   -0.005934  1a -> 3a                                                  
+   -0.076751  1a 1b -> 3a 3b                                            
+   -0.029480  2a 2b -> 3a 3b                                            
+ 
+ Calculating reduced density-matrix for root 1...
+ 
+ Total energy from RDM [au]:                  -74.975482197005
+ 
+ <Psi|S^2|Psi> = 0.00000
+ Multiplicity:   1.00000
+ SCF energy in microiteration  1 is     -74.9754821970050074 [AU]
+ Augemented Hessian step has been accepted!
+ **********************************************************************
+ RMS of occupied difference density:                   0.00047638877777
+ RMS of active difference density:                     0.00026025458795
+ Gap [au]:  0.00000000
+ *** MCSCF ENERGY IN STEP   5 IS              -74.9754821970050074 [AU]
+ ======================================================================
+ ITERATION STEP   6
+ CPU time [min]:     0.009                   Wall time [min]:     0.030
+ 
+ Gradient norm:      4.9496E-04
+ **********************************************************************
+ Calculating Newton-step...
+ Microiteration    1         Norm of the residual vector:   4.94961E-04
+ Microiteration    2         Norm of the residual vector:   4.96040E-05
+ Microiteration    3         Norm of the residual vector:   1.73204E-06
+ Microiteration    4         Norm of the residual vector:   4.54899E-07
+ Newton-step has converged!
+ **********************************************************************
+ 
+ **********************************************************************
+ CISDTQ analytic gradient calculation                                   
+ 
+ 
+ OpenMP parallel version is running.
+ Number of CPU cores:   2
+ Allocation of  500.0 Mbytes of memory...
+ Number of spinorbitals:   6
+ Number of alpha electrons:  2
+ Number of beta  electrons:  2
+ Spin multiplicity: 1
+ z-component of spin:  0.0
+ Spatial symmetry is not used.
+ Convergence criterion:  1.0E-06
+ Construction of occupation graphs...
+ Number of 0-fold excitations: 1
+ Number of 1-fold excitations: 4
+ Number of 2-fold excitations: 4
+ Total number of determinants: 9
+ Calculation of coupling coefficients...
+ Initial cluster amplitudes are generated.
+ Length of intermediate file (Mbytes):       0.1
+ Reading integral list from unit 55...
+ Sorting integrals...
+ Energy of reference determinant [au]:     -74.963470921172
+ Calculation of diagonal elements of Hamiltonian...
+ 
+ Starting CI iteration for root                      1 ...
+ ======================================================================
+ Norm of residual vector:     0.14615771      Convergence:   1.00000000
+ CPU time [min]:     0.001                   Wall time [min]:     0.001
+ 
+ Iteration  1  CI energy:   -74.96347092  Energy decrease:   0.0000E+00
+ ======================================================================
+ Norm of residual vector:     0.00700248      Convergence:   0.08227274
+ CPU time [min]:     0.001                   Wall time [min]:     0.001
+ 
+ Iteration  2  CI energy:   -74.97543677  Energy decrease:   0.01196585
+ ======================================================================
+ Norm of residual vector:     0.00027006      Convergence:   0.00652852
+ CPU time [min]:     0.001                   Wall time [min]:     0.001
+ 
+ Iteration  3  CI energy:   -74.97548218  Energy decrease:   0.00004541
+ ======================================================================
+ Norm of residual vector:     0.0000E+00      Convergence:   2.2592E-04
+ CPU time [min]:     0.001                   Wall time [min]:     0.001
+ 
+ Iteration  4  CI energy:   -74.97548224  Energy decrease:   0.00000006
+ ======================================================================
+ 
+ Iteration has converged in  4 steps.
+ 
+ Final results:
+ Total CISDTQ energy [au]:                    -74.975482243061
+ 
+ Dominant CI coefficients
+ Printing threshold:  1.00E-14
+ 
+    0.996580  Reference determinant                                     
+   -0.005873  1b -> 3b                                                  
+   -0.005873  1a -> 3a                                                  
+   -0.076744  1a 1b -> 3a 3b                                            
+   -0.029483  2a 2b -> 3a 3b                                            
+ 
+ Calculating reduced density-matrix for root 1...
+ 
+ Total energy from RDM [au]:                  -74.975482243061
+ 
+ <Psi|S^2|Psi> = 0.00000
+ Multiplicity:   1.00000
+ RMS of occupied difference density:                   0.00010535025998
+ RMS of active difference density:                     0.00005324308940
+ Gap [au]:  0.00000000
+ *** MCSCF ENERGY IN STEP   6 IS              -74.9754822430613359 [AU]
+ ======================================================================
+ ITERATION STEP   7
+ CPU time [min]:     0.009                   Wall time [min]:     0.031
+ 
+ Gradient norm:      1.0106E-04
+ **********************************************************************
+ Calculating Newton-step...
+ Microiteration    1         Norm of the residual vector:   1.01058E-04
+ Microiteration    2         Norm of the residual vector:   1.02625E-05
+ Microiteration    3         Norm of the residual vector:   3.40427E-07
+ Newton-step has converged!
+ **********************************************************************
+ 
+ **********************************************************************
+ CISDTQ analytic gradient calculation                                   
+ 
+ 
+ OpenMP parallel version is running.
+ Number of CPU cores:   2
+ Allocation of  500.0 Mbytes of memory...
+ Number of spinorbitals:   6
+ Number of alpha electrons:  2
+ Number of beta  electrons:  2
+ Spin multiplicity: 1
+ z-component of spin:  0.0
+ Spatial symmetry is not used.
+ Convergence criterion:  1.0E-06
+ Construction of occupation graphs...
+ Number of 0-fold excitations: 1
+ Number of 1-fold excitations: 4
+ Number of 2-fold excitations: 4
+ Total number of determinants: 9
+ Calculation of coupling coefficients...
+ Initial cluster amplitudes are generated.
+ Length of intermediate file (Mbytes):       0.1
+ Reading integral list from unit 55...
+ Sorting integrals...
+ Energy of reference determinant [au]:     -74.963471096581
+ Calculation of diagonal elements of Hamiltonian...
+ 
+ Starting CI iteration for root                      1 ...
+ ======================================================================
+ Norm of residual vector:     0.14616034      Convergence:   1.00000000
+ CPU time [min]:     0.001                   Wall time [min]:     0.001
+ 
+ Iteration  1  CI energy:   -74.96347110  Energy decrease:   0.0000E+00
+ ======================================================================
+ Norm of residual vector:     0.00700669      Convergence:   0.08226970
+ CPU time [min]:     0.001                   Wall time [min]:     0.001
+ 
+ Iteration  2  CI energy:   -74.97543672  Energy decrease:   0.01196562
+ ======================================================================
+ Norm of residual vector:     0.00027003      Convergence:   0.00653248
+ CPU time [min]:     0.001                   Wall time [min]:     0.001
+ 
+ Iteration  3  CI energy:   -74.97548218  Energy decrease:   0.00004547
+ ======================================================================
+ Norm of residual vector:     0.0000E+00      Convergence:   2.2589E-04
+ CPU time [min]:     0.001                   Wall time [min]:     0.001
+ 
+ Iteration  4  CI energy:   -74.97548225  Energy decrease:   0.00000006
+ ======================================================================
+ 
+ Iteration has converged in  4 steps.
+ 
+ Final results:
+ Total CISDTQ energy [au]:                    -74.975482245002
+ 
+ Dominant CI coefficients
+ Printing threshold:  1.00E-14
+ 
+    0.996580  Reference determinant                                     
+   -0.005860  1b -> 3b                                                  
+   -0.005860  1a -> 3a                                                  
+   -0.076742  1a 1b -> 3a 3b                                            
+   -0.029484  2a 2b -> 3a 3b                                            
+ 
+ Calculating reduced density-matrix for root 1...
+ 
+ Total energy from RDM [au]:                  -74.975482245002
+ 
+ <Psi|S^2|Psi> = 0.00000
+ Multiplicity:   1.00000
+ RMS of occupied difference density:                   0.00002335341229
+ RMS of active difference density:                     0.00001092092685
+ Gap [au]:  0.00000000
+ *** MCSCF ENERGY IN STEP   7 IS              -74.9754822450015439 [AU]
+ ======================================================================
+ ITERATION STEP   8
+ CPU time [min]:     0.009                   Wall time [min]:     0.033
+ 
+ Gradient norm:      2.0626E-05
+ **********************************************************************
+ Calculating Newton-step...
+ Microiteration    1         Norm of the residual vector:   2.06260E-05
+ Microiteration    2         Norm of the residual vector:   2.12360E-06
+ Microiteration    3         Norm of the residual vector:   8.35068E-08
+ Newton-step has converged!
+ **********************************************************************
+ 
+ **********************************************************************
+ CISDTQ analytic gradient calculation                                   
+ 
+ 
+ OpenMP parallel version is running.
+ Number of CPU cores:   2
+ Allocation of  500.0 Mbytes of memory...
+ Number of spinorbitals:   6
+ Number of alpha electrons:  2
+ Number of beta  electrons:  2
+ Spin multiplicity: 1
+ z-component of spin:  0.0
+ Spatial symmetry is not used.
+ Convergence criterion:  1.0E-06
+ Construction of occupation graphs...
+ Number of 0-fold excitations: 1
+ Number of 1-fold excitations: 4
+ Number of 2-fold excitations: 4
+ Total number of determinants: 9
+ Calculation of coupling coefficients...
+ Initial cluster amplitudes are generated.
+ Length of intermediate file (Mbytes):       0.1
+ Reading integral list from unit 55...
+ Sorting integrals...
+ Energy of reference determinant [au]:     -74.963471132249
+ Calculation of diagonal elements of Hamiltonian...
+ 
+ Starting CI iteration for root                      1 ...
+ ======================================================================
+ Norm of residual vector:     0.14616097      Convergence:   1.00000000
+ CPU time [min]:     0.002                   Wall time [min]:     0.001
+ 
+ Iteration  1  CI energy:   -74.96347113  Energy decrease:   0.0000E+00
+ ======================================================================
+ Norm of residual vector:     0.00700756      Convergence:   0.08226903
+ CPU time [min]:     0.002                   Wall time [min]:     0.001
+ 
+ Iteration  2  CI energy:   -74.97543671  Energy decrease:   0.01196557
+ ======================================================================
+ Norm of residual vector:     0.00027003      Convergence:   0.00653329
+ CPU time [min]:     0.002                   Wall time [min]:     0.001
+ 
+ Iteration  3  CI energy:   -74.97548218  Energy decrease:   0.00004548
+ ======================================================================
+ Norm of residual vector:     0.0000E+00      Convergence:   2.2589E-04
+ CPU time [min]:     0.002                   Wall time [min]:     0.001
+ 
+ Iteration  4  CI energy:   -74.97548225  Energy decrease:   0.00000006
+ ======================================================================
+ 
+ Iteration has converged in  4 steps.
+ 
+ Final results:
+ Total CISDTQ energy [au]:                    -74.975482245083
+ 
+ Dominant CI coefficients
+ Printing threshold:  1.00E-14
+ 
+    0.996581  Reference determinant                                     
+   -0.005858  1b -> 3b                                                  
+   -0.005858  1a -> 3a                                                  
+   -0.076742  1a 1b -> 3a 3b                                            
+   -0.029484  2a 2b -> 3a 3b                                            
+ 
+ Calculating reduced density-matrix for root 1...
+ 
+ Total energy from RDM [au]:                  -74.975482245083
+ 
+ <Psi|S^2|Psi> = 0.00000
+ Multiplicity:   1.00000
+ RMS of occupied difference density:                   0.00000515465810
+ RMS of active difference density:                     0.00000224152728
+ Gap [au]:  0.00000000
+ *** MCSCF ENERGY IN STEP   8 IS              -74.9754822450834695 [AU]
+ ======================================================================
+ ITERATION STEP   9
+ CPU time [min]:     0.010                   Wall time [min]:     0.035
+ 
+ Gradient norm:      4.2302E-06
+ **********************************************************************
+ Calculating Newton-step...
+ Microiteration    1         Norm of the residual vector:   4.23022E-06
+ Microiteration    2         Norm of the residual vector:   4.37419E-07
+ Newton-step has converged!
+ **********************************************************************
+ 
+ **********************************************************************
+ CISDTQ analytic gradient calculation                                   
+ 
+ 
+ OpenMP parallel version is running.
+ Number of CPU cores:   2
+ Allocation of  500.0 Mbytes of memory...
+ Number of spinorbitals:   6
+ Number of alpha electrons:  2
+ Number of beta  electrons:  2
+ Spin multiplicity: 1
+ z-component of spin:  0.0
+ Spatial symmetry is not used.
+ Convergence criterion:  1.0E-06
+ Construction of occupation graphs...
+ Number of 0-fold excitations: 1
+ Number of 1-fold excitations: 4
+ Number of 2-fold excitations: 4
+ Total number of determinants: 9
+ Calculation of coupling coefficients...
+ Initial cluster amplitudes are generated.
+ Length of intermediate file (Mbytes):       0.1
+ Reading integral list from unit 55...
+ Sorting integrals...
+ Energy of reference determinant [au]:     -74.963471140094
+ Calculation of diagonal elements of Hamiltonian...
+ 
+ Starting CI iteration for root                      1 ...
+ ======================================================================
+ Norm of residual vector:     0.14616108      Convergence:   1.00000000
+ CPU time [min]:     0.001                   Wall time [min]:     0.002
+ 
+ Iteration  1  CI energy:   -74.96347114  Energy decrease:   0.0000E+00
+ ======================================================================
+ Norm of residual vector:     0.00700774      Convergence:   0.08226890
+ CPU time [min]:     0.001                   Wall time [min]:     0.002
+ 
+ Iteration  2  CI energy:   -74.97543670  Energy decrease:   0.01196556
+ ======================================================================
+ Norm of residual vector:     0.00027003      Convergence:   0.00653345
+ CPU time [min]:     0.001                   Wall time [min]:     0.002
+ 
+ Iteration  3  CI energy:   -74.97548218  Energy decrease:   0.00004548
+ ======================================================================
+ Norm of residual vector:     0.0000E+00      Convergence:   2.2589E-04
+ CPU time [min]:     0.001                   Wall time [min]:     0.002
+ 
+ Iteration  4  CI energy:   -74.97548225  Energy decrease:   0.00000006
+ ======================================================================
+ 
+ Iteration has converged in  4 steps.
+ 
+ Final results:
+ Total CISDTQ energy [au]:                    -74.975482245087
+ 
+ Dominant CI coefficients
+ Printing threshold:  1.00E-14
+ 
+    0.996581  Reference determinant                                     
+   -0.005857  1b -> 3b                                                  
+   -0.005857  1a -> 3a                                                  
+   -0.076742  1a 1b -> 3a 3b                                            
+   -0.029484  2a 2b -> 3a 3b                                            
+ 
+ Calculating reduced density-matrix for root 1...
+ 
+ Total energy from RDM [au]:                  -74.975482245087
+ 
+ <Psi|S^2|Psi> = 0.00000
+ Multiplicity:   1.00000
+ RMS of occupied difference density:                   0.00000098893735
+ RMS of active difference density:                     0.00000045622428
+ Gap [au]:  0.00000000
+ *** MCSCF ENERGY IN STEP   9 IS              -74.9754822450868801 [AU]
+ ======================================================================
+ ITERATION STEP  10
+ CPU time [min]:     0.010                   Wall time [min]:     0.038
+ 
+ Gradient norm:      1.1589E-06
+ **********************************************************************
+ Calculating Newton-step...
+ Microiteration    1         Norm of the residual vector:   1.15889E-06
+ Microiteration    2         Norm of the residual vector:   2.86280E-08
+ Newton-step has converged!
+ **********************************************************************
+ 
+ **********************************************************************
+ CISDTQ analytic gradient calculation                                   
+ 
+ 
+ OpenMP parallel version is running.
+ Number of CPU cores:   2
+ Allocation of  500.0 Mbytes of memory...
+ Number of spinorbitals:   6
+ Number of alpha electrons:  2
+ Number of beta  electrons:  2
+ Spin multiplicity: 1
+ z-component of spin:  0.0
+ Spatial symmetry is not used.
+ Convergence criterion:  1.0E-06
+ Construction of occupation graphs...
+ Number of 0-fold excitations: 1
+ Number of 1-fold excitations: 4
+ Number of 2-fold excitations: 4
+ Total number of determinants: 9
+ Calculation of coupling coefficients...
+ Initial cluster amplitudes are generated.
+ Length of intermediate file (Mbytes):       0.1
+ Reading integral list from unit 55...
+ Sorting integrals...
+ Energy of reference determinant [au]:     -74.963471141079
+ Calculation of diagonal elements of Hamiltonian...
+ 
+ Starting CI iteration for root                      1 ...
+ ======================================================================
+ Norm of residual vector:     0.14616113      Convergence:   1.00000000
+ CPU time [min]:     0.002                   Wall time [min]:     0.002
+ 
+ Iteration  1  CI energy:   -74.96347114  Energy decrease:   0.0000E+00
+ ======================================================================
+ Norm of residual vector:     0.00700777      Convergence:   0.08226886
+ CPU time [min]:     0.002                   Wall time [min]:     0.002
+ 
+ Iteration  2  CI energy:   -74.97543670  Energy decrease:   0.01196556
+ ======================================================================
+ Norm of residual vector:     0.00027003      Convergence:   0.00653348
+ CPU time [min]:     0.002                   Wall time [min]:     0.002
+ 
+ Iteration  3  CI energy:   -74.97548218  Energy decrease:   0.00004548
+ ======================================================================
+ Norm of residual vector:     0.0000E+00      Convergence:   2.2589E-04
+ CPU time [min]:     0.002                   Wall time [min]:     0.002
+ 
+ Iteration  4  CI energy:   -74.97548225  Energy decrease:   0.00000006
+ ======================================================================
+ 
+ Iteration has converged in  4 steps.
+ 
+ Final results:
+ Total CISDTQ energy [au]:                    -74.975482245087
+ 
+ Dominant CI coefficients
+ Printing threshold:  1.00E-14
+ 
+    0.996581  Reference determinant                                     
+   -0.005857  1b -> 3b                                                  
+   -0.005857  1a -> 3a                                                  
+   -0.076742  1a 1b -> 3a 3b                                            
+   -0.029484  2a 2b -> 3a 3b                                            
+ 
+ Calculating reduced density-matrix for root 1...
+ 
+ Total energy from RDM [au]:                  -74.975482245087
+ 
+ <Psi|S^2|Psi> = 0.00000
+ Multiplicity:   1.00000
+ RMS of occupied difference density:                   0.00000032626563
+ RMS of active difference density:                     0.00000009876249
+ Gap [au]:  0.00000000
+ *** MCSCF ENERGY IN STEP  10 IS              -74.9754822450871217 [AU]
+ ======================================================================
+ ITERATION STEP  11
+ CPU time [min]:     0.011                   Wall time [min]:     0.041
+ 
+ Gradient norm:      1.8537E-07
+ RMS of occupied difference density:                   0.00000000000000
+ RMS of active difference density:                     0.00000000000000
+ Gap [au]:  0.00000000
+ *** MCSCF ENERGY IN STEP  11 IS              -74.9754822450871217 [AU]
+ PRINT FORT55
+ ======================================================================
+ 
+ SUCCESS...
+ THE SCF ITERATION HAS CONVERGED!
+ 
+ ***FINAL MCSCF ENERGY:               -74.9754822450871217 [AU]
+ 
+ RETURNING FROM SCF ALGORITHM
+ ======================================================================
+
+ ************************ 2026-11-03 19:56:18 *************************
+ Executing ovirt...
+
+ ovirt, the routine of orbital optimization and integral transformation 
+Tue Nov  3 19:56:18 CET 2026
+ Allocated memory:                     768  Mb
+ RHF calculation! 
+ integral transforamtion: AOs ------ MOs
+ # of basis functions, # of int. blocks     7     1
+100 % 
+ second part
+100 %
+ integral transformation is completed! 
+CPU and WC time           0.00           0.01     AOs -> MOs 
+ printing integral list for the ccsd calculations
+Tue Nov  3 19:56:18 CET 2026
+  ovirt terminated normally 
+
+ ************************ 2026-11-03 19:56:18 *************************
+ Executing nevpt...
+
+total number of electrons:  10
+ num. of alpha and beta electrons:                     4                     4
+ memory =                    768  Mb             100663296  8 byte word
+frozen orbs:       1
+# of frozen, core, active, and virtual orbitals   1   2   3   1
+ # of active determinants:                       9
+ Reference determinant
+  1  2  3  4  0  1  2  3  4
+  CI from fort.9001 (thr=0.0000001) 
+   1       0.996580552  3  4  0  3  4
+   3       0.005857243  4  5  0  3  4
+   2      -0.029484121  3  5  0  3  5
+   1       0.005857243  3  4  0  4  5
+   3      -0.076741620  4  5  0  4  5
+ norm:  0.999999999999999     
+ini steps             0.337
+ group:                      1
+ ka, kb                     3                     3
+##### ##### ##### ##### ##### ##### ##### ##### ##### #### 10%
+##### ##### ##### ##### ##### ##### ##### ##### ##### ### 20%
+##### ##### ##### ##### ##### ##### ##### ##### ##### #### 30%
+##### ##### ##### ##### ##### ##### ##### ##### ##### ### 40%
+##### ##### ##### ##### ##### ##### ##### ##### ##### #### 50%
+##### ##### ##### ##### ##### ##### ##### ##### ##### ### 60%
+##### ##### ##### ##### ##### ##### ##### ##### ##### #### 70%
+##### ##### ##### ##### ##### ##### ##### ##### ##### ### 80%
+##### ##### ##### ##### ##### ##### ##### ##### ##### #### 90%
+##### ##### ##### ##### ##### ##### ##### ##### ##### ###100%
+occupa:      0.00676     0.99411     0.99913
+occupb:      0.00676     0.99411     0.99913
+ 
+rhos             0.011
+ ionization energies:
+                     1 -0.958761087098375     
+                     2 -0.617847108503844     
+ affinities:
+                     1  0.734941550481016     
+densities, heffs, etc.             0.000
+  Koopmanns
+k=-1             0.000
+k=0b             0.000
+k=0a             0.000
+k=+1a             0.000
+k=+1b             0.000
+k=2             0.000
+k=-2             0.000
+PC k=0a             0.000
+PC k=+1a             0.000
+PC k=-2             0.000
+PC k=2             0.000
+PC k=0b             0.000
+PC k=-1a             0.000
+PC k=-1b             0.000
+PC k=+1b             0.000
+ energy terms:     PC-NEVPT2                 SC-NEVPT2 
+ [ 0 ]          -0.010542129741           -0.010542129741
+ [+1 ]          -0.000178781787           -0.000178137447
+ [-1 ]          -0.000038111610           -0.000038060825
+ [+2 ]          -0.001337432610           -0.001337432610
+ [-2 ]          -0.000604925961           -0.000601604490
+ [+1']          -0.000000000000           -0.000000000000
+ [-1']          -0.000000000000            0.000000000000
+ [ 0']          -0.015759675364           -0.015701643431
+ *************************
+ SC-NEVPT2 correlation energy [au]:          -0.028399008545
+ PC-NEVPT2 correlation energy [au]:          -0.028461057074
+ Total SC-NEVPT2 energy [au]:               -75.003881253632
+ Total PC-NEVPT2 energy [au]:               -75.003943302161
+ *************************
+ 
+ ************************ 2026-11-03 19:56:19 *************************
+                      Normal termination of mrcc.
+ **********************************************************************

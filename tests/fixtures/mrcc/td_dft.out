@@ -1,0 +1,31 @@
+ Total number of basis functions:      7
+ Total number of basis functions:    116
+ Total number of basis functions:     84
+ Total number of grid points: 14170       
+ ***FINAL KOHN-SHAM ENERGY:           -75.2465983566186338 [AU]
+ Total number of basis functions:      7
+ Total number of basis functions:    116
+ Total number of basis functions:     84
+                         Total              Energy                Norm of
+                         Total              Energy                Norm of
+                         Total              Energy                Norm of
+ Final results of the full TDDFT calculations for the excited states:
+ Functional: pbe0
+ Singlet excited states:
+ 
+ Excited      Total          Excitation     Excitation     Excitation        Absorption
+  state    energy [au]       energy [au]    energy [eV]  energy [cm^-1]    wavelength [nm]
+ =========================================================================================
+    1     -74.813466025      0.43313233      11.7861        95061.56          105.19
+    2     -74.730885513      0.51571284      14.0333       113185.89           88.35
+ =========================================================================================
+ 
+ CPU time [min]:     0.008                   Wall time [min]:     0.007
+ Excited       dipole moment in length gauge [au]         Dipole          Oscillator
+  state        x              y              z         strength [au]       strength
+ ===================================================================================
+    1     -0.0901999     -0.0000000     -0.0000000       0.0081360         0.0023493
+    2      0.0000000      0.0000001     -0.0000000       0.0000000         0.0000000
+ ===================================================================================
+ 
+                      Normal termination of mrcc.

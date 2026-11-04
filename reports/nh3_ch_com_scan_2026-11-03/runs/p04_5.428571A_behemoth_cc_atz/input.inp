@@ -1,0 +1,16 @@
+nproc = 8
+memory = 16000
+method = UHF CCSD(T)
+scf_fallback = false
+basis = aug-cc-pVTZ
+charge = 0
+multi = 2
+xyzfile = "geometry.xyz"
+@scf
+  max_iterations = 2000
+  diis_max = 10
+end
+@ccsd
+  frozen_core = auto
+  max_iterations = 400
+end
