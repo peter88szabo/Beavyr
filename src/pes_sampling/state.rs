@@ -9,6 +9,52 @@ use std::sync::{
 pub enum Workflow {
     Unimolecular,
     Bimolecular,
+    ReactionPath,
+}
+/// Source of the uniform numbers behind every random choice.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum RandomNumbers {
+    /// Scrambled Halton low-discrepancy sequence: more even coverage.
+    #[default]
+    QuasiRandom,
+    PseudoRandom,
+}
+impl RandomNumbers {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::QuasiRandom => "Quasi-random (Halton)",
+            Self::PseudoRandom => "Pseudo-random",
+        }
+    }
+    pub fn comment(self) -> &'static str {
+        match self {
+            Self::QuasiRandom => "random=scrambled_halton",
+            Self::PseudoRandom => "random=xoshiro256",
+        }
+    }
+}
+/// Space in which normal-mode displacements are applied.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Coordinates {
+    /// Straight-line displacement along Cartesian normal modes.
+    #[default]
+    Cartesian,
+    /// The same displacement mapped to bonds/angles/dihedrals (curvilinear).
+    Internal,
+}
+impl Coordinates {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Cartesian => "Cartesian (rectilinear)",
+            Self::Internal => "Internal (curvilinear)",
+        }
+    }
+    pub fn comment(self) -> &'static str {
+        match self {
+            Self::Cartesian => "coordinates=cartesian",
+            Self::Internal => "coordinates=internal_curvilinear",
+        }
+    }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Source {
@@ -142,6 +188,10 @@ pub struct Settings {
     pub seed: u64,
     pub overlap: super::overlap::OverlapFilter,
     pub displacement: Displacement,
+    pub random: RandomNumbers,
+    pub coordinates: Coordinates,
+    pub diversity: super::diverse::Diversity,
+    pub path: super::path::PathSettings,
 }
 impl Default for Settings {
     fn default() -> Self {
@@ -157,6 +207,10 @@ impl Default for Settings {
             seed: 42,
             overlap: Default::default(),
             displacement: Default::default(),
+            random: Default::default(),
+            coordinates: Default::default(),
+            diversity: Default::default(),
+            path: Default::default(),
         }
     }
 }

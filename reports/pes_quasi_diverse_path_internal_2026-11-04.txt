@@ -1,0 +1,112 @@
+PES sampling: quasi-random numbers, diverse subsets, reaction-path and
+internal-coordinate sampling — 2026-11-04
+
+Scope
+-----
+Four new options in the PES Sampling panel (ideas 7, 3, 1 and 2 of
+~/Desktop/pes_sampling_feature_ideas_2026-11-04.txt).
+
+| Option         | Choices                                        | Default            |
+|----------------|------------------------------------------------|--------------------|
+| Random numbers | Quasi-random (scrambled Halton), Pseudo-random | Quasi-random       |
+| Diverse subset | on/off, oversampling 1–100×                    | on, 3×             |
+| Workflow       | + Reaction path                                | (Unimolecular)     |
+| Coordinates    | Cartesian (rectilinear), Internal (curvilinear)| Cartesian          |
+
+1. Quasi-random numbers (src/pes_sampling/quasi.rs)
+---------------------------------------------------
+- Scrambled Halton sequence: dimension k uses the k-th prime base with a
+  seeded random digit permutation (π(0) = 0, Braaten–Weller style), which
+  removes the strong correlations of plain Halton between large bases.
+- Each sample attempt (accepted or rejected) is one sequence point; its random
+  choices consume dimensions in a fixed order (mode energy draws and phases in
+  mode order, TS displacement, rotor angles, orientations), so a given choice
+  always lands on the same dimension. Up to 512 dimensions; further choices
+  fall back to pseudo-random numbers.
+- Repeatable: the scrambling is seeded by the run seed.
+- Measured (4096 points, 8×8 bins, chi² ~ 63 ± 11 for independent draws):
+  leading dimension pairs are far more even (test requires < 0.5× pseudo).
+  Single high dimensions (k = 40, 120) remain stratified (< 0.25×).
+  LIMITATION: pairs of high dimensions (e.g. 40/41, bases 179/181) were only
+  mildly better (chi² 51 vs 77) — a known Halton property while N is below the
+  product of the two bases. Sobol with Joe–Kuo direction numbers would do
+  better there; not implemented (needs the direction-number table).
+
+2. Diverse subset (src/pes_sampling/diverse.rs)
+-----------------------------------------------
+- Generates ceil(oversampling × N) candidates per block, keeps N by
+  farthest-point selection on all inverse interatomic distances (Å⁻¹; f32
+  storage), starting from the candidate nearest the mean descriptor.
+- Blocks: the whole set (unimolecular), each COM distance (bimolecular), each
+  path point (reaction path) — grids keep exact counts and order.
+- Output is in selection order: any prefix is itself well spread.
+- Guards: oversampling 1–100; ≤ 20 M candidate atom-frames; ≤ 50 M descriptor
+  values per block; selection work Σ N·candidates·D ≤ 2e10.
+- Progress bar counts candidates plus selection steps; cancellable.
+- Note: farthest-point selection favours the edges of the sampled region and
+  is not invariant to permuting identical atoms.
+
+3. Reaction-path workflow (src/pes_sampling/path.rs)
+----------------------------------------------------
+- "Load path Hessians…" takes self-contained Hessians (ORCA .hess, Beavyr
+  exports) along an IRC, ordered by natural file-name order (irc_2 < irc_10).
+  All points must share atoms, order and masses; at least two points.
+- Tangent at point k: neighbour geometries superposed onto point k
+  (mass-weighted Kabsch via Horn's quaternion), central difference inside,
+  one-sided at the ends; duplicate geometries are rejected.
+- Projection: existing EckartMode::ReactionPath (translations, rotations and
+  the tangent), giving 3N−7 modes per point; negative-curvature modes
+  orthogonal to the path are excluded with a warning.
+- One excitation setting and "samples per path point" for the whole path.
+- XYZ comment: path_point=k path_points=K path_file=<name>
+  path_projection=reaction_path_hamiltonian.
+
+4. Internal-coordinate displacement (src/pes_sampling/curvilinear.rs)
+---------------------------------------------------------------------
+- dx = Σ L_j Q_j (+ TS-mode displacement) → dq = B(x_eq) dx → geometry with
+  q(x) = q_eq + dq, applied in substeps of ≤ 0.2 bohr/rad, each solved by
+  Gauss–Newton with the B matrix at the current geometry,
+  dx = (BᵀB)⁺ Bᵀ r in Cartesian space. Intermediate substeps converge to
+  1e-5 bohr, the last to 1e-9 bohr. Rotors are applied afterwards.
+- Internals from optimizer/internal_coords.rs (bonds, angles, dihedrals);
+  bonds from covalent radii × 4/3; near-linear bends (< ~3°) and dihedrals
+  through them are dropped. Refused with a clear message for linear molecules
+  and when the internals span fewer than 3N−6 directions (disconnected parts).
+- Supporting refactor: optimizer::internal_coords::wilson_b (B matrix only)
+  split out of bpg_matrix; bpg_matrix behaviour unchanged.
+- Development notes: the IRC connectivity model alone found no O–H bond in
+  water (bond only below 0.95 × the radius sum), hence the 4/3 scaling. A
+  fixed-B iteration did not converge on the 19-atom TS example at 500 K
+  (corrections up to 0.8 bohr), hence substeps + updated B.
+- Cost (debug build): 19-atom TS, 150 candidates 70 s with internal-space
+  pseudo-inverse, 14 s after the Cartesian-space solve. Release builds are
+  typically 20–50× faster. Not measured in release.
+
+Other changes
+-------------
+- sampling.rs: sampling now runs per block with a Draws stream; energy() and
+  morse_level() accept any uniform source (trait quasi::Unit).
+- input.rs: from_hessian_on_path (reaction-path projection).
+- output.rs: Sample.path_point, SamplingOutput.path_names, comment fields.
+- XYZ comments now also record random=scrambled_halton|xoshiro256,
+  coordinates=cartesian|internal_curvilinear and the diverse-subset setting.
+- README: PES section describes the four options; options table extended.
+
+Testing (cargo -j 4, --test-threads=4)
+--------------------------------------
+New src/pes_sampling/feature_tests.rs (8 tests):
+- quasi_random_is_default_repeatable_and_more_even_than_pseudo_random
+- farthest_point_keeps_extremes_and_drops_duplicates
+- diverse_subset_is_default_keeps_counts_and_widens_coverage
+  (minimum spacing > 3× plain; bimolecular grid layout exact; work count)
+- internal_coordinates_reproduce_first_order_bond_and_angle_changes
+  (water: bonds exactly at first-order target to 1e-8; straight-line bend
+  deviates > 1e-4; linear and disconnected structures refused)
+- internal_coordinate_option_runs_end_to_end_and_is_recorded
+- internal_coordinates_converge_for_a_real_19_atom_transition_state
+  (bonds stay within 0.7–1.4× at 500 K)
+- superposition_and_tangents_are_frame_independent (+ natural ordering)
+- reaction_path_modes_are_orthogonal_to_the_path_and_sampled_per_point
+  (overlap < 1e-5 after projection, > 0.5 without; 5 × 3 samples; comments)
+Results: PES 36 passed. Full suite 1620 passed, 0 failed, 51 ignored.
+Release build not run; the panel was not checked visually in the running app.

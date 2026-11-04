@@ -4,6 +4,10 @@ pub mod calculation;
 mod output;
 pub(crate) mod overlap;
 mod sampling;
+mod curvilinear;
+pub(crate) mod diverse;
+mod path;
+mod quasi;
 mod ts_mode;
 mod rotors;
 mod rotor_ui;
@@ -15,3 +19,6 @@ mod tests;
 
 #[cfg(test)]
 mod mode_tests;
+
+#[cfg(test)]
+mod feature_tests;

@@ -259,7 +259,7 @@ fn start(ctx: &egui::Context, state: &mut PesSampling) {
             return;
         }
     }
-    state.total = sampling::total(&state.settings).unwrap();
+    state.total = sampling::work(&state.settings);
     state.cancel = Arc::new(AtomicBool::new(false));
     state.progress = Arc::new(AtomicUsize::new(0));
     let seed = if state.settings.repeatable {
@@ -279,6 +279,39 @@ fn start(ctx: &egui::Context, state: &mut PesSampling) {
     );
     state.message = None;
     state.is_error = false;
+}
+fn path_controls(ui: &mut egui::Ui, path: &mut super::path::PathSettings) -> Result<(), String> {
+    if ui
+        .button("Load path Hessians…")
+        .on_hover_text("Select all self-contained Hessians (ORCA .hess or Beavyr exports) along the IRC. They are ordered by file name (irc_2 before irc_10).")
+        .clicked_once()
+    {
+        if let Some(files) = rfd::FileDialog::new()
+            .add_filter("Hessian", &["hess", "hessian", "txt", "dat"])
+            .add_filter("All files", &["*"])
+            .pick_files()
+        {
+            path.points = super::path::load(&files)?;
+        }
+    }
+    if path.points.is_empty() {
+        ui.small("No path loaded. At least two points are needed.");
+    } else {
+        egui::CollapsingHeader::new(format!("{} path points", path.points.len())).show(ui, |ui| {
+            egui::ScrollArea::vertical().max_height(160.).show(ui, |ui| {
+                for (k, f) in path.points.iter().enumerate() {
+                    let negative = if f.imaginary_cm1.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" · {} negative excluded", f.imaginary_cm1.len())
+                    };
+                    ui.small(format!("{}. {} · {} modes{negative}", k + 1, f.name, f.frequencies.len()));
+                }
+            });
+        });
+    }
+    ui.push_id("path_excitation", |ui| excitation(ui, &mut path.excitation));
+    Ok(())
 }
 pub(crate) fn poll(ctx: &egui::Context, state: &mut PesSampling) {
     if let Some(task) = &mut state.task {
@@ -361,12 +394,25 @@ pub(crate) fn window(
                                 Workflow::Bimolecular,
                                 "Bimolecular",
                             );
+                            ui.selectable_value(
+                                &mut state.settings.workflow,
+                                Workflow::ReactionPath,
+                                "Reaction path",
+                            )
+                            .on_hover_text("Sample the modes orthogonal to an IRC at every path point (reaction-path Hamiltonian projection).");
                         });
-                        let n = if state.settings.workflow == Workflow::Bimolecular {
-                            2
-                        } else {
-                            1
+                        let n = match state.settings.workflow {
+                            Workflow::Bimolecular => 2,
+                            Workflow::Unimolecular => 1,
+                            Workflow::ReactionPath => 0,
                         };
+                        if n == 0 {
+                            crate::ui_style::group(ui, "Reaction path", |ui| {
+                                if let Err(e) = path_controls(ui, &mut state.settings.path) {
+                                    load_error = Some(e);
+                                }
+                            });
+                        }
                         for i in 0..n {
                             ui.push_id(i, |ui| {
                                 crate::ui_style::group(
@@ -388,7 +434,12 @@ pub(crate) fn window(
                                 );
                             });
                         }
-                        if n == 1 {
+                        if n == 0 {
+                            count(ui, "Samples per path point", &mut state.settings.path.samples_per_point);
+                            if let Ok(n) = sampling::total(&state.settings) {
+                                ui.label(format!("{n} samples total"));
+                            }
+                        } else if n == 1 {
                             count(ui, "Number of samples", &mut state.settings.points);
                         } else {
                             ui.horizontal(|ui| {
@@ -435,6 +486,31 @@ pub(crate) fn window(
                                 "Q = A·cos(2πu): time-weighted (QCT) distribution; samples \
                                  crowd near the turning points.",
                             );
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("Coordinates");
+                            for c in [Coordinates::Cartesian, Coordinates::Internal] {
+                                ui.selectable_value(&mut state.settings.coordinates, c, c.label());
+                            }
+                        })
+                        .response
+                        .on_hover_text("Internal: the normal-mode displacement is mapped to bond, angle and dihedral changes (Wilson B matrix) and back-transformed, so bends and torsions follow arcs instead of straight lines. Needs a connected, nonlinear molecule.");
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label("Random numbers");
+                            for r in [RandomNumbers::QuasiRandom, RandomNumbers::PseudoRandom] {
+                                ui.selectable_value(&mut state.settings.random, r, r.label());
+                            }
+                        })
+                        .response
+                        .on_hover_text("Quasi-random: a scrambled Halton low-discrepancy sequence; each random choice of a sample uses its own sequence dimension, giving more even coverage with fewer samples. Pseudo-random: independent draws.");
+                        ui.horizontal_wrapped(|ui| {
+                            let d = &mut state.settings.diversity;
+                            ui.checkbox(&mut d.enabled, "Diverse subset")
+                                .on_hover_text("Generate oversampling × N candidates and keep the N most spread out (farthest-point selection on inverse interatomic distances), per COM distance or path point.");
+                            ui.add_enabled_ui(d.enabled, |ui| {
+                                ui.label("oversampling");
+                                ui.add(egui::DragValue::new(&mut d.oversampling).speed(0.1).range(1.0..=100.).suffix("×"));
+                            });
                         });
                         ui.horizontal(|ui| {
                             ui.checkbox(&mut state.settings.repeatable, "Repeatable");

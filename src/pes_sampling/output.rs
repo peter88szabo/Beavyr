@@ -13,6 +13,7 @@ pub struct Sample {
     pub distance: Option<f64>,
     pub distance_index: Option<usize>,
     pub sample_at_distance: Option<usize>,
+    pub path_point: Option<usize>,
 }
 #[derive(Clone, Debug)]
 pub struct SamplingOutput {
@@ -24,6 +25,8 @@ pub struct SamplingOutput {
     pub partner_sizes: Vec<usize>,
     pub sampling_note: String,
     pub displacement: super::state::Displacement,
+    /// File names of the reaction-path points, in path order.
+    pub path_names: Vec<String>,
 }
 impl SamplingOutput {
     pub fn sample_comment(&self, i: usize) -> String {
@@ -37,6 +40,13 @@ impl SamplingOutput {
         if !self.sampling_note.is_empty() {
             text.push(' ');
             text.push_str(&self.sampling_note);
+        }
+        if let Some(k) = s.path_point {
+            text.push_str(&format!(
+                " path_point={k} path_points={} path_file={}",
+                self.path_names.len(),
+                self.path_names.get(k - 1).map_or("", String::as_str).replace(char::is_whitespace, "_")
+            ));
         }
         if let Some(d) = s.distance {
             text.push_str(&format!(" COM_distance_A={d:.10} distance_index={} sample_at_distance={} partner_A_atoms={}", s.distance_index.unwrap_or(0), s.sample_at_distance.unwrap_or(0), self.partner_sizes.first().copied().unwrap_or(0)));

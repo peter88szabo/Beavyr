@@ -79,9 +79,41 @@ pub fn geometry(text: &str) -> Result<(Vec<String>, Vec<f64>), String> {
 pub fn from_hessian(
     atoms: Vec<String>,
     masses: Vec<f64>,
+    x: Vec<f64>,
+    hessian: Array2<f64>,
+    name: String,
+) -> Result<Fragment, String> {
+    from_hessian_projected(atoms, masses, x, hessian, name, None)
+}
+/// A path point: the Cartesian path tangent (bohr) is projected out together
+/// with translations and rotations, leaving 3N-7 modes orthogonal to the path.
+pub fn from_hessian_on_path(
+    atoms: Vec<String>,
+    masses: Vec<f64>,
+    x: Vec<f64>,
+    hessian: Array2<f64>,
+    name: String,
+    tangent: &[f64],
+) -> Result<Fragment, String> {
+    if tangent.len() != x.len() {
+        return Err("Path tangent does not match the geometry".into());
+    }
+    // The projector mass-weights a gradient as g/sqrt(m); m·dx gives sqrt(m)·dx,
+    // the mass-weighted tangent. Its scale is irrelevant.
+    let gradient: Vec<f64> = tangent
+        .iter()
+        .enumerate()
+        .map(|(i, t)| t * masses[i / 3])
+        .collect();
+    from_hessian_projected(atoms, masses, x, hessian, name, Some(&gradient))
+}
+fn from_hessian_projected(
+    atoms: Vec<String>,
+    masses: Vec<f64>,
     mut x: Vec<f64>,
     hessian: Array2<f64>,
     name: String,
+    path_gradient: Option<&[f64]>,
 ) -> Result<Fragment, String> {
     if atoms.len() < 2
         || masses.len() != atoms.len()
@@ -98,7 +130,12 @@ pub fn from_hessian(
     if hessian.dim() != (n, n) {
         return Err("Hessian dimensions must match the equilibrium geometry (3N × 3N)".into());
     }
-    let r = cartesian::analyze(&masses, &x, &hessian, EckartMode::VibRot, None)?;
+    let mode = if path_gradient.is_some() {
+        EckartMode::ReactionPath
+    } else {
+        EckartMode::VibRot
+    };
+    let r = cartesian::analyze(&masses, &x, &hessian, mode, path_gradient)?;
     center(&mut x, &masses);
     let keep = &r.positive_indices;
     if keep.is_empty() && r.negative_indices.len() != 1 {

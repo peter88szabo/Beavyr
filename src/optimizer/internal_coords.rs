@@ -382,7 +382,8 @@ pub fn internal_coords_from_bonds(nat: usize, bonds_in: &[[usize; 2]]) -> Result
     })
 }
 
-pub fn bpg_matrix(x: &[f64], ic: &InternalCoords) -> Result<Bpg> {
+/// Wilson B matrix (nint × 3N) at `x`, without the G pseudo-inverse.
+pub fn wilson_b(x: &[f64], ic: &InternalCoords) -> Result<Vec<Vec<f64>>> {
     let nat = ic.nat;
     let nx = 3 * nat;
     if x.len() != nx {
@@ -477,6 +478,13 @@ pub fn bpg_matrix(x: &[f64], ic: &InternalCoords) -> Result<Bpg> {
             b[j][3 * d + k] = v6[k];
         }
     }
+    Ok(b)
+}
+
+pub fn bpg_matrix(x: &[f64], ic: &InternalCoords) -> Result<Bpg> {
+    let b = wilson_b(x, ic)?;
+    let nint = b.len();
+    let nx = 3 * ic.nat;
 
     // G = B * B^T
     let mut g = vec![vec![0.0f64; nint]; nint];

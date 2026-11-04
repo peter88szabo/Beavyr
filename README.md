@@ -733,17 +733,54 @@ exports geometry samples only; it does not assign quantum-chemistry PES
 energies or propagate molecular dynamics. Save the XYZ explicitly; sampling
 setup/results are not stored as additional project fields.
 
+**Coordinates.** *Cartesian* adds the normal-mode displacement along straight
+lines. *Internal* maps the same displacement to first-order changes of bonds,
+angles and dihedrals (Wilson B matrix, `dq = B dx`) and back-transforms it
+stepwise with Gauss–Newton, so bends and torsions follow arcs and large
+amplitudes no longer stretch bonds artificially. It needs a connected,
+nonlinear molecule; bonds are detected with covalent radii × 4/3.
+
+**Random numbers.** *Quasi-random* uses a scrambled Halton low-discrepancy
+sequence: every sample attempt is one sequence point, and each random choice
+(mode energy and phase, TS displacement, rotor angle, orientation) always uses
+the same sequence dimension, so the first choices (the softest modes) are
+stratified most evenly. Pairs of high dimensions (beyond roughly the 20th
+random choice) are only mildly more even than pseudo-random draws.
+*Pseudo-random* uses independent xoshiro256** draws. Both follow **Repeatable**.
+
+**Diverse subset.** With the default on, oversampling × N candidates are
+generated and farthest-point selection keeps the N most spread out, using all
+inverse interatomic distances as the descriptor (translation and rotation
+invariant, not invariant to permuting identical atoms). Selection runs per COM
+distance or path point, so grids keep their exact counts. The kept samples are
+written in selection order: any prefix of the file is itself well spread.
+Farthest-point selection favours the edges of the sampled region.
+
+**Reaction path.** Load the self-contained Hessians (ORCA `.hess` or Beavyr
+exports) computed along an IRC; they are ordered by file name (`irc_2` before
+`irc_10`). At each point the path tangent is taken from the neighbouring
+geometries after mass-weighted superposition (central differences, one-sided
+at the ends) and projected out with translations and rotations (reaction-path
+Hamiltonian projection). The remaining 3N−7 modes are sampled with the chosen
+excitation at every point. Negative-curvature modes orthogonal to the path are
+excluded with a notice. XYZ comments record `path_point`, the number of points
+and the source file.
+
 #### PES Sampling options at a glance
 
 | Option | Choices | Default |
 |---|---|---|
-| Workflow | Unimolecular, Bimolecular | Unimolecular |
+| Workflow | Unimolecular, Bimolecular, Reaction path | Unimolecular |
 | Partner source | Hessian, Diatomic (harmonic or Morse), Atom | Hessian |
 | Rigid geometry | on / off | off |
 | Mode energy | ZPE, Maximum temperature, Maximum quantum number, Maximum energy per mode | ZPE |
 | Temperature rule | Boltzmann-tail cutoff, ZPE + kB × Tmax, Smite thermal | Boltzmann tail, 99.9 % |
 | Per-mode limits | Mode settings → Set limits per mode | off |
 | Mode displacement | Uniform in amplitude, Classical phase (cos) | Uniform in amplitude |
+| Coordinates | Cartesian (rectilinear), Internal (curvilinear) | Cartesian |
+| Random numbers | Quasi-random (scrambled Halton), Pseudo-random | Quasi-random |
+| Diverse subset | farthest-point selection; oversampling 1–100× | on, 3× |
+| Reaction path | self-contained Hessians along an IRC; samples per path point | 20 per point |
 | TS direction (one imaginary mode) | Both sides, Positive only, Negative only; max. atom displacement | Both, 0.2 Å |
 | Internal rotors | bond or dihedral; smaller side, B side, C side, atom list; ZPE only or Replace for an assigned mode | none |
 | Bimolecular grid | first/last COM distance, distance points, samples per distance | 3–6 Å, 10 × 100 |
