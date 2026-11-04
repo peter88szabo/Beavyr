@@ -1,0 +1,96 @@
+PES sampling: uniform mode displacement option — 2026-11-04
+
+Scope
+-----
+Add an even ("uniform in amplitude") normal-mode displacement distribution to
+PES Sampling, make it the default, and keep the previous cosine-weighted
+(classical phase) sampling as a selectable alternative.
+
+Problem
+-------
+Each mode was displaced as Q = A·cos(2πu), A = sqrt(2E)/ω, u ~ U[0,1).
+A uniform phase is a uniform time along the classical trajectory, so Q follows
+the arcsine density 1/(π·sqrt(A² − Q²)): samples crowd near the turning points
+±A and the bottom of the well is sparsely sampled (the central fifth of
+[−A, A] receives only 2/π·asin(0.2) ≈ 12.8 % of samples). That is correct for
+QCT initial conditions, but PES sampling is not dynamics and needs the
+low-energy region covered as well.
+
+Change
+------
+New setting "Mode displacement" (toggle buttons in the PES Sampling panel,
+above "Repeatable"), applied to every vibrating partner in both workflows:
+
+- Uniform in amplitude (default): Q = A·(2u − 1). Even coverage of [−A, A]
+  (20 % in the central fifth).
+- Classical phase (cos): Q = A·cos(2πu), unchanged previous behaviour.
+
+Morse diatomics:
+- Uniform: r uniform between the exact inner and outer classical turning
+  points, r_in + u·(r_out − r_in).
+- Classical phase: unchanged. Note that the existing Smite formula
+  ξ = e^{−β(r−re)} = (1 − ε)/(1 + sqrt(ε)·sin φ), ε = E/De, is the exact
+  time-dependent classical Morse solution, so a uniform φ gives the exact
+  time-weighted Morse distribution.
+
+Unchanged: TS-direction sampling (already uniform within its bound), free
+rotors (uniform 0–360°), energy selection rules, overlap filter, Euler
+rotations and COM placement.
+
+Semantics to note
+-----------------
+- In both modes no sample lies beyond the classical turning points of the
+  selected energy (no quantum tunnelling tails; this is not Wigner sampling).
+- With uniform displacement the selected energy is a per-mode ceiling, not the
+  exact energy of that mode in each sample.
+- With many modes the summed Cartesian displacement still concentrates toward
+  equilibrium (sum of independent contributions).
+
+Provenance
+----------
+XYZ comment lines record the choice:
+  displacement=uniform_within_turning_points   (uniform)
+  phases=uniform_0_2pi                         (classical phase, as before)
+
+Files
+-----
+src/pes_sampling/state.rs     Displacement enum (default Uniform), Settings field
+src/pes_sampling/sampling.rs  harmonic_displacement, morse_displacement; passed
+                              through sample_prepared_fragment for both partners
+src/pes_sampling/output.rs    SamplingOutput.displacement; comment label
+src/pes_sampling/ui.rs        "Mode displacement" toggle buttons with formulas
+                              in hover text
+src/pes_sampling/tests.rs     new test (below)
+README.md                     PES Sampling text updated; options table added
+
+Testing
+-------
+cargo test pes_ : 32 passed, 0 failed.
+New test pes_uniform_displacement_covers_the_well_evenly_and_is_default:
+- Settings default is Uniform.
+- 20 000 uniform draws: every tenth of [−A, A] holds 1800–2200; |Q| ≤ A.
+- Classical draws: central fifth holds 2300–2850 of 20 000 (≈ 12.8 %).
+- Morse uniform endpoints satisfy V(r) = E to 1e-12 on both sides of re;
+  u = 0.5 gives the midpoint.
+Existing tests (diatomic mass normalization, per-mode overrides, rotors, TS
+mode, bimolecular COM, arcsine/energy conservation of harmonic_state) pass
+unchanged.
+
+Full suite before this change: 1610 passed, 1 failed
+(orbitals::real_file_tests::wireframe_extraction_stays_within_a_frame_budget,
+a 100 ms wall-clock assertion; passes when run alone, so it is load-dependent).
+
+Open items from the PES code review (not changed here)
+------------------------------------------------------
+1. A coordinate-free Hessian (Smite numeric, $hessian, Behemoth) silently uses
+   the partner's retained geometry, which can be stale (set by "Sample PES",
+   "Use current geometry" or an earlier XYZ). Same atom count → wrong modes
+   without a warning; the geometry label is hidden once a Hessian is loaded.
+2. "Use current geometry" takes the current trajectory frame, which after a
+   run is a displaced sample, not the equilibrium.
+3. $frequency_scale_factor from ORCA .hess is applied by Frequency Analysis
+   but not by PES sampling.
+4. The "Sample TS direction" checkbox stays clickable under Rigid geometry.
+5. Re-enabling "Set limits per mode" discards earlier per-mode edits.
+6. Very soft unassigned modes (< ~50 cm⁻¹) produce large rectilinear
+   displacements; a warning or rotor suggestion would help.

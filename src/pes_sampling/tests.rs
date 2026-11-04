@@ -306,12 +306,12 @@ fn pes_diatomic_modes_mass_normalization_amplitude_and_morse_bounds() {
     assert!(validate(&s).is_err());
 }
 #[test]
-fn pes_real_example_hessian_projects_modes_and_keeps_imaginary_modes_excluded() {
+fn pes_real_example_hessian_retains_ts_direction_separately_from_stable_modes() {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("examples/TS_Gamma-3-6_ZZ-S_11_Compound_1.hess");
     let f = load_hessian(&path, None).unwrap();
     assert_eq!(f.atoms.len(), 19);
-    assert_eq!(f.excluded.len(), 1);
+    assert_eq!(f.imaginary_cm1.len(), 1);
     assert_eq!(f.frequencies.len(), 50);
     for j in 0..f.modes.ncols() {
         let norm: f64 = (0..f.modes.nrows())
@@ -484,6 +484,39 @@ fn pes_linear_hessian_retains_one_mode_and_respects_isotope_mass() {
     assert!((heavy.frequencies[0] / light.frequencies[0] - 1. / 2_f64.sqrt()).abs() < 1e-10);
 }
 #[test]
+fn pes_uniform_displacement_covers_the_well_evenly_and_is_default() {
+    assert_eq!(Settings::default().displacement, Displacement::Uniform);
+    let (w, e): (f64, f64) = (0.01, 0.005);
+    let a = (2. * e).sqrt() / w;
+    let mut rng = StdRng::seed_from_u64(3);
+    let mut bins = [0usize; 10];
+    let mut classical_centre = 0;
+    for _ in 0..20000 {
+        let q = harmonic_displacement(w, e, Displacement::Uniform, uniform(&mut rng));
+        assert!(q.abs() <= a);
+        bins[(((q / a + 1.) / 2. * 10.) as usize).min(9)] += 1;
+        let c = harmonic_displacement(w, e, Displacement::ClassicalPhase, uniform(&mut rng));
+        if c.abs() < 0.2 * a {
+            classical_centre += 1;
+        }
+    }
+    // Uniform: every tenth of [-A, A] gets ~2000; classical arcsine gives the
+    // central fifth only 2/π·asin(0.2) ≈ 12.8 %, versus 20 % here.
+    assert!(bins.iter().all(|n| (1800..2200).contains(n)), "{bins:?}");
+    assert!((2300..2850).contains(&classical_centre), "{classical_centre}");
+    // Morse: uniform between the exact classical turning points.
+    let (re, mu, de, en) = (1.4, 900., 0.2, 0.05);
+    let inner = morse_displacement(re, mu, w, de, en, Displacement::Uniform, 0.).unwrap();
+    let outer = morse_displacement(re, mu, w, de, en, Displacement::Uniform, 1.).unwrap();
+    let beta = w * (mu / (2. * de)).sqrt();
+    for r in [inner, outer] {
+        assert!((de * (1. - (-beta * (r - re)).exp()).powi(2) - en).abs() < 1e-12);
+    }
+    assert!(inner < re && outer > re);
+    let mid = morse_displacement(re, mu, w, de, en, Displacement::Uniform, 0.5).unwrap();
+    assert!((mid - 0.5 * (inner + outer)).abs() < 1e-12);
+}
+#[test]
 fn pes_mode_limits_override_global_values() {
     let mut p = diatomic();
     p.excitation.population = Population::Quantum;
@@ -498,4 +531,31 @@ fn pes_mode_limits_override_global_values() {
     let de = excited[0] - excited[3] - (f.equilibrium[0] - f.equilibrium[3]);
     let dg = ground[0] - ground[3] - (f.equilibrium[0] - f.equilibrium[3]);
     assert!((de / dg - 11_f64.sqrt()).abs() < 1e-10);
+}
+
+#[test]
+fn hessian_export_reloads_for_both_pes_partners_and_frequency_analysis() {
+    use crate::qchem_interfaces::hessian_io;
+    use super::{input, state::{PesSampling, Workflow}};
+    use crate::qchem_interfaces::xtb_freq::{load_hessian_from_path, XtbFreqPanelState, XtbFrequencyTask};
+    let mut h = ndarray::Array2::zeros((6,6));
+    h[(0,0)] = 0.3; h[(3,3)] = 0.3;
+    h[(0,3)] = -0.3; h[(3,0)] = -0.3 + 2e-6;
+    let data = hessian_io::from_geometry(vec!["H".into(), "H".into()], vec![0.,0.,0.,1.4,0.,0.], h).unwrap();
+    let path = std::env::temp_dir().join(format!("beavyr-hessian-roundtrip-{}.hess", std::process::id()));
+    hessian_io::save(&path, &data).unwrap();
+    let mut state = PesSampling::default();
+    state.settings.workflow = Workflow::Bimolecular;
+    for partner in &mut state.settings.partners {
+        partner.fragment = Some(input::load_hessian(&path, None).unwrap());
+        assert_eq!(input::prepare(partner).unwrap().frequencies.len(), 1);
+    }
+    let fragment = input::load_hessian(&path, None).unwrap();
+    let mut panel = XtbFreqPanelState::default();
+    let mut task = XtbFrequencyTask::default();
+    assert!(load_hessian_from_path(&path, &mut panel, &mut task), "{:?}", task.last_message);
+    let frequency = fragment.frequencies[0] / input::CM_TO_AU;
+    let result = task.result.unwrap();
+    assert!(result.frequencies_cm1.iter().any(|f| (f-frequency).abs() < 1e-6));
+    std::fs::remove_file(path).unwrap();
 }

@@ -171,7 +171,47 @@ pub fn morse_distance(
     }
     Ok(r)
 }
+/// Harmonic normal-coordinate displacement at mode energy `energy`, drawn
+/// within the classical turning points ±A, A = sqrt(2E)/ω.
+pub fn harmonic_displacement(omega: f64, energy: f64, d: Displacement, u: f64) -> f64 {
+    match d {
+        Displacement::Uniform => (2. * energy).sqrt() / omega * (2. * u - 1.),
+        Displacement::ClassicalPhase => harmonic_state(omega, energy, TAU * u).0,
+    }
+}
+/// Morse bond length at energy `en`: uniform between the inner and outer
+/// turning points, or the exact classical time-weighted distribution.
+pub fn morse_displacement(
+    re: f64,
+    mu: f64,
+    w: f64,
+    de: f64,
+    en: f64,
+    d: Displacement,
+    u: f64,
+) -> Result<f64, String> {
+    match d {
+        Displacement::Uniform => {
+            let half_pi = std::f64::consts::FRAC_PI_2;
+            let inner = morse_distance(re, mu, w, de, en, -half_pi)?;
+            let outer = morse_distance(re, mu, w, de, en, half_pi)?;
+            Ok(inner + (outer - inner) * u)
+        }
+        Displacement::ClassicalPhase => morse_distance(re, mu, w, de, en, TAU * u),
+    }
+}
+#[cfg(test)]
 pub fn sample_fragment(f: &Fragment, p: &Partner, rng: &mut StdRng) -> Result<Vec<f64>, String> {
+    let rotors = super::rotors::prepare_all(f, &p.rotors)?;
+    sample_prepared_fragment(f, p, &rotors, Displacement::default(), rng)
+}
+fn sample_prepared_fragment(
+    f: &Fragment,
+    p: &Partner,
+    rotors: &[super::rotors::Prepared],
+    displacement: Displacement,
+    rng: &mut StdRng,
+) -> Result<Vec<f64>, String> {
     let mut x = f.equilibrium.clone();
     if !p.rigid {
         if let Some((re, mu, Some(de))) = f.diatomic {
@@ -181,7 +221,15 @@ pub fn sample_fragment(f: &Fragment, p: &Partner, rng: &mut StdRng) -> Result<Ve
                 &p.excitation
             };
             let en = morse_level(e, f.frequencies[0], de, rng)?;
-            let r = morse_distance(re, mu, f.frequencies[0], de, en, TAU * uniform(rng))?;
+            let r = morse_displacement(
+                re,
+                mu,
+                f.frequencies[0],
+                de,
+                en,
+                displacement,
+                uniform(rng),
+            )?;
             x = vec![r, 0., 0., 0., 0., 0.];
         } else {
             for (j, w) in f.frequencies.iter().enumerate() {
@@ -190,8 +238,16 @@ pub fn sample_fragment(f: &Fragment, p: &Partner, rng: &mut StdRng) -> Result<Ve
                 } else {
                     &p.excitation
                 };
-                let en = energy(e, *w, rng);
-                let (q, _) = harmonic_state(*w, en, TAU * uniform(rng));
+                let en = match rotors
+                    .iter()
+                    .find(|r| r.mode == Some(j))
+                    .map(|r| r.treatment)
+                {
+                    Some(super::rotors::ModeTreatment::ZpeOnly) => 0.5 * w,
+                    Some(super::rotors::ModeTreatment::Replace) => 0.,
+                    None => energy(e, *w, rng),
+                };
+                let q = harmonic_displacement(*w, en, displacement, uniform(rng));
                 for (i, v) in x.iter_mut().enumerate() {
                     *v += f.modes[(i, j)] * q;
                 }
@@ -199,6 +255,14 @@ pub fn sample_fragment(f: &Fragment, p: &Partner, rng: &mut StdRng) -> Result<Ve
             if f.diatomic.is_some() && x[0] - x[3] <= 0. {
                 return Err("Sampled harmonic diatomic bond length is nonpositive. Reduce its excitation or use Morse sampling.".into());
             }
+        }
+    }
+    if !p.rigid {
+        if p.ts_mode.enabled && f.imaginary_cm1.len() == 1 {
+            super::ts_mode::apply(&mut x, f, &p.ts_mode, uniform(rng))?;
+        }
+        for rotor in rotors {
+            super::rotors::rotate(&mut x, rotor, TAU * uniform(rng))?;
         }
     }
     input::center(&mut x, &f.masses);
@@ -244,6 +308,10 @@ pub fn validate(s: &Settings) -> Result<Vec<Fragment>, String> {
             excitation_valid(e)?;
         }
         let f = input::prepare(p)?;
+        if !p.rigid {
+            super::ts_mode::validate(&f, &p.ts_mode)?;
+            super::rotors::prepare_all(&f, &p.rotors)?;
+        }
         if let Some((_, _, Some(de))) = f.diatomic {
             let e = if p.use_overrides {
                 p.overrides.first().unwrap_or(&p.excitation)
@@ -269,6 +337,17 @@ pub fn generate(
     progress: &AtomicUsize,
 ) -> Result<SamplingOutput, String> {
     let fragments = validate(&s)?;
+    let rotors = fragments
+        .iter()
+        .zip(&s.partners)
+        .map(|(f, p)| {
+            if p.rigid {
+                Ok(vec![])
+            } else {
+                super::rotors::prepare_all(f, &p.rotors)
+            }
+        })
+        .collect::<Result<Vec<_>, String>>()?;
     let atoms: Vec<String> = fragments.iter().flat_map(|f| f.atoms.clone()).collect();
     let n = total(&s)?;
     let mut rng = StdRng::seed_from_u64(seed);
@@ -276,12 +355,17 @@ pub fn generate(
     let mut rejected = 0;
     let mut warnings = vec![];
     for (i, f) in fragments.iter().enumerate() {
-        if !f.excluded.is_empty() {
+        if f.imaginary_cm1.len() == 1 && s.partners[i].ts_mode.enabled && !s.partners[i].rigid {
+            warnings.push(format!("Partner {}: TS mode {:.1} cm^-1 sampled with bounded uniform displacement, {}, maximum atom displacement {} Å (no thermal/ZPE assignment).", i+1, f.imaginary_cm1[0], s.partners[i].ts_mode.side.label(), s.partners[i].ts_mode.max_displacement_angstrom));
+        } else if !f.imaginary_cm1.is_empty() {
             warnings.push(format!(
                 "Partner {}: excluded imaginary modes (cm^-1): {:?}",
                 i + 1,
-                f.excluded
+                f.imaginary_cm1
             ));
+        }
+        if !rotors[i].is_empty() {
+            warnings.push(format!("Partner {}: {} free internal rotor(s), uniform 0–360°; bond detection from equilibrium geometry.", i+1, rotors[i].len()));
         }
     }
     for index in 0..n {
@@ -306,13 +390,25 @@ pub fn generate(
             if cancel.load(Ordering::Relaxed) {
                 return Err("Cancelled. Previous results were retained.".into());
             }
-            let mut x = sample_fragment(&fragments[0], &s.partners[0], &mut rng)?;
+            let mut x = sample_prepared_fragment(
+                &fragments[0],
+                &s.partners[0],
+                &rotors[0],
+                s.displacement,
+                &mut rng,
+            )?;
             if let Some(d) = distance {
                 rotate(
                     &mut x,
                     [uniform(&mut rng), uniform(&mut rng), uniform(&mut rng)],
                 );
-                let mut b = sample_fragment(&fragments[1], &s.partners[1], &mut rng)?;
+                let mut b = sample_prepared_fragment(
+                    &fragments[1],
+                    &s.partners[1],
+                    &rotors[1],
+                    s.displacement,
+                    &mut rng,
+                )?;
                 rotate(
                     &mut b,
                     [uniform(&mut rng), uniform(&mut rng), uniform(&mut rng)],
@@ -348,6 +444,36 @@ pub fn generate(
     if cancel.load(Ordering::Relaxed) {
         return Err("Cancelled. Previous results were retained.".into());
     }
+    let mut notes = vec![];
+    for (partner, (f, p)) in fragments.iter().zip(&s.partners).enumerate() {
+        if p.rigid {
+            continue;
+        }
+        if f.imaginary_cm1.len() == 1 && p.ts_mode.enabled {
+            notes.push(format!(
+                "partner{}_TS=uniform_displacement:{:?}:max_atom_A={:.8}",
+                partner + 1,
+                p.ts_mode.side,
+                p.ts_mode.max_displacement_angstrom
+            ));
+        }
+        for (index, r) in rotors[partner].iter().enumerate() {
+            notes.push(format!(
+                "partner{}_rotor{}=axis_{}-{}:atoms_{}:mode_{}:{:?}",
+                partner + 1,
+                index + 1,
+                r.axis[0] + 1,
+                r.axis[1] + 1,
+                r.moving
+                    .iter()
+                    .map(|i| (i + 1).to_string())
+                    .collect::<Vec<_>>()
+                    .join(","),
+                r.mode.map_or(0, |m| m + 1),
+                r.treatment
+            ));
+        }
+    }
     Ok(SamplingOutput {
         atoms,
         samples,
@@ -355,5 +481,7 @@ pub fn generate(
         rejected,
         warnings,
         partner_sizes: fragments.iter().map(|f| f.atoms.len()).collect(),
+        sampling_note: notes.join(" "),
+        displacement: s.displacement,
     })
 }

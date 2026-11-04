@@ -108,7 +108,7 @@ fn pes_calculation_handoff_loads_self_contained_orca_hessian() {
     .unwrap();
     assert_eq!(f.atoms.len(), 19);
     assert_eq!(f.frequencies.len(), 50);
-    assert_eq!(f.excluded.len(), 1);
+    assert_eq!(f.imaginary_cm1.len(), 1);
 }
 
 #[test]

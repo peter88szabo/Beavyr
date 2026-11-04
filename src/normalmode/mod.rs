@@ -12,6 +12,7 @@ use crate::normalmode::bmat_smat::{eckart_reactionpath_transform, eckart_transfo
 use crate::normalmode::linalg_shim::{Backend, LinAlg};
 
 pub mod bmat_smat;
+pub mod cartesian;
 pub mod fd_hessian;
 pub mod inertia;
 pub mod ir_intensity;

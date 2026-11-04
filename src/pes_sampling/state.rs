@@ -33,6 +33,29 @@ impl Population {
         }
     }
 }
+/// How a mode's displacement is drawn within its classical turning points ±A.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Displacement {
+    /// Q = A·(2u−1): even coverage of the well, including its bottom.
+    #[default]
+    Uniform,
+    /// Q = A·cos(2πu): time-weighted (arcsine) distribution, as in QCT/Smite.
+    ClassicalPhase,
+}
+impl Displacement {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Uniform => "Uniform in amplitude",
+            Self::ClassicalPhase => "Classical phase (cos)",
+        }
+    }
+    pub fn comment(self) -> &'static str {
+        match self {
+            Self::Uniform => "displacement=uniform_within_turning_points",
+            Self::ClassicalPhase => "phases=uniform_0_2pi",
+        }
+    }
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TemperatureRule {
     BoltzmannTail,
@@ -83,6 +106,8 @@ pub struct Partner {
     pub rigid: bool,
     pub overrides: Vec<Excitation>,
     pub use_overrides: bool,
+    pub ts_mode: super::ts_mode::Settings,
+    pub rotors: Vec<super::rotors::Rotor>,
 }
 impl Default for Partner {
     fn default() -> Self {
@@ -99,6 +124,8 @@ impl Default for Partner {
             rigid: false,
             overrides: vec![],
             use_overrides: false,
+            ts_mode: Default::default(),
+            rotors: vec![],
         }
     }
 }
@@ -114,6 +141,7 @@ pub struct Settings {
     pub repeatable: bool,
     pub seed: u64,
     pub overlap: super::overlap::OverlapFilter,
+    pub displacement: Displacement,
 }
 impl Default for Settings {
     fn default() -> Self {
@@ -128,6 +156,7 @@ impl Default for Settings {
             repeatable: false,
             seed: 42,
             overlap: Default::default(),
+            displacement: Default::default(),
         }
     }
 }

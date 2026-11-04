@@ -22,11 +22,22 @@ pub struct SamplingOutput {
     pub rejected: usize,
     pub warnings: Vec<String>,
     pub partner_sizes: Vec<usize>,
+    pub sampling_note: String,
+    pub displacement: super::state::Displacement,
 }
 impl SamplingOutput {
     pub fn sample_comment(&self, i: usize) -> String {
         let s = &self.samples[i];
-        let mut text = format!("PES_sample={} seed={} phases=uniform_0_2pi", i+1, self.seed);
+        let mut text = format!(
+            "PES_sample={} seed={} {}",
+            i + 1,
+            self.seed,
+            self.displacement.comment()
+        );
+        if !self.sampling_note.is_empty() {
+            text.push(' ');
+            text.push_str(&self.sampling_note);
+        }
         if let Some(d) = s.distance {
             text.push_str(&format!(" COM_distance_A={d:.10} distance_index={} sample_at_distance={} partner_A_atoms={}", s.distance_index.unwrap_or(0), s.sample_at_distance.unwrap_or(0), self.partner_sizes.first().copied().unwrap_or(0)));
         }
@@ -81,7 +92,8 @@ impl SamplingOutput {
             .samples
             .iter()
             .enumerate()
-            .map(|(i,s)| TrajectoryFrame { metadata: crate::trajectory_data::Metadata::comment(self.sample_comment(i)),
+            .map(|(i, s)| TrajectoryFrame {
+                metadata: crate::trajectory_data::Metadata::comment(self.sample_comment(i)),
                 atoms: self.atoms.clone(),
                 pos: s
                     .coordinates

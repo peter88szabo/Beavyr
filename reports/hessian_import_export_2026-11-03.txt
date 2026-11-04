@@ -1,0 +1,137 @@
+Hessian import/export and PES sampling validation — 2026-11-03
+
+Scope
+-----
+Fix the PES sampler rejecting numerically asymmetric Hessians, accept backend
+and Smite matrix formats for either unimolecular or bimolecular partners, and
+export a single Smite-compatible symmetric Cartesian Hessian format.
+The user cancelled the separate installation-speed change. Cargo.toml,
+reinstall.sh, and packaging/build-deb.sh are unchanged. No commit or push.
+
+Cause and correction
+--------------------
+PES sampling previously rejected differences larger than 1e-7*max(1,max|H|)
+between the triangles. Frequency Analysis did not enforce this rule, and its
+symmetric eigensolver was given matrices without explicit symmetrization.
+Smite's normalmode/hessian.py explicitly averages (H + H.T)/2 before use/save.
+Beavyr now uses that symmetric Cartesian matrix in both workflows and exports.
+Neither mass weighting, Eckart projection nor empirical frequency scaling is
+applied to the stored Hessian. These remain analysis operations.
+
+A gross-corruption guard rejects max|H-H.T| > 1e-7 + 0.25*max|H|, reporting both
+values. This generous guard is not a guarantee of derivative accuracy.
+Non-finite values, invalid dimensions, missing/mismatched coordinates, dummy
+atoms in the Hessian geometry, and invalid masses are also rejected.
+
+Accepted inputs
+---------------
+- ORCA .hess: embedded geometry in bohr, isotope masses, blocked Hessian,
+  optional frequency scaling and IR intensities.
+- Internal PySCF/Psi4/xTB/DREIDING/Sparrow/Behemoth $hessian numeric matrices.
+- Behemoth labelled Cartesian Hessians from its output (matching XYZ needed).
+- Smite plain square numeric matrices (matching XYZ needed).
+- Older internal PySCF dimension-prefixed flat matrices (matching XYZ needed).
+- New self-contained Beavyr standard exports.
+Bare matrices need an explicit matching equilibrium XYZ; the reader does not
+silently guess a geometry from unrelated files or the current viewer.
+The PES file chooser includes .hess/.hessian/.txt/.dat/.log/.out and all files.
+
+Standard export
+---------------
+Numeric section: one row per Cartesian coordinate, whitespace-separated,
+17 digits after the decimal in scientific notation; unweighted Eh/bohr^2.
+Comment lines begin '#', which Smite/numpy.loadtxt ignores. They retain atom
+order, equilibrium geometry in bohr, masses in amu, units, and available
+frequency scale and IR intensities. Thus Beavyr can reopen the exported file
+without a separate XYZ. ORCA isotope substitutions are retained.
+
+The Quantum Chemistry runner prepares this export for Hessian/frequency jobs,
+and its Save button also converts older native calculation results. TS Hessian
+exports use the final search geometry. New self-contained files are passed to
+Frequency Analysis and PES Sampling, avoiding accidental viewer-geometry use.
+The excited-state analysis reader accepts this standard format too.
+Native backend files remain untouched in the run directory and complete-job
+archives. Preparing an already-standard result does not create extra copies.
+
+Validation
+----------
+Real PySCF 2.14.0 PBE/STO-3G water Hessian generated with the existing Beavyr
+script layout; two PySCF threads and affinity restricted to CPUs 0-3.
+Energy: -75.224722292434 Eh.
+Original maximum antisymmetric residual: 1.1009901323966176e-10 Eh/bohr^2.
+Largest matrix element: 0.773455637908882 Eh/bohr^2.
+Independent numpy.loadtxt(..., delimiter=' ') reads the Beavyr export as 9x9.
+Exact array equality with 0.5*H + 0.5*H.T: PASS. Exact symmetry: PASS.
+This small calculation does not reproduce the user's particular residual;
+the user's failing saved Hessian path has been requested but not supplied.
+A regression test adds a 2e-6 residual that the previous PES check rejected.
+
+Regression coverage includes:
+- Real ORCA and Behemoth files, plus newly captured real PySCF fixtures.
+- Legacy dimension-prefixed and Fortran D-exponent matrix input.
+- Isotope/geometry/matrix/IR/scaling preservation through export and reload.
+- Both bimolecular partners, and PES/Frequency Analysis frequency agreement.
+- Correct PySCF calculation geometry even if the displayed trajectory differs.
+- Original native file preservation and idempotent standard preparation.
+- Invalid dimensions/non-finite values/gross asymmetry rejection.
+- Existing dummy-atom removal and all-backend Hessian handoff regressions.
+
+Hessian-only regression suite: 1592 passed, 0 failed, 50 ignored.
+Final combined regression suite: 1599 passed, 0 failed, 50 ignored.
+Sampling-specific tests: 27 passed, 0 failed.
+No compiler warnings in either test run. Four-core affinity, four Cargo jobs,
+single-threaded test execution. Application build: PASS, no warnings (1m 37s).
+Built target/debug/Beavyr. The system-installed application was not replaced;
+use the unchanged ./reinstall.sh to install from the updated source.
+Evidence: reports/testing_evidence_2026-11-03/hessian_pes/
+The 50 ignored tests require separately configured native backends, GPU or
+other explicit test setup; they were not rerun in this task.
+
+Additional requested sampling changes
+-------------------------------------
+Normal-mode preparation now goes through normalmode/cartesian.rs in both PES
+Sampling and Frequency Analysis/thermochemistry (also excited-state analysis).
+This shares the symmetric Hessian and double-precision linearity decision,
+then the existing mass weighting, Eckart projection and diagonalization.
+The PES geometry is COM-centred only after this common analysis. Tests compare
+frequencies AND eigenvectors and test zero net translation/rotation for linear
+and nonlinear cases. PES uses ordinary VibRot projection, not the optional
+reaction-path projection; no empirical frequency factor is applied to its
+physical harmonic sampling amplitudes.
+
+Internal rotors: polyatomic partners can define multiple bonds/dihedrals and
+choose either side, smaller side or a complete explicit fragment atom list.
+Equilibrium connectivity uses Pebble's H-X 1.4 Å / X-X 2.0 Å thresholds and
+ignores H-H edges. Unlike Pebble's older BFS, graph traversal removes only the
+axis edge and rejects cycles crossing it, preventing rotation through a ring.
+Rodrigues rotation uses the current displaced axis; angles are uniform 0–360°.
+Topology is prepared once per sampling run. Associated positive vibrational
+modes can be restricted to ZPE (Pebble convention) or omitted entirely.
+Mode assignments are explicit; the code does not guess torsional identities.
+
+TS direction: retains the single negative Eckart-projected eigenvector
+separately from stable modes. Enabled by default for a first-order saddle;
+uniform bounded displacement defaults to both sides. Optional positive-only
+and negative-only sampling implemented per the user's final instruction.
+Maximum displacement defaults to 0.2 Å for the largest atom displacement
+contributed by that TS mode, configurable in the panel. Positive/negative
+signs are eigenvector signs, not identified reactant/product directions.
+No imaginary-frequency ZPE or thermal partition function is invented.
+Smite currently defaults to excluding imaginary modes; its optional legacy
+'abs' policy explicitly warns about treating them as positive oscillators.
+This new bounded configurational TS sampling deliberately avoids that policy.
+Multiple imaginary modes remain excluded and reported.
+
+Rotors/TS apply to either collision partner. Whole-partner rotations and COM
+distance placement follow as before. The overlap filter sees the final
+combined geometry. Rigid geometry disables these internal changes. Saved XYZ
+comments preserve the TS setting and rotor axis/group/mode configuration.
+
+
+Reversibility
+-------------
+Original edited files are backed up under:
+target/change-backups/hessian-and-local-install-2026-11-03/
+Only module declarations were added in qchem_interfaces/mod.rs and
+normalmode/mod.rs. Implementations live in named files: hessian_io.rs,
+hessian_output.rs, cartesian.rs, rotors.rs, rotor_ui.rs and ts_mode.rs.

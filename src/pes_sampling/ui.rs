@@ -94,6 +94,7 @@ fn partner(ui: &mut egui::Ui, p: &mut Partner, mol: &Molecule) -> Result<(), Str
         ui.selectable_value(&mut p.source, Source::Atom, "Atom");
     });
     if p.source != previous_source {
+        p.rotors.clear();
         // Per-mode controls belong to the loaded Hessian, not a new source.
         p.use_overrides = false;
     }
@@ -118,16 +119,17 @@ fn partner(ui: &mut egui::Ui, p: &mut Partner, mol: &Molecule) -> Result<(), Str
             match request {
                 Some(0) => {
                     if let Some(path) = rfd::FileDialog::new()
-                        .add_filter("Hessian", &["hess", "hessian", "txt"])
+                        .add_filter("Hessian", &["hess", "hessian", "txt", "dat", "log", "out"])
                         .add_filter("All files", &["*"])
                         .pick_file()
                     {
                         let f = input::load_hessian(&path, p.geometry.as_ref())?;
                         p.overrides = vec![p.excitation.clone(); f.frequencies.len()];
                         p.use_overrides = false;
-                        if !f.excluded.is_empty() {
-                            crate::runtime_warning::push(ui.ctx(),"PES sampling: excluded modes",&format!("As in Smite, imaginary modes are excluded from normal-mode sampling. Excluded frequencies (cm^-1): {:?}",f.excluded));
+                        if f.imaginary_cm1.len() > 1 {
+                            crate::runtime_warning::push(ui.ctx(),"PES sampling: excluded modes",&format!("Multiple imaginary modes are excluded from PES sampling; this is not a first-order saddle. Frequencies (cm^-1): {:?}",f.imaginary_cm1));
                         }
+                        p.rotors.clear();
                         p.fragment = Some(f);
                     }
                 }
@@ -165,10 +167,10 @@ fn partner(ui: &mut egui::Ui, p: &mut Partner, mol: &Molecule) -> Result<(), Str
                     f.atoms.len(),
                     f.frequencies.len()
                 ));
-                if !f.excluded.is_empty() {
+                if f.imaginary_cm1.len() > 1 {
                     ui.colored_label(
                         egui::Color32::YELLOW,
-                        format!("{} imaginary mode(s) excluded", f.excluded.len()),
+                        format!("{} imaginary mode(s) excluded", f.imaginary_cm1.len()),
                     );
                 }
             } else if let Some((atoms, _)) = &p.geometry {
@@ -246,6 +248,7 @@ fn partner(ui: &mut egui::Ui, p: &mut Partner, mol: &Molecule) -> Result<(), Str
             }
         });
     }
+    if p.source == Source::Hessian { super::rotor_ui::controls(ui, p); }
     Ok(())
 }
 fn start(ctx: &egui::Context, state: &mut PesSampling) {
@@ -412,6 +415,27 @@ pub(crate) fn window(
                                 ui.label(format!("{n} samples total"));
                             }
                         }
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label("Mode displacement");
+                            ui.selectable_value(
+                                &mut state.settings.displacement,
+                                Displacement::Uniform,
+                                Displacement::Uniform.label(),
+                            )
+                            .on_hover_text(
+                                "Q = A·(2u−1): even coverage between the classical turning \
+                                 points, including the bottom of the well.",
+                            );
+                            ui.selectable_value(
+                                &mut state.settings.displacement,
+                                Displacement::ClassicalPhase,
+                                Displacement::ClassicalPhase.label(),
+                            )
+                            .on_hover_text(
+                                "Q = A·cos(2πu): time-weighted (QCT) distribution; samples \
+                                 crowd near the turning points.",
+                            );
+                        });
                         ui.horizontal(|ui| {
                             ui.checkbox(&mut state.settings.repeatable, "Repeatable");
                             if state.settings.repeatable {

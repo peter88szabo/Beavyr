@@ -1,9 +1,12 @@
 //! Open the sampler using the Hessian and geometry of a completed calculation.
 use super::{input, state::*};
-use crate::qchem_interfaces::{job::JobType, program::QcProgram};
+use crate::qchem_interfaces::job::JobType;
+#[cfg(test)]
+use crate::qchem_interfaces::program::QcProgram;
 use crate::qchem_panel::run::QcRunOutput;
 use crate::ui_style::ResponseExt;
 use bevy_egui::egui;
+#[cfg(test)]
 use std::{fs, path::Path};
 
 fn supports_sampling(job: JobType) -> bool {
@@ -25,9 +28,9 @@ pub fn results_button(ui: &mut egui::Ui, output: &QcRunOutput, state: &mut PesSa
         state.open = true;
         match load_calculation(output) {
             Ok(fragment) => {
-                if !fragment.excluded.is_empty() {
+                if fragment.imaginary_cm1.len() > 1 {
                     crate::runtime_warning::push(ui.ctx(), "PES sampling: excluded modes", &format!(
-                        "As in Smite, imaginary modes are excluded from normal-mode sampling. Excluded frequencies (cm^-1): {:?}", fragment.excluded));
+                        "Multiple imaginary modes are excluded from PES sampling; this is not a first-order saddle. Frequencies (cm^-1): {:?}", fragment.imaginary_cm1));
                 }
                 adopt(state, fragment);
             }
@@ -48,6 +51,7 @@ fn adopt(state: &mut PesSampling, fragment: input::Fragment) {
     state.settings.workflow = Workflow::Unimolecular;
     let partner = &mut state.settings.partners[0];
     partner.source = Source::Hessian;
+    partner.rotors.clear();
     partner.rigid = false;
     partner.geometry = Some((
         fragment.atoms.clone(),
@@ -64,10 +68,6 @@ fn adopt(state: &mut PesSampling, fragment: input::Fragment) {
     state.is_error = false;
 }
 
-fn read(path: &Path) -> Result<String, String> {
-    fs::read_to_string(path).map_err(|e| format!("Cannot read {}: {e}", path.display()))
-}
-
 fn load_calculation(output: &QcRunOutput) -> Result<input::Fragment, String> {
     let path = output
         .hessian_path
@@ -82,27 +82,17 @@ fn load_calculation(output: &QcRunOutput) -> Result<input::Fragment, String> {
                 .map(|(_, path)| path.as_path())
         })
         .ok_or("This calculation did not produce a Hessian file.")?;
-    if read(path)?.lines().any(|line| line.trim() == "$atoms") {
-        return input::load_hessian(path, None);
-    }
-    let dir = path
-        .parent()
-        .ok_or("The Hessian has no calculation directory.")?;
-    // Use backend files from this run, never the current viewer or frequency
-    // panel: either may already contain a different structure. In particular,
-    // xTB's Hessian uses its reoriented g98 geometry, not the input orientation.
-    let geometry = match output.program {
-        QcProgram::Xtb => crate::qchem_interfaces::hessian_file::parse_g98_geometry(
-            &read(&dir.join("hess/g98.out"))?,
-        )?,
-        QcProgram::Behemoth => input::geometry(&read(&dir.join("hess/input.xyz"))?)?,
-        QcProgram::Dreiding => input::geometry(&read(&dir.join("hessian_geometry.xyz"))?)?,
-        QcProgram::PySCF | QcProgram::Psi4 | QcProgram::Psi4Py =>
-            input::geometry(&read(&dir.join("final.xyz"))?)?,
-        QcProgram::SparrowPy => input::geometry(&read(&dir.join("geometry.xyz"))?)?,
-        _ => return Err("The Hessian does not contain its matching geometry. Load the Hessian and its equilibrium XYZ in PES Sampling.".into()),
-    };
-    input::load_hessian(path, Some(&geometry))
+    let h = crate::qchem_panel::run::hessian_output::load(output, path)?;
+    input::from_hessian(
+        h.atoms,
+        h.masses_amu,
+        h.coords_bohr,
+        h.hessian,
+        path.file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned(),
+    )
 }
 
 #[cfg(test)]

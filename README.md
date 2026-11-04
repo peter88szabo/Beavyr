@@ -641,17 +641,67 @@ normal-mode sampling conventions. Completed samples load automatically and
 open the **Trajectory** panel, stopped on the first frame. **Save XYZ…** exports
 all samples; **Load as Trajectory** reopens the retained result.
 
-For each molecule or collision partner, load an ORCA `.hess` containing its
-geometry and masses, or load the matching equilibrium XYZ followed by a bare
-`$hessian` matrix in Eh/bohr². Diatomics can instead use their two elements,
+For each molecule or collision partner, load an ORCA `.hess`, a Beavyr standard
+Hessian, or a matching equilibrium XYZ (Å) plus a matrix: internal PySCF/Psi4
+`$hessian`, Behemoth labelled output, Smite numeric rows, or the legacy PySCF
+size-prefixed matrix. Cartesian Hessians are unweighted and in Eh/bohr².
+PES Sampling and Frequency Analysis both use `(H + Hᵀ)/2`; malformed matrices,
+non-finite values and gross asymmetry are rejected.
+
+Hessians saved from Quantum Chemistry results use Smite-compatible numeric
+rows, with comment metadata containing the calculation's geometry (bohr),
+isotope masses (amu), units, and available IR intensities/scaling. Smite's
+`numpy.loadtxt` ignores these comments. Beavyr reloads the file on its own,
+without a separate XYZ. Original backend files remain in the calculation
+folder and complete-calculation export.
+
+Diatomics can instead use their two elements,
 equilibrium distance in Å and frequency in cm⁻¹. An optional Morse oscillator
 at J = 0 additionally needs De in eV. Atomic partners and rigid partners are
-also supported. Imaginary modes are excluded, with an explicit notice, as in
-Smite; translations and rotations are projected out. Hessian isotope masses
-are retained.
+also supported. PES Sampling uses the same symmetric Hessian, isotope masses,
+linearity test, Eckart projection and mass-normalized eigenvectors as Frequency
+Analysis. The stable vibrational modes exclude translations and rotations.
 
-Every mode uses an independent phase uniformly distributed over [0, 2π).
-With a specified energy ceiling, `Q = sqrt(2 Emax) / omega * cos(phase)`;
+For a single imaginary mode, **Sample TS direction** is enabled by default.
+Its coordinate is sampled uniformly within a bounded displacement, defaulting
+to both sides of the saddle. **Positive only** and **Negative only** are also
+available; the signs refer to the eigenvector, not known reactants/products.
+The default maximum displacement is 0.2 Å for the most displaced atom's TS
+contribution and is adjustable. This is configurational sampling, not a
+thermal oscillator or an assignment of ZPE to an imaginary frequency.
+Multiple imaginary modes are excluded with a notice.
+
+**Internal rotors (free-rotor sampling)** lets each polyatomic partner define
+multiple B–C bonds or A–B–C–D dihedrals. Select the smaller fragment (Pebble's
+default), either bond side, or an explicit list of rotating atom numbers.
+Angles are uniform over 0–360°. Connectivity comes from the equilibrium
+structure, using Pebble's adjustable H–X 1.4 Å and X–X 2.0 Å thresholds.
+Ring bonds and partial fragments that would break other bonds are rejected.
+An associated vibrational mode can be kept at **ZPE only (Pebble)** or removed
+with **Replace harmonic mode**; an unassigned mode retains its existing
+vibrational settings. Rotations are applied after vibrational/TS displacements,
+then the existing overlap filter checks the complete sampled structure.
+Both collision partners support these controls. XYZ comments retain the
+rotor definitions and TS sampling settings. **Rigid geometry** disables all
+internal displacements and rotations.
+
+Each mode's displacement is drawn independently within its classical turning
+points ±A, with `A = sqrt(2 Emax) / omega`. **Mode displacement** toggles how:
+
+- **Uniform in amplitude** (default): `Q = A · (2u − 1)`, u uniform in [0, 1).
+  Samples cover the well evenly, including its bottom near equilibrium. This
+  suits PES/configuration sampling, where the low-energy region matters as much
+  as the turning points.
+- **Classical phase (cos):** `Q = A · cos(2πu)`, the time-weighted (arcsine)
+  distribution of a classical oscillator, as in QCT/Smite initial conditions.
+  Samples crowd near ±A and the equilibrium region is sparse.
+
+Morse diatomics use the same toggle: uniform between the exact inner and outer
+Morse turning points, or the exact classical Morse trajectory at a uniform
+phase. In both modes no sample lies beyond the turning points, and with
+**Uniform in amplitude** the chosen energy is a per-mode ceiling rather than
+the exact mode energy. XYZ comments record the choice
+(`displacement=uniform_within_turning_points` or `phases=uniform_0_2pi`).
 Cartesian displacements use mass-normalized mode vectors. Choose ZPE,
 maximum quantum number, maximum energy **per mode**, or temperature. The
 common setting applies to every mode; **Mode settings → Set limits per mode**
@@ -682,6 +732,24 @@ is limited to five million atom-frames to bound memory use. This module
 exports geometry samples only; it does not assign quantum-chemistry PES
 energies or propagate molecular dynamics. Save the XYZ explicitly; sampling
 setup/results are not stored as additional project fields.
+
+#### PES Sampling options at a glance
+
+| Option | Choices | Default |
+|---|---|---|
+| Workflow | Unimolecular, Bimolecular | Unimolecular |
+| Partner source | Hessian, Diatomic (harmonic or Morse), Atom | Hessian |
+| Rigid geometry | on / off | off |
+| Mode energy | ZPE, Maximum temperature, Maximum quantum number, Maximum energy per mode | ZPE |
+| Temperature rule | Boltzmann-tail cutoff, ZPE + kB × Tmax, Smite thermal | Boltzmann tail, 99.9 % |
+| Per-mode limits | Mode settings → Set limits per mode | off |
+| Mode displacement | Uniform in amplitude, Classical phase (cos) | Uniform in amplitude |
+| TS direction (one imaginary mode) | Both sides, Positive only, Negative only; max. atom displacement | Both, 0.2 Å |
+| Internal rotors | bond or dihedral; smaller side, B side, C side, atom list; ZPE only or Replace for an assigned mode | none |
+| Bimolecular grid | first/last COM distance, distance points, samples per distance | 3–6 Å, 10 × 100 |
+| Samples (unimolecular) | count | 100 |
+| Repeatable | fixed seed | off (seed 42 when on) |
+| Overlap filter | H–H, H–other, other–other minimum distances | on, 0.4 / 0.5 / 0.8 Å |
 
 ### Measurements
 
@@ -975,3 +1043,40 @@ circle/square/no markers, line width, marker size and image dimensions. SVG and 
 exports share the plotted geometry, axis units and scan reference caption. Missing
 values remain gaps, and reversed scans preserve source-point selection. Spectrum
 plots and trajectory histograms retain their existing separate rendering controls.
+
+### MRCC calculations
+
+Select **MRCC** in Quantum Chemistry and set the path to the installation's
+`dmrcc` executable in Configure. Beavyr writes `MINP` in an isolated calculation
+directory and runs that executable without command-line input arguments. Its
+companion executables are found using the selected executable's directory in the
+child process's PATH. No shell startup files or global MPI settings are changed.
+The chosen cores control `OMP_NUM_THREADS` and `MKL_NUM_THREADS`.
+
+Supported ground-state methods are HF, DFT, MP2, RI-MP2, MP2-F12, CCSD,
+CCSD(T), unrestricted CCSD(T), CCSD-F12, CCSD(T)-F12, CCSDT, CCSDT(Q), CCSDTQ,
+CASSCF, strongly contracted NEVPT2 and dRPA. MRCC's F12 names correspond to
+its CCSD(F12*) and CCSD(F12*)(T) energies. HF/DFT references can use TDHF/CIS
+or TDDFT/TDA; ADC(2), SCS-ADC(2) and SOS-ADC(2) are offered as excited-state
+methods. The spectrum interface currently requires a restricted singlet.
+
+**Correlate core electrons** writes `core=corr` and requires a cc-pCVXZ or
+cc-pwCVXZ orbital basis (augmented variants are accepted). Core-correlated F12
+is not currently enabled: the installed library's core-fitting auxiliary sets
+must not be confused with core-correlation orbital bases. Frozen core is the
+default for correlation. CASSCF/NEVPT2 require active electrons and orbitals.
+
+Beavyr's optimizer uses MRCC's analytical gradients for HF, the listed supported
+DFT functionals, closed-shell RI-MP2, CCSD, CCSDT and CCSDTQ. Optimization
+coordinates, convergence tolerances and iteration limits use the existing
+Beavyr controls. Numerical derivatives are not substituted for unsupported
+MRCC analytical gradients. Hessian, TS, scan and MECP jobs are not yet enabled
+for this engine.
+
+MRCC output appears in Live Output; input, output, gradients and requested
+Molden files can be saved with the calculation record. MRCC writes its Molden
+wavefunction in standard orientation. Automatic Surface Tools loading requires
+a matching displayed geometry; otherwise Beavyr reports the mismatch and the
+saved MOLDEN file can be loaded separately. The MRCC input editor allows extra
+SCF/CC convergence controls; scientific job settings and geometry stay tied to
+the panel and must be regenerated there.

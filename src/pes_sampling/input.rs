@@ -1,6 +1,6 @@
 //! Hessians retain their own geometry and isotope masses; no display normalization.
 use super::state::{Partner, Source};
-use crate::normalmode::{normal_modes_with_projection, EckartMode};
+use crate::normalmode::{cartesian, EckartMode};
 use ndarray::Array2;
 use std::path::Path;
 pub const BOHR: f64 = 0.529177210903;
@@ -13,7 +13,8 @@ pub struct Fragment {
     pub equilibrium: Vec<f64>,
     pub frequencies: Vec<f64>,
     pub modes: Array2<f64>,
-    pub excluded: Vec<f64>,
+    pub imaginary_cm1: Vec<f64>,
+    pub imaginary_modes: Array2<f64>,
     pub name: String,
     pub diatomic: Option<(f64, f64, Option<f64>)>,
 }
@@ -75,32 +76,6 @@ pub fn geometry(text: &str) -> Result<(Vec<String>, Vec<f64>), String> {
     masses(&atoms)?;
     Ok((atoms, x))
 }
-pub fn linear(x: &[f64]) -> bool {
-    let n = x.len() / 3;
-    if n <= 2 {
-        return true;
-    }
-    let mut axis = [0.; 3];
-    let mut norm = 0.;
-    for p in x.chunks_exact(3) {
-        let a = [p[0] - x[0], p[1] - x[1], p[2] - x[2]];
-        let l = a.iter().map(|v| v * v).sum::<f64>();
-        if l > norm {
-            norm = l;
-            axis = a;
-        }
-    }
-    norm > 0.
-        && x.chunks_exact(3).all(|p| {
-            let a = [p[0] - x[0], p[1] - x[1], p[2] - x[2]];
-            let cross = [
-                a[1] * axis[2] - a[2] * axis[1],
-                a[2] * axis[0] - a[0] * axis[2],
-                a[0] * axis[1] - a[1] * axis[0],
-            ];
-            cross.iter().map(|v| v * v).sum::<f64>() / norm < 1e-10
-        })
-}
 pub fn from_hessian(
     atoms: Vec<String>,
     masses: Vec<f64>,
@@ -123,26 +98,10 @@ pub fn from_hessian(
     if hessian.dim() != (n, n) {
         return Err("Hessian dimensions must match the equilibrium geometry (3N × 3N)".into());
     }
-    let max = hessian.iter().fold(0_f64, |a, b| a.max(b.abs()));
-    for i in 0..n {
-        for j in 0..i {
-            if (hessian[(i, j)] - hessian[(j, i)]).abs() > 1e-7 * max.max(1.) {
-                return Err("Hessian is not symmetric".into());
-            }
-        }
-    }
+    let r = cartesian::analyze(&masses, &x, &hessian, EckartMode::VibRot, None)?;
     center(&mut x, &masses);
-    let r = normal_modes_with_projection(
-        &masses,
-        &hessian,
-        linear(&x),
-        Some(&x),
-        EckartMode::VibRot,
-        None,
-    )
-    .map_err(|e| e.to_string())?;
     let keep = &r.positive_indices;
-    if keep.is_empty() {
+    if keep.is_empty() && r.negative_indices.len() != 1 {
         return Err(
             "No positive vibrational modes remain after translation/rotation projection".into(),
         );
@@ -154,7 +113,10 @@ pub fn from_hessian(
         equilibrium: x,
         frequencies: keep.iter().map(|i| r.frequencies_au[*i]).collect(),
         modes,
-        excluded: r
+        imaginary_modes: Array2::from_shape_fn((n, r.negative_indices.len()), |(i, j)| {
+            r.modes[(i, r.negative_indices[j])]
+        }),
+        imaginary_cm1: r
             .negative_indices
             .iter()
             .map(|i| r.frequencies_au[*i] / CM_TO_AU)
@@ -167,28 +129,15 @@ pub fn load_hessian(
     path: &Path,
     geometry: Option<&(Vec<String>, Vec<f64>)>,
 ) -> Result<Fragment, String> {
-    let text = std::fs::read_to_string(path)
-        .map_err(|e| format!("Cannot read {}: {e}", path.display()))?;
+    let h = crate::qchem_interfaces::hessian_io::load(path, geometry)?;
     let name = path
         .file_name()
         .unwrap_or_default()
         .to_string_lossy()
         .into_owned();
-    if text.lines().any(|l| l.trim() == "$atoms") {
-        let h = crate::qchem_interfaces::orca_hess::parse_orca_hess(&text)?;
-        from_hessian(h.atoms, h.masses_amu, h.coords_bohr, h.hessian, name)
-    } else {
-        let (atoms,x)=geometry.ok_or("This Hessian contains no geometry. Load its matching equilibrium XYZ first (coordinates in Å; Hessian in Eh/bohr²).")?;
-        let h = crate::qchem_interfaces::hessian_file::parse_turbomole_hessian(&text, atoms.len())?;
-        from_hessian(
-            atoms.clone(),
-            masses(atoms)?,
-            x.iter().map(|v| v / BOHR).collect(),
-            h,
-            name,
-        )
-    }
+    from_hessian(h.atoms, h.masses_amu, h.coords_bohr, h.hessian, name)
 }
+
 pub fn prepare(p: &Partner) -> Result<Fragment, String> {
     match p.source {
         Source::Hessian => p
@@ -204,7 +153,8 @@ pub fn prepare(p: &Partner) -> Result<Fragment, String> {
                 equilibrium: vec![0.; 3],
                 frequencies: vec![],
                 modes: Array2::zeros((3, 0)),
-                excluded: vec![],
+                imaginary_cm1: vec![],
+                imaginary_modes: Array2::zeros((0, 0)),
                 name: "Atom".into(),
                 diatomic: None,
             })
@@ -233,7 +183,8 @@ pub fn prepare(p: &Partner) -> Result<Fragment, String> {
                 equilibrium: x,
                 frequencies: vec![p.frequency * CM_TO_AU],
                 modes,
-                excluded: vec![],
+                imaginary_cm1: vec![],
+                imaginary_modes: Array2::zeros((0, 0)),
                 name: "Diatomic parameters".into(),
                 diatomic: Some((re, mu, p.morse.then_some(p.dissociation_ev / 27.2114))),
             })
