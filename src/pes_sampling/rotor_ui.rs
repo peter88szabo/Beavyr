@@ -9,7 +9,10 @@ pub fn controls(ui: &mut egui::Ui, p: &mut Partner) {
     if f.imaginary_cm1.len() == 1 {
         egui::CollapsingHeader::new(format!("TS mode ({:.1} cm⁻¹)", f.imaginary_cm1[0]))
             .default_open(true).show(ui, |ui| {
-            ui.checkbox(&mut p.ts_mode.enabled,"Sample TS direction");
+            // A rigid partner is never displaced, so the TS controls are inert.
+            ui.add_enabled_ui(!p.rigid, |ui| {
+                ui.checkbox(&mut p.ts_mode.enabled,"Sample TS direction");
+            });
             ui.add_enabled_ui(p.ts_mode.enabled && !p.rigid, |ui| {
                 ui.horizontal_wrapped(|ui| {
                     for side in [ts_mode::Side::Both,ts_mode::Side::Positive,ts_mode::Side::Negative] {

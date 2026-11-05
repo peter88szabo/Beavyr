@@ -6,7 +6,7 @@ use std::path::Path;
 pub const BOHR: f64 = 0.529177210903;
 pub const AMU: f64 = 1822.888486209;
 pub const CM_TO_AU: f64 = 137.035999084 * BOHR / 1e8 * std::f64::consts::TAU;
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Fragment {
     pub atoms: Vec<String>,
     pub masses: Vec<f64>,
@@ -173,6 +173,30 @@ pub fn load_hessian(
         .to_string_lossy()
         .into_owned();
     from_hessian(h.atoms, h.masses_amu, h.coords_bohr, h.hessian, name)
+}
+
+/// Load a Hessian for a partner. Embedded coordinates always win. A
+/// separately loaded equilibrium XYZ is used only for a coordinate-free
+/// matrix, and only once, so it can never silently pair with a later file.
+/// Records where the coordinates came from.
+pub fn load_partner_hessian(p: &mut Partner, path: &Path) -> Result<Fragment, String> {
+    let (f, source) = match load_hessian(path, None) {
+        Ok(f) => (f, "coordinates from the Hessian file".to_string()),
+        Err(e) => match &p.geometry {
+            Some(g) => (
+                load_hessian(path, Some(g))?,
+                format!(
+                    "coordinates from {}",
+                    p.geometry_name.as_deref().unwrap_or("the loaded XYZ")
+                ),
+            ),
+            None => return Err(e),
+        },
+    };
+    p.geometry = None;
+    p.geometry_name = None;
+    p.coordinates_source = Some(source);
+    Ok(f)
 }
 
 pub fn prepare(p: &Partner) -> Result<Fragment, String> {

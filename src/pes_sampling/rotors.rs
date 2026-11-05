@@ -4,7 +4,7 @@
 use super::input::{Fragment, BOHR};
 use std::collections::{BTreeSet, VecDeque};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum FragmentSide {
     Smaller,
     First,
@@ -21,12 +21,13 @@ impl FragmentSide {
         }
     }
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ModeTreatment {
     ZpeOnly,
     Replace,
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct Rotor {
     pub enabled: bool,
     pub dihedral: bool,

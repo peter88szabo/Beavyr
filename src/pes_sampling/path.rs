@@ -11,7 +11,8 @@ use crate::normalmode::linalg_shim::{Backend, LinAlg};
 use ndarray::Array2;
 use std::path::{Path, PathBuf};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct PathSettings {
     pub points: Vec<Fragment>,
     pub samples_per_point: usize,

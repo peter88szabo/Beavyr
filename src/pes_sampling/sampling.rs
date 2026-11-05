@@ -42,6 +42,28 @@ pub fn tail_quantum(w: f64, t: f64, population: f64) -> f64 {
     }
     ((-(1. - population / 100.).ln() * KB * t / w).ceil() - 1.).max(0.)
 }
+/// Real modes below this wavenumber are flagged as soft: their harmonic
+/// amplitude is large and often reaches anharmonic or torsional regions.
+pub const SOFT_MODE_CM1: f64 = 100.;
+
+/// (mode index, wavenumber in cm⁻¹) of the soft real modes of a fragment.
+pub fn soft_modes(f: &Fragment) -> Vec<(usize, f64)> {
+    f.frequencies
+        .iter()
+        .map(|w| w / super::input::CM_TO_AU)
+        .enumerate()
+        .filter(|(_, cm)| *cm < SOFT_MODE_CM1)
+        .collect()
+}
+
+pub fn soft_mode_advice(soft: &[(usize, f64)]) -> String {
+    let list: Vec<String> = soft
+        .iter()
+        .map(|(j, cm)| format!("mode {} {:.1}", j + 1, cm))
+        .collect();
+    format!("soft mode(s) below {:.0} cm^-1 ({}): harmonic amplitudes are large and can distort the structure. Consider internal coordinates, a free rotor for torsions, a per-mode limit, or a lower excitation.", SOFT_MODE_CM1, list.join(", "))
+}
+
 pub fn energy(e: &Excitation, w: f64, rng: &mut impl Unit) -> f64 {
     match e.population {
         Population::Zpe => 0.5 * w,
@@ -227,7 +249,7 @@ pub fn prepare_fragment(f: &Fragment, p: &Partner, coordinates: Coordinates) -> 
 #[cfg(test)]
 pub fn sample_fragment(f: &Fragment, p: &Partner, rng: &mut StdRng) -> Result<Vec<f64>, String> {
     let prepared = prepare_fragment(f, p, Coordinates::Cartesian)?;
-    sample_prepared_fragment(f, p, &prepared, Displacement::default(), rng)
+    sample_prepared_fragment(f, p, &prepared, Displacement::default(), rng).map(|(x, _)| x)
 }
 
 pub fn sample_prepared_fragment(
@@ -236,8 +258,10 @@ pub fn sample_prepared_fragment(
     prepared: &Prepared,
     displacement: Displacement,
     rng: &mut impl Unit,
-) -> Result<Vec<f64>, String> {
+) -> Result<(Vec<f64>, f64), String> {
     let mut x = f.equilibrium.clone();
+    // Harmonic (or Morse) potential energy of the real-mode displacement, hartree.
+    let mut potential = 0.;
     if !p.rigid {
         if let Some((re, mu, Some(de))) = f.diatomic {
             let e = if p.use_overrides {
@@ -247,6 +271,8 @@ pub fn sample_prepared_fragment(
             };
             let en = morse_level(e, f.frequencies[0], de, rng)?;
             let r = morse_displacement(re, mu, f.frequencies[0], de, en, displacement, rng.unit())?;
+            let beta = f.frequencies[0] * (mu / (2. * de)).sqrt();
+            potential = de * (1. - (-beta * (r - re)).exp()).powi(2);
             x = vec![r, 0., 0., 0., 0., 0.];
         } else {
             let mut dx = vec![0.; x.len()];
@@ -267,6 +293,7 @@ pub fn sample_prepared_fragment(
                     None => energy(e, *w, rng),
                 };
                 let q = harmonic_displacement(*w, en, displacement, rng.unit());
+                potential += 0.5 * w * w * q * q;
                 for (i, v) in dx.iter_mut().enumerate() {
                     *v += f.modes[(i, j)] * q;
                 }
@@ -292,7 +319,7 @@ pub fn sample_prepared_fragment(
             "Sampling produced non-finite coordinates; check frequencies and excitation".into(),
         );
     }
-    Ok(x)
+    Ok((x, potential))
 }
 
 /// One group of samples sharing a COM distance or path point. Diverse-subset
@@ -470,6 +497,15 @@ pub fn generate(
                     f.imaginary_cm1
                 ));
             }
+            if !p.rigid && f.diatomic.is_none() {
+                let soft: Vec<(usize, f64)> = soft_modes(f)
+                    .into_iter()
+                    .filter(|(j, _)| !prepared.rotors.iter().any(|r| r.mode == Some(*j)))
+                    .collect();
+                if !soft.is_empty() {
+                    warnings.push(format!("Partner {}: {}", i + 1, soft_mode_advice(&soft)));
+                }
+            }
             if !prepared.rotors.is_empty() {
                 warnings.push(format!("Partner {}: {} free internal rotor(s), uniform 0–360°; bond detection from equilibrium geometry.", i+1, prepared.rotors.len()));
             }
@@ -479,6 +515,7 @@ pub fn generate(
     for block in blocks(&s) {
         let candidates = s.diversity.candidates(block.count);
         let mut geometries = Vec::with_capacity(candidates);
+        let mut energies = Vec::with_capacity(candidates);
         for index in 0..candidates {
             let mut accepted = None;
             for _ in 0..1000 {
@@ -487,11 +524,12 @@ pub fn generate(
                 }
                 draws.next_point();
                 let (f, p, prepared) = &units[block.unit];
-                let mut x = sample_prepared_fragment(f, p, prepared, s.displacement, &mut draws)?;
+                let (mut x, mut energy) = sample_prepared_fragment(f, p, prepared, s.displacement, &mut draws)?;
                 if let Some(d) = block.distance {
                     rotate(&mut x, [draws.unit(), draws.unit(), draws.unit()]);
                     let (g, q, prepared_b) = &units[1];
-                    let mut b = sample_prepared_fragment(g, q, prepared_b, s.displacement, &mut draws)?;
+                    let (mut b, energy_b) = sample_prepared_fragment(g, q, prepared_b, s.displacement, &mut draws)?;
+                    energy += energy_b;
                     rotate(&mut b, [draws.unit(), draws.unit(), draws.unit()]);
                     let ma: f64 = f.masses.iter().sum();
                     let mb: f64 = g.masses.iter().sum();
@@ -507,13 +545,14 @@ pub fn generate(
                     *v *= BOHR;
                 }
                 if s.overlap.accepts(&atoms, &x) {
-                    accepted = Some(x);
+                    accepted = Some((x, energy));
                     break;
                 }
                 rejected += 1;
             }
-            let x = accepted.ok_or_else(|| format!("Could not generate sample {} after 1000 attempts. The overlap filter may be incompatible with this distance or excitation.", samples.len() + index + 1))?;
+            let (x, energy) = accepted.ok_or_else(|| format!("Could not generate sample {} after 1000 attempts. The overlap filter may be incompatible with this distance or excitation.", samples.len() + index + 1))?;
             geometries.push(x);
+            energies.push(energy);
             progress.fetch_add(1, Ordering::Relaxed);
         }
         let order = if candidates > block.count {
@@ -528,6 +567,7 @@ pub fn generate(
                 distance_index: block.distance_index,
                 sample_at_distance: block.distance.map(|_| j + 1),
                 path_point: block.path_point,
+                energy: energies[i],
             });
         }
     }
@@ -595,4 +635,37 @@ pub fn generate(
             vec![]
         },
     })
+}
+
+/// Shape checks for settings read from a file, so a damaged or hand-edited
+/// file is refused instead of causing an index error later.
+pub fn check_loaded(s: &Settings) -> Result<(), String> {
+    let fragment = |f: &Fragment| -> Result<(), String> {
+        let n = f.atoms.len();
+        let ok = f.masses.len() == n
+            && f.equilibrium.len() == 3 * n
+            && f.modes.nrows() == 3 * n
+            && f.modes.ncols() == f.frequencies.len()
+            && (f.imaginary_cm1.is_empty() || f.imaginary_modes.nrows() == 3 * n)
+            && f.masses.iter().chain(&f.equilibrium).chain(&f.frequencies).all(|v| v.is_finite());
+        if ok {
+            Ok(())
+        } else {
+            Err(format!("The settings file has an inconsistent Hessian ({}).", f.name))
+        }
+    };
+    for p in &s.partners {
+        if let Some(f) = &p.fragment {
+            fragment(f)?;
+        }
+        if let Some((atoms, x)) = &p.geometry {
+            if x.len() != 3 * atoms.len() {
+                return Err("The settings file has an inconsistent equilibrium geometry.".into());
+            }
+        }
+    }
+    for f in &s.path.points {
+        fragment(f)?;
+    }
+    Ok(())
 }

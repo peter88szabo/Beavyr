@@ -20,7 +20,7 @@ fn pes_window_retains_user_resize_in_both_dimensions() {
                 ..Default::default()
             },
             |_| {
-                rect = super::ui::window(ctx, state, &crate::molecule::Molecule::empty());
+                rect = super::ui::window(ctx, state);
             },
         );
         output.textures_delta.clear();
@@ -67,6 +67,8 @@ fn pes_window_retains_user_resize_in_both_dimensions() {
 fn pes_pebble_overlap_thresholds_and_pair_order() {
     let mut filter = super::overlap::OverlapFilter::default();
     assert!(filter.enabled);
+    // Pebble's fixed cutoffs alone; the covalent-radius rule is tested separately.
+    filter.covalent = false;
     for (a, b, cutoff) in [
         ("H", "H", 0.4),
         ("H", "C", 0.5),
@@ -390,7 +392,7 @@ fn pes_ui_labels_and_old_layout_serialization_stay_compatible() {
     let mut labels = Vec::new();
     for _ in 0..2 {
         let mut frame = ctx.run_ui(Default::default(), |_| {
-            super::ui::window(&ctx, &mut state, &crate::molecule::Molecule::empty());
+            super::ui::window(&ctx, &mut state);
         });
         frame.textures_delta.clear();
         labels = frame

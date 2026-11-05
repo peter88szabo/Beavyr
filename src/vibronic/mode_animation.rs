@@ -19,6 +19,10 @@ fn same(a: &TrajectoryFrame, b: &TrajectoryFrame) -> bool {
     a.atoms == b.atoms && a.pos == b.pos
 }
 impl Animation {
+    /// True while this animation owns the displayed trajectory.
+    pub fn is_running(&self) -> bool {
+        self.owned.is_some()
+    }
     pub fn needs_apply(&self, open: bool) -> bool {
         self.pending.is_some() || self.stop || (!open && self.owned.is_some())
     }

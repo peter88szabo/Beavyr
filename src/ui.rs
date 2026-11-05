@@ -2079,8 +2079,18 @@ pub fn ui_panel(
             ev_changed.write(MoleculeChanged::parse_xyz(false));
         }
     }
-    if let Some(rect) = crate::pes_sampling::ui::window(ctx, &mut pes_sampling, &mol) {
+    if let Some(rect) = crate::pes_sampling::ui::window(ctx, &mut pes_sampling) {
         window_rects.push(rect);
+    }
+    if pes_sampling.animation.needs_apply(pes_sampling.open) {
+        let previous = structure_history.before(&mol, &traj);
+        let is_open = pes_sampling.open;
+        if pes_sampling.animation.apply(is_open, &mut mol, &mut traj) {
+            structure_history.replaced(previous, &mol, &traj, "PES mode animation");
+            xtb_freq_panel_state.selected_mode = None;
+            mol.recompute_bonds(settings.bond_thresh_scale, settings.hbond_cutoff);
+            ev_changed.write(MoleculeChanged::parse_xyz(false));
+        }
     }
     crate::pes_sampling::ui::poll(ctx, &mut pes_sampling);
     let previous = if pes_sampling.load_requested {

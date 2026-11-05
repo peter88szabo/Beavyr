@@ -1,9 +1,11 @@
 //! Pebble's configuration-sampling workflows with Smite's QCT conventions.
+mod analysis;
 mod input;
 pub mod calculation;
 mod output;
 pub(crate) mod overlap;
 mod sampling;
+mod settings_file;
 mod curvilinear;
 pub(crate) mod diverse;
 mod path;
@@ -22,3 +24,6 @@ mod mode_tests;
 
 #[cfg(test)]
 mod feature_tests;
+
+#[cfg(test)]
+mod ux_tests;

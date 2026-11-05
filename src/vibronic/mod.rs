@@ -44,7 +44,7 @@ mod transition_properties;
 
 mod property_job;
 
-mod mode_animation;
+pub(crate) mod mode_animation;
 mod spectrum_view;
 
 #[cfg(test)]

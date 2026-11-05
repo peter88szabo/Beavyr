@@ -5,7 +5,8 @@
 //! the PES changes fastest. It is not invariant to permuting identical atoms.
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct Diversity {
     pub enabled: bool,
     /// Candidates generated per kept sample (≥ 1).

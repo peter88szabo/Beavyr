@@ -14,6 +14,9 @@ pub struct Sample {
     pub distance_index: Option<usize>,
     pub sample_at_distance: Option<usize>,
     pub path_point: Option<usize>,
+    /// Harmonic (Morse for a Morse diatomic) potential energy of the sampled
+    /// real-mode displacement, hartree; rotors and the TS mode excluded.
+    pub energy: f64,
 }
 #[derive(Clone, Debug)]
 pub struct SamplingOutput {

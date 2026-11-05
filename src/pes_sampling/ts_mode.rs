@@ -2,7 +2,7 @@
 //! An imaginary mode is not a thermal oscillator and contributes no ZPE here.
 use super::input::{Fragment, BOHR};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Side {
     Both,
     Positive,
@@ -17,7 +17,8 @@ impl Side {
         }
     }
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct Settings {
     pub enabled: bool,
     pub max_displacement_angstrom: f64,

@@ -1,5 +1,6 @@
 //! Independent PES-sampling setup; completion always loads the sampled trajectory.
-use super::{input, sampling, state::*};
+use super::{analysis, input, sampling, state::*};
+use crate::vibronic::mode_animation::Animation;
 use crate::{molecule::Molecule, trajectory::TrajectoryState, ui_style::ResponseExt};
 use bevy::tasks::{block_on, futures_lite::future, AsyncComputeTaskPool};
 use bevy_egui::egui;
@@ -24,7 +25,7 @@ fn count(ui: &mut egui::Ui, label: &str, value: &mut usize) {
         ui.add(egui::DragValue::new(value).range(1..=1_000_000));
     });
 }
-fn excitation(ui: &mut egui::Ui, e: &mut Excitation) {
+fn excitation(ui: &mut egui::Ui, e: &mut Excitation, unit: EnergyUnit) {
     ui.horizontal_wrapped(|ui| {
         egui::ComboBox::from_id_salt("population")
             .selected_text(e.population.label())
@@ -52,12 +53,20 @@ fn excitation(ui: &mut egui::Ui, e: &mut Excitation) {
                 ui.add(egui::DragValue::new(&mut e.quantum).prefix("n = "));
             }
             Population::Energy => {
-                ui.add(
-                    egui::DragValue::new(&mut e.energy_kcal)
-                        .speed(0.1)
-                        .suffix(" kcal/mol")
-                        .range(0.0..=1e8),
-                );
+                // Stored in kcal/mol; shown and edited in the chosen unit.
+                let f = unit.per_kcal();
+                let mut value = e.energy_kcal * f;
+                if ui
+                    .add(
+                        egui::DragValue::new(&mut value)
+                            .speed(0.1 * f)
+                            .suffix(format!(" {}", unit.label()))
+                            .range(0.0..=1e8 * f),
+                    )
+                    .changed()
+                {
+                    e.energy_kcal = value / f;
+                }
             }
         }
     });
@@ -86,7 +95,12 @@ fn excitation(ui: &mut egui::Ui, e: &mut Excitation) {
         }
     }
 }
-fn partner(ui: &mut egui::Ui, p: &mut Partner, mol: &Molecule) -> Result<(), String> {
+fn partner(
+    ui: &mut egui::Ui,
+    p: &mut Partner,
+    unit: EnergyUnit,
+    animation: &mut Animation,
+) -> Result<(), String> {
     let previous_source = p.source;
     ui.horizontal_wrapped(|ui| {
         ui.selectable_value(&mut p.source, Source::Hessian, "Hessian");
@@ -112,9 +126,6 @@ fn partner(ui: &mut egui::Ui, p: &mut Partner, mol: &Molecule) -> Result<(), Str
                 {
                     request = Some(1);
                 }
-                if ui.button("Use current geometry").clicked_once() {
-                    request = Some(2);
-                }
             });
             match request {
                 Some(0) => {
@@ -123,7 +134,7 @@ fn partner(ui: &mut egui::Ui, p: &mut Partner, mol: &Molecule) -> Result<(), Str
                         .add_filter("All files", &["*"])
                         .pick_file()
                     {
-                        let f = input::load_hessian(&path, p.geometry.as_ref())?;
+                        let f = input::load_partner_hessian(p, &path)?;
                         p.overrides = vec![p.excitation.clone(); f.frequencies.len()];
                         p.use_overrides = false;
                         if f.imaginary_cm1.len() > 1 {
@@ -140,23 +151,10 @@ fn partner(ui: &mut egui::Ui, p: &mut Partner, mol: &Molecule) -> Result<(), Str
                     {
                         let text = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
                         p.geometry = Some(input::geometry(&text)?);
+                        p.geometry_name = path.file_name().map(|n| n.to_string_lossy().into_owned());
                         p.fragment = None;
+                        p.coordinates_source = None;
                     }
-                }
-                Some(2) => {
-                    let mut atoms = vec![];
-                    let mut x = vec![];
-                    for (a, pos) in mol.atoms.iter().zip(&mol.pos) {
-                        if !crate::molecule::is_dummy(a) {
-                            atoms.push(a.clone());
-                            x.extend(pos.to_array().map(f64::from));
-                        }
-                    }
-                    if atoms.is_empty() {
-                        return Err("No real atoms are displayed".into());
-                    }
-                    p.geometry = Some((atoms, x));
-                    p.fragment = None;
                 }
                 _ => {}
             }
@@ -167,6 +165,17 @@ fn partner(ui: &mut egui::Ui, p: &mut Partner, mol: &Molecule) -> Result<(), Str
                     f.atoms.len(),
                     f.frequencies.len()
                 ));
+                if let Some(source) = &p.coordinates_source {
+                    ui.small(source.as_str());
+                }
+                let soft = sampling::soft_modes(f);
+                if !soft.is_empty() {
+                    ui.colored_label(
+                        egui::Color32::YELLOW,
+                        format!("{} soft mode(s) below {:.0} cm⁻¹", soft.len(), sampling::SOFT_MODE_CM1),
+                    )
+                    .on_hover_text(sampling::soft_mode_advice(&soft));
+                }
                 if f.imaginary_cm1.len() > 1 {
                     ui.colored_label(
                         egui::Color32::YELLOW,
@@ -174,7 +183,11 @@ fn partner(ui: &mut egui::Ui, p: &mut Partner, mol: &Molecule) -> Result<(), Str
                     );
                 }
             } else if let Some((atoms, _)) = &p.geometry {
-                ui.label(format!("Equilibrium geometry: {} atoms", atoms.len()));
+                ui.label(format!(
+                    "Equilibrium XYZ {} ({} atoms) is waiting for a coordinate-free Hessian",
+                    p.geometry_name.as_deref().unwrap_or(""),
+                    atoms.len()
+                ));
             }
         }
         Source::Diatomic => {
@@ -209,17 +222,24 @@ fn partner(ui: &mut egui::Ui, p: &mut Partner, mol: &Molecule) -> Result<(), Str
     if p.source != Source::Atom {
         ui.checkbox(&mut p.rigid, "Rigid geometry");
         ui.add_enabled_ui(!p.rigid, |ui| {
-            excitation(ui, &mut p.excitation);
+            excitation(ui, &mut p.excitation, unit);
             if p.source == Source::Hessian {
                 if let Some(f) = &p.fragment {
+                    mode_table(ui, f, p, unit, animation);
                     egui::CollapsingHeader::new("Mode settings").show(ui, |ui| {
-                        if ui
-                            .checkbox(&mut p.use_overrides, "Set limits per mode")
-                            .changed()
-                            && p.use_overrides
-                        {
-                            p.overrides = vec![p.excitation.clone(); f.frequencies.len()];
-                        }
+                        // Per-mode values are kept when the option is switched
+                        // off and on; they are reset only on request or when a
+                        // different Hessian is loaded.
+                        ui.horizontal_wrapped(|ui| {
+                            ui.checkbox(&mut p.use_overrides, "Set limits per mode");
+                            if ui
+                                .add_enabled(p.use_overrides, egui::Button::new("Reset all to global"))
+                                .on_hover_text("Copy the global excitation setting to every mode")
+                                .clicked_once()
+                            {
+                                p.overrides = vec![p.excitation.clone(); f.frequencies.len()];
+                            }
+                        });
                         if p.overrides.len() != f.frequencies.len() {
                             p.overrides = vec![p.excitation.clone(); f.frequencies.len()];
                         }
@@ -237,7 +257,7 @@ fn partner(ui: &mut egui::Ui, p: &mut Partner, mol: &Molecule) -> Result<(), Str
                                                 w / input::CM_TO_AU
                                             ));
                                             ui.add_enabled_ui(p.use_overrides, |ui| {
-                                                excitation(ui, e)
+                                                excitation(ui, e, unit)
                                             });
                                         });
                                     });
@@ -250,6 +270,161 @@ fn partner(ui: &mut egui::Ui, p: &mut Partner, mol: &Molecule) -> Result<(), Str
     }
     if p.source == Source::Hessian { super::rotor_ui::controls(ui, p); }
     Ok(())
+}
+/// Atom displacements above this (Å) are highlighted in the mode table.
+const LARGE_DISPLACEMENT: f64 = 0.5;
+
+/// Per-mode energies and turning-point displacements, with mode animation.
+fn mode_table(ui: &mut egui::Ui, f: &input::Fragment, p: &Partner, unit: EnergyUnit, animation: &mut Animation) {
+    if f.diatomic.is_some() || f.frequencies.is_empty() {
+        return;
+    }
+    let rows = analysis::mode_overview(f, p);
+    let large = rows.iter().filter(|r| r.max_displacement > LARGE_DISPLACEMENT).count();
+    let title = if large > 0 {
+        format!("Mode overview · {large} mode(s) move an atom > {LARGE_DISPLACEMENT} Å")
+    } else {
+        "Mode overview".to_string()
+    };
+    egui::CollapsingHeader::new(title).id_salt("mode_overview").show(ui, |ui| {
+        ui.small("Energy is the largest allowed mode energy (mean for Smite thermal, marked ~). Δmax is the largest atom displacement at the classical turning point. ▶ animates the mode in the viewer with that amplitude.");
+        egui::ScrollArea::vertical().max_height(220.).id_salt("mode_overview_scroll").show(ui, |ui| {
+            egui::Grid::new("mode_overview_grid").striped(true).num_columns(5).show(ui, |ui| {
+                ui.strong("Mode");
+                ui.strong("cm⁻¹");
+                ui.strong(format!("E ({})", unit.label()));
+                ui.strong("Δmax (Å)");
+                ui.label("");
+                ui.end_row();
+                for r in &rows {
+                    let color = (r.max_displacement > LARGE_DISPLACEMENT || r.cm1 < sampling::SOFT_MODE_CM1)
+                        .then_some(egui::Color32::YELLOW);
+                    let text = |t: String| match color {
+                        Some(c) => egui::RichText::new(t).color(c),
+                        None => egui::RichText::new(t),
+                    };
+                    ui.label(text(format!("{}", r.index + 1)));
+                    ui.label(text(format!("{:.1}", r.cm1)));
+                    let mark = if r.is_maximum { "" } else { "~" };
+                    ui.label(text(format!("{mark}{:.3}", unit.from_hartree(r.energy))))
+                        .on_hover_text(r.note.unwrap_or(""));
+                    ui.label(text(format!("{:.3}", r.max_displacement)));
+                    if ui.small_button("▶").on_hover_text("Animate this mode").clicked_once() {
+                        let amplitude = if r.max_displacement > 1e-3 { r.max_displacement.min(2.) } else { 0.3 };
+                        animate(animation, f, r.index, amplitude as f32);
+                    }
+                    ui.end_row();
+                }
+            });
+        });
+    });
+}
+
+fn animate(animation: &mut Animation, f: &input::Fragment, mode: usize, amplitude: f32) {
+    use crate::trajectory::TrajectoryFrame;
+    let pos: Vec<bevy::prelude::Vec3> = f
+        .equilibrium
+        .chunks_exact(3)
+        .map(|v| bevy::prelude::Vec3::new(v[0] as f32, v[1] as f32, v[2] as f32) * input::BOHR as f32)
+        .collect();
+    let frames = crate::qchem_interfaces::xtb_freq::animate_mode(&f.atoms, &pos, &f.modes, mode, amplitude, 60);
+    animation.pending = Some((
+        TrajectoryFrame { metadata: Default::default(), atoms: f.atoms.clone(), pos },
+        frames,
+    ));
+}
+
+fn save_settings(settings: &Settings) -> Result<(), String> {
+    if let Some(path) = rfd::FileDialog::new()
+        .add_filter("PES sampling settings", &["ron"])
+        .set_file_name("pes_sampling.ron")
+        .save_file()
+    {
+        std::fs::write(&path, super::settings_file::to_text(settings)?).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+fn load_settings(settings: &mut Settings) -> Result<(), String> {
+    if let Some(path) = rfd::FileDialog::new()
+        .add_filter("PES sampling settings", &["ron"])
+        .add_filter("All files", &["*"])
+        .pick_file()
+    {
+        let text = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+        *settings = super::settings_file::from_text(&text)?;
+    }
+    Ok(())
+}
+
+fn histogram_view(ui: &mut egui::Ui, out: &super::output::SamplingOutput, view: &mut analysis::HistogramView, unit: EnergyUnit) {
+    egui::CollapsingHeader::new("Distribution").id_salt("pes_histogram").show(ui, |ui| {
+        ui.horizontal_wrapped(|ui| {
+            egui::ComboBox::from_id_salt("histogram_quantity")
+                .selected_text(view.quantity.label())
+                .show_ui(ui, |ui| {
+                    for q in [analysis::Quantity::Distance, analysis::Quantity::Angle, analysis::Quantity::Energy] {
+                        ui.selectable_value(&mut view.quantity, q, q.label());
+                    }
+                });
+            let n = view.quantity.atoms();
+            if n > 0 {
+                ui.label("atoms");
+                for a in &mut view.atoms[..n] {
+                    ui.add(egui::DragValue::new(a).range(1..=out.atoms.len().max(1)));
+                }
+            }
+            ui.label("bins");
+            ui.add(egui::DragValue::new(&mut view.bins).range(5..=200));
+        });
+        if view.quantity == analysis::Quantity::Energy {
+            ui.small("Harmonic potential energy of the sampled real-mode displacement (Morse for a Morse diatomic); rotors and the TS mode are not included.");
+        } else {
+            let n = view.quantity.atoms();
+            let names: Vec<String> = view.atoms[..n]
+                .iter()
+                .map(|&a| out.atoms.get(a.wrapping_sub(1)).map_or("?".into(), |s| format!("{s}{a}")))
+                .collect();
+            ui.small(names.join(" – "));
+        }
+        let (values, label) = match analysis::values(out, view, unit) {
+            Ok(v) => v,
+            Err(e) => {
+                ui.colored_label(egui::Color32::YELLOW, e);
+                return;
+            }
+        };
+        if values.is_empty() {
+            return;
+        }
+        let (lo, hi, counts) = analysis::histogram(&values, view.bins);
+        let peak = counts.iter().copied().max().unwrap_or(1).max(1) as f32;
+        let width = ui.available_width().clamp(160., 440.);
+        let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 120.), egui::Sense::hover());
+        let painter = ui.painter_at(rect);
+        painter.rect_filled(rect, 2., ui.visuals().extreme_bg_color);
+        let bar = rect.width() / counts.len() as f32;
+        let fill = ui.visuals().selection.bg_fill;
+        for (k, &c) in counts.iter().enumerate() {
+            let h = c as f32 / peak * (rect.height() - 4.);
+            let x0 = rect.left() + k as f32 * bar;
+            painter.rect_filled(
+                egui::Rect::from_min_max(egui::pos2(x0 + 0.5, rect.bottom() - h), egui::pos2(x0 + bar - 0.5, rect.bottom())),
+                0.,
+                fill,
+            );
+        }
+        let step = (hi - lo) / counts.len() as f64;
+        if let Some(pos) = response.hover_pos() {
+            let k = (((pos.x - rect.left()) / bar) as usize).min(counts.len() - 1);
+            response.on_hover_text(format!("{:.4} – {:.4} {label}: {} samples", lo + k as f64 * step, lo + (k + 1) as f64 * step, counts[k]));
+        }
+        let mean = values.iter().sum::<f64>() / values.len() as f64;
+        let sd = (values.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / values.len() as f64).sqrt();
+        ui.horizontal_wrapped(|ui| {
+            ui.small(format!("min {lo:.4}  max {hi:.4}  mean {mean:.4}  sd {sd:.4} {label}  ({} samples)", values.len()));
+        });
+    });
 }
 fn start(ctx: &egui::Context, state: &mut PesSampling) {
     match sampling::validate(&state.settings) {
@@ -280,7 +455,7 @@ fn start(ctx: &egui::Context, state: &mut PesSampling) {
     state.message = None;
     state.is_error = false;
 }
-fn path_controls(ui: &mut egui::Ui, path: &mut super::path::PathSettings) -> Result<(), String> {
+fn path_controls(ui: &mut egui::Ui, path: &mut super::path::PathSettings, unit: EnergyUnit) -> Result<(), String> {
     if ui
         .button("Load path Hessians…")
         .on_hover_text("Select all self-contained Hessians (ORCA .hess or Beavyr exports) along the IRC. They are ordered by file name (irc_2 before irc_10).")
@@ -310,7 +485,7 @@ fn path_controls(ui: &mut egui::Ui, path: &mut super::path::PathSettings) -> Res
             });
         });
     }
-    ui.push_id("path_excitation", |ui| excitation(ui, &mut path.excitation));
+    ui.push_id("path_excitation", |ui| excitation(ui, &mut path.excitation, unit));
     Ok(())
 }
 pub(crate) fn poll(ctx: &egui::Context, state: &mut PesSampling) {
@@ -362,7 +537,6 @@ pub(crate) fn load_if_requested(
 pub(crate) fn window(
     ctx: &egui::Context,
     state: &mut PesSampling,
-    mol: &Molecule,
 ) -> Option<egui::Rect> {
     if !state.open {
         return None;
@@ -382,7 +556,38 @@ pub(crate) fn window(
                 .show(ui, |ui| {
                     let running = state.task.is_some();
                     let mut load_error = None;
+                    let unit = state.settings.energy_unit;
                     ui.add_enabled_ui(!running, |ui| {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label("Preset");
+                            for preset in Preset::ALL {
+                                if ui.button(preset.label()).on_hover_text(preset.description()).clicked_once() {
+                                    state.settings.apply_preset(preset);
+                                }
+                            }
+                        });
+                        ui.horizontal_wrapped(|ui| {
+                            if ui.button("Save settings…").on_hover_text("Write all panel settings, including the loaded Hessians, to a .ron file").clicked_once() {
+                                if let Err(e) = save_settings(&state.settings) {
+                                    load_error = Some(e);
+                                }
+                            }
+                            if ui.button("Load settings…").clicked_once() {
+                                if let Err(e) = load_settings(&mut state.settings) {
+                                    load_error = Some(e);
+                                }
+                            }
+                            ui.separator();
+                            ui.label("Energy unit");
+                            egui::ComboBox::from_id_salt("pes_energy_unit")
+                                .selected_text(state.settings.energy_unit.label())
+                                .show_ui(ui, |ui| {
+                                    for u in EnergyUnit::ALL {
+                                        ui.selectable_value(&mut state.settings.energy_unit, u, u.label());
+                                    }
+                                });
+                        });
+                        ui.separator();
                         ui.horizontal(|ui| {
                             ui.selectable_value(
                                 &mut state.settings.workflow,
@@ -408,7 +613,7 @@ pub(crate) fn window(
                         };
                         if n == 0 {
                             crate::ui_style::group(ui, "Reaction path", |ui| {
-                                if let Err(e) = path_controls(ui, &mut state.settings.path) {
+                                if let Err(e) = path_controls(ui, &mut state.settings.path, unit) {
                                     load_error = Some(e);
                                 }
                             });
@@ -426,7 +631,7 @@ pub(crate) fn window(
                                     },
                                     |ui| {
                                         if let Err(e) =
-                                            partner(ui, &mut state.settings.partners[i], mol)
+                                            partner(ui, &mut state.settings.partners[i], unit, &mut state.animation)
                                         {
                                             load_error = Some(e);
                                         }
@@ -526,6 +731,11 @@ pub(crate) fn window(
                                 number(ui, "H–H (Å)", &mut filter.hydrogen_hydrogen, 0.01);
                                 number(ui, "H–other (Å)", &mut filter.hydrogen_other, 0.01);
                                 number(ui, "Other–other (Å)", &mut filter.other_other, 0.01);
+                                ui.horizontal_wrapped(|ui| {
+                                    ui.checkbox(&mut filter.covalent, "Covalent-radius rule")
+                                        .on_hover_text("Also reject any atom pair closer than factor × (rA + rB), using covalent radii. Catches clashes of heavy atoms that the fixed cutoffs miss.");
+                                    ui.add_enabled(filter.covalent, egui::DragValue::new(&mut filter.covalent_factor).range(0.0..=1.5).speed(0.01).prefix("× "));
+                                });
                             });
                         });
                     });
@@ -545,6 +755,9 @@ pub(crate) fn window(
                         }
                     } else if ui.button("Generate samples").clicked_once() {
                         start(ctx, state);
+                    }
+                    if state.animation.is_running() && ui.button("Stop mode animation").clicked_once() {
+                        state.animation.stop = true;
                     }
                     if let Some(message) = &state.message {
                         ui.add(egui::Label::new(message).selectable(true).wrap());
@@ -571,6 +784,7 @@ pub(crate) fn window(
                         for w in &out.warnings {
                             ui.label(w);
                         }
+                        histogram_view(ui, out, &mut state.histogram, unit);
                     }
                     if let Some(e) = save_error {
                         error(ctx, state, e);

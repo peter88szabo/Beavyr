@@ -303,3 +303,22 @@ fn internal_coordinates_converge_for_a_real_19_atom_transition_state() {
         }
     }
 }
+
+#[test]
+fn soft_modes_are_flagged_and_rigid_partners_ignore_them() {
+    let mut f = water_fragment();
+    assert!(sampling::soft_modes(&f).is_empty());
+    f.frequencies[0] = 40. * input::CM_TO_AU;
+    let soft = sampling::soft_modes(&f);
+    assert_eq!(soft.len(), 1);
+    assert_eq!(soft[0].0, 0);
+    assert!((soft[0].1 - 40.).abs() < 1e-9);
+    let mut s = Settings::default();
+    s.partners[0].fragment = Some(f);
+    s.points = 4;
+    let out = run(s.clone());
+    assert!(out.warnings.iter().any(|w| w.contains("soft mode") && w.contains("mode 1 40.0")));
+    s.partners[0].rigid = true;
+    let out = run(s);
+    assert!(!out.warnings.iter().any(|w| w.contains("soft mode")));
+}
