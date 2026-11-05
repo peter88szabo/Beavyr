@@ -1,8 +1,0 @@
-{
-  "status": "STOPPED_BY_USER",
-  "missing_conventional_distances_angstrom": [
-    4.285714285714286,
-    5.428571428571429
-  ],
-  "scope": "Continue only the new five-point composite tests"
-}

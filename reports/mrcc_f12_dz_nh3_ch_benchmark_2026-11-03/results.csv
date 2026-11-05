@@ -1,4 +1,0 @@
-engine,method,basis,reference,cores,cpu_ids,status,wall_seconds,energy_hartree,started,exit_code,failure,user_cpu_seconds,system_cpu_seconds,max_process_rss_kb,directory
-mrcc-f12-dz,UCCSD(T)-F12,aug-cc-pVDZ,UHF,1,0,PASS,31.6,-94.882779028435,2026-11-03 22:40:27 +0100,0,,29.61,1.88,754132.0,/home/peter/DevCode/Beavyr/reports/mrcc_f12_dz_nh3_ch_benchmark_2026-11-03/1cores
-mrcc-f12-dz,UCCSD(T)-F12,aug-cc-pVDZ,UHF,2,"0,1",PASS,21.82,-94.882779028434,2026-11-03 22:40:59 +0100,0,,38.72,2.54,759524.0,/home/peter/DevCode/Beavyr/reports/mrcc_f12_dz_nh3_ch_benchmark_2026-11-03/2cores
-mrcc-f12-dz,UCCSD(T)-F12,aug-cc-pVDZ,UHF,4,"0,1,2,3",PASS,16.82,-94.882779028434,2026-11-03 22:41:20 +0100,0,,55.89,4.39,770532.0,/home/peter/DevCode/Beavyr/reports/mrcc_f12_dz_nh3_ch_benchmark_2026-11-03/4cores

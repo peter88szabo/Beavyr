@@ -1,6 +1,0 @@
-{
-  "confirmed_at": "2026-11-03 22:14:16 +0100",
-  "exclude_runs_started_before_confirmation": true,
-  "rerun_required": "UCCSD(T)/cc-pVTZ, 1 core",
-  "memory_after_shutdown": "               total        used        free      shared  buff/cache   available\nMem:            29Gi       7.2Gi        12Gi       207Mi        10Gi        22Gi\nSwap:          8.0Gi       3.7Gi       4.3Gi\n"
-}
