@@ -9,10 +9,16 @@ pub(super) fn input_text(
     config: &MethodConfig,
     wavefunction: bool,
 ) -> String {
-    let reference = if multiplicity == 1 {
+    let reference = if method == QcMethod::CcsdT {
+        // Closed-shell RHF is Behemoth's plain "HF"; open shells take UHF
+        // (default) or ROHF as chosen in the panel.
+        match correlated::reference(config.cc_reference, multiplicity) {
+            correlated::Reference::Rhf => "HF",
+            correlated::Reference::Rohf => "ROHF",
+            correlated::Reference::Uhf => "UHF",
+        }
+    } else if multiplicity == 1 {
         "HF"
-    } else if method == QcMethod::CcsdT {
-        "UHF"
     } else {
         "ROHF"
     };

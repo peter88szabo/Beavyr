@@ -5,14 +5,14 @@ use std::sync::{
     atomic::{AtomicBool, AtomicUsize},
     Arc,
 };
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Workflow {
     Unimolecular,
     Bimolecular,
     ReactionPath,
 }
 /// Source of the uniform numbers behind every random choice.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum RandomNumbers {
     /// Scrambled Halton low-discrepancy sequence: more even coverage.
     #[default]
@@ -34,7 +34,7 @@ impl RandomNumbers {
     }
 }
 /// Space in which normal-mode displacements are applied.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Coordinates {
     /// Straight-line displacement along Cartesian normal modes.
     #[default]
@@ -56,47 +56,13 @@ impl Coordinates {
         }
     }
 }
-/// Display unit for energies; values are stored in kcal/mol.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub enum EnergyUnit {
-    #[default]
-    KcalMol,
-    KjMol,
-    Ev,
-    Wavenumber,
-}
-impl EnergyUnit {
-    pub const ALL: [Self; 4] = [Self::KcalMol, Self::KjMol, Self::Ev, Self::Wavenumber];
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::KcalMol => "kcal/mol",
-            Self::KjMol => "kJ/mol",
-            Self::Ev => "eV",
-            Self::Wavenumber => "cm⁻¹",
-        }
-    }
-    /// Units per kcal/mol.
-    pub fn per_kcal(self) -> f64 {
-        match self {
-            Self::KcalMol => 1.,
-            Self::KjMol => 4.184,
-            // 1 eV = 23.060548 kcal/mol; 1 kcal/mol = 349.7551 cm⁻¹.
-            Self::Ev => 1. / 23.060548,
-            Self::Wavenumber => 349.7551,
-        }
-    }
-    /// Hartree → this unit (the sampler converts kcal/mol with 627.51).
-    pub fn from_hartree(self, e: f64) -> f64 {
-        e * 627.51 * self.per_kcal()
-    }
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Source {
     Hessian,
     Diatomic,
     Atom,
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Population {
     Zpe,
     Thermal,
@@ -114,7 +80,7 @@ impl Population {
     }
 }
 /// How a mode's displacement is drawn within its classical turning points ±A.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Displacement {
     /// Q = A·(2u−1): even coverage of the well, including its bottom.
     #[default]
@@ -136,7 +102,7 @@ impl Displacement {
         }
     }
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TemperatureRule {
     BoltzmannTail,
     ZpePlusKt,
@@ -151,8 +117,7 @@ impl TemperatureRule {
         }
     }
 }
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-#[serde(default)]
+#[derive(Clone, Debug)]
 pub struct Excitation {
     pub population: Population,
     pub temperature: f64,
@@ -173,8 +138,7 @@ impl Default for Excitation {
         }
     }
 }
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
-#[serde(default)]
+#[derive(Clone)]
 pub struct Partner {
     pub source: Source,
     pub fragment: Option<Fragment>,
@@ -217,8 +181,7 @@ impl Default for Partner {
         }
     }
 }
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
-#[serde(default)]
+#[derive(Clone)]
 pub struct Settings {
     pub workflow: Workflow,
     pub partners: [Partner; 2],
@@ -235,7 +198,6 @@ pub struct Settings {
     pub coordinates: Coordinates,
     pub diversity: super::diverse::Diversity,
     pub path: super::path::PathSettings,
-    pub energy_unit: EnergyUnit,
 }
 impl Default for Settings {
     fn default() -> Self {
@@ -255,55 +217,7 @@ impl Default for Settings {
             coordinates: Default::default(),
             diversity: Default::default(),
             path: Default::default(),
-            energy_unit: Default::default(),
         }
-    }
-}
-/// One-click combinations of the sampling options.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Preset {
-    MlTrainingSet,
-    QctInitialConditions,
-}
-impl Preset {
-    pub const ALL: [Self; 2] = [Self::MlTrainingSet, Self::QctInitialConditions];
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::MlTrainingSet => "ML training set",
-            Self::QctInitialConditions => "QCT initial conditions",
-        }
-    }
-    pub fn description(self) -> &'static str {
-        match self {
-            Self::MlTrainingSet => "Even coverage of the wells for fitting a PES: uniform displacement, quasi-random numbers, diverse subset (3×), Cartesian displacement, overlap filter on; every molecule (and the path) thermal with the Boltzmann-tail cutoff at its current temperature. Hessians, counts and temperatures are kept.",
-            Self::QctInitialConditions => "Smite/Pebble QCT convention: classical phases (cos), pseudo-random numbers, no subset selection, Cartesian displacement, ZPE in every mode, per-mode limits off. Hessians and counts are kept.",
-        }
-    }
-}
-impl Settings {
-    pub fn apply_preset(&mut self, preset: Preset) {
-        let ml = preset == Preset::MlTrainingSet;
-        self.displacement = if ml { Displacement::Uniform } else { Displacement::ClassicalPhase };
-        self.random = if ml { RandomNumbers::QuasiRandom } else { RandomNumbers::PseudoRandom };
-        self.coordinates = Coordinates::Cartesian;
-        self.diversity.enabled = ml;
-        if ml {
-            self.diversity.oversampling = 3.;
-            self.overlap.enabled = true;
-        }
-        let set = |e: &mut Excitation| {
-            if ml {
-                e.population = Population::Thermal;
-                e.temperature_rule = TemperatureRule::BoltzmannTail;
-            } else {
-                e.population = Population::Zpe;
-            }
-        };
-        for p in &mut self.partners {
-            set(&mut p.excitation);
-            p.use_overrides = false;
-        }
-        set(&mut self.path.excitation);
     }
 }
 #[derive(Resource)]

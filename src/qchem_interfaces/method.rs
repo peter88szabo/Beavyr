@@ -459,6 +459,12 @@ pub struct MethodConfig {
     pub active_space: super::job::correlated::ActiveSpace,
     #[serde(default)]
     pub mrcc: super::mrcc::Options,
+    /// CCSD(T) reference; `None` = RHF closed shell, UHF open shell.
+    #[serde(default)]
+    pub cc_reference: Option<super::job::correlated::Reference>,
+    /// Correlated electrons; `None` = the program's frozen-core default.
+    #[serde(default)]
+    pub correlated_electrons: Option<u32>,
     pub xtb: XtbMethod,
     pub behemoth: BehemothMethod,
     pub functional: String,
@@ -492,6 +498,8 @@ impl Default for MethodConfig {
             search: Default::default(),
             active_space: Default::default(),
             mrcc: Default::default(),
+            cc_reference: None,
+            correlated_electrons: None,
             xtb: XtbMethod::default(),
             behemoth: BehemothMethod::default(),
             functional: DEFAULT_FUNCTIONAL.to_string(),

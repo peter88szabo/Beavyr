@@ -314,3 +314,92 @@ fn correlated_native_orca_energies() {
         );
     }
 }
+
+#[test]
+fn ccsd_t_reference_is_chosen_per_spin_state_in_every_program() {
+    use correlated::Reference::*;
+    // Defaults: RHF closed shell, UHF open shell (ORCA's own default).
+    assert_eq!(correlated::reference(None, 1), Rhf);
+    assert_eq!(correlated::reference(None, 2), Uhf);
+    assert_eq!(correlated::reference(Some(Rohf), 3), Rohf);
+    assert_eq!(correlated::reference(Some(Uhf), 1), Uhf);
+    // A choice that no longer fits the spin state falls back to the default.
+    assert_eq!(correlated::reference(Some(Rohf), 1), Rhf);
+    assert_eq!(correlated::reference(Some(Rhf), 2), Uhf);
+    assert_eq!(correlated::Reference::options(1), [Rhf, Uhf]);
+    assert_eq!(correlated::Reference::options(2), [Uhf, Rohf]);
+    for program in [QcProgram::Orca, QcProgram::Mrcc, QcProgram::Behemoth] {
+        assert!(correlated::reference_choice(program, Some(QcMethod::CcsdT)));
+        assert!(!correlated::reference_choice(program, Some(QcMethod::Mp2)));
+    }
+    assert!(!job::methods_for(QcProgram::Mrcc).contains(&QcMethod::UccsdT));
+
+    let radical: Vec<String> = vec!["O".into(), "H".into()];
+    let xyz = [0., 0., 0., 0., 0., 0.97];
+    let mut config = MethodConfig { basis: "cc-pVDZ".into(), ..Default::default() };
+    for (choice, orca, mrcc, behemoth) in [
+        (None, "! UHF CCSD(T)", "scftype=UHF", "method = UHF CCSD(T)"),
+        (Some(Rohf), "! ROHF CCSD(T)", "scftype=ROHF", "method = ROHF CCSD(T)"),
+    ] {
+        config.cc_reference = choice;
+        let o = orca_run::panel_input_text(JobType::SinglePoint, QcMethod::CcsdT, 0, 2, &config,
+            Default::default(), "", &orca_run::xyz_body(&radical, &xyz));
+        assert!(o.contains(orca), "{o}");
+        let m = crate::qchem_interfaces::mrcc::input(JobType::SinglePoint, QcMethod::CcsdT, 0, 2,
+            &config, Default::default(), false, &radical, &xyz).unwrap();
+        assert!(m.contains(mrcc), "{m}");
+        assert!(input_text(QcMethod::CcsdT, 0, 2, &config, false).contains(behemoth));
+    }
+    // Closed-shell UHF on request.
+    config.cc_reference = Some(Uhf);
+    assert!(input_text(QcMethod::CcsdT, 0, 1, &config, false).contains("method = UHF CCSD(T)"));
+}
+
+#[test]
+fn correlated_electrons_set_the_frozen_core_in_orca_and_mrcc() {
+    let (atoms, coords, mut config) = water();
+    // Default: the programs' own frozen core, nothing written.
+    assert_eq!(correlated::frozen_electrons(None, &atoms, 0, 1), Ok(None));
+    let body = orca_run::xyz_body(&atoms, &coords);
+    let orca = |c: &MethodConfig| orca_run::panel_input_text(JobType::SinglePoint, QcMethod::CcsdT, 0, 1, c, Default::default(), "", &body);
+    assert!(!orca(&config).contains("FrozenCore"));
+    config.basis = "cc-pCVDZ".into();
+    let mrcc = |c: &MethodConfig| crate::qchem_interfaces::mrcc::input(JobType::SinglePoint, QcMethod::CcsdT, 0, 1, c, Default::default(), false, &atoms, &coords).unwrap();
+    assert!(mrcc(&config).contains("core=frozen\n"));
+    // All 10 electrons: no frozen core.
+    config.correlated_electrons = Some(10);
+    assert!(orca(&config).contains("%method\n  FrozenCore FC_NONE\nend\n"));
+    assert!(mrcc(&config).contains("core=0\n"));
+    // 8 correlated: 2 electrons (one spatial orbital) frozen.
+    config.correlated_electrons = Some(8);
+    assert!(orca(&config).contains("%method\n  FrozenCore -2\nend\n"));
+    assert!(mrcc(&config).contains("core=1\n"));
+    // Impossible counts are refused.
+    assert!(correlated::frozen_electrons(Some(9), &atoms, 0, 1).is_err());
+    assert!(correlated::frozen_electrons(Some(12), &atoms, 0, 1).is_err());
+    assert!(correlated::frozen_electrons(Some(0), &atoms, 0, 1).is_err());
+    assert_eq!(correlated::frozen_electrons(Some(9), &atoms, 1, 2), Ok(Some(0)));
+    // Only correlated methods of ORCA and MRCC offer it.
+    assert!(correlated::correlated_electrons_choice(QcProgram::Orca, Some(QcMethod::DlpnoCcsdT)));
+    assert!(correlated::correlated_electrons_choice(QcProgram::Mrcc, Some(QcMethod::Ccsdt)));
+    assert!(!correlated::correlated_electrons_choice(QcProgram::Orca, Some(QcMethod::Dft)));
+    assert!(!correlated::correlated_electrons_choice(QcProgram::Mrcc, Some(QcMethod::Hf)));
+    assert!(!correlated::correlated_electrons_choice(QcProgram::PySCF, Some(QcMethod::CcsdT)));
+    // A stale count is ignored for a method that has no frozen core.
+    let hf = crate::qchem_interfaces::mrcc::input(JobType::SinglePoint, QcMethod::Hf, 0, 1, &MethodConfig { correlated_electrons: Some(9), ..config.clone() }, Default::default(), false, &atoms, &coords).unwrap();
+    assert!(hf.contains("core=frozen\n"));
+}
+
+#[test]
+fn mrcc_offers_the_manuals_functionals() {
+    use crate::qchem_interfaces::mrcc::FUNCTIONALS;
+    let names: Vec<&str> = FUNCTIONALS.iter().map(|(n, _)| *n).collect();
+    for f in ["B3LYP", "wB97M-V", "SCAN0", "DSDPBEP86", "RS-PBE-P86", "B3LYP-D3", "dRPA75"] {
+        assert!(names.contains(&f), "{f}");
+    }
+    let mut unique = names.clone();
+    unique.sort();
+    unique.dedup();
+    assert_eq!(unique.len(), names.len());
+    assert!(!names.contains(&"M06"), "M06 is not in the MRCC manual");
+}

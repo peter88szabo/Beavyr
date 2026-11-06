@@ -5,7 +5,6 @@ pub mod calculation;
 mod output;
 pub(crate) mod overlap;
 mod sampling;
-mod settings_file;
 mod curvilinear;
 pub(crate) mod diverse;
 mod path;

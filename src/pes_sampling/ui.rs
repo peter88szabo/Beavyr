@@ -25,7 +25,7 @@ fn count(ui: &mut egui::Ui, label: &str, value: &mut usize) {
         ui.add(egui::DragValue::new(value).range(1..=1_000_000));
     });
 }
-fn excitation(ui: &mut egui::Ui, e: &mut Excitation, unit: EnergyUnit) {
+fn excitation(ui: &mut egui::Ui, e: &mut Excitation) {
     ui.horizontal_wrapped(|ui| {
         egui::ComboBox::from_id_salt("population")
             .selected_text(e.population.label())
@@ -53,20 +53,12 @@ fn excitation(ui: &mut egui::Ui, e: &mut Excitation, unit: EnergyUnit) {
                 ui.add(egui::DragValue::new(&mut e.quantum).prefix("n = "));
             }
             Population::Energy => {
-                // Stored in kcal/mol; shown and edited in the chosen unit.
-                let f = unit.per_kcal();
-                let mut value = e.energy_kcal * f;
-                if ui
-                    .add(
-                        egui::DragValue::new(&mut value)
-                            .speed(0.1 * f)
-                            .suffix(format!(" {}", unit.label()))
-                            .range(0.0..=1e8 * f),
-                    )
-                    .changed()
-                {
-                    e.energy_kcal = value / f;
-                }
+                ui.add(
+                    egui::DragValue::new(&mut e.energy_kcal)
+                        .speed(0.1)
+                        .suffix(" kcal/mol")
+                        .range(0.0..=1e8),
+                );
             }
         }
     });
@@ -98,7 +90,6 @@ fn excitation(ui: &mut egui::Ui, e: &mut Excitation, unit: EnergyUnit) {
 fn partner(
     ui: &mut egui::Ui,
     p: &mut Partner,
-    unit: EnergyUnit,
     animation: &mut Animation,
 ) -> Result<(), String> {
     let previous_source = p.source;
@@ -222,10 +213,10 @@ fn partner(
     if p.source != Source::Atom {
         ui.checkbox(&mut p.rigid, "Rigid geometry");
         ui.add_enabled_ui(!p.rigid, |ui| {
-            excitation(ui, &mut p.excitation, unit);
+            excitation(ui, &mut p.excitation);
             if p.source == Source::Hessian {
                 if let Some(f) = &p.fragment {
-                    mode_table(ui, f, p, unit, animation);
+                    mode_table(ui, f, p, animation);
                     egui::CollapsingHeader::new("Mode settings").show(ui, |ui| {
                         // Per-mode values are kept when the option is switched
                         // off and on; they are reset only on request or when a
@@ -257,7 +248,7 @@ fn partner(
                                                 w / input::CM_TO_AU
                                             ));
                                             ui.add_enabled_ui(p.use_overrides, |ui| {
-                                                excitation(ui, e, unit)
+                                                excitation(ui, e)
                                             });
                                         });
                                     });
@@ -275,7 +266,7 @@ fn partner(
 const LARGE_DISPLACEMENT: f64 = 0.5;
 
 /// Per-mode energies and turning-point displacements, with mode animation.
-fn mode_table(ui: &mut egui::Ui, f: &input::Fragment, p: &Partner, unit: EnergyUnit, animation: &mut Animation) {
+fn mode_table(ui: &mut egui::Ui, f: &input::Fragment, p: &Partner, animation: &mut Animation) {
     if f.diatomic.is_some() || f.frequencies.is_empty() {
         return;
     }
@@ -292,7 +283,7 @@ fn mode_table(ui: &mut egui::Ui, f: &input::Fragment, p: &Partner, unit: EnergyU
             egui::Grid::new("mode_overview_grid").striped(true).num_columns(5).show(ui, |ui| {
                 ui.strong("Mode");
                 ui.strong("cm⁻¹");
-                ui.strong(format!("E ({})", unit.label()));
+                ui.strong("E (kcal/mol)");
                 ui.strong("Δmax (Å)");
                 ui.label("");
                 ui.end_row();
@@ -306,7 +297,7 @@ fn mode_table(ui: &mut egui::Ui, f: &input::Fragment, p: &Partner, unit: EnergyU
                     ui.label(text(format!("{}", r.index + 1)));
                     ui.label(text(format!("{:.1}", r.cm1)));
                     let mark = if r.is_maximum { "" } else { "~" };
-                    ui.label(text(format!("{mark}{:.3}", unit.from_hartree(r.energy))))
+                    ui.label(text(format!("{mark}{:.3}", r.energy * 627.51)))
                         .on_hover_text(r.note.unwrap_or(""));
                     ui.label(text(format!("{:.3}", r.max_displacement)));
                     if ui.small_button("▶").on_hover_text("Animate this mode").clicked_once() {
@@ -334,30 +325,7 @@ fn animate(animation: &mut Animation, f: &input::Fragment, mode: usize, amplitud
     ));
 }
 
-fn save_settings(settings: &Settings) -> Result<(), String> {
-    if let Some(path) = rfd::FileDialog::new()
-        .add_filter("PES sampling settings", &["ron"])
-        .set_file_name("pes_sampling.ron")
-        .save_file()
-    {
-        std::fs::write(&path, super::settings_file::to_text(settings)?).map_err(|e| e.to_string())?;
-    }
-    Ok(())
-}
-
-fn load_settings(settings: &mut Settings) -> Result<(), String> {
-    if let Some(path) = rfd::FileDialog::new()
-        .add_filter("PES sampling settings", &["ron"])
-        .add_filter("All files", &["*"])
-        .pick_file()
-    {
-        let text = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-        *settings = super::settings_file::from_text(&text)?;
-    }
-    Ok(())
-}
-
-fn histogram_view(ui: &mut egui::Ui, out: &super::output::SamplingOutput, view: &mut analysis::HistogramView, unit: EnergyUnit) {
+fn histogram_view(ui: &mut egui::Ui, out: &super::output::SamplingOutput, view: &mut analysis::HistogramView) {
     egui::CollapsingHeader::new("Distribution").id_salt("pes_histogram").show(ui, |ui| {
         ui.horizontal_wrapped(|ui| {
             egui::ComboBox::from_id_salt("histogram_quantity")
@@ -387,7 +355,7 @@ fn histogram_view(ui: &mut egui::Ui, out: &super::output::SamplingOutput, view: 
                 .collect();
             ui.small(names.join(" – "));
         }
-        let (values, label) = match analysis::values(out, view, unit) {
+        let (values, label) = match analysis::values(out, view) {
             Ok(v) => v,
             Err(e) => {
                 ui.colored_label(egui::Color32::YELLOW, e);
@@ -455,7 +423,7 @@ fn start(ctx: &egui::Context, state: &mut PesSampling) {
     state.message = None;
     state.is_error = false;
 }
-fn path_controls(ui: &mut egui::Ui, path: &mut super::path::PathSettings, unit: EnergyUnit) -> Result<(), String> {
+fn path_controls(ui: &mut egui::Ui, path: &mut super::path::PathSettings) -> Result<(), String> {
     if ui
         .button("Load path Hessians…")
         .on_hover_text("Select all self-contained Hessians (ORCA .hess or Beavyr exports) along the IRC. They are ordered by file name (irc_2 before irc_10).")
@@ -485,7 +453,7 @@ fn path_controls(ui: &mut egui::Ui, path: &mut super::path::PathSettings, unit: 
             });
         });
     }
-    ui.push_id("path_excitation", |ui| excitation(ui, &mut path.excitation, unit));
+    ui.push_id("path_excitation", |ui| excitation(ui, &mut path.excitation));
     Ok(())
 }
 pub(crate) fn poll(ctx: &egui::Context, state: &mut PesSampling) {
@@ -556,38 +524,7 @@ pub(crate) fn window(
                 .show(ui, |ui| {
                     let running = state.task.is_some();
                     let mut load_error = None;
-                    let unit = state.settings.energy_unit;
                     ui.add_enabled_ui(!running, |ui| {
-                        ui.horizontal_wrapped(|ui| {
-                            ui.label("Preset");
-                            for preset in Preset::ALL {
-                                if ui.button(preset.label()).on_hover_text(preset.description()).clicked_once() {
-                                    state.settings.apply_preset(preset);
-                                }
-                            }
-                        });
-                        ui.horizontal_wrapped(|ui| {
-                            if ui.button("Save settings…").on_hover_text("Write all panel settings, including the loaded Hessians, to a .ron file").clicked_once() {
-                                if let Err(e) = save_settings(&state.settings) {
-                                    load_error = Some(e);
-                                }
-                            }
-                            if ui.button("Load settings…").clicked_once() {
-                                if let Err(e) = load_settings(&mut state.settings) {
-                                    load_error = Some(e);
-                                }
-                            }
-                            ui.separator();
-                            ui.label("Energy unit");
-                            egui::ComboBox::from_id_salt("pes_energy_unit")
-                                .selected_text(state.settings.energy_unit.label())
-                                .show_ui(ui, |ui| {
-                                    for u in EnergyUnit::ALL {
-                                        ui.selectable_value(&mut state.settings.energy_unit, u, u.label());
-                                    }
-                                });
-                        });
-                        ui.separator();
                         ui.horizontal(|ui| {
                             ui.selectable_value(
                                 &mut state.settings.workflow,
@@ -613,7 +550,7 @@ pub(crate) fn window(
                         };
                         if n == 0 {
                             crate::ui_style::group(ui, "Reaction path", |ui| {
-                                if let Err(e) = path_controls(ui, &mut state.settings.path, unit) {
+                                if let Err(e) = path_controls(ui, &mut state.settings.path) {
                                     load_error = Some(e);
                                 }
                             });
@@ -631,7 +568,7 @@ pub(crate) fn window(
                                     },
                                     |ui| {
                                         if let Err(e) =
-                                            partner(ui, &mut state.settings.partners[i], unit, &mut state.animation)
+                                            partner(ui, &mut state.settings.partners[i], &mut state.animation)
                                         {
                                             load_error = Some(e);
                                         }
@@ -671,47 +608,51 @@ pub(crate) fn window(
                                 ui.label(format!("{n} samples total"));
                             }
                         }
-                        ui.horizontal_wrapped(|ui| {
+                        ui.horizontal(|ui| {
                             ui.label("Mode displacement");
-                            ui.selectable_value(
-                                &mut state.settings.displacement,
-                                Displacement::Uniform,
-                                Displacement::Uniform.label(),
-                            )
-                            .on_hover_text(
-                                "Q = A·(2u−1): even coverage between the classical turning \
-                                 points, including the bottom of the well.",
-                            );
-                            ui.selectable_value(
-                                &mut state.settings.displacement,
-                                Displacement::ClassicalPhase,
-                                Displacement::ClassicalPhase.label(),
-                            )
-                            .on_hover_text(
-                                "Q = A·cos(2πu): time-weighted (QCT) distribution; samples \
-                                 crowd near the turning points.",
-                            );
+                            egui::ComboBox::from_id_salt("pes_displacement")
+                                .selected_text(state.settings.displacement.label())
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(&mut state.settings.displacement, Displacement::Uniform, Displacement::Uniform.label())
+                                        .on_hover_text("Q = A·(2u−1): even coverage between the classical turning points, including the bottom of the well.");
+                                    ui.selectable_value(&mut state.settings.displacement, Displacement::ClassicalPhase, Displacement::ClassicalPhase.label())
+                                        .on_hover_text("Q = A·cos(2πu): time-weighted (QCT) distribution; samples crowd near the turning points.");
+                                });
                         });
                         ui.horizontal(|ui| {
                             ui.label("Coordinates");
-                            for c in [Coordinates::Cartesian, Coordinates::Internal] {
-                                ui.selectable_value(&mut state.settings.coordinates, c, c.label());
-                            }
-                        })
-                        .response
-                        .on_hover_text("Internal: the normal-mode displacement is mapped to bond, angle and dihedral changes (Wilson B matrix) and back-transformed, so bends and torsions follow arcs instead of straight lines. Needs a connected, nonlinear molecule.");
-                        ui.horizontal_wrapped(|ui| {
+                            egui::ComboBox::from_id_salt("pes_coordinates")
+                                .selected_text(state.settings.coordinates.label())
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(&mut state.settings.coordinates, Coordinates::Cartesian, Coordinates::Cartesian.label())
+                                        .on_hover_text("Straight-line displacement along the Cartesian normal modes.");
+                                    ui.selectable_value(&mut state.settings.coordinates, Coordinates::Internal, Coordinates::Internal.label())
+                                        .on_hover_text("The normal-mode displacement is mapped to bond, angle and dihedral changes (Wilson B matrix) and back-transformed, so bends and torsions follow arcs. Needs a connected, nonlinear molecule.");
+                                });
+                        });
+                        ui.horizontal(|ui| {
                             ui.label("Random numbers");
-                            for r in [RandomNumbers::QuasiRandom, RandomNumbers::PseudoRandom] {
-                                ui.selectable_value(&mut state.settings.random, r, r.label());
-                            }
-                        })
-                        .response
-                        .on_hover_text("Quasi-random: a scrambled Halton low-discrepancy sequence; each random choice of a sample uses its own sequence dimension, giving more even coverage with fewer samples. Pseudo-random: independent draws.");
+                            egui::ComboBox::from_id_salt("pes_random")
+                                .selected_text(state.settings.random.label())
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(&mut state.settings.random, RandomNumbers::QuasiRandom, RandomNumbers::QuasiRandom.label())
+                                        .on_hover_text("Scrambled Halton low-discrepancy sequence: more even coverage with fewer samples.");
+                                    ui.selectable_value(&mut state.settings.random, RandomNumbers::PseudoRandom, RandomNumbers::PseudoRandom.label())
+                                        .on_hover_text("Independent pseudo-random draws.");
+                                });
+                        });
                         ui.horizontal_wrapped(|ui| {
                             let d = &mut state.settings.diversity;
-                            ui.checkbox(&mut d.enabled, "Diverse subset")
-                                .on_hover_text("Generate oversampling × N candidates and keep the N most spread out (farthest-point selection on inverse interatomic distances), per COM distance or path point.");
+                            ui.checkbox(&mut d.enabled, "Diverse subset");
+                            ui.menu_button("Info", |ui| {
+                                ui.set_max_width(360.);
+                                ui.label("Removes near-duplicate geometries. With oversampling k, k × N candidate geometries are generated and the N that differ most from each other are kept (farthest-point selection on all inverse interatomic distances). Done separately for every COM distance or path point, so those counts stay exact.");
+                                ui.label("Purpose: fewer redundant quantum-chemistry calculations for the same coverage of the PES.");
+                                ui.strong("Downsides");
+                                ui.label("• Favours the edges of the sampled region: the kept set no longer follows the chosen mode displacement (uniform or cos) or the thermal populations, so it is not a statistical ensemble. Switch it off for QCT initial conditions or any Boltzmann-weighted average.");
+                                ui.label("• Not invariant to swapping identical atoms: two geometries that differ only by exchanging, e.g., two hydrogens count as different.");
+                                ui.label("• Output is in selection order (most different first), not generation order.");
+                            });
                             ui.add_enabled_ui(d.enabled, |ui| {
                                 ui.label("oversampling");
                                 ui.add(egui::DragValue::new(&mut d.oversampling).speed(0.1).range(1.0..=100.).suffix("×"));
@@ -784,7 +725,7 @@ pub(crate) fn window(
                         for w in &out.warnings {
                             ui.label(w);
                         }
-                        histogram_view(ui, out, &mut state.histogram, unit);
+                        histogram_view(ui, out, &mut state.histogram);
                     }
                     if let Some(e) = save_error {
                         error(ctx, state, e);

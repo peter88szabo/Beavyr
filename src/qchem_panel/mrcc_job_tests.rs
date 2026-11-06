@@ -144,7 +144,7 @@ fn mrcc_native_energy_spectrum_gradient_and_optimization() {
     let radical = vec!["O".into(), "H".into()];
     let result = run_cancellable(
         QcProgram::Mrcc,
-        Some(QcMethod::UccsdT),
+        Some(QcMethod::CcsdT),
         JobType::SinglePoint,
         &binary,
         &root.join("open_shell_uccsd_t"),
@@ -221,7 +221,7 @@ fn mrcc_native_energy_spectrum_gradient_and_optimization() {
         gradient[5]
     );
     config.basis = "cc-pCVDZ".into();
-    config.mrcc.correlate_core = true;
+    config.correlated_electrons = Some(10);
     let result = run_cancellable(
         QcProgram::Mrcc,
         Some(QcMethod::CcsdT),
@@ -248,7 +248,7 @@ fn mrcc_native_energy_spectrum_gradient_and_optimization() {
         result.energetics.final_energy_hartree
     );
     config.basis = "STO-3G".into();
-    config.mrcc.correlate_core = false;
+    config.correlated_electrons = None;
     config.search.minimum.max_cycles = 40;
     let atoms = vec!["H".into(), "H".into()];
     let xyz = [0., 0., 0., 0.3, 0.4, 0.8];

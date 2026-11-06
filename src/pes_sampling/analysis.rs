@@ -149,7 +149,6 @@ fn norm(a: [f64; 3]) -> f64 {
 pub fn values(
     out: &SamplingOutput,
     view: &HistogramView,
-    unit: EnergyUnit,
 ) -> Result<(Vec<f64>, String), String> {
     let n = view.quantity.atoms();
     let idx: Vec<usize> = view.atoms[..n].iter().map(|a| a.wrapping_sub(1)).collect();
@@ -180,8 +179,8 @@ pub fn values(
             "°".into(),
         ),
         Quantity::Energy => (
-            samples.map(|s| unit.from_hartree(s.energy)).collect(),
-            unit.label().into(),
+            samples.map(|s| s.energy * 627.51).collect(),
+            "kcal/mol".into(),
         ),
     })
 }

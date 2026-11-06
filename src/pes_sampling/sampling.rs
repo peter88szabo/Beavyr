@@ -636,36 +636,3 @@ pub fn generate(
         },
     })
 }
-
-/// Shape checks for settings read from a file, so a damaged or hand-edited
-/// file is refused instead of causing an index error later.
-pub fn check_loaded(s: &Settings) -> Result<(), String> {
-    let fragment = |f: &Fragment| -> Result<(), String> {
-        let n = f.atoms.len();
-        let ok = f.masses.len() == n
-            && f.equilibrium.len() == 3 * n
-            && f.modes.nrows() == 3 * n
-            && f.modes.ncols() == f.frequencies.len()
-            && (f.imaginary_cm1.is_empty() || f.imaginary_modes.nrows() == 3 * n)
-            && f.masses.iter().chain(&f.equilibrium).chain(&f.frequencies).all(|v| v.is_finite());
-        if ok {
-            Ok(())
-        } else {
-            Err(format!("The settings file has an inconsistent Hessian ({}).", f.name))
-        }
-    };
-    for p in &s.partners {
-        if let Some(f) = &p.fragment {
-            fragment(f)?;
-        }
-        if let Some((atoms, x)) = &p.geometry {
-            if x.len() != 3 * atoms.len() {
-                return Err("The settings file has an inconsistent equilibrium geometry.".into());
-            }
-        }
-    }
-    for f in &s.path.points {
-        fragment(f)?;
-    }
-    Ok(())
-}

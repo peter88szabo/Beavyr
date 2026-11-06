@@ -17,7 +17,6 @@ pub const METHODS: &[QcMethod] = &[
     QcMethod::Mp2F12,
     QcMethod::Ccsd,
     QcMethod::CcsdT,
-    QcMethod::UccsdT,
     QcMethod::CcsdF12,
     QcMethod::CcsdTF12,
     QcMethod::Ccsdt,
@@ -53,23 +52,47 @@ pub const BASES: &[&str] = &[
     "cc-pVTZ-F12",
     "cc-pVQZ-F12",
 ];
-pub const FUNCTIONALS: &[&str] = &[
-    "PBE", "PBE0", "BLYP", "B3LYP", "BP86", "TPSS", "TPSSh", "M06", "M06-2X", "B2PLYP",
+/// Complete exchange-correlation functionals of the MRCC manual (Table 4,
+/// keyword `dft`) with their family, and the documented `-D3` variants.
+pub const FUNCTIONALS: &[(&str, &str)] = &[
+    ("BLYP", "GGA"), ("BP86", "GGA"), ("PBE", "GGA"), ("PW91", "GGA"),
+    ("HCTH120", "GGA"), ("HCTH147", "GGA"), ("HCTH407", "GGA"), ("XLYP", "GGA"),
+    ("mPWLYP1w", "GGA"),
+    ("BHLYP", "Hybrid GGA"), ("B3LYP", "Hybrid GGA"), ("B3LYP3", "Hybrid GGA"),
+    ("B3PW91", "Hybrid GGA"), ("B1LYP", "Hybrid GGA"), ("O3LYP", "Hybrid GGA"),
+    ("B97", "Hybrid GGA"), ("PBE0", "Hybrid GGA"), ("X3LYP", "Hybrid GGA"),
+    ("TPSS", "Meta-GGA"), ("revTPSS", "Meta-GGA"), ("M06-L", "Meta-GGA"),
+    ("B97M-V", "Meta-GGA"), ("SCAN", "Meta-GGA"), ("revSCAN", "Meta-GGA"),
+    ("M06-2X", "Hybrid meta-GGA"), ("M06-HF", "Hybrid meta-GGA"), ("M08-HX", "Hybrid meta-GGA"),
+    ("M08-SO", "Hybrid meta-GGA"), ("TPSSh", "Hybrid meta-GGA"), ("revTPSSh", "Hybrid meta-GGA"),
+    ("mPW1B95", "Hybrid meta-GGA"), ("PW6B95", "Hybrid meta-GGA"), ("MN15", "Hybrid meta-GGA"),
+    ("SCAN0", "Hybrid meta-GGA"), ("revSCAN0", "Hybrid meta-GGA"),
+    ("HSE06", "Range-separated hybrid"), ("CAM-B3LYP", "Range-separated hybrid"),
+    ("LC-wPBE", "Range-separated hybrid"), ("wB97", "Range-separated hybrid"),
+    ("wB97X", "Range-separated hybrid"), ("wB97X-V", "Range-separated hybrid"),
+    ("M11", "Range-separated hybrid"), ("MN12-SX", "Range-separated hybrid"),
+    ("wB97M-V", "Range-separated hybrid"),
+    ("B2PLYP", "Double hybrid"), ("B2GPPLYP", "Double hybrid"), ("DSDPBEP86", "Double hybrid"),
+    ("DSDPBEhB95", "Double hybrid"), ("XYG3", "Double hybrid"), ("SCAN0-2", "Double hybrid"),
+    ("dRPA75", "Double hybrid"), ("SCS-dRPA75", "Double hybrid"),
+    ("RS-PBE-PBE", "Range-separated double hybrid"), ("RS-PBE-P86", "Range-separated double hybrid"),
+    ("RS-B88-LYP", "Range-separated double hybrid"), ("RS-PW91-PW91", "Range-separated double hybrid"),
+    ("BLYP-D3", "DFT-D3"), ("BHLYP-D3", "DFT-D3"), ("B3LYP-D3", "DFT-D3"), ("B3PW91-D3", "DFT-D3"),
+    ("BP86-D3", "DFT-D3"), ("PBE-D3", "DFT-D3"), ("PBE0-D3", "DFT-D3"), ("HCTH120-D3", "DFT-D3"),
+    ("B2PLYP-D3", "DFT-D3"), ("mPW1B95-D3", "DFT-D3"), ("TPSS-D3", "DFT-D3"), ("TPSSh-D3", "DFT-D3"),
+    ("B2GPPLYP-D3", "DFT-D3"), ("DSDPBEP86-D3", "DFT-D3"), ("DSDPBEhB95-D3", "DFT-D3"),
+    ("CAM-B3LYP-D3", "DFT-D3"), ("wB97X-D3", "DFT-D3"), ("M06-L-D3", "DFT-D3"), ("MN15-D3", "DFT-D3"),
+    ("M06-2X-D3", "DFT-D3"), ("LC-wPBE-D3", "DFT-D3"), ("PW91-D3", "DFT-D3"), ("SCAN-D3", "DFT-D3"),
+    ("dRPA75-D3", "DFT-D3"),
 ];
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct Options {
-    pub correlate_core: bool,
-    pub unrestricted: bool,
     pub method: QcMethod,
 }
 impl Default for Options {
     fn default() -> Self {
-        Self {
-            correlate_core: false,
-            unrestricted: false,
-            method: QcMethod::Hf,
-        }
+        Self { method: QcMethod::Hf }
     }
 }
 pub fn adc(m: QcMethod) -> bool {
@@ -136,11 +159,17 @@ pub fn validate(
     {
         return Err("Choose a single MRCC basis-set name.".into());
     }
-    if c.mrcc.correlate_core && m.is_f12() {
-        return Err("Core-correlated F12 calculations are not enabled in this MRCC interface. Choose a conventional correlated method with a cc-pCVXZ or cc-pwCVXZ orbital basis for core correlation.".into());
+    let frozen = if super::job::correlated::correlated_electrons_choice(super::program::QcProgram::Mrcc, Some(m)) {
+        super::job::correlated::frozen_electrons(c.correlated_electrons, atoms, charge, mult)?
+    } else {
+        None
+    };
+    if frozen.is_some() && m.is_f12() {
+        return Err("A custom number of correlated electrons is not enabled for F12 methods in this MRCC interface. Use the default frozen core, or a conventional correlated method with a cc-pCVXZ or cc-pwCVXZ basis.".into());
     }
-    if c.mrcc.correlate_core && !core_basis(&c.basis) {
-        return Err("Core correlation requires a core-correlation basis: choose cc-pCVXZ or cc-pwCVXZ (including augmented variants). Valence-only basis sets are not allowed with Correlate core electrons.".into());
+    let has_core = atoms.iter().any(|a| crate::molecule::atomic_number(a).is_some_and(|z| z > 2));
+    if frozen == Some(0) && has_core && !core_basis(&c.basis) {
+        return Err("Correlating all electrons requires a core-correlation basis: choose cc-pCVXZ or cc-pwCVXZ (including augmented variants).".into());
     }
     if m.is_f12() && !c.basis.to_ascii_uppercase().ends_with("-F12") {
         return Err("Choose an F12 orbital basis for this MRCC method.".into());
@@ -156,11 +185,11 @@ pub fn validate(
     if total < i64::from(mult - 1) || (total - i64::from(mult - 1)) % 2 != 0 {
         return Err("Charge and multiplicity are incompatible with the electron count.".into());
     }
-    if job == JobType::TdDft && (mult != 1 || c.mrcc.unrestricted) {
+    if job == JobType::TdDft && mult != 1 {
         return Err("The MRCC ADC/TD-DFT spectrum interface currently requires a restricted closed-shell singlet.".into());
     }
     if matches!(job, JobType::Gradient | JobType::Optimize) {
-        if m == QcMethod::RiMp2 && (mult != 1 || c.mrcc.unrestricted) {
+        if m == QcMethod::RiMp2 && mult != 1 {
             return Err(
                 "MRCC RI-MP2 analytical gradients require an RHF closed-shell singlet.".into(),
             );
@@ -225,7 +254,9 @@ pub fn input(
     };
     let scf = if matches!(m, QcMethod::Casscf | QcMethod::Nevpt2) {
         "MCSCF"
-    } else if mult > 1 || c.mrcc.unrestricted || m == QcMethod::UccsdT {
+    } else if m == QcMethod::CcsdT {
+        super::job::correlated::reference(c.cc_reference, mult).label()
+    } else if mult > 1 || m == QcMethod::UccsdT {
         "UHF"
     } else {
         "RHF"
@@ -251,7 +282,17 @@ pub fn input(
     } else {
         c.basis.clone()
     };
-    let mut text=format!("calc={calc}\nbasis={}\ncharge={charge}\nmult={mult}\nscftype={scf}\nmem={}MB\ncore={}\nsymm=off\nunit=angs\nmolden={}\n",basis,c.memory_mb.max(128),if c.mrcc.correlate_core {"corr"}else{"frozen"},if orbitals{"on"}else{"off"});
+    // core=frozen keeps MRCC's default; an integer drops that many of the
+    // lowest spatial orbitals (core=0 correlates every electron).
+    let core = if super::job::correlated::correlated_electrons_choice(super::program::QcProgram::Mrcc, Some(m)) {
+        match super::job::correlated::frozen_electrons(c.correlated_electrons, atoms, charge, mult)? {
+            Some(frozen) => (frozen / 2).to_string(),
+            None => "frozen".to_string(),
+        }
+    } else {
+        "frozen".to_string()
+    };
+    let mut text=format!("calc={calc}\nbasis={}\ncharge={charge}\nmult={mult}\nscftype={scf}\nmem={}MB\ncore={}\nsymm=off\nunit=angs\nmolden={}\n",basis,c.memory_mb.max(128),core,if orbitals{"on"}else{"off"});
     if matches!(m, QcMethod::Dft | QcMethod::Drpa) {
         text.push_str(&format!("dft={}\n", c.functional));
     }

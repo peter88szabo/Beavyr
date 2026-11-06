@@ -102,7 +102,7 @@ fn mrcc_capabilities_restrict_jobs_and_references() {
 #[test]
 fn mrcc_core_correlation_cannot_use_a_valence_basis() {
     let mut c = config();
-    c.mrcc.correlate_core = true;
+    c.correlated_electrons = Some(10); // all of water's electrons
     assert!(
         validate(JobType::SinglePoint, QcMethod::CcsdT, 0, 1, &c, &water())
             .unwrap_err()
@@ -162,9 +162,10 @@ fn mrcc_inputs_define_charge_spin_active_space_and_requested_roots() {
     .unwrap();
     assert!(inp.contains("calc=TDA"));
     assert!(inp.contains("nstate=3"));
+    c.cc_reference = Some(crate::qchem_interfaces::job::correlated::Reference::Uhf);
     let inp = input(
         JobType::SinglePoint,
-        QcMethod::UccsdT,
+        QcMethod::CcsdT,
         0,
         1,
         &c,
@@ -249,7 +250,7 @@ fn mrcc_missing_correlated_strengths_do_not_reuse_cis_strengths() {
 fn mrcc_core_basis_uses_correct_hydrogen_member() {
     let mut c = config();
     c.basis = "cc-pCVDZ".into();
-    c.mrcc.correlate_core = true;
+    c.correlated_electrons = Some(10);
     let text = input(
         JobType::SinglePoint,
         QcMethod::CcsdT,
@@ -263,7 +264,7 @@ fn mrcc_core_basis_uses_correct_hydrogen_member() {
     )
     .unwrap();
     assert!(text.contains("basis=atomtype\nO:cc-pCVDZ\nH:cc-pvdz\n"));
-    assert!(text.contains("core=corr"));
+    assert!(text.contains("core=0\n"));
     assert!(validate_custom(&text, &text).is_ok());
     assert!(validate_custom(&text, &text.replace("O:cc-pCVDZ", "O:cc-pVDZ")).is_err());
 }

@@ -1,7 +1,6 @@
 //! Pebble's atom-pair overlap cutoffs, in Angstrom rather than bohr, plus an
 //! element-aware covalent-radius clash rule.
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
-#[serde(default)]
+#[derive(Clone)]
 pub struct OverlapFilter {
     pub enabled: bool,
     pub hydrogen_hydrogen: f64,

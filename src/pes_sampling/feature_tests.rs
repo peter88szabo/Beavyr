@@ -96,9 +96,10 @@ fn farthest_point_keeps_extremes_and_drops_duplicates() {
 }
 
 #[test]
-fn diverse_subset_is_default_keeps_counts_and_widens_coverage() {
-    assert!(Settings::default().diversity.enabled);
+fn diverse_subset_is_optional_keeps_counts_and_widens_coverage() {
+    assert!(!Settings::default().diversity.enabled);
     let mut s = Settings::default();
+    s.diversity.enabled = true;
     s.partners[0].source = Source::Diatomic;
     s.partners[0].excitation.population = Population::Quantum;
     s.partners[0].excitation.quantum = 3;

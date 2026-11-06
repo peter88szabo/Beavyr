@@ -440,7 +440,7 @@ fn picker(
 }
 
 fn functional_choices(program: QcProgram) -> Vec<Choice> {
-    if program == QcProgram::Mrcc {return crate::qchem_interfaces::mrcc::FUNCTIONALS.iter().map(|s|Choice{label:s,keyword:s,group:"MRCC"}).collect();}
+    if program == QcProgram::Mrcc {return crate::qchem_interfaces::mrcc::FUNCTIONALS.iter().map(|(s,g)|Choice{label:s,keyword:s,group:g}).collect();}
     match program {
         QcProgram::Orca => orca_method::FUNCTIONALS
             .iter()
@@ -595,9 +595,24 @@ fn theory_card(
             }
         }
 
-        if panel.program == QcProgram::Mrcc {
-            ui.add_enabled(!running, egui::Checkbox::new(&mut panel.config.mrcc.correlate_core, "Correlate core electrons"));
-            ui.add_enabled(!running, egui::Checkbox::new(&mut panel.config.mrcc.unrestricted, "Unrestricted reference"));
+        if job::correlated::reference_choice(panel.program, panel.method) {
+            let current = job::correlated::reference(panel.config.cc_reference, panel.multiplicity);
+            ui.horizontal(|ui| {
+                ui.add_sized([86.0, 30.0], egui::Label::new("Reference"));
+                ui.add_enabled_ui(!running, |ui| {
+                    egui::ComboBox::from_id_salt("modern_qc_cc_reference")
+                        .selected_text(current.label())
+                        .show_ui(ui, |ui| {
+                            for r in job::correlated::Reference::options(panel.multiplicity) {
+                                if ui.selectable_label(current == r, r.label()).clicked() {
+                                    panel.config.cc_reference = Some(r);
+                                }
+                            }
+                        });
+                });
+            })
+            .response
+            .on_hover_text("SCF reference for CCSD(T). Closed shell: RHF (default) or UHF. Open shell: UHF (default, as in ORCA) or ROHF.");
         }
         if panel.method.is_some_and(job::correlated::needs_active_space) {
             ui.horizontal(|ui| {
@@ -763,19 +778,28 @@ fn resources_row(ui: &mut egui::Ui, panel: &mut QcPanelState, running: bool) {
     });
 }
 
-fn optional_settings(ui: &mut egui::Ui, panel: &mut QcPanelState, running: bool) {
+fn optional_settings(ui: &mut egui::Ui, panel: &mut QcPanelState, atoms: &[String], running: bool) {
     let orbitals = !spectrum_controls::active(panel)
         && !matches!(panel.job, JobType::Scan | JobType::Mecp);
+    let correlated = job::correlated::correlated_electrons_choice(panel.program, panel.method);
     ui.horizontal(|ui| {
         tolerance_window::button(ui, panel, running);
-        if orbitals {
-            ui.add_enabled(
-                !running,
-                egui::Checkbox::new(&mut panel.wavefunction, "Write orbitals"),
-            )
-            .on_hover_text("Write a Molden file, load it into Surface Tools, and offer it to save.");
-        }
     });
+    if orbitals || correlated {
+        egui::CollapsingHeader::new("Advanced")
+            .id_salt("modern_qc_advanced")
+            .show(ui, |ui| {
+                ui.add_enabled_ui(!running, |ui| {
+                    if orbitals {
+                        ui.checkbox(&mut panel.wavefunction, "Write orbitals")
+                            .on_hover_text("Write a Molden file, load it into Surface Tools, and offer it to save.");
+                    }
+                    if correlated {
+                        correlated_electrons_row(ui, panel, atoms);
+                    }
+                });
+            });
+    }
     if panel.program == QcProgram::Orca {
         ui.label("Extra keywords");
         ui.add_enabled(
@@ -784,6 +808,36 @@ fn optional_settings(ui: &mut egui::Ui, panel: &mut QcPanelState, running: bool)
                 .desired_width(f32::INFINITY)
                 .hint_text("e.g. TightSCF CPCM(water)"),
         );
+    }
+}
+
+/// Number of correlated electrons; unset keeps the program's frozen core.
+fn correlated_electrons_row(ui: &mut egui::Ui, panel: &mut QcPanelState, atoms: &[String]) {
+    let total = job::correlated::total_electrons(atoms, panel.charge).unwrap_or(0).max(0) as u32;
+    ui.horizontal_wrapped(|ui| {
+        let mut custom = panel.config.correlated_electrons.is_some();
+        if ui
+            .checkbox(&mut custom, "Correlated electrons")
+            .on_hover_text("Unchecked: the program's default frozen core. Checked: correlate exactly this many electrons (the rest are frozen as core). All electrons = no frozen core; needs a core-correlation basis such as cc-pwCVXZ.")
+            .changed()
+        {
+            panel.config.correlated_electrons = custom.then_some(total);
+        }
+        match &mut panel.config.correlated_electrons {
+            Some(n) => {
+                ui.add(egui::DragValue::new(n).range(1..=total.max(1)).speed(2.0));
+                ui.label(format!("of {total}"));
+                if ui.small_button("All").clicked_once() {
+                    *n = total;
+                }
+            }
+            None => {
+                ui.label(egui::RichText::new("frozen core (program default)").weak());
+            }
+        }
+    });
+    if let Err(e) = job::correlated::frozen_electrons(panel.config.correlated_electrons, atoms, panel.charge, panel.multiplicity) {
+        ui.colored_label(WARNING, e);
     }
 }
 
@@ -849,6 +903,11 @@ fn blocking_reason(panel: &QcPanelState, mol: &Molecule, code: &CodeStatus) -> O
         if let Some(method) = panel.method {
             if let Err(error) = job::correlated::validate_active_space(method, &panel.config.active_space,
                 &mol.atoms, panel.charge, panel.multiplicity) { return Some(error); }
+        }
+    }
+    if panel.program == QcProgram::Orca && job::correlated::correlated_electrons_choice(panel.program, panel.method) {
+        if let Err(error) = job::correlated::frozen_electrons(panel.config.correlated_electrons, &mol.atoms, panel.charge, panel.multiplicity) {
+            return Some(error);
         }
     }
     if panel.program == QcProgram::Mrcc {
@@ -1048,7 +1107,7 @@ fn contents(
                 }
                 if panel.job == JobType::Mecp { super::super::mecp_controls::settings(ui, panel, task); }
                 if job::search::active(panel.job) { super::super::geometry_search_controls::settings(ui, panel, task); }
-                optional_settings(ui, panel, task.is_running());
+                optional_settings(ui, panel, &mol.atoms, task.is_running());
                 super::super::scan_results::reopen_button(ui, task);
                 if panel.show_warnings {
                     if let Ok((_, warnings)) =

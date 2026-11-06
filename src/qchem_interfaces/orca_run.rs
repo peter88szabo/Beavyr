@@ -329,6 +329,11 @@ pub fn panel_input_text(
 
     text.push('!');
     text.push(' ');
+    if method == QcMethod::CcsdT {
+        // ORCA runs UHF for an open shell by default; the choice is explicit.
+        text.push_str(super::job::correlated::reference(config.cc_reference, multiplicity).label());
+        text.push(' ');
+    }
     text.push_str(method_keyword(method, &config.functional));
     for keyword in basis_keywords(method, &config.functional, &config.basis) {
         text.push(' ');
@@ -366,6 +371,11 @@ pub fn panel_input_text(
         text.push_str(&job_blocks(job, excited));
     }
     text.push_str(&super::job::correlated::orca_active_space_block(method, multiplicity, &config.active_space));
+    if let Some(frozen) = orca_frozen_electrons(method, charge, multiplicity, config, xyz_body) {
+        // FrozenCore -n freezes exactly n electrons; FC_NONE correlates all.
+        let value = if frozen == 0 { "FC_NONE".to_string() } else { format!("-{frozen}") };
+        text.push_str(&format!("%method\n  FrozenCore {value}\nend\n"));
+    }
 
     if matches!(job, JobType::Optimize | JobType::OptimizeThenFrequencies | JobType::TransitionState) {
         if let Some(t) = config.optimization.get(super::program::QcProgram::Orca) {
@@ -380,6 +390,27 @@ pub fn panel_input_text(
     }
     text.push_str("*\n");
     text
+}
+
+/// Electrons to freeze when the user set the number of correlated electrons.
+/// Invalid counts are reported by the panel validation, never written.
+fn orca_frozen_electrons(
+    method: QcMethod,
+    charge: i32,
+    multiplicity: i32,
+    config: &MethodConfig,
+    xyz_body: &str,
+) -> Option<u32> {
+    if !super::job::correlated::correlated_electrons_choice(super::program::QcProgram::Orca, Some(method)) {
+        return None;
+    }
+    let atoms: Vec<String> = xyz_body
+        .lines()
+        .filter_map(|l| l.split_whitespace().next().map(str::to_string))
+        .collect();
+    super::job::correlated::frozen_electrons(config.correlated_electrons, &atoms, charge, multiplicity)
+        .ok()
+        .flatten()
 }
 
 /// One self-consistent field iteration, for the run summary.

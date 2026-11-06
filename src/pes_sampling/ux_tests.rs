@@ -1,11 +1,9 @@
-//! Geometry pairing, mode overview, histograms, clash rule, presets, energy
-//! units and the settings file.
+//! Geometry pairing, mode overview, histograms, and the clash rule.
 use super::{
     analysis::{self, HistogramView, Quantity},
     input::{self, BOHR},
     overlap::OverlapFilter,
     sampling::generate,
-    settings_file,
     state::*,
 };
 use std::path::PathBuf;
@@ -86,22 +84,22 @@ fn sample_energies_and_histograms_are_consistent() {
     assert!(out.samples.iter().any(|x| x.energy > 0.1 * zpe));
     let mut view = HistogramView::default();
     view.atoms = [1, 2, 3];
-    let (d, unit) = analysis::values(&out, &view, EnergyUnit::KcalMol).unwrap();
+    let (d, unit) = analysis::values(&out, &view).unwrap();
     assert_eq!(unit, "Å");
     assert!(d.iter().all(|r| (0.8..1.2).contains(r)));
     view.quantity = Quantity::Angle;
     view.atoms = [2, 1, 3]; // H–O–H
-    let (a, _) = analysis::values(&out, &view, EnergyUnit::KcalMol).unwrap();
+    let (a, _) = analysis::values(&out, &view).unwrap();
     assert!(a.iter().all(|t| (80.0..130.).contains(t)));
     view.quantity = Quantity::Energy;
-    let (e, unit) = analysis::values(&out, &view, EnergyUnit::Ev).unwrap();
-    assert_eq!(unit, "eV");
-    assert!((e[0] - out.samples[0].energy * 27.2114).abs() < 1e-3 * e[0].max(1e-9));
+    let (e, unit) = analysis::values(&out, &view).unwrap();
+    assert_eq!(unit, "kcal/mol");
+    assert!((e[0] - out.samples[0].energy * 627.51).abs() < 1e-3 * e[0].max(1e-9));
     view.quantity = Quantity::Distance;
     view.atoms = [1, 1, 3];
-    assert!(analysis::values(&out, &view, EnergyUnit::KcalMol).is_err());
+    assert!(analysis::values(&out, &view).is_err());
     view.atoms = [1, 9, 3];
-    assert!(analysis::values(&out, &view, EnergyUnit::KcalMol).is_err());
+    assert!(analysis::values(&out, &view).is_err());
     let (lo, hi, counts) = analysis::histogram(&[0., 1., 1., 2.], 2);
     assert_eq!((lo, hi, counts), (0., 2., vec![1, 3]));
 }
@@ -121,53 +119,4 @@ fn covalent_rule_catches_heavy_atom_clashes() {
     assert!(filter.accepts(&["C".into(), "H".into()], &[0., 0., 0., 1.09, 0., 0.]));
     filter.covalent_factor = 2.;
     assert!(filter.validate().is_err());
-}
-
-#[test]
-fn presets_set_consistent_option_combinations() {
-    let mut s = Settings::default();
-    s.partners[0].excitation.temperature = 800.;
-    s.apply_preset(Preset::QctInitialConditions);
-    assert_eq!(s.displacement, Displacement::ClassicalPhase);
-    assert_eq!(s.random, RandomNumbers::PseudoRandom);
-    assert!(!s.diversity.enabled);
-    assert!(s.partners.iter().all(|p| p.excitation.population == Population::Zpe));
-    s.apply_preset(Preset::MlTrainingSet);
-    assert_eq!(s.displacement, Displacement::Uniform);
-    assert_eq!(s.random, RandomNumbers::QuasiRandom);
-    assert!(s.diversity.enabled && s.overlap.enabled);
-    assert_eq!(s.partners[0].excitation.population, Population::Thermal);
-    assert_eq!(s.partners[0].excitation.temperature, 800.);
-    assert_eq!(s.path.excitation.temperature_rule, TemperatureRule::BoltzmannTail);
-}
-
-#[test]
-fn energy_units_convert_consistently() {
-    let h = 1.;
-    assert!((EnergyUnit::KcalMol.from_hartree(h) - 627.51).abs() < 1e-9);
-    assert!((EnergyUnit::KjMol.from_hartree(h) - 2625.5).abs() < 0.1);
-    assert!((EnergyUnit::Ev.from_hartree(h) - 27.2114).abs() < 1e-3);
-    assert!((EnergyUnit::Wavenumber.from_hartree(h) - 219474.6).abs() < 2.);
-}
-
-#[test]
-fn settings_file_round_trips_hessians_and_reproduces_samples() {
-    let mut s = Settings::default();
-    s.partners[0] = water_partner();
-    s.partners[0].excitation.temperature = 654.;
-    s.energy_unit = EnergyUnit::Ev;
-    s.points = 8;
-    let text = settings_file::to_text(&s).unwrap();
-    assert!(text.starts_with("// Beavyr PES sampling settings"));
-    let back = settings_file::from_text(&text).unwrap();
-    assert_eq!(back.energy_unit, EnergyUnit::Ev);
-    assert_eq!(back.partners[0].excitation.temperature, 654.);
-    let (a, b) = (run(s), run(back));
-    for (x, y) in a.samples.iter().zip(&b.samples) {
-        assert_eq!(x.coordinates, y.coordinates);
-    }
-    // Damaged files are refused, not loaded.
-    assert!(settings_file::from_text("not ron").is_err());
-    let broken = text.replacen("frequencies: [", "frequencies: [1.0, ", 1);
-    assert!(settings_file::from_text(&broken).is_err());
 }

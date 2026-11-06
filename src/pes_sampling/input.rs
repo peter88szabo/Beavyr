@@ -6,7 +6,7 @@ use std::path::Path;
 pub const BOHR: f64 = 0.529177210903;
 pub const AMU: f64 = 1822.888486209;
 pub const CM_TO_AU: f64 = 137.035999084 * BOHR / 1e8 * std::f64::consts::TAU;
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug)]
 pub struct Fragment {
     pub atoms: Vec<String>,
     pub masses: Vec<f64>,
